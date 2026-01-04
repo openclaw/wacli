@@ -30,6 +30,16 @@ Run (local build only):
 
 - `./dist/wacli --help`
 
+### Option C: Install via Mise
+
+[Mise](https://mise.jdx.dev/) can install Go packages directly from GitHub:
+
+```bash
+mise use -g go:github.com/steipete/wacli/cmd/wacli
+```
+
+This installs `wacli` globally and adds it to your PATH.
+
 ## Quick start
 
 Default store directory is `~/.wacli` (override with `--store DIR`).
