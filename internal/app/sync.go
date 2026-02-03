@@ -32,6 +32,7 @@ type SyncOptions struct {
 	RefreshGroups   bool
 	IdleExit        time.Duration // only used for bootstrap/once
 	Verbosity       int           // future
+	EnableSocket    bool          // start Unix socket server for IPC
 }
 
 type SyncResult struct {
@@ -162,6 +163,16 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	if opts.RefreshGroups {
 		_ = a.refreshGroups(ctx)
 	}
+	// Start socket server for IPC if requested.
+	if opts.EnableSocket {
+		srv, err := a.StartSocketServer(ctx, a.makeSocketHandler(ctx))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not start socket server: %v\n", err)
+		} else {
+			defer srv.Stop()
+		}
+	}
+
 	if opts.AfterConnect != nil {
 		if err := opts.AfterConnect(ctx); err != nil {
 			return SyncResult{MessagesStored: messagesStored.Load()}, err
