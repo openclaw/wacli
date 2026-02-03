@@ -39,7 +39,7 @@ func TestDownloadMediaJobMarksDownloaded(t *testing.T) {
 		t.Fatalf("UpsertMessage: %v", err)
 	}
 
-	if err := a.downloadMediaJob(context.Background(), mediaJob{chatJID: chat, msgID: "mid"}); err != nil {
+	if err := a.downloadMediaJob(context.Background(), mediaJob{chatJID: chat, msgID: "mid"}, ""); err != nil {
 		t.Fatalf("downloadMediaJob: %v", err)
 	}
 

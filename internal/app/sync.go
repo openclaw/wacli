@@ -37,6 +37,7 @@ type SyncOptions struct {
 	OnQRCode        func(string)
 	AfterConnect    func(context.Context) error
 	DownloadMedia   bool
+	MediaDir        string // custom base directory for downloaded media
 	RefreshContacts bool
 	RefreshGroups   bool
 	IdleExit        time.Duration // only used for bootstrap/once
@@ -167,7 +168,7 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 
 	if opts.DownloadMedia {
 		var err error
-		stopMedia, err = a.runMediaWorkers(ctx, mediaJobs, 4)
+		stopMedia, err = a.runMediaWorkers(ctx, mediaJobs, 4, opts.MediaDir)
 		if err != nil {
 			return SyncResult{}, err
 		}

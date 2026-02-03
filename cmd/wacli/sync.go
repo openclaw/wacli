@@ -21,6 +21,7 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 	var follow bool
 	var idleExit time.Duration
 	var downloadMedia bool
+	var mediaDir string
 	var refreshContacts bool
 	var refreshGroups bool
 	var markRead bool
@@ -50,6 +51,11 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 				mode = appPkg.SyncModeFollow
 			} else {
 				mode = appPkg.SyncModeOnce
+			}
+
+			// If --media is set, enable media download with custom dir.
+			if mediaDir != "" {
+				downloadMedia = true
 			}
 
 			// Set up output mode.
@@ -111,6 +117,7 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 				Mode:            mode,
 				AllowQR:         false,
 				DownloadMedia:   downloadMedia,
+				MediaDir:        mediaDir,
 				RefreshContacts: refreshContacts,
 				RefreshGroups:   refreshGroups,
 				IdleExit:        idleExit,
@@ -138,6 +145,7 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().BoolVar(&follow, "follow", true, "keep syncing until Ctrl+C")
 	cmd.Flags().DurationVar(&idleExit, "idle-exit", 30*time.Second, "exit after being idle (once mode)")
 	cmd.Flags().BoolVar(&downloadMedia, "download-media", false, "download media in the background during sync")
+	cmd.Flags().StringVar(&mediaDir, "media", "", "download media to this directory (implies --download-media)")
 	cmd.Flags().BoolVar(&refreshContacts, "refresh-contacts", false, "refresh contacts from session store into local DB")
 	cmd.Flags().BoolVar(&refreshGroups, "refresh-groups", false, "refresh joined groups (live) into local DB")
 	cmd.Flags().BoolVar(&markRead, "mark-read", false, "automatically mark incoming messages as read")

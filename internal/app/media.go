@@ -73,7 +73,7 @@ func mediaFilename(info store.MediaDownloadInfo) string {
 	return name
 }
 
-func (a *App) runMediaWorkers(ctx context.Context, jobs <-chan mediaJob, workers int) (func(), error) {
+func (a *App) runMediaWorkers(ctx context.Context, jobs <-chan mediaJob, workers int, mediaDir string) (func(), error) {
 	if workers <= 0 {
 		workers = 2
 	}
@@ -95,7 +95,7 @@ func (a *App) runMediaWorkers(ctx context.Context, jobs <-chan mediaJob, workers
 					if strings.TrimSpace(job.chatJID) == "" || strings.TrimSpace(job.msgID) == "" {
 						continue
 					}
-					if err := a.downloadMediaJob(ctx, job); err != nil {
+					if err := a.downloadMediaJob(ctx, job, mediaDir); err != nil {
 						fmt.Fprintf(os.Stderr, "media download failed for %s/%s: %v\n", job.chatJID, job.msgID, err)
 					}
 				}
@@ -110,7 +110,7 @@ func (a *App) runMediaWorkers(ctx context.Context, jobs <-chan mediaJob, workers
 	return stop, nil
 }
 
-func (a *App) downloadMediaJob(ctx context.Context, job mediaJob) error {
+func (a *App) downloadMediaJob(ctx context.Context, job mediaJob, mediaDir string) error {
 	info, err := a.db.GetMediaDownloadInfo(job.chatJID, job.msgID)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -125,7 +125,7 @@ func (a *App) downloadMediaJob(ctx context.Context, job mediaJob) error {
 		return nil
 	}
 
-	targetPath, err := a.ResolveMediaOutputPath(info, "")
+	targetPath, err := a.ResolveMediaOutputPath(info, mediaDir)
 	if err != nil {
 		return err
 	}
