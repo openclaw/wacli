@@ -1,0 +1,26 @@
+[Unit]
+Description=wacli WhatsApp sync daemon
+Documentation=https://github.com/steipete/wacli
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/wacli sync --follow
+Restart=on-failure
+RestartSec=10
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.wacli
+PrivateTmp=true
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=wacli-sync
+
+[Install]
+WantedBy=default.target
