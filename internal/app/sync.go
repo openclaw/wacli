@@ -22,6 +22,15 @@ const (
 	SyncModeFollow    SyncMode = "follow"
 )
 
+// OutputMode controls how messages are printed during sync.
+type OutputMode string
+
+const (
+	OutputNone OutputMode = "none"
+	OutputText OutputMode = "text"
+	OutputJSON OutputMode = "json"
+)
+
 type SyncOptions struct {
 	Mode            SyncMode
 	AllowQR         bool
@@ -32,7 +41,10 @@ type SyncOptions struct {
 	RefreshGroups   bool
 	IdleExit        time.Duration // only used for bootstrap/once
 	Verbosity       int           // future
-	EnableSocket    bool          // start Unix socket server for IPC
+	OnMessage       func(pm wa.ParsedMessage)
+	MarkRead        bool
+	Output          OutputMode
+	EnableSocket    bool // start Unix socket server for IPC
 }
 
 type SyncResult struct {
@@ -101,6 +113,12 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 			}
 			if opts.DownloadMedia && pm.Media != nil && pm.ID != "" {
 				enqueueMedia(pm.Chat.String(), pm.ID)
+			}
+			if opts.MarkRead && !pm.FromMe && pm.ID != "" && !pm.Chat.IsEmpty() {
+				_ = a.wa.MarkRead(ctx, pm.Chat, []types.MessageID{types.MessageID(pm.ID)})
+			}
+			if opts.OnMessage != nil {
+				opts.OnMessage(pm)
 			}
 			if messagesStored.Load()%25 == 0 {
 				fmt.Fprintf(os.Stderr, "\rSynced %d messages...", messagesStored.Load())
