@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
+	appPkg "github.com/steipete/wacli/internal/app"
 	"github.com/steipete/wacli/internal/out"
 	"github.com/steipete/wacli/internal/wa"
 )
@@ -28,6 +30,49 @@ func newSendFileCmd(flags *rootFlags) *cobra.Command {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
+			storeDir := resolveStoreDir(flags)
+
+			// Try socket first (sync process is running).
+			if appPkg.IsSocketAvailable(storeDir) {
+				b64, err := appPkg.EncodeFileToBase64(filePath)
+				if err != nil {
+					return fmt.Errorf("read file: %w", err)
+				}
+				fn := filename
+				if fn == "" {
+					fn = filepath.Base(filePath)
+				}
+				resp, err := appPkg.SendSocketRequest(storeDir, appPkg.SocketRequest{
+					Action:       "send_file",
+					To:           to,
+					FileDataB64:  b64,
+					Filename:     fn,
+					Caption:      caption,
+					MimeOverride: mimeOverride,
+				})
+				if err != nil {
+					return fmt.Errorf("socket send failed: %w", err)
+				}
+				if !resp.OK {
+					return fmt.Errorf("send failed: %s", resp.Error)
+				}
+				if flags.asJSON {
+					return out.WriteJSON(os.Stdout, map[string]any{
+						"sent": true,
+						"to":   to,
+						"id":   resp.ID,
+						"file": resp.Meta,
+					})
+				}
+				name := fn
+				if resp.Meta != nil && resp.Meta["name"] != "" {
+					name = resp.Meta["name"]
+				}
+				fmt.Fprintf(os.Stdout, "Sent %s to %s (id %s)\n", name, to, resp.ID)
+				return nil
+			}
+
+			// Fallback: direct connection.
 			a, lk, err := newApp(ctx, flags, true, false)
 			if err != nil {
 				return err

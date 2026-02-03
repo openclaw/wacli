@@ -49,6 +49,7 @@ func execute(args []string) error {
 	rootCmd.AddCommand(newChatsCmd(&flags))
 	rootCmd.AddCommand(newGroupsCmd(&flags))
 	rootCmd.AddCommand(newHistoryCmd(&flags))
+	rootCmd.AddCommand(newReadCmd(&flags))
 
 	rootCmd.SetArgs(args)
 	if err := rootCmd.Execute(); err != nil {
@@ -104,6 +105,15 @@ func closeApp(a *app.App, lk *lock.Lock) {
 	if lk != nil {
 		_ = lk.Release()
 	}
+}
+
+func resolveStoreDir(flags *rootFlags) string {
+	storeDir := flags.storeDir
+	if storeDir == "" {
+		storeDir = config.DefaultStoreDir()
+	}
+	storeDir, _ = filepath.Abs(storeDir)
+	return storeDir
 }
 
 func wrapErr(err error, msg string) error {

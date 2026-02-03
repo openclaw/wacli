@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	appPkg "github.com/steipete/wacli/internal/app"
 	"github.com/steipete/wacli/internal/out"
 	"github.com/steipete/wacli/internal/store"
 	"github.com/steipete/wacli/internal/wa"
@@ -37,6 +38,33 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
+			storeDir := resolveStoreDir(flags)
+
+			// Try socket first (sync process is running).
+			if appPkg.IsSocketAvailable(storeDir) {
+				resp, err := appPkg.SendSocketRequest(storeDir, appPkg.SocketRequest{
+					Action:  "send_text",
+					To:      to,
+					Message: message,
+				})
+				if err != nil {
+					return fmt.Errorf("socket send failed: %w", err)
+				}
+				if !resp.OK {
+					return fmt.Errorf("send failed: %s", resp.Error)
+				}
+				if flags.asJSON {
+					return out.WriteJSON(os.Stdout, map[string]any{
+						"sent": true,
+						"to":   to,
+						"id":   resp.ID,
+					})
+				}
+				fmt.Fprintf(os.Stdout, "Sent to %s (id %s)\n", to, resp.ID)
+				return nil
+			}
+
+			// Fallback: direct connection.
 			a, lk, err := newApp(ctx, flags, true, false)
 			if err != nil {
 				return err
