@@ -244,6 +244,10 @@ func (f *fakeWA) RequestHistorySyncOnDemand(ctx context.Context, lastKnown types
 	return types.MessageID("req"), nil
 }
 
+func (f *fakeWA) MarkRead(ctx context.Context, chat types.JID, messageIDs []types.MessageID) error {
+	return nil
+}
+
 func (f *fakeWA) Logout(ctx context.Context) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
