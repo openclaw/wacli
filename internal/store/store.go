@@ -145,10 +145,28 @@ func (d *DB) ensureSchema() error {
 		return err
 	}
 
+	if err := d.ensureContactColumns(); err != nil {
+		return err
+	}
+
 	if err := d.ensureMessagesFTS(); err != nil {
 		return err
 	}
 
+	return nil
+}
+
+func (d *DB) ensureContactColumns() error {
+	ok, err := d.tableHasColumn("contacts", "system_name")
+	if err != nil {
+		return err
+	}
+	if ok {
+		return nil
+	}
+	if _, err := d.sql.Exec(`ALTER TABLE contacts ADD COLUMN system_name TEXT`); err != nil {
+		return fmt.Errorf("add system_name column: %w", err)
+	}
 	return nil
 }
 
@@ -347,12 +365,13 @@ type MessageInfo struct {
 }
 
 type Contact struct {
-	JID       string
-	Phone     string
-	Name      string
-	Alias     string
-	Tags      []string
-	UpdatedAt time.Time
+	JID        string
+	Phone      string
+	Name       string    // Display name (computed from precedence: alias > system_name > whatsapp names)
+	Alias      string    // Manual user override
+	SystemName string    // From system contacts (macOS/iOS address book)
+	Tags       []string
+	UpdatedAt  time.Time
 }
 
 func unix(t time.Time) int64 {
@@ -841,19 +860,26 @@ func (d *DB) SearchContacts(query string, limit int) ([]Contact, error) {
 	if limit <= 0 {
 		limit = 50
 	}
+	// Display name precedence: alias > system_name > full_name > push_name > business_name > first_name
 	q := `
 		SELECT c.jid,
 		       COALESCE(c.phone,''),
 		       COALESCE(NULLIF(a.alias,''), ''),
-		       COALESCE(NULLIF(c.full_name,''), NULLIF(c.push_name,''), NULLIF(c.business_name,''), NULLIF(c.first_name,''), ''),
+		       COALESCE(NULLIF(c.system_name,''), ''),
+		       COALESCE(NULLIF(a.alias,''), NULLIF(c.system_name,''), NULLIF(c.full_name,''), NULLIF(c.push_name,''), NULLIF(c.business_name,''), NULLIF(c.first_name,''), ''),
 		       c.updated_at
 		FROM contacts c
 		LEFT JOIN contact_aliases a ON a.jid = c.jid
-		WHERE LOWER(COALESCE(a.alias,'')) LIKE LOWER(?) OR LOWER(COALESCE(c.full_name,'')) LIKE LOWER(?) OR LOWER(COALESCE(c.push_name,'')) LIKE LOWER(?) OR LOWER(COALESCE(c.phone,'')) LIKE LOWER(?) OR LOWER(c.jid) LIKE LOWER(?)
-		ORDER BY COALESCE(NULLIF(a.alias,''), NULLIF(c.full_name,''), NULLIF(c.push_name,''), c.jid)
+		WHERE LOWER(COALESCE(a.alias,'')) LIKE LOWER(?) 
+		   OR LOWER(COALESCE(c.system_name,'')) LIKE LOWER(?)
+		   OR LOWER(COALESCE(c.full_name,'')) LIKE LOWER(?) 
+		   OR LOWER(COALESCE(c.push_name,'')) LIKE LOWER(?) 
+		   OR LOWER(COALESCE(c.phone,'')) LIKE LOWER(?) 
+		   OR LOWER(c.jid) LIKE LOWER(?)
+		ORDER BY COALESCE(NULLIF(a.alias,''), NULLIF(c.system_name,''), NULLIF(c.full_name,''), NULLIF(c.push_name,''), c.jid)
 		LIMIT ?`
 	needle := "%" + query + "%"
-	rows, err := d.sql.Query(q, needle, needle, needle, needle, needle, limit)
+	rows, err := d.sql.Query(q, needle, needle, needle, needle, needle, needle, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -862,7 +888,7 @@ func (d *DB) SearchContacts(query string, limit int) ([]Contact, error) {
 	for rows.Next() {
 		var c Contact
 		var updated int64
-		if err := rows.Scan(&c.JID, &c.Phone, &c.Alias, &c.Name, &updated); err != nil {
+		if err := rows.Scan(&c.JID, &c.Phone, &c.Alias, &c.SystemName, &c.Name, &updated); err != nil {
 			return nil, err
 		}
 		c.UpdatedAt = fromUnix(updated)
@@ -872,11 +898,13 @@ func (d *DB) SearchContacts(query string, limit int) ([]Contact, error) {
 }
 
 func (d *DB) GetContact(jid string) (Contact, error) {
+	// Display name precedence: alias > system_name > full_name > push_name > business_name > first_name
 	row := d.sql.QueryRow(`
 		SELECT c.jid,
 		       COALESCE(c.phone,''),
 		       COALESCE(NULLIF(a.alias,''), ''),
-		       COALESCE(NULLIF(c.full_name,''), NULLIF(c.push_name,''), NULLIF(c.business_name,''), NULLIF(c.first_name,''), ''),
+		       COALESCE(NULLIF(c.system_name,''), ''),
+		       COALESCE(NULLIF(a.alias,''), NULLIF(c.system_name,''), NULLIF(c.full_name,''), NULLIF(c.push_name,''), NULLIF(c.business_name,''), NULLIF(c.first_name,''), ''),
 		       c.updated_at
 		FROM contacts c
 		LEFT JOIN contact_aliases a ON a.jid = c.jid
@@ -884,7 +912,7 @@ func (d *DB) GetContact(jid string) (Contact, error) {
 	`, jid)
 	var c Contact
 	var updated int64
-	if err := row.Scan(&c.JID, &c.Phone, &c.Alias, &c.Name, &updated); err != nil {
+	if err := row.Scan(&c.JID, &c.Phone, &c.Alias, &c.SystemName, &c.Name, &updated); err != nil {
 		return Contact{}, err
 	}
 	c.UpdatedAt = fromUnix(updated)
@@ -1021,6 +1049,50 @@ func (d *DB) SetAlias(jid, alias string) error {
 func (d *DB) RemoveAlias(jid string) error {
 	_, err := d.sql.Exec(`DELETE FROM contact_aliases WHERE jid = ?`, jid)
 	return err
+}
+
+// SetSystemName sets the system contact name for a contact (from macOS/iOS address book)
+func (d *DB) SetSystemName(jid, systemName string) error {
+	systemName = strings.TrimSpace(systemName)
+	if systemName == "" {
+		return fmt.Errorf("system_name is required")
+	}
+	now := time.Now().UTC().Unix()
+	_, err := d.sql.Exec(`
+		UPDATE contacts SET system_name = ?, updated_at = ? WHERE jid = ?
+	`, systemName, now, jid)
+	return err
+}
+
+// ClearSystemName removes the system contact name for a contact
+func (d *DB) ClearSystemName(jid string) error {
+	now := time.Now().UTC().Unix()
+	_, err := d.sql.Exec(`
+		UPDATE contacts SET system_name = NULL, updated_at = ? WHERE jid = ?
+	`, now, jid)
+	return err
+}
+
+// ClearAllSystemNames removes all system contact names
+func (d *DB) ClearAllSystemNames() (int64, error) {
+	now := time.Now().UTC().Unix()
+	result, err := d.sql.Exec(`
+		UPDATE contacts SET system_name = NULL, updated_at = ? WHERE system_name IS NOT NULL
+	`, now)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+// CountSystemNames returns the number of contacts with system names set
+func (d *DB) CountSystemNames() (int64, error) {
+	row := d.sql.QueryRow(`SELECT COUNT(1) FROM contacts WHERE system_name IS NOT NULL AND system_name != ''`)
+	var n int64
+	if err := row.Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
 }
 
 func (d *DB) AddTag(jid, tag string) error {

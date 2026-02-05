@@ -8,6 +8,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
+	"github.com/steipete/wacli/internal/contacts"
 	"github.com/steipete/wacli/internal/out"
 )
 
@@ -19,6 +20,7 @@ func newContactsCmd(flags *rootFlags) *cobra.Command {
 	cmd.AddCommand(newContactsSearchCmd(flags))
 	cmd.AddCommand(newContactsShowCmd(flags))
 	cmd.AddCommand(newContactsRefreshCmd(flags))
+	cmd.AddCommand(newContactsImportSystemCmd(flags))
 	cmd.AddCommand(newContactsAliasCmd(flags))
 	cmd.AddCommand(newContactsTagsCmd(flags))
 	return cmd
@@ -104,6 +106,9 @@ func newContactsShowCmd(flags *rootFlags) *cobra.Command {
 			if c.Alias != "" {
 				fmt.Fprintf(os.Stdout, "Alias: %s\n", c.Alias)
 			}
+			if c.SystemName != "" {
+				fmt.Fprintf(os.Stdout, "System Name: %s\n", c.SystemName)
+			}
 			if len(c.Tags) > 0 {
 				fmt.Fprintf(os.Stdout, "Tags: %s\n", strings.Join(c.Tags, ", "))
 			}
@@ -156,6 +161,187 @@ func newContactsRefreshCmd(flags *rootFlags) *cobra.Command {
 			return nil
 		},
 	}
+	return cmd
+}
+
+func newContactsImportSystemCmd(flags *rootFlags) *cobra.Command {
+	var dryRun bool
+	var clear bool
+	cmd := &cobra.Command{
+		Use:   "import-system",
+		Short: "Import names from macOS Contacts (matches by phone number)",
+		Long: `Imports contacts from macOS Contacts.app and sets them as system names in wacli.
+
+This command:
+1. Reads all contacts with phone numbers from macOS Contacts.app
+2. Matches them against existing wacli contacts by phone number
+3. Sets the system contact name (displayed with precedence over WhatsApp names)
+
+Display name precedence:
+  1. Manual alias (user override - highest priority)
+  2. System contact name (from this import)
+  3. WhatsApp names (push_name, full_name, etc.)
+  4. Phone number (fallback)
+
+This mirrors how the native WhatsApp app displays contacts.
+
+Run 'wacli contacts refresh' first to ensure contacts are synced from WhatsApp.
+
+Note: Only supported on macOS.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx, cancel := withTimeout(context.Background(), flags)
+			defer cancel()
+
+			// Open DB
+			a, lk, err := newApp(ctx, flags, false, false)
+			if err != nil {
+				return err
+			}
+			defer closeApp(a, lk)
+
+			// Handle --clear flag
+			if clear {
+				if dryRun {
+					count, err := a.DB().CountSystemNames()
+					if err != nil {
+						return fmt.Errorf("count system names: %w", err)
+					}
+					if flags.asJSON {
+						return out.WriteJSON(os.Stdout, map[string]any{
+							"action":  "clear",
+							"count":   count,
+							"dryRun":  true,
+						})
+					}
+					fmt.Fprintf(os.Stdout, "[DRY RUN] Would clear %d system names.\n", count)
+					return nil
+				}
+				count, err := a.DB().ClearAllSystemNames()
+				if err != nil {
+					return fmt.Errorf("clear system names: %w", err)
+				}
+				if flags.asJSON {
+					return out.WriteJSON(os.Stdout, map[string]any{
+						"action":  "clear",
+						"cleared": count,
+					})
+				}
+				fmt.Fprintf(os.Stdout, "Cleared %d system names.\n", count)
+				return nil
+			}
+
+			// Fetch system contacts
+			fmt.Fprintln(os.Stderr, "Reading macOS Contacts...")
+			systemContacts, err := contacts.GetSystemContacts()
+			if err != nil {
+				return fmt.Errorf("failed to read system contacts: %w", err)
+			}
+			fmt.Fprintf(os.Stderr, "Found %d contacts with phone numbers\n", len(systemContacts))
+
+			// Build phone-to-name map
+			phoneToName := contacts.BuildPhoneToNameMap(systemContacts)
+			fmt.Fprintf(os.Stderr, "Built lookup map with %d unique phone numbers\n", len(phoneToName))
+
+			// Get all contacts from wacli DB
+			allContacts, err := a.DB().SearchContacts("%", 100000)
+			if err != nil {
+				return fmt.Errorf("failed to list contacts: %w", err)
+			}
+			fmt.Fprintf(os.Stderr, "Checking %d wacli contacts...\n", len(allContacts))
+
+			type match struct {
+				JID            string `json:"jid"`
+				Phone          string `json:"phone"`
+				CurrentName    string `json:"currentName"`
+				NewSystemName  string `json:"newSystemName"`
+				HadSystemName  bool   `json:"hadSystemName"`
+			}
+			var matches []match
+			var skippedSameName int
+			var skippedNoMatch int
+
+			for _, c := range allContacts {
+				// Normalize the phone from wacli contact
+				normalizedPhone := contacts.NormalizePhone(c.Phone)
+				if normalizedPhone == "" {
+					skippedNoMatch++
+					continue
+				}
+
+				// Try to find a match in system contacts
+				systemName, found := phoneToName[normalizedPhone]
+				if !found {
+					skippedNoMatch++
+					continue
+				}
+
+				// Skip if system name is already the same
+				if c.SystemName == systemName {
+					skippedSameName++
+					continue
+				}
+
+				matches = append(matches, match{
+					JID:           c.JID,
+					Phone:         c.Phone,
+					CurrentName:   c.Name,
+					NewSystemName: systemName,
+					HadSystemName: c.SystemName != "",
+				})
+			}
+
+			if flags.asJSON {
+				return out.WriteJSON(os.Stdout, map[string]any{
+					"matches":         matches,
+					"skippedSameName": skippedSameName,
+					"skippedNoMatch":  skippedNoMatch,
+					"dryRun":          dryRun,
+				})
+			}
+
+			fmt.Fprintf(os.Stderr, "\nResults:\n")
+			fmt.Fprintf(os.Stderr, "  Matched: %d\n", len(matches))
+			fmt.Fprintf(os.Stderr, "  Skipped (same name): %d\n", skippedSameName)
+			fmt.Fprintf(os.Stderr, "  Skipped (no phone match): %d\n", skippedNoMatch)
+
+			if len(matches) == 0 {
+				fmt.Fprintln(os.Stdout, "\nNo new matches to import.")
+				return nil
+			}
+
+			if dryRun {
+				fmt.Fprintln(os.Stdout, "\n[DRY RUN] Would set these system names:")
+				w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
+				fmt.Fprintln(w, "PHONE\tCURRENT\tSYSTEM NAME")
+				for _, m := range matches {
+					fmt.Fprintf(w, "%s\t%s\t%s\n",
+						truncate(m.Phone, 16),
+						truncate(m.CurrentName, 20),
+						truncate(m.NewSystemName, 24),
+					)
+				}
+				_ = w.Flush()
+				fmt.Fprintln(os.Stdout, "\nRun without --dry-run to apply.")
+				return nil
+			}
+
+			// Apply system names
+			fmt.Fprintln(os.Stdout, "\nSetting system names...")
+			var applied int
+			for _, m := range matches {
+				if err := a.DB().SetSystemName(m.JID, m.NewSystemName); err != nil {
+					fmt.Fprintf(os.Stderr, "  Failed to set system name for %s: %v\n", m.JID, err)
+					continue
+				}
+				applied++
+			}
+			fmt.Fprintf(os.Stdout, "Applied %d system names.\n", applied)
+
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would be imported without making changes")
+	cmd.Flags().BoolVar(&clear, "clear", false, "remove all imported system names")
 	return cmd
 }
 
