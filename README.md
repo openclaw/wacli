@@ -91,6 +91,7 @@ Defaults to `~/.wacli` (override with `--store DIR`).
 
 ## Environment overrides
 
+- `WACLI_STORE_DIR`: override the store directory (default: `~/.wacli`). Equivalent to `--store`.
 - `WACLI_DEVICE_LABEL`: set the linked device label (shown in WhatsApp).
 - `WACLI_DEVICE_PLATFORM`: override the linked device platform (defaults to `CHROME` if unset or invalid).
 
