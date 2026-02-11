@@ -370,3 +370,38 @@ func (c *Client) ReconnectWithBackoff(ctx context.Context, minDelay, maxDelay ti
 		}
 	}
 }
+
+// OwnJID returns the JID of the authenticated user.
+func (c *Client) OwnJID() types.JID {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || cli.Store == nil || cli.Store.ID == nil {
+		return types.JID{}
+	}
+	return cli.Store.ID.ToNonAD()
+}
+
+// RevokeMessage deletes a message (revokes it for everyone or just locally).
+func (c *Client) RevokeMessage(ctx context.Context, chat types.JID, msgID string, forEveryone bool) error {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || !cli.IsConnected() {
+		return fmt.Errorf("not connected")
+	}
+
+	ownJID := types.JID{}
+	if cli.Store != nil && cli.Store.ID != nil {
+		ownJID = cli.Store.ID.ToNonAD()
+	}
+	if ownJID.IsEmpty() {
+		return fmt.Errorf("not authenticated")
+	}
+
+	// Build revoke message - for own messages, sender is own JID
+	revokeMsg := cli.BuildRevoke(chat, ownJID, types.MessageID(msgID))
+	
+	_, err := cli.SendMessage(ctx, chat, revokeMsg)
+	return err
+}
