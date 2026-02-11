@@ -32,6 +32,48 @@ func TestParseHistoryMessageTextAndSender(t *testing.T) {
 	}
 }
 
+func TestParseHistoryMessageTopLevelParticipant(t *testing.T) {
+	// When key.participant is empty (LID-addressed groups), the top-level
+	// participant field should be used instead of falling back to remoteJID.
+	groupJID := "120363001234567890@g.us"
+	senderLID := "12345:67@lid"
+	h := &waProto.WebMessageInfo{
+		Key: &waProto.MessageKey{
+			ID:        proto.String("msgid2"),
+			FromMe:    proto.Bool(false),
+			RemoteJID: proto.String(groupJID),
+			// Participant intentionally omitted (empty) — simulates LID group
+		},
+		Participant:      proto.String(senderLID),
+		MessageTimestamp: proto.Uint64(uint64(time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC).Unix())),
+		Message:          &waProto.Message{Conversation: proto.String("from lid group")},
+	}
+	pm := ParseHistoryMessage(groupJID, h)
+	if pm.SenderJID != senderLID {
+		t.Fatalf("expected sender %q from top-level participant, got %q", senderLID, pm.SenderJID)
+	}
+}
+
+func TestParseHistoryMessageKeyParticipantStillWorks(t *testing.T) {
+	// When top-level participant is empty but key.participant is set,
+	// key.participant should still be used (backward compat).
+	h := &waProto.WebMessageInfo{
+		Key: &waProto.MessageKey{
+			ID:          proto.String("msgid3"),
+			FromMe:      proto.Bool(false),
+			RemoteJID:   proto.String("120363001234567890@g.us"),
+			Participant: proto.String("sender@s.whatsapp.net"),
+		},
+		// No top-level Participant
+		MessageTimestamp: proto.Uint64(uint64(time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC).Unix())),
+		Message:          &waProto.Message{Conversation: proto.String("from regular group")},
+	}
+	pm := ParseHistoryMessage("120363001234567890@g.us", h)
+	if pm.SenderJID != "sender@s.whatsapp.net" {
+		t.Fatalf("expected sender from key.participant, got %q", pm.SenderJID)
+	}
+}
+
 func TestParseLiveMessageImageClonesBytes(t *testing.T) {
 	chat, _ := types.ParseJID("123@s.whatsapp.net")
 	sender, _ := types.ParseJID("sender@s.whatsapp.net")

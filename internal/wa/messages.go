@@ -65,7 +65,13 @@ func ParseHistoryMessage(chatJID string, hist *waProto.WebMessageInfo) ParsedMes
 		FromMe:    hist.GetKey().GetFromMe(),
 	}
 
-	sender := strings.TrimSpace(hist.GetKey().GetParticipant())
+	// Prefer top-level participant (works for LID-addressed groups),
+	// then fall back to key.participant, then key.remoteJID.
+	// This matches whatsmeow's own ParseWebMessage priority.
+	sender := strings.TrimSpace(hist.GetParticipant())
+	if sender == "" {
+		sender = strings.TrimSpace(hist.GetKey().GetParticipant())
+	}
 	if sender == "" {
 		sender = strings.TrimSpace(hist.GetKey().GetRemoteJID())
 	}
