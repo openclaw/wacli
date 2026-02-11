@@ -118,7 +118,7 @@ This loops through chats already known in your local DB:
 
 ```bash
 pnpm -s wacli -- --json chats list --limit 100000 \
-  | jq -r '.[].JID' \
+  | jq -r '.data[].JID' \
   | while read -r jid; do
       pnpm -s wacli -- history backfill --chat "$jid" --requests 3 --count 50
     done
