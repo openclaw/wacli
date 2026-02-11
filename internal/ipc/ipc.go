@@ -75,13 +75,28 @@ func SocketPath(storeDir string) string {
 // Start begins listening for connections.
 func (s *Server) Start() error {
 	sockPath := SocketPath(s.storeDir)
-	
+
+	if info, err := os.Stat(s.storeDir); err == nil {
+		if info.Mode().Perm()&0077 != 0 {
+			fmt.Fprintf(os.Stderr, "Warning: store dir permissions are too open (%s). Consider chmod 0700.\n", info.Mode().Perm().String())
+		}
+	}
+
 	// Remove stale socket if exists
-	_ = os.Remove(sockPath)
+	if info, err := os.Lstat(sockPath); err == nil {
+		if info.Mode()&os.ModeSocket == 0 {
+			return fmt.Errorf("refusing to remove non-socket path: %s", sockPath)
+		}
+		_ = os.Remove(sockPath)
+	}
 	
 	listener, err := net.Listen("unix", sockPath)
 	if err != nil {
 		return fmt.Errorf("listen on socket: %w", err)
+	}
+	if err := os.Chmod(sockPath, 0600); err != nil {
+		_ = listener.Close()
+		return fmt.Errorf("chmod socket: %w", err)
 	}
 	s.listener = listener
 	
