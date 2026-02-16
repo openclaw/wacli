@@ -1,0 +1,54 @@
+name: Setup CI Environment
+description: Shared toolchain/bootstrap for CI and release jobs.
+
+inputs:
+  go-version-file:
+    description: Path to go.mod/go.work file.
+    required: false
+    default: go.mod
+  setup-node:
+    description: Whether to install Node.js.
+    required: false
+    default: "false"
+  node-version:
+    description: Node.js version to install when setup-node is true.
+    required: false
+    default: "20"
+  setup-pnpm:
+    description: Whether to enable corepack and activate pnpm.
+    required: false
+    default: "false"
+  apt-packages:
+    description: Space-separated apt packages to install (ubuntu only).
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node
+      if: ${{ inputs.setup-node == 'true' }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: ${{ inputs.go-version-file }}
+        cache: true
+
+    - name: Setup pnpm
+      if: ${{ inputs.setup-pnpm == 'true' }}
+      shell: bash
+      run: |
+        corepack enable
+        corepack prepare pnpm@10.23.0 --activate
+        pnpm --version
+
+    - name: Install apt packages
+      if: ${{ inputs.apt-packages != '' }}
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends ${{ inputs.apt-packages }}

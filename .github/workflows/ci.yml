@@ -15,27 +15,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - name: Setup CI Environment
+        uses: ./.github/actions/setup-ci-env
         with:
+          setup-node: "true"
           node-version: "20"
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Setup pnpm
-        run: |
-          corepack enable
-          corepack prepare pnpm@10.23.0 --activate
-          pnpm --version
-
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential
+          setup-pnpm: "true"
+          apt-packages: "build-essential"
 
       - name: pnpm format:check
         run: pnpm -s format:check

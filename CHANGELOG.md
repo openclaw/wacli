@@ -1,10 +1,24 @@
 # Changelog
 
-## 0.2.1 - Unreleased
+## 0.5.0 - Unreleased
 
-### Added
+### Changed
 
-- TBD.
+- Internal architecture: split store and groups command logic into focused modules for cleaner maintenance and safer follow-up changes.
+
+### Build
+
+- CI: extract a shared setup action and reuse it across CI and release workflows.
+- Release: install arm64 libc headers in release workflow to improve ARM build reliability.
+
+### Docs
+
+- README: update usage/docs for the 0.2.0 release baseline.
+- Changelog: roll unreleased tracking from `0.2.1` to `0.5.0`.
+
+### Chore
+
+- Version: bump CLI version string to `0.5.0` (unreleased).
 
 ## 0.2.0 - 2026-01-23
 
