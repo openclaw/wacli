@@ -32,6 +32,21 @@ type SyncOptions struct {
 	RefreshGroups   bool
 	IdleExit        time.Duration // only used for bootstrap/once
 	Verbosity       int           // future
+	OnMessage       func(StreamMessage)
+}
+
+// StreamMessage is emitted for each stored message when OnMessage is set.
+type StreamMessage struct {
+	ChatJID     string `json:"chat_jid"`
+	ChatName    string `json:"chat_name,omitempty"`
+	MsgID       string `json:"msg_id"`
+	SenderJID   string `json:"sender_jid,omitempty"`
+	SenderName  string `json:"sender_name,omitempty"`
+	Timestamp   int64  `json:"timestamp"`
+	FromMe      bool   `json:"from_me"`
+	Text        string `json:"text,omitempty"`
+	DisplayText string `json:"display_text,omitempty"`
+	MediaType   string `json:"media_type,omitempty"`
 }
 
 type SyncResult struct {
@@ -95,8 +110,11 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 					}
 				}
 			}
-			if err := a.storeParsedMessage(ctx, pm); err == nil {
+			if sm, err := a.storeParsedMessage(ctx, pm); err == nil {
 				messagesStored.Add(1)
+				if opts.OnMessage != nil {
+					opts.OnMessage(sm)
+				}
 			}
 			if opts.DownloadMedia && pm.Media != nil && pm.ID != "" {
 				enqueueMedia(pm.Chat.String(), pm.ID)
@@ -121,8 +139,11 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 					if pm.ID == "" || pm.Chat.IsEmpty() {
 						continue
 					}
-					if err := a.storeParsedMessage(ctx, pm); err == nil {
+					if sm, err := a.storeParsedMessage(ctx, pm); err == nil {
 						messagesStored.Add(1)
+						if opts.OnMessage != nil {
+							opts.OnMessage(sm)
+						}
 					}
 					if opts.DownloadMedia && pm.Media != nil && pm.ID != "" {
 						enqueueMedia(pm.Chat.String(), pm.ID)
@@ -223,11 +244,11 @@ func chatKind(chat types.JID) string {
 	return "unknown"
 }
 
-func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error {
+func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) (StreamMessage, error) {
 	chatJID := pm.Chat.String()
 	chatName := a.wa.ResolveChatName(ctx, pm.Chat, pm.PushName)
 	if err := a.db.UpsertChat(chatJID, chatKind(pm.Chat), chatName, pm.Timestamp); err != nil {
-		return err
+		return StreamMessage{}, err
 	}
 
 	// Best-effort: store contact info for DMs.
@@ -307,7 +328,20 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 
 	displayText := a.buildDisplayText(ctx, pm)
 
-	return a.db.UpsertMessage(store.UpsertMessageParams{
+	sm := StreamMessage{
+		ChatJID:     chatJID,
+		ChatName:    chatName,
+		MsgID:       pm.ID,
+		SenderJID:   pm.SenderJID,
+		SenderName:  senderName,
+		Timestamp:   pm.Timestamp.Unix(),
+		FromMe:      pm.FromMe,
+		Text:        pm.Text,
+		DisplayText: displayText,
+		MediaType:   mediaType,
+	}
+
+	err := a.db.UpsertMessage(store.UpsertMessageParams{
 		ChatJID:       chatJID,
 		ChatName:      chatName,
 		MsgID:         pm.ID,
@@ -327,6 +361,10 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 		FileEncSHA256: fileEncSha,
 		FileLength:    fileLen,
 	})
+	if err != nil {
+		return StreamMessage{}, err
+	}
+	return sm, nil
 }
 
 func (a *App) buildDisplayText(ctx context.Context, pm wa.ParsedMessage) string {

@@ -250,3 +250,12 @@ func (f *fakeWA) Logout(ctx context.Context) error {
 	f.authed = false
 	return nil
 }
+
+func (f *fakeWA) SendPresence(ctx context.Context, state types.Presence) error { return nil }
+func (f *fakeWA) SendChatPresence(ctx context.Context, jid types.JID, state types.ChatPresence, media types.ChatPresenceMedia) error {
+	return nil
+}
+func (f *fakeWA) MarkRead(ctx context.Context, ids []types.MessageID, timestamp time.Time, chat, sender types.JID) error {
+	return nil
+}
+func (f *fakeWA) SetForceActiveDeliveryReceipts(active bool) {}

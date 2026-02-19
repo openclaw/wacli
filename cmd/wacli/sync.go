@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -20,6 +22,7 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 	var downloadMedia bool
 	var refreshContacts bool
 	var refreshGroups bool
+	var stream bool
 
 	cmd := &cobra.Command{
 		Use:   "sync",
@@ -47,14 +50,25 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 				mode = appPkg.SyncModeOnce
 			}
 
-			res, err := a.Sync(ctx, appPkg.SyncOptions{
+			syncOpts := appPkg.SyncOptions{
 				Mode:            mode,
 				AllowQR:         false,
 				DownloadMedia:   downloadMedia,
 				RefreshContacts: refreshContacts,
 				RefreshGroups:   refreshGroups,
 				IdleExit:        idleExit,
-			})
+			}
+			if stream {
+				enc := json.NewEncoder(os.Stdout)
+				var mu sync.Mutex
+				syncOpts.OnMessage = func(sm appPkg.StreamMessage) {
+					mu.Lock()
+					defer mu.Unlock()
+					_ = enc.Encode(sm)
+				}
+			}
+
+			res, err := a.Sync(ctx, syncOpts)
 			if err != nil {
 				return err
 			}
@@ -76,5 +90,6 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().BoolVar(&downloadMedia, "download-media", false, "download media in the background during sync")
 	cmd.Flags().BoolVar(&refreshContacts, "refresh-contacts", false, "refresh contacts from session store into local DB")
 	cmd.Flags().BoolVar(&refreshGroups, "refresh-groups", false, "refresh joined groups (live) into local DB")
+	cmd.Flags().BoolVar(&stream, "stream", false, "emit each message as a JSON line to stdout")
 	return cmd
 }
