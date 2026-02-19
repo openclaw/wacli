@@ -28,6 +28,16 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 
+			// A second interrupt forces immediate exit.
+			go func() {
+				sigCh := make(chan os.Signal, 1)
+				signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+				<-sigCh // first is handled by NotifyContext
+				<-sigCh // second forces exit
+				fmt.Fprintln(os.Stderr, "\nForced exit.")
+				os.Exit(1)
+			}()
+
 			a, lk, err := newApp(ctx, flags, true, false)
 			if err != nil {
 				return err

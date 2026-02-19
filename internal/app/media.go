@@ -87,6 +87,11 @@ func (a *App) runMediaWorkers(ctx context.Context, jobs <-chan mediaJob, workers
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Fprintf(os.Stderr, "recovered panic in media worker: %v\n", r)
+				}
+			}()
 			for {
 				select {
 				case <-ctx.Done():

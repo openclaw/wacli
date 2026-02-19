@@ -28,8 +28,8 @@ func (d *DB) ListChats(query string, limit int) ([]Chat, error) {
 	q := `SELECT jid, kind, COALESCE(name,''), COALESCE(last_message_ts,0) FROM chats WHERE 1=1`
 	var args []interface{}
 	if strings.TrimSpace(query) != "" {
-		q += ` AND (LOWER(name) LIKE LOWER(?) OR LOWER(jid) LIKE LOWER(?))`
-		needle := "%" + query + "%"
+		q += ` AND (LOWER(name) LIKE LOWER(?) ESCAPE '\' OR LOWER(jid) LIKE LOWER(?) ESCAPE '\')`
+		needle := "%" + escapeLIKE(query) + "%"
 		args = append(args, needle, needle)
 	}
 	q += ` ORDER BY last_message_ts DESC LIMIT ?`
@@ -80,10 +80,10 @@ func (d *DB) SearchContacts(query string, limit int) ([]Contact, error) {
 		       c.updated_at
 		FROM contacts c
 		LEFT JOIN contact_aliases a ON a.jid = c.jid
-		WHERE LOWER(COALESCE(a.alias,'')) LIKE LOWER(?) OR LOWER(COALESCE(c.full_name,'')) LIKE LOWER(?) OR LOWER(COALESCE(c.push_name,'')) LIKE LOWER(?) OR LOWER(COALESCE(c.phone,'')) LIKE LOWER(?) OR LOWER(c.jid) LIKE LOWER(?)
+		WHERE LOWER(COALESCE(a.alias,'')) LIKE LOWER(?) ESCAPE '\' OR LOWER(COALESCE(c.full_name,'')) LIKE LOWER(?) ESCAPE '\' OR LOWER(COALESCE(c.push_name,'')) LIKE LOWER(?) ESCAPE '\' OR LOWER(COALESCE(c.phone,'')) LIKE LOWER(?) ESCAPE '\' OR LOWER(c.jid) LIKE LOWER(?) ESCAPE '\'
 		ORDER BY COALESCE(NULLIF(a.alias,''), NULLIF(c.full_name,''), NULLIF(c.push_name,''), c.jid)
 		LIMIT ?`
-	needle := "%" + query + "%"
+	needle := "%" + escapeLIKE(query) + "%"
 	rows, err := d.sql.Query(q, needle, needle, needle, needle, needle, limit)
 	if err != nil {
 		return nil, err
@@ -213,8 +213,8 @@ func (d *DB) ListGroups(query string, limit int) ([]Group, error) {
 	q := `SELECT jid, COALESCE(name,''), COALESCE(owner_jid,''), COALESCE(created_ts,0), updated_at FROM groups WHERE 1=1`
 	var args []interface{}
 	if strings.TrimSpace(query) != "" {
-		needle := "%" + query + "%"
-		q += ` AND (LOWER(name) LIKE LOWER(?) OR LOWER(jid) LIKE LOWER(?))`
+		needle := "%" + escapeLIKE(query) + "%"
+		q += ` AND (LOWER(name) LIKE LOWER(?) ESCAPE '\' OR LOWER(jid) LIKE LOWER(?) ESCAPE '\')`
 		args = append(args, needle, needle)
 	}
 	q += ` ORDER BY COALESCE(created_ts,0) DESC LIMIT ?`

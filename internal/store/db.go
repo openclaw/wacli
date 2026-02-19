@@ -24,9 +24,20 @@ func Open(path string) (*DB, error) {
 		return nil, fmt.Errorf("create db directory: %w", err)
 	}
 
+	if strings.ContainsAny(path, "?#") {
+		return nil, fmt.Errorf("db path must not contain '?' or '#'")
+	}
+
 	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?_foreign_keys=on&_busy_timeout=5000", path))
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
+	}
+
+	// Enforce restrictive permissions on the database file (contains sensitive data).
+	if err := os.Chmod(path, 0600); err != nil && !os.IsNotExist(err) {
+		// Ignore if the file doesn't exist yet (first open); SQLite will create it.
+		_ = db.Close()
+		return nil, fmt.Errorf("set db file permissions: %w", err)
 	}
 
 	s := &DB{path: path, sql: db}

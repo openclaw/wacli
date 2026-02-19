@@ -4,9 +4,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 )
+
+var validTableName = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
 type migration struct {
 	version int
@@ -263,6 +266,9 @@ func (d *DB) tableExists(table string) (bool, error) {
 }
 
 func (d *DB) tableHasColumn(table, column string) (bool, error) {
+	if !validTableName.MatchString(table) {
+		return false, fmt.Errorf("invalid table name: %q", table)
+	}
 	rows, err := d.sql.Query("PRAGMA table_info(" + table + ")")
 	if err != nil {
 		return false, err

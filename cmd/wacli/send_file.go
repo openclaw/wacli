@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"mime"
 	"net/http"
 	"os"
@@ -17,10 +18,22 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// maxUploadSize is the maximum file size allowed for uploads (100 MB).
+// WhatsApp enforces its own limits per media type, but this prevents
+// accidentally reading multi-GB files into memory.
+const maxUploadSize = 100 * 1024 * 1024
+
 func sendFile(ctx context.Context, a interface {
 	WA() app.WAClient
 	DB() *store.DB
 }, to types.JID, filePath, filename, caption, mimeOverride string) (string, map[string]string, error) {
+	fi, err := os.Stat(filePath)
+	if err != nil {
+		return "", nil, err
+	}
+	if fi.Size() > maxUploadSize {
+		return "", nil, fmt.Errorf("file too large (%d bytes); maximum upload size is %d bytes", fi.Size(), maxUploadSize)
+	}
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return "", nil, err

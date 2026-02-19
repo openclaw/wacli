@@ -16,6 +16,14 @@ type SearchMessagesParams struct {
 	Type    string
 }
 
+// escapeLIKE escapes SQL LIKE metacharacters so they are matched literally.
+func escapeLIKE(s string) string {
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, "%", "\\%")
+	s = strings.ReplaceAll(s, "_", "\\_")
+	return s
+}
+
 func (d *DB) SearchMessages(p SearchMessagesParams) ([]Message, error) {
 	if strings.TrimSpace(p.Query) == "" {
 		return nil, fmt.Errorf("query is required")
@@ -35,8 +43,8 @@ func (d *DB) searchLIKE(p SearchMessagesParams) ([]Message, error) {
 		SELECT m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.media_type,''), ''
 		FROM messages m
 		LEFT JOIN chats c ON c.jid = m.chat_jid
-		WHERE (LOWER(m.text) LIKE LOWER(?) OR LOWER(m.display_text) LIKE LOWER(?) OR LOWER(m.media_caption) LIKE LOWER(?) OR LOWER(m.filename) LIKE LOWER(?) OR LOWER(COALESCE(m.chat_name,'')) LIKE LOWER(?) OR LOWER(COALESCE(m.sender_name,'')) LIKE LOWER(?) OR LOWER(COALESCE(c.name,'')) LIKE LOWER(?))`
-	needle := "%" + p.Query + "%"
+		WHERE (LOWER(m.text) LIKE LOWER(?) ESCAPE '\' OR LOWER(m.display_text) LIKE LOWER(?) ESCAPE '\' OR LOWER(m.media_caption) LIKE LOWER(?) ESCAPE '\' OR LOWER(m.filename) LIKE LOWER(?) ESCAPE '\' OR LOWER(COALESCE(m.chat_name,'')) LIKE LOWER(?) ESCAPE '\' OR LOWER(COALESCE(m.sender_name,'')) LIKE LOWER(?) ESCAPE '\' OR LOWER(COALESCE(c.name,'')) LIKE LOWER(?) ESCAPE '\')`
+	needle := "%" + escapeLIKE(p.Query) + "%"
 	args := []interface{}{needle, needle, needle, needle, needle, needle, needle}
 	query, args = applyMessageFilters(query, args, p)
 	query += " ORDER BY m.ts DESC LIMIT ?"
@@ -52,7 +60,10 @@ func (d *DB) searchFTS(p SearchMessagesParams) ([]Message, error) {
 		JOIN messages m ON messages_fts.rowid = m.rowid
 		LEFT JOIN chats c ON c.jid = m.chat_jid
 		WHERE messages_fts MATCH ?`
-	args := []interface{}{p.Query}
+	// Wrap the query in double-quotes to treat it as a phrase literal,
+	// preventing FTS5 operator injection (AND, OR, NOT, NEAR, etc.).
+	safeQuery := `"` + strings.ReplaceAll(p.Query, `"`, `""`) + `"`
+	args := []interface{}{safeQuery}
 	query, args = applyMessageFilters(query, args, p)
 	query += " ORDER BY bm25(messages_fts) LIMIT ?"
 	args = append(args, p.Limit)

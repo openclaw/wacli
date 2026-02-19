@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -32,6 +33,9 @@ type Client struct {
 func New(opts Options) (*Client, error) {
 	if strings.TrimSpace(opts.StorePath) == "" {
 		return nil, fmt.Errorf("StorePath is required")
+	}
+	if strings.ContainsAny(opts.StorePath, "?#") {
+		return nil, fmt.Errorf("StorePath must not contain '?' or '#'")
 	}
 	c := &Client{opts: opts}
 	if err := c.init(); err != nil {
@@ -247,6 +251,8 @@ func (c *Client) RequestHistorySyncOnDemand(ctx context.Context, lastKnown types
 	return resp.ID, nil
 }
 
+var phoneNumberRe = regexp.MustCompile(`^\d{1,15}$`)
+
 func ParseUserOrJID(s string) (types.JID, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -254,6 +260,9 @@ func ParseUserOrJID(s string) (types.JID, error) {
 	}
 	if strings.Contains(s, "@") {
 		return types.ParseJID(s)
+	}
+	if !phoneNumberRe.MatchString(s) {
+		return types.JID{}, fmt.Errorf("invalid phone number %q: must be 1-15 digits", s)
 	}
 	return types.JID{User: s, Server: types.DefaultUserServer}, nil
 }

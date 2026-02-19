@@ -68,18 +68,19 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 			select {
 			case mediaJobs <- mediaJob{chatJID: chatJID, msgID: msgID}:
 			default:
-				// Avoid blocking the event handler.
-				go func() {
-					select {
-					case mediaJobs <- mediaJob{chatJID: chatJID, msgID: msgID}:
-					case <-ctx.Done():
-					}
-				}()
+				// Drop jobs when the channel is full rather than spawning
+				// unbounded goroutines that could leak during large syncs.
+				fmt.Fprintf(os.Stderr, "media job queue full, dropping %s/%s\n", chatJID, msgID)
 			}
 		}
 	}
 
 	handlerID := a.wa.AddEventHandler(func(evt interface{}) {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(os.Stderr, "recovered panic in event handler: %v\n", r)
+			}
+		}()
 		lastEvent.Store(time.Now().UTC().UnixNano())
 
 		switch v := evt.(type) {

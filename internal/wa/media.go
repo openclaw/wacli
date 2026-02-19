@@ -3,13 +3,15 @@ package wa
 import (
 	"context"
 	"fmt"
-	"math"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"go.mau.fi/whatsmeow"
 )
+
+// MaxMediaDownloadSize is the maximum size for media downloads (100 MB).
+const MaxMediaDownloadSize = 100 * 1024 * 1024
 
 func MediaTypeFromString(mediaType string) (whatsmeow.MediaType, error) {
 	switch strings.ToLower(strings.TrimSpace(mediaType)) {
@@ -60,8 +62,11 @@ func (c *Client) DownloadMediaToFile(ctx context.Context, directPath string, enc
 		}
 	}()
 
+	if fileLength > MaxMediaDownloadSize {
+		return 0, fmt.Errorf("media too large (%d bytes); maximum download size is %d bytes", fileLength, MaxMediaDownloadSize)
+	}
 	length := -1
-	if fileLength > 0 && fileLength < math.MaxInt32 {
+	if fileLength > 0 {
 		length = int(fileLength)
 	}
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/steipete/wacli/internal/store"
@@ -55,9 +56,11 @@ type Options struct {
 }
 
 type App struct {
-	opts Options
-	wa   WAClient
-	db   *store.DB
+	opts   Options
+	waOnce sync.Once
+	waErr  error
+	wa     WAClient
+	db     *store.DB
 }
 
 func New(opts Options) (*App, error) {
@@ -79,19 +82,18 @@ func New(opts Options) (*App, error) {
 }
 
 func (a *App) OpenWA() error {
-	if a.wa != nil {
-		return nil
-	}
-	sessionPath := filepath.Join(a.opts.StoreDir, "session.db")
-	cli, err := wa.New(wa.Options{
-		StorePath: sessionPath,
+	a.waOnce.Do(func() {
+		sessionPath := filepath.Join(a.opts.StoreDir, "session.db")
+		cli, err := wa.New(wa.Options{
+			StorePath: sessionPath,
+		})
+		if err != nil {
+			a.waErr = err
+			return
+		}
+		a.wa = cli
 	})
-	if err != nil {
-		return err
-	}
-
-	a.wa = cli
-	return nil
+	return a.waErr
 }
 
 func (a *App) Close() {
