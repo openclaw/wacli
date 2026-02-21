@@ -123,6 +123,12 @@ pnpm -s wacli -- --json chats list --limit 100000 \
     done
 ```
 
+## Examples
+
+The `examples/` directory contains companion tools that demonstrate how to build on wacli's data:
+
+- **[speaker-tracker](examples/speaker-tracker/)**: Track speakers across conversations with privacy-preserving hashed JIDs
+
 ## License
 
 See `LICENSE`.
