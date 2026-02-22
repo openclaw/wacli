@@ -18,6 +18,7 @@ type Group struct {
 	JID       string
 	Name      string
 	OwnerJID  string
+	IsMember  bool
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }

@@ -162,14 +162,20 @@ func (d *DB) UpsertContact(jid, phone, pushName, fullName, firstName, businessNa
 func (d *DB) UpsertGroup(jid, name, ownerJID string, created time.Time) error {
 	now := time.Now().UTC().Unix()
 	_, err := d.sql.Exec(`
-		INSERT INTO groups(jid, name, owner_jid, created_ts, updated_at)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO groups(jid, name, owner_jid, created_ts, is_member, updated_at)
+		VALUES (?, ?, ?, ?, 1, ?)
 		ON CONFLICT(jid) DO UPDATE SET
 			name=COALESCE(NULLIF(excluded.name,''), groups.name),
 			owner_jid=COALESCE(NULLIF(excluded.owner_jid,''), groups.owner_jid),
 			created_ts=COALESCE(NULLIF(excluded.created_ts,0), groups.created_ts),
+			is_member=1,
 			updated_at=excluded.updated_at
 	`, jid, name, ownerJID, unix(created), now)
+	return err
+}
+
+func (d *DB) MarkGroupLeft(jid string) error {
+	_, err := d.sql.Exec(`UPDATE groups SET is_member=0, updated_at=? WHERE jid=?`, time.Now().UTC().Unix(), jid)
 	return err
 }
 
@@ -206,12 +212,15 @@ func (d *DB) ReplaceGroupParticipants(groupJID string, participants []GroupParti
 	return tx.Commit()
 }
 
-func (d *DB) ListGroups(query string, limit int) ([]Group, error) {
+func (d *DB) ListGroups(query string, limit int, all bool) ([]Group, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	q := `SELECT jid, COALESCE(name,''), COALESCE(owner_jid,''), COALESCE(created_ts,0), updated_at FROM groups WHERE 1=1`
+	q := `SELECT jid, COALESCE(name,''), COALESCE(owner_jid,''), COALESCE(is_member,1), COALESCE(created_ts,0), updated_at FROM groups WHERE 1=1`
 	var args []interface{}
+	if !all {
+		q += ` AND is_member=1`
+	}
 	if strings.TrimSpace(query) != "" {
 		needle := "%" + query + "%"
 		q += ` AND (LOWER(name) LIKE LOWER(?) OR LOWER(jid) LIKE LOWER(?))`
@@ -229,10 +238,12 @@ func (d *DB) ListGroups(query string, limit int) ([]Group, error) {
 	var out []Group
 	for rows.Next() {
 		var g Group
+		var isMember int
 		var created, updated int64
-		if err := rows.Scan(&g.JID, &g.Name, &g.OwnerJID, &created, &updated); err != nil {
+		if err := rows.Scan(&g.JID, &g.Name, &g.OwnerJID, &isMember, &created, &updated); err != nil {
 			return nil, err
 		}
+		g.IsMember = isMember != 0
 		g.CreatedAt = fromUnix(created)
 		g.UpdatedAt = fromUnix(updated)
 		out = append(out, g)

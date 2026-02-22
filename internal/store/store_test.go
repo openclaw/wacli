@@ -305,7 +305,7 @@ func TestGroupsUpsertListAndParticipantsReplace(t *testing.T) {
 		t.Fatalf("ReplaceGroupParticipants: %v", err)
 	}
 
-	gs, err := db.ListGroups("Gro", 10)
+	gs, err := db.ListGroups("Gro", 10, false)
 	if err != nil {
 		t.Fatalf("ListGroups: %v", err)
 	}

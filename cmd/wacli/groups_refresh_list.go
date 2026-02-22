@@ -57,9 +57,10 @@ func newGroupsRefreshCmd(flags *rootFlags) *cobra.Command {
 func newGroupsListCmd(flags *rootFlags) *cobra.Command {
 	var query string
 	var limit int
+	var all bool
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List known groups (from local DB; run sync to populate)",
+		Short: "List joined groups (from local DB; run sync to populate)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
@@ -70,7 +71,7 @@ func newGroupsListCmd(flags *rootFlags) *cobra.Command {
 			}
 			defer closeApp(a, lk)
 
-			gs, err := a.DB().ListGroups(query, limit)
+			gs, err := a.DB().ListGroups(query, limit, all)
 			if err != nil {
 				return err
 			}
@@ -93,5 +94,6 @@ func newGroupsListCmd(flags *rootFlags) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&query, "query", "", "search query")
 	cmd.Flags().IntVar(&limit, "limit", 50, "limit")
+	cmd.Flags().BoolVar(&all, "all", false, "include groups you have left")
 	return cmd
 }
