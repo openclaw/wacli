@@ -96,7 +96,9 @@ func runDaemon(ctx context.Context, flags *rootFlags, opts daemonOptions) error 
 				"timestamp": pm.Timestamp.UTC().Format(time.RFC3339Nano),
 			}
 			if strings.Contains(chatJID, "@g.us") {
-				if groups, err := a.DB().ListGroups(chatJID, 1); err == nil {
+				if chat, err := a.DB().GetChat(chatJID); err == nil && strings.TrimSpace(chat.Name) != "" {
+					payload["groupName"] = chat.Name
+				} else if groups, err := a.DB().ListGroups(chatJID, 1); err == nil {
 					for _, g := range groups {
 						if g.JID == chatJID && strings.TrimSpace(g.Name) != "" {
 							payload["groupName"] = g.Name
