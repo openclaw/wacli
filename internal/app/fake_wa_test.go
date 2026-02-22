@@ -262,3 +262,5 @@ func (f *fakeWA) RemoteDelete(ctx context.Context, chat types.JID, targetMsgID t
 func (f *fakeWA) SendFile(ctx context.Context, to types.JID, filePath, caption, mimeOverride string) (wa.SendFileResult, error) {
 	return wa.SendFileResult{MsgID: "fileid", MimeType: "application/octet-stream", MediaType: "document", Filename: "test.bin"}, nil
 }
+
+func (f *fakeWA) SelfJID() string { return "test@s.whatsapp.net" }

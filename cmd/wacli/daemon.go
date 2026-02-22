@@ -81,6 +81,9 @@ func runDaemon(ctx context.Context, flags *rootFlags, opts daemonOptions) error 
 	hub := rpc.NewHub(opts.eventBuffer)
 	defer hub.Close()
 
+	// Resolve own JID for self-identification in events.
+	selfJid := a.WA().SelfJID()
+
 	// Bridge whatsmeow events → EventHub.
 	handlerID := a.WA().AddEventHandler(func(rawEvt interface{}) {
 		switch v := rawEvt.(type) {
@@ -91,6 +94,7 @@ func runDaemon(ctx context.Context, flags *rootFlags, opts daemonOptions) error 
 				"id":        pm.ID,
 				"chatJid":   chatJID,
 				"senderJid": pm.SenderJID,
+				"selfJid":   selfJid,
 				"fromMe":    pm.FromMe,
 				"text":      pm.Text,
 				"timestamp": pm.Timestamp.UTC().Format(time.RFC3339Nano),

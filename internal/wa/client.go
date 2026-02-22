@@ -535,3 +535,11 @@ func (c *Client) SendFile(ctx context.Context, to types.JID, filePath, caption, 
 		FileLength:    up.FileLength,
 	}, nil
 }
+
+// SelfJID returns the JID of this device (non-AD format), or empty string if not connected.
+func (c *Client) SelfJID() string {
+	if c.client != nil && c.client.Store != nil && c.client.Store.ID != nil {
+		return c.client.Store.ID.ToNonAD().String()
+	}
+	return ""
+}
