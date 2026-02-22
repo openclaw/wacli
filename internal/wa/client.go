@@ -4,7 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"mime"
+	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +19,7 @@ import (
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
+	"google.golang.org/protobuf/proto"
 )
 
 type Options struct {
@@ -369,4 +373,165 @@ func (c *Client) ReconnectWithBackoff(ctx context.Context, minDelay, maxDelay ti
 			delay = maxDelay
 		}
 	}
+}
+
+// SendReaction sends a reaction to a message in a chat.
+// Pass an empty emoji string to remove an existing reaction.
+func (c *Client) SendReaction(ctx context.Context, chat types.JID, targetMsgID types.MessageID, emoji string) (types.MessageID, error) {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || !cli.IsConnected() {
+		return "", fmt.Errorf("not connected")
+	}
+	msg := cli.BuildReaction(chat, types.EmptyJID, targetMsgID, emoji)
+	resp, err := cli.SendMessage(ctx, chat, msg)
+	if err != nil {
+		return "", err
+	}
+	return resp.ID, nil
+}
+
+// RemoteDelete revokes/deletes a message in a chat.
+func (c *Client) RemoteDelete(ctx context.Context, chat types.JID, targetMsgID types.MessageID) (types.MessageID, error) {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || !cli.IsConnected() {
+		return "", fmt.Errorf("not connected")
+	}
+	msg := cli.BuildRevoke(chat, types.EmptyJID, targetMsgID)
+	resp, err := cli.SendMessage(ctx, chat, msg)
+	if err != nil {
+		return "", err
+	}
+	return resp.ID, nil
+}
+
+// SendFileResult holds the result of a SendFile call.
+type SendFileResult struct {
+	MsgID     types.MessageID
+	MimeType  string
+	MediaType string // "image", "video", "audio", or "document"
+	Filename  string
+	DirectPath    string
+	MediaKey      []byte
+	FileSHA256    []byte
+	FileEncSHA256 []byte
+	FileLength    uint64
+}
+
+// SendFile uploads and sends a file to the given JID.
+// mimeOverride may be empty; if so the MIME type is detected from content.
+func (c *Client) SendFile(ctx context.Context, to types.JID, filePath, caption, mimeOverride string) (SendFileResult, error) {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || !cli.IsConnected() {
+		return SendFileResult{}, fmt.Errorf("not connected")
+	}
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return SendFileResult{}, fmt.Errorf("read file: %w", err)
+	}
+
+	name := filepath.Base(filePath)
+	mimeType := strings.TrimSpace(mimeOverride)
+	if mimeType == "" {
+		mimeType = mime.TypeByExtension(strings.ToLower(filepath.Ext(filePath)))
+	}
+	if mimeType == "" {
+		sniff := data
+		if len(sniff) > 512 {
+			sniff = sniff[:512]
+		}
+		mimeType = http.DetectContentType(sniff)
+	}
+
+	mediaType := "document"
+	uploadType, _ := MediaTypeFromString("document")
+	switch {
+	case strings.HasPrefix(mimeType, "image/"):
+		mediaType = "image"
+		uploadType, _ = MediaTypeFromString("image")
+	case strings.HasPrefix(mimeType, "video/"):
+		mediaType = "video"
+		uploadType, _ = MediaTypeFromString("video")
+	case strings.HasPrefix(mimeType, "audio/"):
+		mediaType = "audio"
+		uploadType, _ = MediaTypeFromString("audio")
+	}
+
+	up, err := cli.Upload(ctx, data, uploadType)
+	if err != nil {
+		return SendFileResult{}, fmt.Errorf("upload: %w", err)
+	}
+
+	msg := &waProto.Message{}
+	switch mediaType {
+	case "image":
+		msg.ImageMessage = &waProto.ImageMessage{
+			URL:           proto.String(up.URL),
+			DirectPath:    proto.String(up.DirectPath),
+			MediaKey:      up.MediaKey,
+			FileEncSHA256: up.FileEncSHA256,
+			FileSHA256:    up.FileSHA256,
+			FileLength:    proto.Uint64(up.FileLength),
+			Mimetype:      proto.String(mimeType),
+			Caption:       proto.String(caption),
+		}
+	case "video":
+		msg.VideoMessage = &waProto.VideoMessage{
+			URL:           proto.String(up.URL),
+			DirectPath:    proto.String(up.DirectPath),
+			MediaKey:      up.MediaKey,
+			FileEncSHA256: up.FileEncSHA256,
+			FileSHA256:    up.FileSHA256,
+			FileLength:    proto.Uint64(up.FileLength),
+			Mimetype:      proto.String(mimeType),
+			Caption:       proto.String(caption),
+		}
+	case "audio":
+		msg.AudioMessage = &waProto.AudioMessage{
+			URL:           proto.String(up.URL),
+			DirectPath:    proto.String(up.DirectPath),
+			MediaKey:      up.MediaKey,
+			FileEncSHA256: up.FileEncSHA256,
+			FileSHA256:    up.FileSHA256,
+			FileLength:    proto.Uint64(up.FileLength),
+			Mimetype:      proto.String(mimeType),
+			PTT:           proto.Bool(false),
+		}
+	default:
+		msg.DocumentMessage = &waProto.DocumentMessage{
+			URL:           proto.String(up.URL),
+			DirectPath:    proto.String(up.DirectPath),
+			MediaKey:      up.MediaKey,
+			FileEncSHA256: up.FileEncSHA256,
+			FileSHA256:    up.FileSHA256,
+			FileLength:    proto.Uint64(up.FileLength),
+			Mimetype:      proto.String(mimeType),
+			FileName:      proto.String(name),
+			Caption:       proto.String(caption),
+			Title:         proto.String(name),
+		}
+	}
+
+	resp, err := cli.SendMessage(ctx, to, msg)
+	if err != nil {
+		return SendFileResult{}, fmt.Errorf("send: %w", err)
+	}
+
+	return SendFileResult{
+		MsgID:         resp.ID,
+		MimeType:      mimeType,
+		MediaType:     mediaType,
+		Filename:      name,
+		DirectPath:    up.DirectPath,
+		MediaKey:      up.MediaKey,
+		FileSHA256:    up.FileSHA256,
+		FileEncSHA256: up.FileEncSHA256,
+		FileLength:    up.FileLength,
+	}, nil
 }

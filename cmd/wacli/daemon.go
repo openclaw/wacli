@@ -35,10 +35,14 @@ Server-initiated event notifications (e.g. message.received) are pushed to
 clients that have called the "subscribe" method.
 
 Supported RPC methods:
-  send         – send a text message
-  listChats    – list chats from local store
-  getMessages  – retrieve message history for a chat
-  subscribe    – subscribe to real-time events (push notifications)
+  send           – send a text message
+  listChats      – list chats from local store
+  getMessages    – retrieve message history for a chat
+  sendReaction   – send a reaction to a message
+  remoteDelete   – revoke/delete a message
+  sendFile       – upload and send a file attachment
+  searchMessages – full-text search across messages
+  subscribe      – subscribe to real-time events (push notifications)
 
 Transport:
   stdio  (default) – JSON-RPC on stdin/stdout; ideal for sub-process integration
@@ -92,6 +96,19 @@ func runDaemon(ctx context.Context, flags *rootFlags, opts daemonOptions) error 
 			if pm.PushName != "" {
 				payload["pushName"] = pm.PushName
 			}
+			if pm.ReactionEmoji != "" {
+				payload["reactionEmoji"] = pm.ReactionEmoji
+				payload["reactionToId"] = pm.ReactionToID
+			}
+			if pm.Media != nil {
+				payload["media"] = map[string]any{
+					"type":       pm.Media.Type,
+					"mimeType":   pm.Media.MimeType,
+					"caption":    pm.Media.Caption,
+					"directPath": pm.Media.DirectPath,
+					"fileLength": pm.Media.FileLength,
+				}
+			}
 			hub.Publish(rpc.Event{
 				Type:    "message.received",
 				Payload: payload,
@@ -104,6 +121,34 @@ func runDaemon(ctx context.Context, flags *rootFlags, opts daemonOptions) error 
 					"ids":     v.MessageIDs,
 					"chatJid": v.MessageSource.Chat.String(),
 				},
+			})
+
+		case *events.ChatPresence:
+			hub.Publish(rpc.Event{
+				Type: "typing",
+				Payload: map[string]any{
+					"chatJid":   v.MessageSource.Chat.String(),
+					"senderJid": v.MessageSource.Sender.String(),
+					"state":     string(v.State),
+					"media":     string(v.Media),
+				},
+			})
+
+		case *events.Presence:
+			status := "available"
+			if v.Unavailable {
+				status = "unavailable"
+			}
+			payload := map[string]any{
+				"from":   v.From.String(),
+				"status": status,
+			}
+			if !v.LastSeen.IsZero() {
+				payload["lastSeen"] = v.LastSeen.UTC().Format(time.RFC3339Nano)
+			}
+			hub.Publish(rpc.Event{
+				Type:    "presence",
+				Payload: payload,
 			})
 		}
 	})

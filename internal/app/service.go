@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	"github.com/steipete/wacli/internal/store"
 	"go.mau.fi/whatsmeow/types"
@@ -27,16 +29,93 @@ func (s *Service) SendText(ctx context.Context, to types.JID, message string) (t
 }
 
 // ListChats returns a list of chats ordered by most-recent message.
-// query is an optional substring filter; limit ≤ 0 uses the store default (50).
+// query is an optional substring filter; limit <= 0 uses the store default (50).
 func (s *Service) ListChats(ctx context.Context, query string, limit int) ([]store.Chat, error) {
 	return s.app.DB().ListChats(query, limit)
 }
 
 // GetMessages returns messages in a given chat ordered by newest first.
-// limit ≤ 0 uses the store default (50).
+// limit <= 0 uses the store default (50).
 func (s *Service) GetMessages(ctx context.Context, chatJID string, limit int) ([]store.Message, error) {
 	return s.app.DB().ListMessages(store.ListMessagesParams{
 		ChatJID: chatJID,
 		Limit:   limit,
 	})
+}
+
+// SendReaction sends a reaction to a message.
+// emoji is the reaction string; pass "" to remove an existing reaction.
+func (s *Service) SendReaction(ctx context.Context, to types.JID, targetMsgID types.MessageID, emoji string) (types.MessageID, error) {
+	if err := s.app.EnsureAuthed(); err != nil {
+		return "", err
+	}
+	return s.app.WA().SendReaction(ctx, to, targetMsgID, emoji)
+}
+
+// RemoteDelete revokes/deletes a sent message.
+func (s *Service) RemoteDelete(ctx context.Context, to types.JID, targetMsgID types.MessageID) (types.MessageID, error) {
+	if err := s.app.EnsureAuthed(); err != nil {
+		return "", err
+	}
+	return s.app.WA().RemoteDelete(ctx, to, targetMsgID)
+}
+
+// SendFile uploads and sends a file attachment, persisting it to the local DB.
+func (s *Service) SendFile(ctx context.Context, to types.JID, filePath, caption string) (types.MessageID, string, error) {
+	if err := s.app.EnsureAuthed(); err != nil {
+		return "", "", err
+	}
+	result, err := s.app.WA().SendFile(ctx, to, filePath, caption, "")
+	if err != nil {
+		return "", "", fmt.Errorf("sendFile: %w", err)
+	}
+
+	now := time.Now().UTC()
+	chatName := s.app.WA().ResolveChatName(ctx, to, "")
+	kind := chatKindFromJID(to)
+	_ = s.app.DB().UpsertChat(to.String(), kind, chatName, now)
+	_ = s.app.DB().UpsertMessage(store.UpsertMessageParams{
+		ChatJID:       to.String(),
+		ChatName:      chatName,
+		MsgID:         string(result.MsgID),
+		SenderJID:     "",
+		SenderName:    "me",
+		Timestamp:     now,
+		FromMe:        true,
+		Text:          caption,
+		MediaType:     result.MediaType,
+		MediaCaption:  caption,
+		Filename:      result.Filename,
+		MimeType:      result.MimeType,
+		DirectPath:    result.DirectPath,
+		MediaKey:      result.MediaKey,
+		FileSHA256:    result.FileSHA256,
+		FileEncSHA256: result.FileEncSHA256,
+		FileLength:    result.FileLength,
+	})
+
+	return result.MsgID, result.MimeType, nil
+}
+
+// SearchMessages searches messages by full-text query.
+// limit <= 0 defaults to 50.
+func (s *Service) SearchMessages(ctx context.Context, query string, limit int) ([]store.Message, error) {
+	return s.app.DB().SearchMessages(store.SearchMessagesParams{
+		Query: query,
+		Limit: limit,
+	})
+}
+
+// chatKindFromJID returns the kind string for a JID.
+func chatKindFromJID(j types.JID) string {
+	if j.Server == types.GroupServer {
+		return "group"
+	}
+	if j.IsBroadcastList() {
+		return "broadcast"
+	}
+	if j.Server == types.DefaultUserServer {
+		return "dm"
+	}
+	return "unknown"
 }

@@ -34,10 +34,14 @@ func NewServer(a *app.App, hub *Hub) *Server {
 
 func (s *Server) buildAssigner() jrpc2.Assigner {
 	return handler.Map{
-		"send":        handler.New(s.rpcSend),
-		"listChats":   handler.New(s.rpcListChats),
-		"getMessages": handler.New(s.rpcGetMessages),
-		"subscribe":   handler.New(s.rpcSubscribe),
+		"send":           handler.New(s.rpcSend),
+		"listChats":      handler.New(s.rpcListChats),
+		"getMessages":    handler.New(s.rpcGetMessages),
+		"subscribe":      handler.New(s.rpcSubscribe),
+		"sendReaction":   handler.New(s.rpcSendReaction),
+		"remoteDelete":   handler.New(s.rpcRemoteDelete),
+		"sendFile":       handler.New(s.rpcSendFile),
+		"searchMessages": handler.New(s.rpcSearchMessages),
 	}
 }
 

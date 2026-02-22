@@ -42,6 +42,10 @@ type WAClient interface {
 	Upload(ctx context.Context, data []byte, mediaType whatsmeow.MediaType) (whatsmeow.UploadResponse, error)
 	DownloadMediaToFile(ctx context.Context, directPath string, encFileHash, fileHash, mediaKey []byte, fileLength uint64, mediaType, mmsType string, targetPath string) (int64, error)
 
+	SendReaction(ctx context.Context, chat types.JID, targetMsgID types.MessageID, emoji string) (types.MessageID, error)
+	RemoteDelete(ctx context.Context, chat types.JID, targetMsgID types.MessageID) (types.MessageID, error)
+	SendFile(ctx context.Context, to types.JID, filePath, caption, mimeOverride string) (wa.SendFileResult, error)
+
 	DecryptReaction(ctx context.Context, reaction *events.Message) (*waProto.ReactionMessage, error)
 	RequestHistorySyncOnDemand(ctx context.Context, lastKnown types.MessageInfo, count int) (types.MessageID, error)
 	Logout(ctx context.Context) error

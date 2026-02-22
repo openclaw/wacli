@@ -1,3 +1,21 @@
+// Package rpc implements the JSON-RPC 2.0 server and the event hub used to
+// push real-time notifications to subscribed clients.
+//
+// Event types pushed via the "event" notification:
+//
+//	message.received  – an incoming or outgoing message was received
+//	  payload: {id, chatJid, senderJid, fromMe, text, timestamp,
+//	            pushName?, reactionEmoji?, reactionToId?,
+//	            media?:{type, mimeType, caption, directPath, fileLength}}
+//
+//	message.sent      – a read receipt was received confirming delivery
+//	  payload: {ids, chatJid}
+//
+//	typing            – a chat presence (typing) notification
+//	  payload: {chatJid, senderJid, state ("composing"|"paused"), media}
+//
+//	presence          – an online/offline presence update
+//	  payload: {from, status ("available"|"unavailable"), lastSeen?}
 package rpc
 
 import (

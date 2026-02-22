@@ -250,3 +250,15 @@ func (f *fakeWA) Logout(ctx context.Context) error {
 	f.authed = false
 	return nil
 }
+
+func (f *fakeWA) SendReaction(ctx context.Context, chat types.JID, targetMsgID types.MessageID, emoji string) (types.MessageID, error) {
+	return types.MessageID("reactionid"), nil
+}
+
+func (f *fakeWA) RemoteDelete(ctx context.Context, chat types.JID, targetMsgID types.MessageID) (types.MessageID, error) {
+	return types.MessageID("deleteid"), nil
+}
+
+func (f *fakeWA) SendFile(ctx context.Context, to types.JID, filePath, caption, mimeOverride string) (wa.SendFileResult, error) {
+	return wa.SendFileResult{MsgID: "fileid", MimeType: "application/octet-stream", MediaType: "document", Filename: "test.bin"}, nil
+}

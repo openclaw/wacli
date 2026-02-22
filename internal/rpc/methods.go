@@ -172,4 +172,161 @@ func (s *Server) rpcSubscribe(ctx context.Context) (SubscribeResponse, error) {
 	return SubscribeResponse{ID: id}, nil
 }
 
-// (no additional helpers needed)
+// ---- sendReaction -------------------------------------------------------
+
+// SendReactionRequest holds parameters for the "sendReaction" RPC method.
+type SendReactionRequest struct {
+	Recipient       string `json:"recipient"`
+	TargetMessageID string `json:"targetMessageId"`
+	Emoji           string `json:"emoji"`
+}
+
+// SendReactionResponse is returned by the "sendReaction" method.
+type SendReactionResponse struct {
+	OK bool `json:"ok"`
+}
+
+func (s *Server) rpcSendReaction(ctx context.Context, req SendReactionRequest) (SendReactionResponse, error) {
+	if req.Recipient == "" {
+		return SendReactionResponse{}, &jrpc2.Error{Code: -32602, Message: "recipient is required"}
+	}
+	if req.TargetMessageID == "" {
+		return SendReactionResponse{}, &jrpc2.Error{Code: -32602, Message: "targetMessageId is required"}
+	}
+	jid, err := types.ParseJID(req.Recipient)
+	if err != nil {
+		return SendReactionResponse{}, &jrpc2.Error{Code: -32602, Message: fmt.Sprintf("invalid recipient JID: %v", err)}
+	}
+	svc := newService(s.app)
+	_, err = svc.SendReaction(ctx, jid, types.MessageID(req.TargetMessageID), req.Emoji)
+	if err != nil {
+		return SendReactionResponse{}, &jrpc2.Error{Code: -32011, Message: fmt.Sprintf("sendReaction failed: %v", err)}
+	}
+	return SendReactionResponse{OK: true}, nil
+}
+
+// ---- remoteDelete -------------------------------------------------------
+
+// RemoteDeleteRequest holds parameters for the "remoteDelete" RPC method.
+type RemoteDeleteRequest struct {
+	Recipient       string `json:"recipient"`
+	TargetMessageID string `json:"targetMessageId"`
+}
+
+// RemoteDeleteResponse is returned by the "remoteDelete" method.
+type RemoteDeleteResponse struct {
+	OK bool `json:"ok"`
+}
+
+func (s *Server) rpcRemoteDelete(ctx context.Context, req RemoteDeleteRequest) (RemoteDeleteResponse, error) {
+	if req.Recipient == "" {
+		return RemoteDeleteResponse{}, &jrpc2.Error{Code: -32602, Message: "recipient is required"}
+	}
+	if req.TargetMessageID == "" {
+		return RemoteDeleteResponse{}, &jrpc2.Error{Code: -32602, Message: "targetMessageId is required"}
+	}
+	jid, err := types.ParseJID(req.Recipient)
+	if err != nil {
+		return RemoteDeleteResponse{}, &jrpc2.Error{Code: -32602, Message: fmt.Sprintf("invalid recipient JID: %v", err)}
+	}
+	svc := newService(s.app)
+	_, err = svc.RemoteDelete(ctx, jid, types.MessageID(req.TargetMessageID))
+	if err != nil {
+		return RemoteDeleteResponse{}, &jrpc2.Error{Code: -32011, Message: fmt.Sprintf("remoteDelete failed: %v", err)}
+	}
+	return RemoteDeleteResponse{OK: true}, nil
+}
+
+// ---- sendFile -----------------------------------------------------------
+
+// SendFileRequest holds parameters for the "sendFile" RPC method.
+type SendFileRequest struct {
+	Recipient string `json:"recipient"`
+	FilePath  string `json:"filePath"`
+	Caption   string `json:"caption,omitempty"`
+	MimeType  string `json:"mimeType,omitempty"`
+}
+
+// SendFileResponse is returned by the "sendFile" method.
+type SendFileResponse struct {
+	ID        string `json:"id"`
+	Timestamp string `json:"timestamp"`
+	MimeType  string `json:"mimeType"`
+}
+
+func (s *Server) rpcSendFile(ctx context.Context, req SendFileRequest) (SendFileResponse, error) {
+	if req.Recipient == "" {
+		return SendFileResponse{}, &jrpc2.Error{Code: -32602, Message: "recipient is required"}
+	}
+	if req.FilePath == "" {
+		return SendFileResponse{}, &jrpc2.Error{Code: -32602, Message: "filePath is required"}
+	}
+	jid, err := types.ParseJID(req.Recipient)
+	if err != nil {
+		return SendFileResponse{}, &jrpc2.Error{Code: -32602, Message: fmt.Sprintf("invalid recipient JID: %v", err)}
+	}
+	svc := newService(s.app)
+	msgID, mimeType, err := svc.SendFile(ctx, jid, req.FilePath, req.Caption)
+	if err != nil {
+		return SendFileResponse{}, &jrpc2.Error{Code: -32011, Message: fmt.Sprintf("sendFile failed: %v", err)}
+	}
+	return SendFileResponse{
+		ID:        string(msgID),
+		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
+		MimeType:  mimeType,
+	}, nil
+}
+
+// ---- searchMessages -----------------------------------------------------
+
+// SearchMessagesRequest holds parameters for the "searchMessages" RPC method.
+type SearchMessagesRequest struct {
+	Query string `json:"query"`
+	Limit int    `json:"limit,omitempty"`
+}
+
+// SearchMessageItem represents a single search result message.
+type SearchMessageItem struct {
+	ID          string `json:"id"`
+	ChatJID     string `json:"chatJid"`
+	ChatName    string `json:"chatName,omitempty"`
+	SenderJID   string `json:"senderJid,omitempty"`
+	Timestamp   string `json:"timestamp"`
+	FromMe      bool   `json:"fromMe"`
+	Text        string `json:"text,omitempty"`
+	DisplayText string `json:"displayText,omitempty"`
+	MediaType   string `json:"mediaType,omitempty"`
+	Snippet     string `json:"snippet,omitempty"`
+}
+
+// SearchMessagesResponse is the result of "searchMessages".
+type SearchMessagesResponse struct {
+	Messages []SearchMessageItem `json:"messages"`
+}
+
+func (s *Server) rpcSearchMessages(ctx context.Context, req SearchMessagesRequest) (SearchMessagesResponse, error) {
+	if req.Query == "" {
+		return SearchMessagesResponse{}, &jrpc2.Error{Code: -32602, Message: "query is required"}
+	}
+	svc := newService(s.app)
+	msgs, err := svc.SearchMessages(ctx, req.Query, req.Limit)
+	if err != nil {
+		return SearchMessagesResponse{}, &jrpc2.Error{Code: -32603, Message: fmt.Sprintf("searchMessages: %v", err)}
+	}
+	items := make([]SearchMessageItem, 0, len(msgs))
+	for _, m := range msgs {
+		items = append(items, SearchMessageItem{
+			ID:          m.MsgID,
+			ChatJID:     m.ChatJID,
+			ChatName:    m.ChatName,
+			SenderJID:   m.SenderJID,
+			Timestamp:   m.Timestamp.UTC().Format(time.RFC3339Nano),
+			FromMe:      m.FromMe,
+			Text:        m.Text,
+			DisplayText: m.DisplayText,
+			MediaType:   m.MediaType,
+			Snippet:     m.Snippet,
+		})
+	}
+	return SearchMessagesResponse{Messages: items}, nil
+}
