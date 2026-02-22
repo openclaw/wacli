@@ -84,6 +84,25 @@ func runDaemon(ctx context.Context, flags *rootFlags, opts daemonOptions) error 
 	// Resolve own JID for self-identification in events.
 	selfJid := a.WA().SelfJID()
 
+	// Pre-populate group names into local DB so event handler can look them up.
+	if groups, err := a.WA().GetJoinedGroups(ctx); err == nil {
+		for _, g := range groups {
+			_ = a.DB().UpsertGroup(g.JID.String(), g.GroupName.Name, g.OwnerJID.String(), g.GroupCreated)
+			_ = a.DB().UpsertChat(g.JID.String(), "group", g.GroupName.Name, time.Time{})
+		}
+		fmt.Fprintf(os.Stderr, "Synced %d group(s) to local DB\n", len(groups))
+	}
+
+	// In-memory group name cache for fast lookup in event handler.
+	groupNameCache := make(map[string]string)
+	if chats, err := a.DB().ListChats("", 200); err == nil {
+		for _, c := range chats {
+			if strings.Contains(c.JID, "@g.us") && c.Name != "" {
+				groupNameCache[c.JID] = c.Name
+			}
+		}
+	}
+
 	// Bridge whatsmeow events → EventHub.
 	handlerID := a.WA().AddEventHandler(func(rawEvt interface{}) {
 		switch v := rawEvt.(type) {
@@ -100,15 +119,11 @@ func runDaemon(ctx context.Context, flags *rootFlags, opts daemonOptions) error 
 				"timestamp": pm.Timestamp.UTC().Format(time.RFC3339Nano),
 			}
 			if strings.Contains(chatJID, "@g.us") {
-				if chat, err := a.DB().GetChat(chatJID); err == nil && strings.TrimSpace(chat.Name) != "" {
+				if name, ok := groupNameCache[chatJID]; ok {
+					payload["groupName"] = name
+				} else if chat, err := a.DB().GetChat(chatJID); err == nil && strings.TrimSpace(chat.Name) != "" {
 					payload["groupName"] = chat.Name
-				} else if groups, err := a.DB().ListGroups(chatJID, 1); err == nil {
-					for _, g := range groups {
-						if g.JID == chatJID && strings.TrimSpace(g.Name) != "" {
-							payload["groupName"] = g.Name
-							break
-						}
-					}
+					groupNameCache[chatJID] = chat.Name
 				}
 			}
 			if pm.PushName != "" {
