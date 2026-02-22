@@ -15,6 +15,14 @@ func TestParseUserOrJID(t *testing.T) {
 		t.Fatalf("unexpected jid: %+v", j)
 	}
 
+	j, err = ParseUserOrJID("+1234567890")
+	if err != nil {
+		t.Fatalf("ParseUserOrJID with + prefix: %v", err)
+	}
+	if j.Server != types.DefaultUserServer || j.User != "1234567890" {
+		t.Fatalf("expected + to be stripped, got %+v", j)
+	}
+
 	j, err = ParseUserOrJID("123@g.us")
 	if err != nil {
 		t.Fatalf("ParseUserOrJID group: %v", err)

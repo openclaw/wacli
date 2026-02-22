@@ -255,6 +255,7 @@ func ParseUserOrJID(s string) (types.JID, error) {
 	if strings.Contains(s, "@") {
 		return types.ParseJID(s)
 	}
+	s = strings.TrimPrefix(s, "+")
 	return types.JID{User: s, Server: types.DefaultUserServer}, nil
 }
 
