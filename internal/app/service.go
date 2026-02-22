@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/steipete/wacli/internal/store"
+	"github.com/steipete/wacli/internal/wa"
 	"go.mau.fi/whatsmeow/types"
 )
 
@@ -13,6 +14,23 @@ import (
 // It avoids direct dependency on CLI helpers from the cmd package.
 type Service struct {
 	app *App
+}
+
+type GroupParticipantInfo struct {
+	JID  string
+	Name string
+}
+
+type GroupInfo struct {
+	JID          string
+	Name         string
+	Participants []GroupParticipantInfo
+}
+
+type ContactName struct {
+	JID      string
+	Name     string
+	PushName string
 }
 
 // NewService wraps an App in a Service.
@@ -104,6 +122,66 @@ func (s *Service) SearchMessages(ctx context.Context, query string, limit int) (
 		Query: query,
 		Limit: limit,
 	})
+}
+
+// GetGroupInfo fetches live group info and resolves participant display names.
+func (s *Service) GetGroupInfo(ctx context.Context, groupJID string) (GroupInfo, error) {
+	if err := s.app.EnsureAuthed(); err != nil {
+		return GroupInfo{}, err
+	}
+	jid, err := types.ParseJID(groupJID)
+	if err != nil {
+		return GroupInfo{}, fmt.Errorf("invalid group JID: %w", err)
+	}
+	info, err := s.app.WA().GetGroupInfo(ctx, jid)
+	if err != nil {
+		return GroupInfo{}, err
+	}
+	if info == nil {
+		return GroupInfo{}, fmt.Errorf("group not found")
+	}
+	out := GroupInfo{
+		JID:  info.JID.String(),
+		Name: info.GroupName.Name,
+	}
+	if out.Name == "" {
+		out.Name = out.JID
+	}
+	out.Participants = make([]GroupParticipantInfo, 0, len(info.Participants))
+	for _, p := range info.Participants {
+		name := ""
+		if c, err := s.app.WA().GetContact(ctx, p.JID.ToNonAD()); err == nil {
+			name = wa.BestContactName(c)
+		}
+		if name == "" {
+			name = p.JID.String()
+		}
+		out.Participants = append(out.Participants, GroupParticipantInfo{
+			JID:  p.JID.String(),
+			Name: name,
+		})
+	}
+	return out, nil
+}
+
+// GetContactName fetches a contact's display name from the whatsmeow contact store.
+func (s *Service) GetContactName(ctx context.Context, jidStr string) (ContactName, error) {
+	if err := s.app.EnsureAuthed(); err != nil {
+		return ContactName{}, err
+	}
+	jid, err := types.ParseJID(jidStr)
+	if err != nil {
+		return ContactName{}, fmt.Errorf("invalid JID: %w", err)
+	}
+	info, err := s.app.WA().GetContact(ctx, jid.ToNonAD())
+	if err != nil {
+		return ContactName{}, err
+	}
+	return ContactName{
+		JID:      jid.String(),
+		Name:     wa.BestContactName(info),
+		PushName: info.PushName,
+	}, nil
 }
 
 // chatKindFromJID returns the kind string for a JID.

@@ -42,6 +42,8 @@ func (s *Server) buildAssigner() jrpc2.Assigner {
 		"remoteDelete":   handler.New(s.rpcRemoteDelete),
 		"sendFile":       handler.New(s.rpcSendFile),
 		"searchMessages": handler.New(s.rpcSearchMessages),
+		"getGroupInfo":   handler.New(s.rpcGetGroupInfo),
+		"getContactName": handler.New(s.rpcGetContactName),
 	}
 }
 

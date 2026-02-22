@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -85,13 +86,24 @@ func runDaemon(ctx context.Context, flags *rootFlags, opts daemonOptions) error 
 		switch v := rawEvt.(type) {
 		case *events.Message:
 			pm := wa.ParseLiveMessage(v)
+			chatJID := pm.Chat.String()
 			payload := map[string]any{
 				"id":        pm.ID,
-				"chatJid":   pm.Chat.String(),
+				"chatJid":   chatJID,
 				"senderJid": pm.SenderJID,
 				"fromMe":    pm.FromMe,
 				"text":      pm.Text,
 				"timestamp": pm.Timestamp.UTC().Format(time.RFC3339Nano),
+			}
+			if strings.Contains(chatJID, "@g.us") {
+				if groups, err := a.DB().ListGroups(chatJID, 1); err == nil {
+					for _, g := range groups {
+						if g.JID == chatJID && strings.TrimSpace(g.Name) != "" {
+							payload["groupName"] = g.Name
+							break
+						}
+					}
+				}
 			}
 			if pm.PushName != "" {
 				payload["pushName"] = pm.PushName

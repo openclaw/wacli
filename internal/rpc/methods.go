@@ -330,3 +330,85 @@ func (s *Server) rpcSearchMessages(ctx context.Context, req SearchMessagesReques
 	}
 	return SearchMessagesResponse{Messages: items}, nil
 }
+
+// ---- getGroupInfo ------------------------------------------------------
+
+// GetGroupInfoRequest holds parameters for the "getGroupInfo" RPC method.
+type GetGroupInfoRequest struct {
+	JID string `json:"jid"`
+}
+
+// GroupParticipantItem is a single group participant entry.
+type GroupParticipantItem struct {
+	JID  string `json:"jid"`
+	Name string `json:"name"`
+}
+
+// GetGroupInfoResponse is the result of "getGroupInfo".
+type GetGroupInfoResponse struct {
+	JID          string                 `json:"jid"`
+	Name         string                 `json:"name"`
+	Participants []GroupParticipantItem `json:"participants"`
+}
+
+func (s *Server) rpcGetGroupInfo(ctx context.Context, req GetGroupInfoRequest) (GetGroupInfoResponse, error) {
+	if req.JID == "" {
+		return GetGroupInfoResponse{}, &jrpc2.Error{Code: -32602, Message: "jid is required"}
+	}
+	if _, err := types.ParseJID(req.JID); err != nil {
+		return GetGroupInfoResponse{}, &jrpc2.Error{Code: -32602, Message: fmt.Sprintf("invalid jid: %v", err)}
+	}
+
+	svc := newService(s.app)
+	info, err := svc.GetGroupInfo(ctx, req.JID)
+	if err != nil {
+		return GetGroupInfoResponse{}, &jrpc2.Error{Code: -32011, Message: fmt.Sprintf("getGroupInfo failed: %v", err)}
+	}
+
+	resp := GetGroupInfoResponse{
+		JID:          info.JID,
+		Name:         info.Name,
+		Participants: make([]GroupParticipantItem, 0, len(info.Participants)),
+	}
+	for _, p := range info.Participants {
+		resp.Participants = append(resp.Participants, GroupParticipantItem{
+			JID:  p.JID,
+			Name: p.Name,
+		})
+	}
+	return resp, nil
+}
+
+// ---- getContactName ----------------------------------------------------
+
+// GetContactNameRequest holds parameters for the "getContactName" RPC method.
+type GetContactNameRequest struct {
+	JID string `json:"jid"`
+}
+
+// GetContactNameResponse is the result of "getContactName".
+type GetContactNameResponse struct {
+	JID      string `json:"jid"`
+	Name     string `json:"name"`
+	PushName string `json:"pushName"`
+}
+
+func (s *Server) rpcGetContactName(ctx context.Context, req GetContactNameRequest) (GetContactNameResponse, error) {
+	if req.JID == "" {
+		return GetContactNameResponse{}, &jrpc2.Error{Code: -32602, Message: "jid is required"}
+	}
+	if _, err := types.ParseJID(req.JID); err != nil {
+		return GetContactNameResponse{}, &jrpc2.Error{Code: -32602, Message: fmt.Sprintf("invalid jid: %v", err)}
+	}
+
+	svc := newService(s.app)
+	contact, err := svc.GetContactName(ctx, req.JID)
+	if err != nil {
+		return GetContactNameResponse{}, &jrpc2.Error{Code: -32011, Message: fmt.Sprintf("getContactName failed: %v", err)}
+	}
+	return GetContactNameResponse{
+		JID:      contact.JID,
+		Name:     contact.Name,
+		PushName: contact.PushName,
+	}, nil
+}
