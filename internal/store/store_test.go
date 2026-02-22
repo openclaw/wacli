@@ -128,6 +128,64 @@ func TestMessageUpsertIdempotentAndContext(t *testing.T) {
 	}
 }
 
+func TestMessageQueriesReturnSenderName(t *testing.T) {
+	db := openTestDB(t)
+
+	chat := "group@g.us"
+	if err := db.UpsertChat(chat, "group", "Team", time.Now()); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+
+	base := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+	for i, id := range []string{"m1", "m2", "m3"} {
+		if err := db.UpsertMessage(UpsertMessageParams{
+			ChatJID:    chat,
+			ChatName:   "Team",
+			MsgID:      id,
+			SenderJID:  "sender@s.whatsapp.net",
+			SenderName: "Alice",
+			Timestamp:  base.Add(time.Duration(i+1) * time.Second),
+			Text:       "hello",
+		}); err != nil {
+			t.Fatalf("UpsertMessage %s: %v", id, err)
+		}
+	}
+
+	listed, err := db.ListMessages(ListMessagesParams{ChatJID: chat, Limit: 10})
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(listed) != 3 {
+		t.Fatalf("expected 3 listed messages, got %d", len(listed))
+	}
+	for _, m := range listed {
+		if m.SenderName != "Alice" {
+			t.Fatalf("expected sender name Alice in list, got %q", m.SenderName)
+		}
+	}
+
+	got, err := db.GetMessage(chat, "m2")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if got.SenderName != "Alice" {
+		t.Fatalf("expected sender name Alice in GetMessage, got %q", got.SenderName)
+	}
+
+	ctx, err := db.MessageContext(chat, "m2", 1, 1)
+	if err != nil {
+		t.Fatalf("MessageContext: %v", err)
+	}
+	if len(ctx) != 3 {
+		t.Fatalf("expected 3 context messages, got %d", len(ctx))
+	}
+	for _, m := range ctx {
+		if m.SenderName != "Alice" {
+			t.Fatalf("expected sender name Alice in context, got %q", m.SenderName)
+		}
+	}
+}
+
 func TestMediaDownloadInfoAndMarkDownloaded(t *testing.T) {
 	db := openTestDB(t)
 

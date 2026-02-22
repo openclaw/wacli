@@ -37,6 +37,9 @@ func TestSearchMessagesUsesLIKEWhenFTSDisabled(t *testing.T) {
 	if len(ms) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(ms))
 	}
+	if ms[0].SenderName != "Alice" {
+		t.Fatalf("expected sender name Alice, got %q", ms[0].SenderName)
+	}
 	if ms[0].Snippet != "" {
 		t.Fatalf("expected empty snippet for LIKE search, got %q", ms[0].Snippet)
 	}

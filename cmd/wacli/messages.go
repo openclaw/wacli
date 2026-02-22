@@ -82,10 +82,7 @@ func newMessagesListCmd(flags *rootFlags) *cobra.Command {
 			w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
 			fmt.Fprintln(w, "TIME\tCHAT\tFROM\tID\tTEXT")
 			for _, m := range msgs {
-				from := m.SenderJID; if showNames && m.SenderName != "" { from = m.SenderName }
-				if m.FromMe {
-					from = "me"
-				}
+				from := senderLabel(m, showNames)
 				chatLabel := m.ChatName
 				if chatLabel == "" {
 					chatLabel = m.ChatJID
@@ -181,10 +178,7 @@ func newMessagesSearchCmd(flags *rootFlags) *cobra.Command {
 			w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
 			fmt.Fprintf(w, "TIME\tCHAT\tFROM\tID\tMATCH\n")
 			for _, m := range msgs {
-				fromLabel := m.SenderJID; if showNames && m.SenderName != "" { fromLabel = m.SenderName }
-				if m.FromMe {
-					fromLabel = "me"
-				}
+				fromLabel := senderLabel(m, showNames)
 				chatLabel := m.ChatName
 				if chatLabel == "" {
 					chatLabel = m.ChatJID
@@ -262,7 +256,8 @@ func newMessagesShowCmd(flags *rootFlags) *cobra.Command {
 			if m.FromMe {
 				fmt.Fprintf(os.Stdout, "From: me\n")
 			} else {
-				fromDisplay := m.SenderJID; if showNames && m.SenderName != "" { fromDisplay = m.SenderName }; fmt.Fprintf(os.Stdout, "From: %s\n", fromDisplay)
+				fromDisplay := senderLabel(m, showNames)
+				fmt.Fprintf(os.Stdout, "From: %s\n", fromDisplay)
 			}
 			if m.MediaType != "" {
 				fmt.Fprintf(os.Stdout, "Media: %s\n", m.MediaType)
@@ -314,10 +309,7 @@ func newMessagesContextCmd(flags *rootFlags) *cobra.Command {
 			w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
 			fmt.Fprintln(w, "TIME\tFROM\tID\tTEXT")
 			for _, m := range msgs {
-				from := m.SenderJID; if showNames && m.SenderName != "" { from = m.SenderName }
-				if m.FromMe {
-					from = "me"
-				}
+				from := senderLabel(m, showNames)
 				line := m.Text
 				if m.MsgID == id {
 					line = ">> " + line
@@ -339,4 +331,14 @@ func newMessagesContextCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().IntVar(&after, "after", 5, "messages after")
 	cmd.Flags().BoolVar(&showNames, "names", false, "show sender names instead of JIDs")
 	return cmd
+}
+
+func senderLabel(m store.Message, showNames bool) string {
+	if m.FromMe {
+		return "me"
+	}
+	if showNames && m.SenderName != "" {
+		return m.SenderName
+	}
+	return m.SenderJID
 }
