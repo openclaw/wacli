@@ -67,9 +67,16 @@ func ParseHistoryMessage(chatJID string, hist *waProto.WebMessageInfo) ParsedMes
 
 	sender := strings.TrimSpace(hist.GetKey().GetParticipant())
 	if sender == "" {
+		// Fall back to top-level Participant field on WebMessageInfo,
+		// which WhatsApp populates for group messages in history sync
+		// even when Key.Participant is empty.
+		sender = strings.TrimSpace(hist.GetParticipant())
+	}
+	if sender == "" {
 		sender = strings.TrimSpace(hist.GetKey().GetRemoteJID())
 	}
 	pm.SenderJID = sender
+	pm.PushName = strings.TrimSpace(hist.GetPushName())
 
 	if hist.GetMessage() != nil {
 		extractWAProto(hist.GetMessage(), &pm)

@@ -30,6 +30,7 @@ func newMessagesListCmd(flags *rootFlags) *cobra.Command {
 	var limit int
 	var afterStr string
 	var beforeStr string
+	var showNames bool
 
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -81,7 +82,7 @@ func newMessagesListCmd(flags *rootFlags) *cobra.Command {
 			w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
 			fmt.Fprintln(w, "TIME\tCHAT\tFROM\tID\tTEXT")
 			for _, m := range msgs {
-				from := m.SenderJID
+				from := m.SenderJID; if showNames && m.SenderName != "" { from = m.SenderName }
 				if m.FromMe {
 					from = "me"
 				}
@@ -113,6 +114,7 @@ func newMessagesListCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().IntVar(&limit, "limit", 50, "limit results")
 	cmd.Flags().StringVar(&afterStr, "after", "", "only messages after time (RFC3339 or YYYY-MM-DD)")
 	cmd.Flags().StringVar(&beforeStr, "before", "", "only messages before time (RFC3339 or YYYY-MM-DD)")
+	cmd.Flags().BoolVar(&showNames, "names", false, "show sender names instead of JIDs")
 	return cmd
 }
 
@@ -123,6 +125,7 @@ func newMessagesSearchCmd(flags *rootFlags) *cobra.Command {
 	var afterStr string
 	var beforeStr string
 	var msgType string
+	var showNames bool
 
 	cmd := &cobra.Command{
 		Use:   "search <query>",
@@ -178,7 +181,7 @@ func newMessagesSearchCmd(flags *rootFlags) *cobra.Command {
 			w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
 			fmt.Fprintf(w, "TIME\tCHAT\tFROM\tID\tMATCH\n")
 			for _, m := range msgs {
-				fromLabel := m.SenderJID
+				fromLabel := m.SenderJID; if showNames && m.SenderName != "" { fromLabel = m.SenderName }
 				if m.FromMe {
 					fromLabel = "me"
 				}
@@ -215,12 +218,14 @@ func newMessagesSearchCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().StringVar(&afterStr, "after", "", "only messages after time (RFC3339 or YYYY-MM-DD)")
 	cmd.Flags().StringVar(&beforeStr, "before", "", "only messages before time (RFC3339 or YYYY-MM-DD)")
 	cmd.Flags().StringVar(&msgType, "type", "", "media type filter (image|video|audio|document)")
+	cmd.Flags().BoolVar(&showNames, "names", false, "show sender names instead of JIDs")
 	return cmd
 }
 
 func newMessagesShowCmd(flags *rootFlags) *cobra.Command {
 	var chat string
 	var id string
+	var showNames bool
 
 	cmd := &cobra.Command{
 		Use:   "show",
@@ -257,7 +262,7 @@ func newMessagesShowCmd(flags *rootFlags) *cobra.Command {
 			if m.FromMe {
 				fmt.Fprintf(os.Stdout, "From: me\n")
 			} else {
-				fmt.Fprintf(os.Stdout, "From: %s\n", m.SenderJID)
+				fromDisplay := m.SenderJID; if showNames && m.SenderName != "" { fromDisplay = m.SenderName }; fmt.Fprintf(os.Stdout, "From: %s\n", fromDisplay)
 			}
 			if m.MediaType != "" {
 				fmt.Fprintf(os.Stdout, "Media: %s\n", m.MediaType)
@@ -269,6 +274,7 @@ func newMessagesShowCmd(flags *rootFlags) *cobra.Command {
 
 	cmd.Flags().StringVar(&chat, "chat", "", "chat JID")
 	cmd.Flags().StringVar(&id, "id", "", "message ID")
+	cmd.Flags().BoolVar(&showNames, "names", false, "show sender names instead of JIDs")
 	return cmd
 }
 
@@ -277,6 +283,7 @@ func newMessagesContextCmd(flags *rootFlags) *cobra.Command {
 	var id string
 	var before int
 	var after int
+	var showNames bool
 
 	cmd := &cobra.Command{
 		Use:   "context",
@@ -307,7 +314,7 @@ func newMessagesContextCmd(flags *rootFlags) *cobra.Command {
 			w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
 			fmt.Fprintln(w, "TIME\tFROM\tID\tTEXT")
 			for _, m := range msgs {
-				from := m.SenderJID
+				from := m.SenderJID; if showNames && m.SenderName != "" { from = m.SenderName }
 				if m.FromMe {
 					from = "me"
 				}
@@ -330,5 +337,6 @@ func newMessagesContextCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().StringVar(&id, "id", "", "message ID")
 	cmd.Flags().IntVar(&before, "before", 5, "messages before")
 	cmd.Flags().IntVar(&after, "after", 5, "messages after")
+	cmd.Flags().BoolVar(&showNames, "names", false, "show sender names instead of JIDs")
 	return cmd
 }

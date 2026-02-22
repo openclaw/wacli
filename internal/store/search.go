@@ -32,7 +32,7 @@ func (d *DB) SearchMessages(p SearchMessagesParams) ([]Message, error) {
 
 func (d *DB) searchLIKE(p SearchMessagesParams) ([]Message, error) {
 	query := `
-		SELECT m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.media_type,''), ''
+		SELECT m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.media_type,''), ''
 		FROM messages m
 		LEFT JOIN chats c ON c.jid = m.chat_jid
 		WHERE (LOWER(m.text) LIKE LOWER(?) OR LOWER(m.display_text) LIKE LOWER(?) OR LOWER(m.media_caption) LIKE LOWER(?) OR LOWER(m.filename) LIKE LOWER(?) OR LOWER(COALESCE(m.chat_name,'')) LIKE LOWER(?) OR LOWER(COALESCE(m.sender_name,'')) LIKE LOWER(?) OR LOWER(COALESCE(c.name,'')) LIKE LOWER(?))`
@@ -46,7 +46,7 @@ func (d *DB) searchLIKE(p SearchMessagesParams) ([]Message, error) {
 
 func (d *DB) searchFTS(p SearchMessagesParams) ([]Message, error) {
 	query := `
-		SELECT m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.media_type,''),
+		SELECT m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.media_type,''),
 		       snippet(messages_fts, 0, '[', ']', '…', 12)
 		FROM messages_fts
 		JOIN messages m ON messages_fts.rowid = m.rowid

@@ -32,6 +32,44 @@ func TestParseHistoryMessageTextAndSender(t *testing.T) {
 	}
 }
 
+func TestParseHistoryMessageGroupSenderFromTopLevelParticipant(t *testing.T) {
+	h := &waProto.WebMessageInfo{
+		Key: &waProto.MessageKey{
+			ID:        proto.String("msgid"),
+			FromMe:    proto.Bool(false),
+			RemoteJID: proto.String("group@g.us"),
+		},
+		Participant:      proto.String("sender@s.whatsapp.net"),
+		PushName:         proto.String("Alice"),
+		MessageTimestamp: proto.Uint64(uint64(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC).Unix())),
+		Message:          &waProto.Message{Conversation: proto.String("hello from group")},
+	}
+	pm := ParseHistoryMessage("group@g.us", h)
+	if pm.SenderJID != "sender@s.whatsapp.net" {
+		t.Fatalf("expected sender from top-level Participant, got %q", pm.SenderJID)
+	}
+	if pm.PushName != "Alice" {
+		t.Fatalf("expected PushName 'Alice', got %q", pm.PushName)
+	}
+}
+
+func TestParseHistoryMessagePushNameExtracted(t *testing.T) {
+	h := &waProto.WebMessageInfo{
+		Key: &waProto.MessageKey{
+			ID:          proto.String("msgid"),
+			FromMe:      proto.Bool(false),
+			Participant: proto.String("sender@s.whatsapp.net"),
+		},
+		PushName:         proto.String("Bob"),
+		MessageTimestamp: proto.Uint64(uint64(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC).Unix())),
+		Message:          &waProto.Message{Conversation: proto.String("hello")},
+	}
+	pm := ParseHistoryMessage("group@g.us", h)
+	if pm.PushName != "Bob" {
+		t.Fatalf("expected PushName 'Bob', got %q", pm.PushName)
+	}
+}
+
 func TestParseLiveMessageImageClonesBytes(t *testing.T) {
 	chat, _ := types.ParseJID("123@s.whatsapp.net")
 	sender, _ := types.ParseJID("sender@s.whatsapp.net")
