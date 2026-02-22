@@ -204,11 +204,39 @@ func (f *fakeWA) JoinGroupWithLink(ctx context.Context, code string) (types.JID,
 
 func (f *fakeWA) LeaveGroup(ctx context.Context, group types.JID) error { return nil }
 
+func (f *fakeWA) GetNewsletterInfoWithInvite(ctx context.Context, key string) (*types.NewsletterMetadata, error) {
+	return nil, nil
+}
+
+func (f *fakeWA) FollowNewsletter(ctx context.Context, jid types.JID) error {
+	return nil
+}
+
+func (f *fakeWA) UnfollowNewsletter(ctx context.Context, jid types.JID) error {
+	return nil
+}
+
+func (f *fakeWA) GetSubscribedNewsletters(ctx context.Context) ([]*types.NewsletterMetadata, error) {
+	return nil, nil
+}
+
+func (f *fakeWA) GetNewsletterInfo(ctx context.Context, jid types.JID) (*types.NewsletterMetadata, error) {
+	return nil, nil
+}
+
+func (f *fakeWA) UploadNewsletter(ctx context.Context, data []byte, mediaType whatsmeow.MediaType) (whatsmeow.UploadResponse, error) {
+	return whatsmeow.UploadResponse{}, nil
+}
+
 func (f *fakeWA) SendText(ctx context.Context, to types.JID, text string) (types.MessageID, error) {
 	return types.MessageID("msgid"), nil
 }
 
 func (f *fakeWA) SendProtoMessage(ctx context.Context, to types.JID, msg *waProto.Message) (types.MessageID, error) {
+	return f.SendProtoMessageWithExtra(ctx, to, msg, "")
+}
+
+func (f *fakeWA) SendProtoMessageWithExtra(ctx context.Context, to types.JID, msg *waProto.Message, mediaHandle string) (types.MessageID, error) {
 	return types.MessageID("msgid"), nil
 }
 

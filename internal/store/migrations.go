@@ -73,7 +73,7 @@ func migrateCoreSchema(d *DB) error {
 	if _, err := d.sql.Exec(`
 		CREATE TABLE IF NOT EXISTS chats (
 			jid TEXT PRIMARY KEY,
-			kind TEXT NOT NULL, -- dm|group|broadcast|unknown
+			kind TEXT NOT NULL, -- dm|group|broadcast|newsletter|unknown
 			name TEXT,
 			last_message_ts INTEGER
 		);

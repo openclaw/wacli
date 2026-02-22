@@ -161,6 +161,7 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	}
 	if opts.RefreshGroups {
 		_ = a.refreshGroups(ctx)
+		_ = a.refreshNewsletters(ctx)
 	}
 	if opts.AfterConnect != nil {
 		if err := opts.AfterConnect(ctx); err != nil {
@@ -211,6 +212,9 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 }
 
 func chatKind(chat types.JID) string {
+	if chat.Server == types.NewsletterServer {
+		return "newsletter"
+	}
 	if chat.Server == types.GroupServer {
 		return "group"
 	}

@@ -57,13 +57,115 @@ func sendFile(ctx context.Context, a interface {
 		uploadType, _ = wa.MediaTypeFromString("audio")
 	}
 
-	up, err := a.WA().Upload(ctx, data, uploadType)
-	if err != nil {
-		return "", nil, err
+	var up struct {
+		URL           string
+		DirectPath    string
+		MediaKey      []byte
+		FileEncSHA256 []byte
+		FileSHA256    []byte
+		FileLength    uint64
+		Handle        string
+	}
+	isNewsletter := to.Server == types.NewsletterServer
+	if isNewsletter {
+		resp, err := a.WA().UploadNewsletter(ctx, data, uploadType)
+		if err != nil {
+			return "", nil, err
+		}
+		up.URL = resp.URL
+		up.DirectPath = resp.DirectPath
+		up.FileSHA256 = resp.FileSHA256
+		up.FileLength = resp.FileLength
+		up.Handle = resp.Handle
+	} else {
+		resp, err := a.WA().Upload(ctx, data, uploadType)
+		if err != nil {
+			return "", nil, err
+		}
+		up.URL = resp.URL
+		up.DirectPath = resp.DirectPath
+		up.MediaKey = resp.MediaKey
+		up.FileEncSHA256 = resp.FileEncSHA256
+		up.FileSHA256 = resp.FileSHA256
+		up.FileLength = resp.FileLength
 	}
 
 	now := time.Now().UTC()
 	msg := &waProto.Message{}
+
+	if isNewsletter {
+		switch mediaType {
+		case "image":
+			msg.ImageMessage = &waProto.ImageMessage{
+				URL:        proto.String(up.URL),
+				DirectPath: proto.String(up.DirectPath),
+				FileSHA256: up.FileSHA256,
+				FileLength: proto.Uint64(up.FileLength),
+				Mimetype:   proto.String(mimeType),
+				Caption:    proto.String(caption),
+			}
+		case "video":
+			msg.VideoMessage = &waProto.VideoMessage{
+				URL:        proto.String(up.URL),
+				DirectPath: proto.String(up.DirectPath),
+				FileSHA256: up.FileSHA256,
+				FileLength: proto.Uint64(up.FileLength),
+				Mimetype:   proto.String(mimeType),
+				Caption:    proto.String(caption),
+			}
+		case "audio":
+			msg.AudioMessage = &waProto.AudioMessage{
+				URL:        proto.String(up.URL),
+				DirectPath: proto.String(up.DirectPath),
+				FileSHA256: up.FileSHA256,
+				FileLength: proto.Uint64(up.FileLength),
+				Mimetype:   proto.String(mimeType),
+				PTT:        proto.Bool(false),
+			}
+		default:
+			msg.DocumentMessage = &waProto.DocumentMessage{
+				URL:        proto.String(up.URL),
+				DirectPath: proto.String(up.DirectPath),
+				FileSHA256: up.FileSHA256,
+				FileLength: proto.Uint64(up.FileLength),
+				Mimetype:   proto.String(mimeType),
+				FileName:   proto.String(name),
+				Caption:    proto.String(caption),
+				Title:      proto.String(name),
+			}
+		}
+		id, err := a.WA().SendProtoMessageWithExtra(ctx, to, msg, up.Handle)
+		if err != nil {
+			return "", nil, err
+		}
+		chatName := a.WA().ResolveChatName(ctx, to, "")
+		kind := chatKindFromJID(to)
+		_ = a.DB().UpsertChat(to.String(), kind, chatName, now)
+		_ = a.DB().UpsertMessage(store.UpsertMessageParams{
+			ChatJID:       to.String(),
+			ChatName:      chatName,
+			MsgID:         id,
+			SenderJID:     "",
+			SenderName:    "me",
+			Timestamp:     now,
+			FromMe:        true,
+			Text:          caption,
+			MediaType:     mediaType,
+			MediaCaption:  caption,
+			Filename:      name,
+			MimeType:      mimeType,
+			DirectPath:    up.DirectPath,
+			MediaKey:      up.MediaKey,
+			FileSHA256:    up.FileSHA256,
+			FileEncSHA256: up.FileEncSHA256,
+			FileLength:    up.FileLength,
+		})
+		return id, map[string]string{
+			"name":      name,
+			"mime_type": mimeType,
+			"media":     mediaType,
+		}, nil
+	}
 
 	switch mediaType {
 	case "image":
@@ -150,6 +252,9 @@ func sendFile(ctx context.Context, a interface {
 }
 
 func chatKindFromJID(j types.JID) string {
+	if j.Server == types.NewsletterServer {
+		return "newsletter"
+	}
 	if j.Server == types.GroupServer {
 		return "group"
 	}

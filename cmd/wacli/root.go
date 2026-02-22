@@ -48,6 +48,7 @@ func execute(args []string) error {
 	rootCmd.AddCommand(newContactsCmd(&flags))
 	rootCmd.AddCommand(newChatsCmd(&flags))
 	rootCmd.AddCommand(newGroupsCmd(&flags))
+	rootCmd.AddCommand(newChannelsCmd(&flags))
 	rootCmd.AddCommand(newHistoryCmd(&flags))
 
 	rootCmd.SetArgs(args)

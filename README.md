@@ -71,6 +71,11 @@ pnpm wacli send text --to 1234567890 --message "hello"
 # List groups and manage participants
 pnpm wacli groups list
 pnpm wacli groups rename --jid 123456789@g.us --name "New name"
+
+# WhatsApp channels (newsletters): list, join via invite, send messages
+pnpm wacli channels list
+pnpm wacli channels join --invite "https://whatsapp.com/channel/..."
+pnpm wacli send text --to 12345678901234567@newsletter --message "Hello channel"
 ```
 
 ## Prior Art / Credit

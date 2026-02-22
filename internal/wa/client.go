@@ -184,13 +184,21 @@ func (c *Client) SendText(ctx context.Context, to types.JID, text string) (types
 }
 
 func (c *Client) SendProtoMessage(ctx context.Context, to types.JID, msg *waProto.Message) (types.MessageID, error) {
+	return c.SendProtoMessageWithExtra(ctx, to, msg, "")
+}
+
+func (c *Client) SendProtoMessageWithExtra(ctx context.Context, to types.JID, msg *waProto.Message, mediaHandle string) (types.MessageID, error) {
 	c.mu.Lock()
 	cli := c.client
 	c.mu.Unlock()
 	if cli == nil || !cli.IsConnected() {
 		return "", fmt.Errorf("not connected")
 	}
-	resp, err := cli.SendMessage(ctx, to, msg)
+	var extra whatsmeow.SendRequestExtra
+	if mediaHandle != "" {
+		extra.MediaHandle = mediaHandle
+	}
+	resp, err := cli.SendMessage(ctx, to, msg, extra)
 	if err != nil {
 		return "", err
 	}
@@ -307,7 +315,14 @@ func BestContactName(info types.ContactInfo) string {
 func (c *Client) ResolveChatName(ctx context.Context, chat types.JID, pushName string) string {
 	fallback := chat.String()
 
-	if chat.Server == types.GroupServer || chat.IsBroadcastList() {
+	if chat.Server == types.NewsletterServer {
+		meta, err := c.GetNewsletterInfo(ctx, chat)
+		if err == nil && meta != nil {
+			if name := NewsletterName(meta); name != "" {
+				return name
+			}
+		}
+	} else if chat.Server == types.GroupServer || chat.IsBroadcastList() {
 		info, err := c.GetGroupInfo(ctx, chat)
 		if err == nil && info != nil {
 			if name := strings.TrimSpace(info.GroupName.Name); name != "" {

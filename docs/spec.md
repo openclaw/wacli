@@ -20,7 +20,7 @@ This document defines the v1 plan for `wacli`: a WhatsApp CLI that syncs message
 
 ## Terminology
 
-- **JID**: WhatsApp Jabber ID, e.g. `1234567890@s.whatsapp.net` (user) or `123456789@g.us` (group).
+- **JID**: WhatsApp Jabber ID, e.g. `1234567890@s.whatsapp.net` (user), `123456789@g.us` (group), or `12345678901234567@newsletter` (channel).
 - **Store directory**: directory containing all local state, default `~/.wacli`.
 
 ## Storage layout
@@ -94,7 +94,7 @@ Immediately after QR pairing success, `wacli auth` runs a bootstrap sync:
 ### Tables (proposed)
 
 - `chats`
-  - `jid` (PK), `name`, `kind` (`dm|group|broadcast`), `last_message_ts`, …
+  - `jid` (PK), `name`, `kind` (`dm|group|broadcast|newsletter|unknown`), `last_message_ts`, …
 - `contacts`
   - `jid` (PK), `push_name`, `full_name`, `business_name`, `phone`, …
 - `groups`
@@ -173,6 +173,15 @@ WhatsApp Web history is best-effort. If you want to try fetching *older* message
 
 - `wacli send text --to PHONE_OR_JID --message TEXT`
 - `wacli send file --to PHONE_OR_JID --file PATH [--caption TEXT] [--mime TYPE]`
+
+`--to` can be a user (phone or JID), group JID (`…@g.us`), or channel JID (`…@newsletter`). Sending to a channel requires admin/owner role; file uploads to channels use unencrypted newsletter media.
+
+### Channels (newsletters)
+
+- `wacli channels list` — list subscribed channels (live)
+- `wacli channels info --jid JID` — fetch channel metadata (JID: `…@newsletter`)
+- `wacli channels join --invite LINK_OR_KEY` — join a channel (full invite link or code after `https://whatsapp.com/channel/`)
+- `wacli channels leave --jid JID` — unfollow a channel
 
 ### Contacts (read + local management)
 
