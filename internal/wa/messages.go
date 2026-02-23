@@ -5,6 +5,7 @@ import (
 	"time"
 
 	waProto "go.mau.fi/whatsmeow/binary/proto"
+	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 )
@@ -34,6 +35,71 @@ type ParsedMessage struct {
 	ReplyToDisplay string
 	ReactionToID   string
 	ReactionEmoji  string
+}
+
+// RevokeInfo returns the chat JID and message ID for a revoke (delete-for-everyone) event.
+// If the event is not a revoke, ok is false.
+func RevokeInfo(evt *events.Message) (chatJID, msgID string, ok bool) {
+	if evt == nil || evt.Message == nil {
+		return "", "", false
+	}
+	proto := evt.Message.GetProtocolMessage()
+	if proto == nil || proto.GetType() != waE2E.ProtocolMessage_REVOKE {
+		return "", "", false
+	}
+	key := proto.GetKey()
+	if key == nil {
+		return "", "", false
+	}
+	chatJID = strings.TrimSpace(key.GetRemoteJID())
+	msgID = strings.TrimSpace(key.GetID())
+	if chatJID == "" || msgID == "" {
+		return "", "", false
+	}
+	return chatJID, msgID, true
+}
+
+// ParseEditEvent parses an edit event and returns a ParsedMessage for the original message
+// with updated text, so the store can upsert by (chat_jid, msg_id). If the event is not
+// an edit, ok is false.
+func ParseEditEvent(evt *events.Message) (pm ParsedMessage, ok bool) {
+	if evt == nil || evt.Message == nil {
+		return ParsedMessage{}, false
+	}
+	editedWrap := evt.Message.GetEditedMessage()
+	if editedWrap == nil || editedWrap.GetMessage() == nil {
+		return ParsedMessage{}, false
+	}
+	inner := editedWrap.GetMessage()
+	proto := inner.GetProtocolMessage()
+	if proto == nil || proto.GetType() != waE2E.ProtocolMessage_MESSAGE_EDIT {
+		return ParsedMessage{}, false
+	}
+	key := proto.GetKey()
+	if key == nil {
+		return ParsedMessage{}, false
+	}
+	originalID := strings.TrimSpace(key.GetID())
+	if originalID == "" {
+		return ParsedMessage{}, false
+	}
+	editedContent := proto.GetEditedMessage()
+	if editedContent == nil {
+		return ParsedMessage{}, false
+	}
+
+	pm = ParsedMessage{
+		Chat:      evt.Info.Chat,
+		ID:        originalID,
+		Timestamp: evt.Info.Timestamp,
+		FromMe:    evt.Info.IsFromMe,
+		PushName:  evt.Info.PushName,
+	}
+	if s := evt.Info.Sender.String(); s != "" {
+		pm.SenderJID = s
+	}
+	extractWAProto(editedContent, &pm)
+	return pm, true
 }
 
 func ParseLiveMessage(evt *events.Message) ParsedMessage {

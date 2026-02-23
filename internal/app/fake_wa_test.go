@@ -212,6 +212,14 @@ func (f *fakeWA) SendProtoMessage(ctx context.Context, to types.JID, msg *waProt
 	return types.MessageID("msgid"), nil
 }
 
+func (f *fakeWA) RevokeMessage(ctx context.Context, chat types.JID, msgID types.MessageID) error {
+	return nil
+}
+
+func (f *fakeWA) EditMessage(ctx context.Context, chat types.JID, msgID types.MessageID, newText string) (types.MessageID, error) {
+	return types.MessageID("edit-msgid"), nil
+}
+
 func (f *fakeWA) Upload(ctx context.Context, data []byte, mediaType whatsmeow.MediaType) (whatsmeow.UploadResponse, error) {
 	return whatsmeow.UploadResponse{}, nil
 }

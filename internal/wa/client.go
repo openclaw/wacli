@@ -197,6 +197,33 @@ func (c *Client) SendProtoMessage(ctx context.Context, to types.JID, msg *waProt
 	return resp.ID, nil
 }
 
+func (c *Client) RevokeMessage(ctx context.Context, chat types.JID, msgID types.MessageID) error {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || !cli.IsConnected() {
+		return fmt.Errorf("not connected")
+	}
+	_, err := cli.SendMessage(ctx, chat, cli.BuildRevoke(chat, types.EmptyJID, msgID))
+	return err
+}
+
+func (c *Client) EditMessage(ctx context.Context, chat types.JID, msgID types.MessageID, newText string) (types.MessageID, error) {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || !cli.IsConnected() {
+		return "", fmt.Errorf("not connected")
+	}
+	newContent := &waProto.Message{Conversation: &newText}
+	editMsg := cli.BuildEdit(chat, msgID, newContent)
+	resp, err := cli.SendMessage(ctx, chat, editMsg)
+	if err != nil {
+		return "", err
+	}
+	return resp.ID, nil
+}
+
 func (c *Client) Upload(ctx context.Context, data []byte, mediaType whatsmeow.MediaType) (whatsmeow.UploadResponse, error) {
 	c.mu.Lock()
 	cli := c.client

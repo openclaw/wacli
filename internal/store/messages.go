@@ -25,6 +25,7 @@ type UpsertMessageParams struct {
 	FileSHA256    []byte
 	FileEncSHA256 []byte
 	FileLength    uint64
+	Revoked       bool
 }
 
 func (d *DB) UpsertMessage(p UpsertMessageParams) error {
@@ -32,8 +33,8 @@ func (d *DB) UpsertMessage(p UpsertMessageParams) error {
 		INSERT INTO messages(
 			chat_jid, chat_name, msg_id, sender_jid, sender_name, ts, from_me, text, display_text,
 			media_type, media_caption, filename, mime_type, direct_path,
-			media_key, file_sha256, file_enc_sha256, file_length
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			media_key, file_sha256, file_enc_sha256, file_length, revoked
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(chat_jid, msg_id) DO UPDATE SET
 			chat_name=COALESCE(NULLIF(excluded.chat_name,''), messages.chat_name),
 			sender_jid=excluded.sender_jid,
@@ -50,11 +51,17 @@ func (d *DB) UpsertMessage(p UpsertMessageParams) error {
 			media_key=CASE WHEN excluded.media_key IS NOT NULL AND length(excluded.media_key)>0 THEN excluded.media_key ELSE messages.media_key END,
 			file_sha256=CASE WHEN excluded.file_sha256 IS NOT NULL AND length(excluded.file_sha256)>0 THEN excluded.file_sha256 ELSE messages.file_sha256 END,
 			file_enc_sha256=CASE WHEN excluded.file_enc_sha256 IS NOT NULL AND length(excluded.file_enc_sha256)>0 THEN excluded.file_enc_sha256 ELSE messages.file_enc_sha256 END,
-			file_length=CASE WHEN excluded.file_length>0 THEN excluded.file_length ELSE messages.file_length END
+			file_length=CASE WHEN excluded.file_length>0 THEN excluded.file_length ELSE messages.file_length END,
+			revoked=CASE WHEN excluded.revoked != 0 THEN excluded.revoked ELSE messages.revoked END
 	`, p.ChatJID, nullIfEmpty(p.ChatName), p.MsgID, nullIfEmpty(p.SenderJID), nullIfEmpty(p.SenderName), unix(p.Timestamp), boolToInt(p.FromMe), nullIfEmpty(p.Text), nullIfEmpty(p.DisplayText),
 		nullIfEmpty(p.MediaType), nullIfEmpty(p.MediaCaption), nullIfEmpty(p.Filename), nullIfEmpty(p.MimeType), nullIfEmpty(p.DirectPath),
-		p.MediaKey, p.FileSHA256, p.FileEncSHA256, int64(p.FileLength),
+		p.MediaKey, p.FileSHA256, p.FileEncSHA256, int64(p.FileLength), boolToInt(p.Revoked),
 	)
+	return err
+}
+
+func (d *DB) MarkRevoked(chatJID, msgID string) error {
+	_, err := d.sql.Exec(`UPDATE messages SET revoked = 1 WHERE chat_jid = ? AND msg_id = ?`, chatJID, msgID)
 	return err
 }
 
@@ -70,10 +77,10 @@ func (d *DB) ListMessages(p ListMessagesParams) ([]Message, error) {
 		p.Limit = 50
 	}
 	query := `
-		SELECT m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.media_type,''), ''
+		SELECT m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.media_type,''), '', COALESCE(m.revoked,0)
 		FROM messages m
 		LEFT JOIN chats c ON c.jid = m.chat_jid
-		WHERE 1=1`
+		WHERE (m.revoked = 0 OR m.revoked IS NULL)`
 	var args []interface{}
 	if strings.TrimSpace(p.ChatJID) != "" {
 		query += " AND m.chat_jid = ?"
@@ -94,7 +101,7 @@ func (d *DB) ListMessages(p ListMessagesParams) ([]Message, error) {
 
 func (d *DB) GetMessage(chatJID, msgID string) (Message, error) {
 	row := d.sql.QueryRow(`
-		SELECT m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.media_type,''), ''
+		SELECT m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.media_type,''), '', COALESCE(m.revoked,0)
 		FROM messages m
 		LEFT JOIN chats c ON c.jid = m.chat_jid
 		WHERE m.chat_jid = ? AND m.msg_id = ?
@@ -102,11 +109,13 @@ func (d *DB) GetMessage(chatJID, msgID string) (Message, error) {
 	var m Message
 	var ts int64
 	var fromMe int
-	if err := row.Scan(&m.ChatJID, &m.ChatName, &m.MsgID, &m.SenderJID, &ts, &fromMe, &m.Text, &m.DisplayText, &m.MediaType, &m.Snippet); err != nil {
+	var revoked int
+	if err := row.Scan(&m.ChatJID, &m.ChatName, &m.MsgID, &m.SenderJID, &ts, &fromMe, &m.Text, &m.DisplayText, &m.MediaType, &m.Snippet, &revoked); err != nil {
 		return Message{}, err
 	}
 	m.Timestamp = fromUnix(ts)
 	m.FromMe = fromMe != 0
+	m.Revoked = revoked != 0
 	return m, nil
 }
 
@@ -127,7 +136,7 @@ func (d *DB) GetOldestMessageInfo(chatJID string) (MessageInfo, error) {
 	row := d.sql.QueryRow(`
 		SELECT m.chat_jid, m.msg_id, m.ts, m.from_me, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,'')
 		FROM messages m
-		WHERE m.chat_jid = ?
+		WHERE m.chat_jid = ? AND (m.revoked = 0 OR m.revoked IS NULL)
 		ORDER BY m.ts ASC
 		LIMIT 1
 	`, chatJID)
@@ -155,7 +164,7 @@ func (d *DB) MessageContext(chatJID, msgID string, before, after int) ([]Message
 	}
 
 	beforeRows, err := d.scanMessages(`
-		SELECT m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.media_type,''), ''
+		SELECT m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.media_type,''), '', COALESCE(m.revoked,0)
 		FROM messages m
 		LEFT JOIN chats c ON c.jid = m.chat_jid
 		WHERE m.chat_jid = ? AND m.ts < ?
@@ -167,7 +176,7 @@ func (d *DB) MessageContext(chatJID, msgID string, before, after int) ([]Message
 	}
 
 	afterRows, err := d.scanMessages(`
-		SELECT m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.media_type,''), ''
+		SELECT m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.media_type,''), '', COALESCE(m.revoked,0)
 		FROM messages m
 		LEFT JOIN chats c ON c.jid = m.chat_jid
 		WHERE m.chat_jid = ? AND m.ts > ?
@@ -202,11 +211,13 @@ func (d *DB) scanMessages(query string, args ...interface{}) ([]Message, error) 
 		var m Message
 		var ts int64
 		var fromMe int
-		if err := rows.Scan(&m.ChatJID, &m.ChatName, &m.MsgID, &m.SenderJID, &ts, &fromMe, &m.Text, &m.DisplayText, &m.MediaType, &m.Snippet); err != nil {
+		var revoked int
+		if err := rows.Scan(&m.ChatJID, &m.ChatName, &m.MsgID, &m.SenderJID, &ts, &fromMe, &m.Text, &m.DisplayText, &m.MediaType, &m.Snippet, &revoked); err != nil {
 			return nil, err
 		}
 		m.Timestamp = fromUnix(ts)
 		m.FromMe = fromMe != 0
+		m.Revoked = revoked != 0
 		out = append(out, m)
 	}
 	return out, rows.Err()

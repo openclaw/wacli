@@ -11,6 +11,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steipete/wacli/internal/out"
 	"github.com/steipete/wacli/internal/store"
+	"github.com/steipete/wacli/internal/wa"
+	"go.mau.fi/whatsmeow/types"
 )
 
 func newMessagesCmd(flags *rootFlags) *cobra.Command {
@@ -22,6 +24,8 @@ func newMessagesCmd(flags *rootFlags) *cobra.Command {
 	cmd.AddCommand(newMessagesSearchCmd(flags))
 	cmd.AddCommand(newMessagesShowCmd(flags))
 	cmd.AddCommand(newMessagesContextCmd(flags))
+	cmd.AddCommand(newMessagesDeleteCmd(flags))
+	cmd.AddCommand(newMessagesEditCmd(flags))
 	return cmd
 }
 
@@ -330,5 +334,149 @@ func newMessagesContextCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().StringVar(&id, "id", "", "message ID")
 	cmd.Flags().IntVar(&before, "before", 5, "messages before")
 	cmd.Flags().IntVar(&after, "after", 5, "messages after")
+	return cmd
+}
+
+func newMessagesDeleteCmd(flags *rootFlags) *cobra.Command {
+	var chat string
+	var id string
+
+	cmd := &cobra.Command{
+		Use:   "delete",
+		Short: "Delete (revoke) a message for everyone",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if chat == "" || id == "" {
+				return fmt.Errorf("--chat and --id are required")
+			}
+
+			ctx, cancel := withTimeout(context.Background(), flags)
+			defer cancel()
+
+			a, lk, err := newApp(ctx, flags, true, false)
+			if err != nil {
+				return err
+			}
+			defer closeApp(a, lk)
+
+			if err := a.EnsureAuthed(); err != nil {
+				return err
+			}
+			if err := a.Connect(ctx, false, nil); err != nil {
+				return err
+			}
+
+			m, err := a.DB().GetMessage(chat, id)
+			if err != nil {
+				return err
+			}
+			if !m.FromMe {
+				return fmt.Errorf("can only delete your own messages")
+			}
+
+			chatJID, err := wa.ParseUserOrJID(chat)
+			if err != nil {
+				return err
+			}
+
+			if err := a.WA().RevokeMessage(ctx, chatJID, types.MessageID(id)); err != nil {
+				return err
+			}
+			if err := a.DB().MarkRevoked(chat, id); err != nil {
+				return err
+			}
+
+			if flags.asJSON {
+				return out.WriteJSON(os.Stdout, map[string]any{
+					"revoked": true,
+					"chat":    chat,
+					"id":      id,
+				})
+			}
+			fmt.Fprintf(os.Stdout, "Revoked message %s in %s\n", id, chat)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&chat, "chat", "", "chat JID")
+	cmd.Flags().StringVar(&id, "id", "", "message ID")
+	return cmd
+}
+
+func newMessagesEditCmd(flags *rootFlags) *cobra.Command {
+	var chat string
+	var id string
+	var message string
+
+	cmd := &cobra.Command{
+		Use:   "edit",
+		Short: "Edit a message you sent (within WhatsApp's edit window)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if chat == "" || id == "" || message == "" {
+				return fmt.Errorf("--chat, --id and --message are required")
+			}
+
+			ctx, cancel := withTimeout(context.Background(), flags)
+			defer cancel()
+
+			a, lk, err := newApp(ctx, flags, true, false)
+			if err != nil {
+				return err
+			}
+			defer closeApp(a, lk)
+
+			if err := a.EnsureAuthed(); err != nil {
+				return err
+			}
+			if err := a.Connect(ctx, false, nil); err != nil {
+				return err
+			}
+
+			m, err := a.DB().GetMessage(chat, id)
+			if err != nil {
+				return err
+			}
+			if !m.FromMe {
+				return fmt.Errorf("can only edit your own messages")
+			}
+
+			chatJID, err := wa.ParseUserOrJID(chat)
+			if err != nil {
+				return err
+			}
+
+			_, err = a.WA().EditMessage(ctx, chatJID, types.MessageID(id), message)
+			if err != nil {
+				return err
+			}
+
+			chatName := m.ChatName
+			if chatName == "" {
+				chatName = a.WA().ResolveChatName(ctx, chatJID, "")
+			}
+			_ = a.DB().UpsertMessage(store.UpsertMessageParams{
+				ChatJID:     chat,
+				ChatName:    chatName,
+				MsgID:       id,
+				SenderJID:   "",
+				SenderName:  "me",
+				Timestamp:   m.Timestamp,
+				FromMe:      true,
+				Text:       message,
+				DisplayText: message,
+			})
+
+			if flags.asJSON {
+				return out.WriteJSON(os.Stdout, map[string]any{
+					"edited": true,
+					"chat":   chat,
+					"id":     id,
+				})
+			}
+			fmt.Fprintf(os.Stdout, "Edited message %s in %s\n", id, chat)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&chat, "chat", "", "chat JID")
+	cmd.Flags().StringVar(&id, "id", "", "message ID")
+	cmd.Flags().StringVar(&message, "message", "", "new message text")
 	return cmd
 }

@@ -84,22 +84,32 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 
 		switch v := evt.(type) {
 		case *events.Message:
-			pm := wa.ParseLiveMessage(v)
-			if pm.ReactionToID != "" && pm.ReactionEmoji == "" && v.Message != nil && v.Message.GetEncReactionMessage() != nil {
-				if reaction, err := a.wa.DecryptReaction(ctx, v); err == nil && reaction != nil {
-					pm.ReactionEmoji = reaction.GetText()
-					if pm.ReactionToID == "" {
-						if key := reaction.GetKey(); key != nil {
-							pm.ReactionToID = key.GetID()
+			if chatJID, msgID, isRevoke := wa.RevokeInfo(v); isRevoke {
+				if err := a.db.MarkRevoked(chatJID, msgID); err == nil {
+					messagesStored.Add(1)
+				}
+			} else if editPM, isEdit := wa.ParseEditEvent(v); isEdit {
+				if err := a.storeParsedMessage(ctx, editPM); err == nil {
+					messagesStored.Add(1)
+				}
+			} else {
+				pm := wa.ParseLiveMessage(v)
+				if pm.ReactionToID != "" && pm.ReactionEmoji == "" && v.Message != nil && v.Message.GetEncReactionMessage() != nil {
+					if reaction, err := a.wa.DecryptReaction(ctx, v); err == nil && reaction != nil {
+						pm.ReactionEmoji = reaction.GetText()
+						if pm.ReactionToID == "" {
+							if key := reaction.GetKey(); key != nil {
+								pm.ReactionToID = key.GetID()
+							}
 						}
 					}
 				}
-			}
-			if err := a.storeParsedMessage(ctx, pm); err == nil {
-				messagesStored.Add(1)
-			}
-			if opts.DownloadMedia && pm.Media != nil && pm.ID != "" {
-				enqueueMedia(pm.Chat.String(), pm.ID)
+				if err := a.storeParsedMessage(ctx, pm); err == nil {
+					messagesStored.Add(1)
+				}
+				if opts.DownloadMedia && pm.Media != nil && pm.ID != "" {
+					enqueueMedia(pm.Chat.String(), pm.ID)
+				}
 			}
 			if messagesStored.Load()%25 == 0 {
 				fmt.Fprintf(os.Stderr, "\rSynced %d messages...", messagesStored.Load())
