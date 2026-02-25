@@ -135,6 +135,14 @@ func (f *fakeWA) GetAllContacts(ctx context.Context) (map[types.JID]types.Contac
 	return out, nil
 }
 
+func (f *fakeWA) GetUserInfo(ctx context.Context, jids []types.JID) (map[types.JID]types.UserInfo, error) {
+	return map[types.JID]types.UserInfo{}, nil
+}
+
+func (f *fakeWA) ResolveRecipientJID(ctx context.Context, jid types.JID) (types.JID, error) {
+	return jid.ToNonAD(), nil
+}
+
 func (f *fakeWA) GetJoinedGroups(ctx context.Context) ([]*types.GroupInfo, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

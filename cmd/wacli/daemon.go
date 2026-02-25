@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steipete/wacli/internal/rpc"
 	"github.com/steipete/wacli/internal/wa"
+	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 )
 
@@ -104,19 +105,38 @@ func runDaemon(ctx context.Context, flags *rootFlags, opts daemonOptions) error 
 	}
 
 	// Bridge whatsmeow events → EventHub.
+	resolveChatJIDForSend := func(chat types.JID) string {
+		base := chat.ToNonAD()
+		if !wa.IsLIDJID(base) {
+			return base.String()
+		}
+		resolveCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		resolved, err := a.WA().ResolveRecipientJID(resolveCtx, base)
+		if err != nil || resolved.IsEmpty() {
+			return base.String()
+		}
+		return resolved.ToNonAD().String()
+	}
+
 	handlerID := a.WA().AddEventHandler(func(rawEvt interface{}) {
 		switch v := rawEvt.(type) {
 		case *events.Message:
 			pm := wa.ParseLiveMessage(v)
 			chatJID := pm.Chat.String()
+			resolvedJID := chatJID
+			if !wa.IsGroupJID(pm.Chat) && !pm.Chat.IsBroadcastList() {
+				resolvedJID = resolveChatJIDForSend(pm.Chat)
+			}
 			payload := map[string]any{
-				"id":        pm.ID,
-				"chatJid":   chatJID,
-				"senderJid": pm.SenderJID,
-				"selfJid":   selfJid,
-				"fromMe":    pm.FromMe,
-				"text":      pm.Text,
-				"timestamp": pm.Timestamp.UTC().Format(time.RFC3339Nano),
+				"id":          pm.ID,
+				"chatJid":     chatJID,
+				"resolvedJid": resolvedJID,
+				"senderJid":   pm.SenderJID,
+				"selfJid":     selfJid,
+				"fromMe":      pm.FromMe,
+				"text":        pm.Text,
+				"timestamp":   pm.Timestamp.UTC().Format(time.RFC3339Nano),
 			}
 			if strings.Contains(chatJID, "@g.us") {
 				if name, ok := groupNameCache[chatJID]; ok {

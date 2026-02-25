@@ -7,6 +7,7 @@ import (
 
 	"github.com/creachadair/jrpc2"
 	"github.com/steipete/wacli/internal/app"
+	"github.com/steipete/wacli/internal/wa"
 	"go.mau.fi/whatsmeow/types"
 )
 
@@ -41,6 +42,12 @@ func (s *Server) rpcSend(ctx context.Context, req SendRequest) (SendResponse, er
 	jid, err := types.ParseJID(req.Recipient)
 	if err != nil {
 		return SendResponse{}, &jrpc2.Error{Code: -32602, Message: fmt.Sprintf("invalid recipient JID: %v", err)}
+	}
+	jid = jid.ToNonAD()
+	if wa.IsLIDJID(jid) {
+		if resolved, resolveErr := s.app.WA().ResolveRecipientJID(ctx, jid); resolveErr == nil && !resolved.IsEmpty() {
+			jid = resolved.ToNonAD()
+		}
 	}
 
 	svc := newService(s.app)

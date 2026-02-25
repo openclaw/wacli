@@ -266,6 +266,73 @@ func IsGroupJID(jid types.JID) bool {
 	return jid.Server == types.GroupServer
 }
 
+func IsLIDJID(jid types.JID) bool {
+	return jid.Server == types.HiddenUserServer || jid.Server == types.HostedLIDServer
+}
+
+func (c *Client) GetUserInfo(ctx context.Context, jids []types.JID) (map[types.JID]types.UserInfo, error) {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || !cli.IsConnected() {
+		return nil, fmt.Errorf("not connected")
+	}
+	if len(jids) == 0 {
+		return map[types.JID]types.UserInfo{}, nil
+	}
+	return cli.GetUserInfo(ctx, jids)
+}
+
+// ResolveRecipientJID resolves a LID user JID to a sendable phone-number JID when possible.
+// If no mapping is currently known, the original JID is returned.
+func (c *Client) ResolveRecipientJID(ctx context.Context, jid types.JID) (types.JID, error) {
+	jid = jid.ToNonAD()
+	if jid.IsEmpty() {
+		return types.JID{}, fmt.Errorf("jid is required")
+	}
+	if !IsLIDJID(jid) {
+		return jid, nil
+	}
+
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || cli.Store == nil {
+		return types.JID{}, fmt.Errorf("client store not available")
+	}
+
+	// Fast path: use persisted LID<->PN mappings in the local device store.
+	if alt, err := cli.Store.GetAltJID(ctx, jid); err == nil && !alt.IsEmpty() {
+		return alt.ToNonAD(), nil
+	}
+
+	if !cli.IsConnected() {
+		return jid, nil
+	}
+
+	// Best-effort refresh: query user info with PN candidate to populate LID mapping cache.
+	pnCandidate := types.NewJID(jid.User, types.DefaultUserServer)
+	if _, err := cli.GetUserInfo(ctx, []types.JID{pnCandidate}); err == nil {
+		if alt, err := cli.Store.GetAltJID(ctx, jid); err == nil && !alt.IsEmpty() {
+			return alt.ToNonAD(), nil
+		}
+	}
+
+	// Fallback: some servers may respond with the queried JID key only.
+	if infos, err := cli.GetUserInfo(ctx, []types.JID{jid}); err == nil {
+		if alt, err := cli.Store.GetAltJID(ctx, jid); err == nil && !alt.IsEmpty() {
+			return alt.ToNonAD(), nil
+		}
+		for candidate, info := range infos {
+			if candidate.Server == types.DefaultUserServer && info.LID.ToNonAD() == jid {
+				return candidate.ToNonAD(), nil
+			}
+		}
+	}
+
+	return jid, nil
+}
+
 func (c *Client) GetContact(ctx context.Context, jid types.JID) (types.ContactInfo, error) {
 	c.mu.Lock()
 	cli := c.client
@@ -410,10 +477,10 @@ func (c *Client) RemoteDelete(ctx context.Context, chat types.JID, targetMsgID t
 
 // SendFileResult holds the result of a SendFile call.
 type SendFileResult struct {
-	MsgID     types.MessageID
-	MimeType  string
-	MediaType string // "image", "video", "audio", or "document"
-	Filename  string
+	MsgID         types.MessageID
+	MimeType      string
+	MediaType     string // "image", "video", "audio", or "document"
+	Filename      string
 	DirectPath    string
 	MediaKey      []byte
 	FileSHA256    []byte
