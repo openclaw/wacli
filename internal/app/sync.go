@@ -102,10 +102,20 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 				enqueueMedia(pm.Chat.String(), pm.ID)
 			}
 			if messagesStored.Load()%25 == 0 {
-				fmt.Fprintf(os.Stderr, "\rSynced %d messages...", messagesStored.Load())
+				n := messagesStored.Load()
+				if a.events.Enabled() {
+					a.events.Emit("progress", map[string]interface{}{"messages_synced": n})
+				} else {
+					fmt.Fprintf(os.Stderr, "\rSynced %d messages...", n)
+				}
 			}
 		case *events.HistorySync:
-			fmt.Fprintf(os.Stderr, "\nProcessing history sync (%d conversations)...\n", len(v.Data.Conversations))
+			nConv := len(v.Data.Conversations)
+			if a.events.Enabled() {
+				a.events.Emit("history_sync", map[string]interface{}{"conversations": nConv})
+			} else {
+				fmt.Fprintf(os.Stderr, "\nProcessing history sync (%d conversations)...\n", nConv)
+			}
 			for _, conv := range v.Data.Conversations {
 				lastEvent.Store(time.Now().UTC().UnixNano())
 				chatID := strings.TrimSpace(conv.GetID())
@@ -129,11 +139,24 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 					}
 				}
 			}
-			fmt.Fprintf(os.Stderr, "\rSynced %d messages...", messagesStored.Load())
+			n := messagesStored.Load()
+			if a.events.Enabled() {
+				a.events.Emit("progress", map[string]interface{}{"messages_synced": n})
+			} else {
+				fmt.Fprintf(os.Stderr, "\rSynced %d messages...", n)
+			}
 		case *events.Connected:
-			fmt.Fprintln(os.Stderr, "\nConnected.")
+			if a.events.Enabled() {
+				a.events.Emit("connected", nil)
+			} else {
+				fmt.Fprintln(os.Stderr, "\nConnected.")
+			}
 		case *events.Disconnected:
-			fmt.Fprintln(os.Stderr, "\nDisconnected.")
+			if a.events.Enabled() {
+				a.events.Emit("disconnected", nil)
+			} else {
+				fmt.Fprintln(os.Stderr, "\nDisconnected.")
+			}
 			select {
 			case disconnected <- struct{}{}:
 			default:
@@ -172,10 +195,18 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 		for {
 			select {
 			case <-ctx.Done():
-				fmt.Fprintln(os.Stderr, "\nStopping sync.")
+				if a.events.Enabled() {
+					a.events.Emit("stopping", map[string]interface{}{"messages_synced": messagesStored.Load()})
+				} else {
+					fmt.Fprintln(os.Stderr, "\nStopping sync.")
+				}
 				return SyncResult{MessagesStored: messagesStored.Load()}, nil
 			case <-disconnected:
-				fmt.Fprintln(os.Stderr, "Reconnecting...")
+				if a.events.Enabled() {
+					a.events.Emit("reconnecting", nil)
+				} else {
+					fmt.Fprintln(os.Stderr, "Reconnecting...")
+				}
 				if err := a.wa.ReconnectWithBackoff(ctx, 2*time.Second, 30*time.Second); err != nil {
 					return SyncResult{MessagesStored: messagesStored.Load()}, err
 				}
@@ -193,17 +224,32 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	for {
 		select {
 		case <-ctx.Done():
-			fmt.Fprintln(os.Stderr, "\nStopping sync.")
+			if a.events.Enabled() {
+				a.events.Emit("stopping", map[string]interface{}{"messages_synced": messagesStored.Load()})
+			} else {
+				fmt.Fprintln(os.Stderr, "\nStopping sync.")
+			}
 			return SyncResult{MessagesStored: messagesStored.Load()}, nil
 		case <-disconnected:
-			fmt.Fprintln(os.Stderr, "Reconnecting...")
+			if a.events.Enabled() {
+				a.events.Emit("reconnecting", nil)
+			} else {
+				fmt.Fprintln(os.Stderr, "Reconnecting...")
+			}
 			if err := a.wa.ReconnectWithBackoff(ctx, 2*time.Second, 30*time.Second); err != nil {
 				return SyncResult{MessagesStored: messagesStored.Load()}, err
 			}
 		case <-ticker.C:
 			last := time.Unix(0, lastEvent.Load())
 			if time.Since(last) >= opts.IdleExit {
-				fmt.Fprintf(os.Stderr, "\nIdle for %s, exiting.\n", opts.IdleExit)
+				if a.events.Enabled() {
+					a.events.Emit("idle_exit", map[string]interface{}{
+						"idle_duration":  opts.IdleExit.String(),
+						"messages_synced": messagesStored.Load(),
+					})
+				} else {
+					fmt.Fprintf(os.Stderr, "\nIdle for %s, exiting.\n", opts.IdleExit)
+				}
 				return SyncResult{MessagesStored: messagesStored.Load()}, nil
 			}
 		}
