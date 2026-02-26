@@ -98,6 +98,42 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 			if err := a.storeParsedMessage(ctx, pm); err == nil {
 				messagesStored.Add(1)
 			}
+			if a.events.Enabled() {
+				data := map[string]interface{}{
+					"id":        pm.ID,
+					"chat":      pm.Chat.String(),
+					"sender":    pm.SenderJID,
+					"timestamp": pm.Timestamp.Unix(),
+					"from_me":   pm.FromMe,
+					"is_group":  pm.Chat.Server == types.GroupServer,
+				}
+				if pm.PushName != "" {
+					data["push_name"] = pm.PushName
+				}
+				if pm.Text != "" {
+					data["text"] = pm.Text
+				}
+				if pm.Media != nil {
+					data["media_type"] = pm.Media.Type
+					if pm.Media.Caption != "" {
+						data["caption"] = pm.Media.Caption
+					}
+					if pm.Media.MimeType != "" {
+						data["mime_type"] = pm.Media.MimeType
+					}
+					if pm.Media.Filename != "" {
+						data["filename"] = pm.Media.Filename
+					}
+				}
+				if pm.ReactionEmoji != "" {
+					data["reaction_emoji"] = pm.ReactionEmoji
+					data["reaction_to_id"] = pm.ReactionToID
+				}
+				if pm.ReplyToID != "" {
+					data["reply_to_id"] = pm.ReplyToID
+				}
+				a.events.Emit("new_message", data)
+			}
 			if opts.DownloadMedia && pm.Media != nil && pm.ID != "" {
 				enqueueMedia(pm.Chat.String(), pm.ID)
 			}
