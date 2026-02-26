@@ -37,7 +37,12 @@ func newAuthCmd(flags *rootFlags) *cobra.Command {
 				mode = appPkg.SyncModeFollow
 			}
 
-			fmt.Fprintln(os.Stderr, "Starting authentication…")
+			ev := a.Events()
+			if ev.Enabled() {
+				ev.Emit("auth_starting", nil)
+			} else {
+				fmt.Fprintln(os.Stderr, "Starting authentication…")
+			}
 			res, err := a.Sync(ctx, appPkg.SyncOptions{
 				Mode:            mode,
 				AllowQR:         true,
@@ -46,9 +51,13 @@ func newAuthCmd(flags *rootFlags) *cobra.Command {
 				RefreshGroups:   true,
 				IdleExit:        idleExit,
 				OnQRCode: func(code string) {
-					fmt.Fprintln(os.Stderr, "\nScan this QR code with WhatsApp (Linked Devices):")
-					qrterminal.GenerateHalfBlock(code, qrterminal.M, os.Stderr)
-					fmt.Fprintln(os.Stderr)
+					if ev.Enabled() {
+						ev.Emit("qr_code", map[string]interface{}{"code": code})
+					} else {
+						fmt.Fprintln(os.Stderr, "\nScan this QR code with WhatsApp (Linked Devices):")
+						qrterminal.GenerateHalfBlock(code, qrterminal.M, os.Stderr)
+						fmt.Fprintln(os.Stderr)
+					}
 				},
 			})
 			if err != nil {
