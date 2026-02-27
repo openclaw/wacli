@@ -34,6 +34,7 @@ type ParsedMessage struct {
 	ReplyToDisplay string
 	ReactionToID   string
 	ReactionEmoji  string
+	MentionedJids  []string
 }
 
 func ParseLiveMessage(evt *events.Message) ParsedMessage {
@@ -187,6 +188,9 @@ func extractWAProto(m *waProto.Message, pm *ParsedMessage) {
 		}
 		if quoted := ctx.GetQuotedMessage(); quoted != nil {
 			pm.ReplyToDisplay = strings.TrimSpace(displayTextForProto(quoted))
+		}
+		if jids := ctx.GetMentionedJID(); len(jids) > 0 {
+			pm.MentionedJids = jids
 		}
 	}
 }

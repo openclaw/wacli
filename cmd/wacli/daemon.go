@@ -153,6 +153,9 @@ func runDaemon(ctx context.Context, flags *rootFlags, opts daemonOptions) error 
 				payload["reactionEmoji"] = pm.ReactionEmoji
 				payload["reactionToId"] = pm.ReactionToID
 			}
+			if len(pm.MentionedJids) > 0 {
+				payload["mentionedJids"] = pm.MentionedJids
+			}
 			if pm.Media != nil {
 				payload["media"] = map[string]any{
 					"type":       pm.Media.Type,
