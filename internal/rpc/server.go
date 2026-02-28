@@ -2,9 +2,11 @@ package rpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
+	"time"
 
 	"github.com/creachadair/jrpc2"
 	"github.com/creachadair/jrpc2/channel"
@@ -90,8 +92,45 @@ func (s *Server) serveTCP(ctx context.Context, addr string) error {
 		_ = lst.Close()
 	}()
 
-	acc := jserver.NetAccepter(lst, channel.Line)
-	return jserver.Loop(ctx, acc, jserver.Static(s.buildAssigner()), &jserver.LoopOptions{
-		ServerOptions: s.serverOpts(),
-	})
+	if tcp, ok := lst.(*net.TCPListener); ok {
+		lst = tcpKeepAliveListener{TCPListener: tcp}
+	}
+
+	for {
+		acc := jserver.NetAccepter(lst, channel.Line)
+		err := jserver.Loop(ctx, acc, jserver.Static(s.buildAssigner()), &jserver.LoopOptions{
+			ServerOptions: s.serverOpts(),
+		})
+		if err == nil {
+			return nil
+		}
+		if ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
+			return nil
+		}
+		var ne net.Error
+		if errors.As(err, &ne) && ne.Temporary() {
+			fmt.Fprintf(os.Stderr, "wacli: temporary TCP accept error: %v (retrying)\n", err)
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(500 * time.Millisecond):
+			}
+			continue
+		}
+		return err
+	}
+}
+
+type tcpKeepAliveListener struct {
+	*net.TCPListener
+}
+
+func (ln tcpKeepAliveListener) Accept() (net.Conn, error) {
+	conn, err := ln.AcceptTCP()
+	if err != nil {
+		return nil, err
+	}
+	_ = conn.SetKeepAlive(true)
+	_ = conn.SetKeepAlivePeriod(45 * time.Second)
+	return conn, nil
 }

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -60,6 +62,10 @@ func execute(args []string) error {
 }
 
 func newApp(ctx context.Context, flags *rootFlags, needLock bool, allowUnauthed bool) (*app.App, *lock.Lock, error) {
+	return newAppWithLockWait(ctx, flags, needLock, allowUnauthed, 0)
+}
+
+func newAppWithLockWait(ctx context.Context, flags *rootFlags, needLock bool, allowUnauthed bool, lockWait time.Duration) (*app.App, *lock.Lock, error) {
 	storeDir := flags.storeDir
 	if storeDir == "" {
 		storeDir = config.DefaultStoreDir()
@@ -68,9 +74,30 @@ func newApp(ctx context.Context, flags *rootFlags, needLock bool, allowUnauthed 
 
 	var lk *lock.Lock
 	if needLock {
+		acquire := func() (*lock.Lock, error) {
+			deadline := time.Now().Add(lockWait)
+			for {
+				cur, err := lock.Acquire(storeDir)
+				if err == nil {
+					return cur, nil
+				}
+				if lockWait <= 0 || !isStoreLockContention(err) || time.Now().After(deadline) {
+					return nil, err
+				}
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(500 * time.Millisecond):
+				}
+			}
+		}
+
 		var err error
-		lk, err = lock.Acquire(storeDir)
+		lk, err = acquire()
 		if err != nil {
+			if lockWait > 0 && isStoreLockContention(err) {
+				return nil, nil, fmt.Errorf("timed out waiting for store lock after %s: %w", lockWait, err)
+			}
 			return nil, nil, err
 		}
 	}
@@ -89,6 +116,12 @@ func newApp(ctx context.Context, flags *rootFlags, needLock bool, allowUnauthed 
 	}
 
 	return a, lk, nil
+}
+
+func isStoreLockContention(err error) bool {
+	return errors.Is(err, syscall.EWOULDBLOCK) ||
+		errors.Is(err, syscall.EAGAIN) ||
+		strings.Contains(err.Error(), "store is locked")
 }
 
 func withTimeout(ctx context.Context, flags *rootFlags) (context.Context, context.CancelFunc) {

@@ -16,6 +16,18 @@ func newService(a *app.App) *app.Service {
 	return app.NewService(a)
 }
 
+func (s *Server) ensureConnected(ctx context.Context) error {
+	if s.app.WA().IsConnected() {
+		return nil
+	}
+	reconnectCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	if err := s.app.WA().ReconnectWithBackoff(reconnectCtx, 500*time.Millisecond, 5*time.Second); err != nil {
+		return fmt.Errorf("not connected and reconnect failed: %w", err)
+	}
+	return nil
+}
+
 // ---- send ---------------------------------------------------------------
 
 // SendRequest holds parameters for the "send" RPC method.
@@ -37,6 +49,10 @@ func (s *Server) rpcSend(ctx context.Context, req SendRequest) (SendResponse, er
 	}
 	if req.Message == "" {
 		return SendResponse{}, &jrpc2.Error{Code: -32602, Message: "message is required"}
+	}
+
+	if err := s.ensureConnected(ctx); err != nil {
+		return SendResponse{}, &jrpc2.Error{Code: -32011, Message: err.Error()}
 	}
 
 	jid, err := types.ParseJID(req.Recipient)
@@ -164,14 +180,38 @@ type SubscribeResponse struct {
 // Events are pushed as server-side notifications with method "event".
 func (s *Server) rpcSubscribe(ctx context.Context) (SubscribeResponse, error) {
 	srv := jrpc2.ServerFromContext(ctx)
+	if srv == nil {
+		return SubscribeResponse{}, &jrpc2.Error{Code: -32603, Message: "internal error: server context unavailable"}
+	}
 	id, evCh, cancel := s.hub.Subscribe()
+	if id == "" {
+		return SubscribeResponse{}, &jrpc2.Error{Code: -32000, Message: "event hub is closed"}
+	}
+
+	connDone := make(chan struct{})
+	go func() {
+		_ = srv.Wait()
+		close(connDone)
+	}()
 
 	go func() {
 		defer cancel()
-		for evt := range evCh {
-			if err := srv.Notify(context.Background(), "event", evt); err != nil {
-				// Client disconnected or server stopped.
+		for {
+			select {
+			case <-connDone:
+				// TCP connection is gone; unsubscribe immediately.
 				return
+			case evt, ok := <-evCh:
+				if !ok {
+					return
+				}
+				notifyCtx, done := context.WithTimeout(context.Background(), 5*time.Second)
+				err := srv.Notify(notifyCtx, "event", evt)
+				done()
+				if err != nil {
+					// Client disconnected or server stopped.
+					return
+				}
 			}
 		}
 	}()
@@ -200,6 +240,10 @@ func (s *Server) rpcSendReaction(ctx context.Context, req SendReactionRequest) (
 	if req.TargetMessageID == "" {
 		return SendReactionResponse{}, &jrpc2.Error{Code: -32602, Message: "targetMessageId is required"}
 	}
+	if err := s.ensureConnected(ctx); err != nil {
+		return SendReactionResponse{}, &jrpc2.Error{Code: -32011, Message: err.Error()}
+	}
+
 	jid, err := types.ParseJID(req.Recipient)
 	if err != nil {
 		return SendReactionResponse{}, &jrpc2.Error{Code: -32602, Message: fmt.Sprintf("invalid recipient JID: %v", err)}
@@ -232,6 +276,10 @@ func (s *Server) rpcRemoteDelete(ctx context.Context, req RemoteDeleteRequest) (
 	if req.TargetMessageID == "" {
 		return RemoteDeleteResponse{}, &jrpc2.Error{Code: -32602, Message: "targetMessageId is required"}
 	}
+	if err := s.ensureConnected(ctx); err != nil {
+		return RemoteDeleteResponse{}, &jrpc2.Error{Code: -32011, Message: err.Error()}
+	}
+
 	jid, err := types.ParseJID(req.Recipient)
 	if err != nil {
 		return RemoteDeleteResponse{}, &jrpc2.Error{Code: -32602, Message: fmt.Sprintf("invalid recipient JID: %v", err)}
@@ -268,6 +316,10 @@ func (s *Server) rpcSendFile(ctx context.Context, req SendFileRequest) (SendFile
 	if req.FilePath == "" {
 		return SendFileResponse{}, &jrpc2.Error{Code: -32602, Message: "filePath is required"}
 	}
+	if err := s.ensureConnected(ctx); err != nil {
+		return SendFileResponse{}, &jrpc2.Error{Code: -32011, Message: err.Error()}
+	}
+
 	jid, err := types.ParseJID(req.Recipient)
 	if err != nil {
 		return SendFileResponse{}, &jrpc2.Error{Code: -32602, Message: fmt.Sprintf("invalid recipient JID: %v", err)}
@@ -366,6 +418,10 @@ func (s *Server) rpcGetGroupInfo(ctx context.Context, req GetGroupInfoRequest) (
 		return GetGroupInfoResponse{}, &jrpc2.Error{Code: -32602, Message: fmt.Sprintf("invalid jid: %v", err)}
 	}
 
+	if err := s.ensureConnected(ctx); err != nil {
+		return GetGroupInfoResponse{}, &jrpc2.Error{Code: -32011, Message: err.Error()}
+	}
+
 	svc := newService(s.app)
 	info, err := svc.GetGroupInfo(ctx, req.JID)
 	if err != nil {
@@ -406,6 +462,10 @@ func (s *Server) rpcGetContactName(ctx context.Context, req GetContactNameReques
 	}
 	if _, err := types.ParseJID(req.JID); err != nil {
 		return GetContactNameResponse{}, &jrpc2.Error{Code: -32602, Message: fmt.Sprintf("invalid jid: %v", err)}
+	}
+
+	if err := s.ensureConnected(ctx); err != nil {
+		return GetContactNameResponse{}, &jrpc2.Error{Code: -32011, Message: err.Error()}
 	}
 
 	svc := newService(s.app)

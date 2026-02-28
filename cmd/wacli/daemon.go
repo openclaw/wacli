@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -21,6 +22,7 @@ type daemonOptions struct {
 	listen      string
 	eventBuffer int
 	allowQR     bool
+	lockWait    time.Duration
 }
 
 func newDaemonCmd(flags *rootFlags) *cobra.Command {
@@ -60,12 +62,13 @@ Transport:
 	cmd.Flags().StringVar(&opts.listen, "listen", "127.0.0.1:8686", "TCP listen address (only used with --transport=tcp)")
 	cmd.Flags().IntVar(&opts.eventBuffer, "event-buffer", 256, "per-subscriber event channel buffer size")
 	cmd.Flags().BoolVar(&opts.allowQR, "allow-qr", false, "allow QR code authentication on first run")
+	cmd.Flags().DurationVar(&opts.lockWait, "lock-wait", 45*time.Second, "how long to wait for store lock before failing")
 
 	return cmd
 }
 
 func runDaemon(ctx context.Context, flags *rootFlags, opts daemonOptions) error {
-	a, lk, err := newApp(ctx, flags, true, opts.allowQR)
+	a, lk, err := newAppWithLockWait(ctx, flags, true, opts.allowQR, opts.lockWait)
 	if err != nil {
 		return fmt.Errorf("init app: %w", err)
 	}
@@ -81,6 +84,62 @@ func runDaemon(ctx context.Context, flags *rootFlags, opts daemonOptions) error 
 	// Event hub.
 	hub := rpc.NewHub(opts.eventBuffer)
 	defer hub.Close()
+
+	reconnectRequested := make(chan string, 1)
+	var reconnecting atomic.Bool
+	requestReconnect := func(reason string) {
+		if ctx.Err() != nil {
+			return
+		}
+		select {
+		case reconnectRequested <- reason:
+		default:
+		}
+	}
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case reason := <-reconnectRequested:
+				if !reconnecting.CompareAndSwap(false, true) {
+					continue
+				}
+				fmt.Fprintf(os.Stderr, "wacli: reconnecting to WhatsApp (%s)\n", reason)
+				if err := a.WA().ReconnectWithBackoff(ctx, 2*time.Second, 30*time.Second); err != nil {
+					if ctx.Err() == nil {
+						fmt.Fprintf(os.Stderr, "wacli: reconnect failed: %v\n", err)
+					}
+				} else {
+					fmt.Fprintln(os.Stderr, "wacli: WhatsApp reconnected")
+					hub.Publish(rpc.Event{
+						Type: "connection",
+						Payload: map[string]any{
+							"state": "connected",
+						},
+					})
+				}
+				reconnecting.Store(false)
+			}
+		}
+	}()
+
+	// Defensive watchdog in case the disconnect event is missed.
+	go func() {
+		tick := time.NewTicker(30 * time.Second)
+		defer tick.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+				if !a.WA().IsConnected() {
+					requestReconnect("connection watchdog")
+				}
+			}
+		}
+	}()
 
 	// Resolve own JID for self-identification in events.
 	selfJid := a.WA().SelfJID()
@@ -144,6 +203,18 @@ func runDaemon(ctx context.Context, flags *rootFlags, opts daemonOptions) error 
 				} else if chat, err := a.DB().GetChat(chatJID); err == nil && strings.TrimSpace(chat.Name) != "" {
 					payload["groupName"] = chat.Name
 					groupNameCache[chatJID] = chat.Name
+				} else {
+					// Fallback: fetch from WA server.
+					groupJID, parseErr := types.ParseJID(chatJID)
+					if parseErr == nil {
+						groupInfo, infoErr := a.WA().GetGroupInfo(ctx, groupJID)
+						if infoErr == nil && groupInfo != nil && groupInfo.GroupName.Name != "" {
+							payload["groupName"] = groupInfo.GroupName.Name
+							groupNameCache[chatJID] = groupInfo.GroupName.Name
+							// Persist to DB for future lookups.
+							_ = a.DB().UpsertChat(chatJID, "group", groupInfo.GroupName.Name, time.Time{})
+						}
+					}
 				}
 			}
 			if pm.PushName != "" {
@@ -206,6 +277,23 @@ func runDaemon(ctx context.Context, flags *rootFlags, opts daemonOptions) error 
 				Type:    "presence",
 				Payload: payload,
 			})
+
+		case *events.Connected:
+			hub.Publish(rpc.Event{
+				Type: "connection",
+				Payload: map[string]any{
+					"state": "connected",
+				},
+			})
+
+		case *events.Disconnected:
+			hub.Publish(rpc.Event{
+				Type: "connection",
+				Payload: map[string]any{
+					"state": "disconnected",
+				},
+			})
+			requestReconnect("disconnected event")
 		}
 	})
 	defer a.WA().RemoveEventHandler(handlerID)

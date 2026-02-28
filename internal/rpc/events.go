@@ -61,6 +61,11 @@ func NewHub(bufferSize int) *Hub {
 func (h *Hub) Subscribe() (id string, ch <-chan Event, cancel func()) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.closed {
+		closedCh := make(chan Event)
+		close(closedCh)
+		return "", closedCh, func() {}
+	}
 
 	id = uuid.New().String()
 	evCh := make(chan Event, h.bufferSize)
