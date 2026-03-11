@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"github.com/steipete/wacli/internal/app"
+	"github.com/steipete/wacli/internal/lock"
 	"github.com/steipete/wacli/internal/out"
 )
 
@@ -25,24 +28,42 @@ func newSendFileCmd(flags *rootFlags) *cobra.Command {
 				return fmt.Errorf("--to and --file are required")
 			}
 
+			absFilePath, err := filepath.Abs(filePath)
+			if err != nil {
+				return fmt.Errorf("resolve file path: %w", err)
+			}
+
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
-			a, lk, err := newApp(ctx, flags, true, false)
-			if err != nil {
-				return err
-			}
-			defer closeApp(a, lk)
-
-			res, err := a.SendFile(ctx, app.SendFileParams{
+			params := app.SendFileParams{
 				To:       to,
-				FilePath: filePath,
+				FilePath: absFilePath,
 				Filename: filename,
 				Caption:  caption,
 				MIMEType: mimeOverride,
-			})
+			}
+
+			var res app.SendResult
+			a, lk, err := newApp(ctx, flags, true, false)
 			if err != nil {
-				return err
+				if !errors.Is(err, lock.ErrLocked) {
+					return err
+				}
+				lockErr := err
+				res, err = app.DelegateSendFile(ctx, resolveStoreDir(flags), params)
+				if err != nil {
+					if errors.Is(err, app.ErrSendDelegateUnavailable) {
+						return lockErr
+					}
+					return err
+				}
+			} else {
+				defer closeApp(a, lk)
+				res, err = a.SendFile(ctx, params)
+				if err != nil {
+					return err
+				}
 			}
 
 			if flags.asJSON {

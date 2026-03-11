@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/steipete/wacli/internal/app"
+	"github.com/steipete/wacli/internal/lock"
 	"github.com/steipete/wacli/internal/out"
 )
 
@@ -35,18 +37,31 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
-			a, lk, err := newApp(ctx, flags, true, false)
-			if err != nil {
-				return err
-			}
-			defer closeApp(a, lk)
-
-			res, err := a.SendText(ctx, app.SendTextParams{
+			params := app.SendTextParams{
 				To:      to,
 				Message: message,
-			})
+			}
+
+			var res app.SendResult
+			a, lk, err := newApp(ctx, flags, true, false)
 			if err != nil {
-				return err
+				if !errors.Is(err, lock.ErrLocked) {
+					return err
+				}
+				lockErr := err
+				res, err = app.DelegateSendText(ctx, resolveStoreDir(flags), params)
+				if err != nil {
+					if errors.Is(err, app.ErrSendDelegateUnavailable) {
+						return lockErr
+					}
+					return err
+				}
+			} else {
+				defer closeApp(a, lk)
+				res, err = a.SendText(ctx, params)
+				if err != nil {
+					return err
+				}
 			}
 
 			if flags.asJSON {
