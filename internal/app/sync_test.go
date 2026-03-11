@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -320,6 +321,61 @@ func TestSyncFollowHostsIPCAndDelegatedSendSucceeds(t *testing.T) {
 	// Socket should be gone after sync exits.
 	if _, err := os.Stat(sockPath); !os.IsNotExist(err) {
 		t.Errorf("socket should be removed after sync exit, got err: %v", err)
+	}
+}
+
+func TestSyncFollowConcurrentDelegatedSends(t *testing.T) {
+	a := newIPCTestApp(t)
+	fw := newFakeWA()
+	a.wa = fw
+	sockPath := SendSocketPath(a.opts.StoreDir)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	syncDone := make(chan error, 1)
+	go func() {
+		_, err := a.Sync(ctx, SyncOptions{
+			Mode:    SyncModeFollow,
+			AllowQR: false,
+		})
+		syncDone <- err
+	}()
+
+	waitForSocket(t, sockPath, 2*time.Second)
+
+	// Fire 3 concurrent delegated sends.
+	const n = 3
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		go func(idx int) {
+			_, err := DelegateSendText(context.Background(), a.opts.StoreDir, SendTextParams{
+				To:      "6591234567",
+				Message: fmt.Sprintf("concurrent msg %d", idx),
+			})
+			errs <- err
+		}(i)
+	}
+
+	for i := 0; i < n; i++ {
+		if err := <-errs; err != nil {
+			t.Errorf("concurrent send %d failed: %v", i, err)
+		}
+	}
+
+	// All 3 sends should have been processed.
+	if got := len(fw.sendTextCalls); got != n {
+		t.Errorf("expected %d SendText calls, got %d", n, got)
+	}
+
+	cancel()
+	select {
+	case err := <-syncDone:
+		if err != nil {
+			t.Fatalf("Sync returned error: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Sync did not exit after cancel")
 	}
 }
 
