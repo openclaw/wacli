@@ -168,6 +168,13 @@ func delegateSend(ctx context.Context, storeDir string, req sendDelegateRequest)
 		return SendResult{}, fmt.Errorf("%w: empty result in response", ErrSendDelegateUnavailable)
 	}
 
+	// Validate op-specific response shape.
+	if req.Op == sendDelegateOpFile && resp.Result.File == nil {
+		return SendResult{}, &SendDelegateProtocolError{
+			Message: "missing file metadata in send_file result",
+		}
+	}
+
 	return *resp.Result, nil
 }
 
@@ -211,6 +218,13 @@ func (a *App) startSendDelegateServer() (*sendDelegateServer, error) {
 	listener, err := net.ListenUnix("unix", addr)
 	if err != nil {
 		return nil, fmt.Errorf("listen send socket: %w", err)
+	}
+
+	// Harden socket permissions to owner-only.
+	if err := os.Chmod(sockPath, 0o600); err != nil {
+		_ = listener.Close()
+		_ = os.Remove(sockPath)
+		return nil, fmt.Errorf("chmod send socket: %w", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

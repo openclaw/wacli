@@ -465,3 +465,80 @@ func TestSendDelegateServer_CloseReturnsPromptlyWithStalledClient(t *testing.T) 
 		t.Errorf("socket should be removed after Close, got err: %v", err)
 	}
 }
+
+func TestDelegateSendFile_RejectsNilFileMetadata(t *testing.T) {
+	dir := ipcTestDir(t)
+	sockPath := SendSocketPath(dir)
+
+	// Custom server that returns a success result without File metadata.
+	addr := &net.UnixAddr{Name: sockPath, Net: "unix"}
+	ln, err := net.ListenUnix("unix", addr)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+
+	go func() {
+		conn, err := ln.AcceptUnix()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		var req sendDelegateRequest
+		_ = json.NewDecoder(conn).Decode(&req)
+
+		// Respond with Result.File = nil (malformed for send_file).
+		_ = json.NewEncoder(conn).Encode(sendDelegateResponse{
+			Version: sendDelegateProtocolVersion,
+			Result:  &SendResult{To: "jid", ID: "id", File: nil},
+		})
+	}()
+
+	_, err = DelegateSendFile(context.Background(), dir, SendFileParams{
+		To:       "6591234567",
+		FilePath: "/tmp/test.pdf",
+	})
+	if err == nil {
+		t.Fatal("expected error for nil File metadata, got nil")
+	}
+
+	var protoErr *SendDelegateProtocolError
+	if !errors.As(err, &protoErr) {
+		t.Fatalf("expected *SendDelegateProtocolError, got %T: %v", err, err)
+	}
+	if protoErr.Message != "missing file metadata in send_file result" {
+		t.Errorf("message = %q, want %q", protoErr.Message, "missing file metadata in send_file result")
+	}
+
+	// Must NOT be ErrSendDelegateUnavailable.
+	if errors.Is(err, ErrSendDelegateUnavailable) {
+		t.Error("should not be ErrSendDelegateUnavailable")
+	}
+}
+
+func TestSendDelegateServer_SocketPermissions(t *testing.T) {
+	a := newIPCTestApp(t)
+	a.wa = newFakeWA()
+
+	srv, err := a.startSendDelegateServer()
+	if err != nil {
+		t.Fatalf("startSendDelegateServer: %v", err)
+	}
+	defer srv.Close()
+
+	sockPath := SendSocketPath(a.opts.StoreDir)
+	info, err := os.Lstat(sockPath)
+	if err != nil {
+		t.Fatalf("stat socket: %v", err)
+	}
+
+	if info.Mode()&os.ModeSocket == 0 {
+		t.Fatal("path is not a socket")
+	}
+
+	perm := info.Mode().Perm()
+	if perm != 0o600 {
+		t.Errorf("socket permissions = %04o, want 0600", perm)
+	}
+}
