@@ -25,8 +25,9 @@ type Options struct {
 type Client struct {
 	opts Options
 
-	mu     sync.Mutex
-	client *whatsmeow.Client
+	connectMu sync.Mutex
+	mu        sync.Mutex
+	client    *whatsmeow.Client
 }
 
 func New(opts Options) (*Client, error) {
@@ -91,6 +92,9 @@ type ConnectOptions struct {
 }
 
 func (c *Client) Connect(ctx context.Context, opts ConnectOptions) error {
+	c.connectMu.Lock()
+	defer c.connectMu.Unlock()
+
 	c.mu.Lock()
 	cli := c.client
 	c.mu.Unlock()

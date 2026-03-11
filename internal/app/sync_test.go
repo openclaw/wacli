@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -15,7 +16,7 @@ import (
 )
 
 func TestSyncStoresLiveAndHistoryMessages(t *testing.T) {
-	a := newTestApp(t)
+	a := newIPCTestApp(t)
 	f := newFakeWA()
 	a.wa = f
 
@@ -86,7 +87,7 @@ func TestSyncStoresLiveAndHistoryMessages(t *testing.T) {
 }
 
 func TestSyncStoresDisplayText(t *testing.T) {
-	a := newTestApp(t)
+	a := newIPCTestApp(t)
 	f := newFakeWA()
 	a.wa = f
 
@@ -254,5 +255,94 @@ func TestSyncOnceIdleExit(t *testing.T) {
 	}
 	if time.Since(start) > 1500*time.Millisecond {
 		t.Fatalf("expected to exit quickly on idle, took %s", time.Since(start))
+	}
+}
+
+func waitForSocket(t *testing.T, path string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("socket %s did not appear within %v", path, timeout)
+}
+
+func TestSyncFollowHostsIPCAndDelegatedSendSucceeds(t *testing.T) {
+	a := newIPCTestApp(t)
+	fw := newFakeWA()
+	a.wa = fw
+	sockPath := SendSocketPath(a.opts.StoreDir)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	syncDone := make(chan error, 1)
+	go func() {
+		_, err := a.Sync(ctx, SyncOptions{
+			Mode:    SyncModeFollow,
+			AllowQR: false,
+		})
+		syncDone <- err
+	}()
+
+	// Wait for socket to appear.
+	waitForSocket(t, sockPath, 2*time.Second)
+
+	// Issue a delegated send.
+	res, err := DelegateSendText(context.Background(), a.opts.StoreDir, SendTextParams{
+		To:      "6591234567",
+		Message: "hello from IPC",
+	})
+	if err != nil {
+		t.Fatalf("DelegateSendText: %v", err)
+	}
+	if res.ID != "msgid" {
+		t.Errorf("ID = %q, want %q", res.ID, "msgid")
+	}
+	if len(fw.sendTextCalls) != 1 {
+		t.Errorf("expected 1 SendText call, got %d", len(fw.sendTextCalls))
+	}
+
+	// Cancel sync and wait for exit.
+	cancel()
+	select {
+	case err := <-syncDone:
+		if err != nil {
+			t.Fatalf("Sync returned error: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Sync did not exit after cancel")
+	}
+
+	// Socket should be gone after sync exits.
+	if _, err := os.Stat(sockPath); !os.IsNotExist(err) {
+		t.Errorf("socket should be removed after sync exit, got err: %v", err)
+	}
+}
+
+func TestSyncOnceDoesNotHostSocket(t *testing.T) {
+	a := newIPCTestApp(t)
+	fw := newFakeWA()
+	a.wa = fw
+	sockPath := SendSocketPath(a.opts.StoreDir)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	_, err := a.Sync(ctx, SyncOptions{
+		Mode:     SyncModeOnce,
+		AllowQR:  false,
+		IdleExit: 200 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	// Socket should never have been created.
+	if _, err := os.Stat(sockPath); err == nil {
+		t.Error("socket should not exist for once mode")
 	}
 }

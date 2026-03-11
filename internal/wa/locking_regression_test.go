@@ -106,6 +106,73 @@ func isCallToMuUnlock(call *ast.CallExpr) bool {
 	return isCallToSelector(call, "mu", "Unlock")
 }
 
+func isCallToConnectMuLock(call *ast.CallExpr) bool {
+	return isCallToSelector(call, "connectMu", "Lock")
+}
+
+func isCallToConnectMuUnlock(call *ast.CallExpr) bool {
+	return isCallToSelector(call, "connectMu", "Unlock")
+}
+
+// TestConnectSerializedWithConnectMu verifies that Connect is serialized
+// with connectMu.Lock() / defer connectMu.Unlock() as the first two statements.
+func TestConnectSerializedWithConnectMu(t *testing.T) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatalf("runtime.Caller failed")
+	}
+	clientPath := filepath.Join(filepath.Dir(thisFile), "client.go")
+	src, err := os.ReadFile(clientPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", clientPath, err)
+	}
+
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, clientPath, src, 0)
+	if err != nil {
+		t.Fatalf("parse %s: %v", clientPath, err)
+	}
+
+	// Find Connect method.
+	var connectFn *ast.FuncDecl
+	for _, d := range f.Decls {
+		fd, ok := d.(*ast.FuncDecl)
+		if !ok || fd.Recv == nil || fd.Name == nil {
+			continue
+		}
+		if fd.Name.Name == "Connect" {
+			connectFn = fd
+			break
+		}
+	}
+	if connectFn == nil || connectFn.Body == nil {
+		t.Fatal("could not find Connect method")
+	}
+
+	// First statement should be c.connectMu.Lock().
+	if len(connectFn.Body.List) < 2 {
+		t.Fatal("Connect body too short")
+	}
+
+	stmt0, ok := connectFn.Body.List[0].(*ast.ExprStmt)
+	if !ok {
+		t.Fatalf("first stmt is %T, want *ast.ExprStmt", connectFn.Body.List[0])
+	}
+	call0, ok := stmt0.X.(*ast.CallExpr)
+	if !ok || !isCallToConnectMuLock(call0) {
+		t.Fatal("first stmt should be c.connectMu.Lock()")
+	}
+
+	// Second statement should be defer c.connectMu.Unlock().
+	stmt1, ok := connectFn.Body.List[1].(*ast.DeferStmt)
+	if !ok {
+		t.Fatalf("second stmt is %T, want *ast.DeferStmt", connectFn.Body.List[1])
+	}
+	if !isCallToConnectMuUnlock(stmt1.Call) {
+		t.Fatal("second stmt should be defer c.connectMu.Unlock()")
+	}
+}
+
 func isCallToSelector(call *ast.CallExpr, field, method string) bool {
 	if call == nil {
 		return false

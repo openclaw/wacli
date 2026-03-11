@@ -142,6 +142,15 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	})
 	defer a.wa.RemoveEventHandler(handlerID)
 
+	// Host send-delegation IPC only in follow mode.
+	if opts.Mode == SyncModeFollow {
+		srv, err := a.startSendDelegateServer()
+		if err != nil {
+			return SyncResult{}, err
+		}
+		defer srv.Close()
+	}
+
 	if err := a.Connect(ctx, opts.AllowQR, opts.OnQRCode); err != nil {
 		return SyncResult{}, err
 	}
