@@ -15,6 +15,21 @@ import (
 	"go.mau.fi/whatsmeow/types/events"
 )
 
+type sendTextCall struct {
+	To   types.JID
+	Text string
+}
+
+type sendProtoCall struct {
+	To  types.JID
+	Msg *waProto.Message
+}
+
+type uploadCall struct {
+	Data      []byte
+	MediaType whatsmeow.MediaType
+}
+
 type fakeWA struct {
 	mu sync.Mutex
 
@@ -30,6 +45,19 @@ type fakeWA struct {
 	groups   map[types.JID]*types.GroupInfo
 
 	onDemandHistory func(lastKnown types.MessageInfo, count int) *events.HistorySync
+
+	// Send/upload recording
+	sendTextCalls  []sendTextCall
+	sendProtoCalls []sendProtoCall
+	uploadCalls    []uploadCall
+
+	// Configurable return values
+	sendTextID  types.MessageID
+	sendTextErr error
+	sendProtoID types.MessageID
+	sendProtoErr error
+	uploadResp  whatsmeow.UploadResponse
+	uploadErr   error
 }
 
 func newFakeWA() *fakeWA {
@@ -39,6 +67,16 @@ func newFakeWA() *fakeWA {
 		contacts:      map[types.JID]types.ContactInfo{},
 		groups:        map[types.JID]*types.GroupInfo{},
 		nextHandlerID: 1,
+		sendTextID:    "msgid",
+		sendProtoID:   "msgid",
+		uploadResp: whatsmeow.UploadResponse{
+			URL:           "https://mmg.whatsapp.net/test",
+			DirectPath:    "/test/path",
+			MediaKey:      []byte("testmediakey1234"),
+			FileSHA256:    []byte("testsha256hash12"),
+			FileEncSHA256: []byte("testencsha25612x"),
+			FileLength:    1234,
+		},
 	}
 }
 
@@ -205,15 +243,24 @@ func (f *fakeWA) JoinGroupWithLink(ctx context.Context, code string) (types.JID,
 func (f *fakeWA) LeaveGroup(ctx context.Context, group types.JID) error { return nil }
 
 func (f *fakeWA) SendText(ctx context.Context, to types.JID, text string) (types.MessageID, error) {
-	return types.MessageID("msgid"), nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.sendTextCalls = append(f.sendTextCalls, sendTextCall{To: to, Text: text})
+	return f.sendTextID, f.sendTextErr
 }
 
 func (f *fakeWA) SendProtoMessage(ctx context.Context, to types.JID, msg *waProto.Message) (types.MessageID, error) {
-	return types.MessageID("msgid"), nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.sendProtoCalls = append(f.sendProtoCalls, sendProtoCall{To: to, Msg: msg})
+	return f.sendProtoID, f.sendProtoErr
 }
 
 func (f *fakeWA) Upload(ctx context.Context, data []byte, mediaType whatsmeow.MediaType) (whatsmeow.UploadResponse, error) {
-	return whatsmeow.UploadResponse{}, nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.uploadCalls = append(f.uploadCalls, uploadCall{Data: data, MediaType: mediaType})
+	return f.uploadResp, f.uploadErr
 }
 
 func (f *fakeWA) DecryptReaction(ctx context.Context, reaction *events.Message) (*waProto.ReactionMessage, error) {

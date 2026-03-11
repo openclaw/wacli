@@ -4,12 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steipete/wacli/internal/app"
 	"github.com/steipete/wacli/internal/out"
-	"github.com/steipete/wacli/internal/store"
-	"github.com/steipete/wacli/internal/wa"
 )
 
 func newSendCmd(flags *rootFlags) *cobra.Command {
@@ -43,47 +41,22 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 			}
 			defer closeApp(a, lk)
 
-			if err := a.EnsureAuthed(); err != nil {
-				return err
-			}
-			if err := a.Connect(ctx, false, nil); err != nil {
-				return err
-			}
-
-			toJID, err := wa.ParseUserOrJID(to)
-			if err != nil {
-				return err
-			}
-
-			msgID, err := a.WA().SendText(ctx, toJID, message)
-			if err != nil {
-				return err
-			}
-
-			now := time.Now().UTC()
-			chat := toJID
-			chatName := a.WA().ResolveChatName(ctx, chat, "")
-			kind := chatKindFromJID(chat)
-			_ = a.DB().UpsertChat(chat.String(), kind, chatName, now)
-			_ = a.DB().UpsertMessage(store.UpsertMessageParams{
-				ChatJID:    chat.String(),
-				ChatName:   chatName,
-				MsgID:      string(msgID),
-				SenderJID:  "",
-				SenderName: "me",
-				Timestamp:  now,
-				FromMe:     true,
-				Text:       message,
+			res, err := a.SendText(ctx, app.SendTextParams{
+				To:      to,
+				Message: message,
 			})
+			if err != nil {
+				return err
+			}
 
 			if flags.asJSON {
 				return out.WriteJSON(os.Stdout, map[string]any{
 					"sent": true,
-					"to":   chat.String(),
-					"id":   msgID,
+					"to":   res.To,
+					"id":   res.ID,
 				})
 			}
-			fmt.Fprintf(os.Stdout, "Sent to %s (id %s)\n", chat.String(), msgID)
+			fmt.Fprintf(os.Stdout, "Sent to %s (id %s)\n", res.To, res.ID)
 			return nil
 		},
 	}

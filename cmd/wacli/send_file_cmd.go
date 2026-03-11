@@ -6,8 +6,8 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/steipete/wacli/internal/app"
 	"github.com/steipete/wacli/internal/out"
-	"github.com/steipete/wacli/internal/wa"
 )
 
 func newSendFileCmd(flags *rootFlags) *cobra.Command {
@@ -34,19 +34,13 @@ func newSendFileCmd(flags *rootFlags) *cobra.Command {
 			}
 			defer closeApp(a, lk)
 
-			if err := a.EnsureAuthed(); err != nil {
-				return err
-			}
-			if err := a.Connect(ctx, false, nil); err != nil {
-				return err
-			}
-
-			toJID, err := wa.ParseUserOrJID(to)
-			if err != nil {
-				return err
-			}
-
-			msgID, meta, err := sendFile(ctx, a, toJID, filePath, filename, caption, mimeOverride)
+			res, err := a.SendFile(ctx, app.SendFileParams{
+				To:       to,
+				FilePath: filePath,
+				Filename: filename,
+				Caption:  caption,
+				MIMEType: mimeOverride,
+			})
 			if err != nil {
 				return err
 			}
@@ -54,12 +48,16 @@ func newSendFileCmd(flags *rootFlags) *cobra.Command {
 			if flags.asJSON {
 				return out.WriteJSON(os.Stdout, map[string]any{
 					"sent": true,
-					"to":   toJID.String(),
-					"id":   msgID,
-					"file": meta,
+					"to":   res.To,
+					"id":   res.ID,
+					"file": map[string]string{
+						"name":      res.File.Name,
+						"mime_type": res.File.MIMEType,
+						"media":     res.File.Media,
+					},
 				})
 			}
-			fmt.Fprintf(os.Stdout, "Sent %s to %s (id %s)\n", meta["name"], toJID.String(), msgID)
+			fmt.Fprintf(os.Stdout, "Sent %s to %s (id %s)\n", res.File.Name, res.To, res.ID)
 			return nil
 		},
 	}
