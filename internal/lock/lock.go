@@ -1,6 +1,7 @@
 package lock
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +9,37 @@ import (
 	"syscall"
 	"time"
 )
+
+// ErrLocked is a sentinel error indicating that the store is locked by another process.
+// Use errors.Is(err, ErrLocked) to distinguish lock contention from other lock failures.
+var ErrLocked = errors.New("store is locked")
+
+// ContentionError is returned when lock acquisition fails because another process
+// holds the flock. It wraps ErrLocked and the underlying syscall error.
+type ContentionError struct {
+	cause error
+	info  string
+}
+
+func (e *ContentionError) Error() string {
+	if e.info != "" {
+		return fmt.Sprintf("store is locked (another wacli is running?): %v (%s)", e.cause, e.info)
+	}
+	return fmt.Sprintf("store is locked (another wacli is running?): %v", e.cause)
+}
+
+func (e *ContentionError) Unwrap() error {
+	return e.cause
+}
+
+func (e *ContentionError) Is(target error) bool {
+	return target == ErrLocked
+}
+
+// isLockContention returns true if the error indicates another process holds the flock.
+func isLockContention(err error) bool {
+	return errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN)
+}
 
 type Lock struct {
 	path string
@@ -25,14 +57,13 @@ func Acquire(storeDir string) (*Lock, error) {
 	}
 
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		_, _ = f.Seek(0, 0)
-		b, _ := os.ReadFile(path)
 		_ = f.Close()
-		info := strings.TrimSpace(string(b))
-		if info != "" {
-			return nil, fmt.Errorf("store is locked (another wacli is running?): %w (%s)", err, info)
+		if isLockContention(err) {
+			b, _ := os.ReadFile(path)
+			info := strings.TrimSpace(string(b))
+			return nil, &ContentionError{cause: err, info: info}
 		}
-		return nil, fmt.Errorf("store is locked (another wacli is running?): %w", err)
+		return nil, fmt.Errorf("flock lock file: %w", err)
 	}
 
 	_ = f.Truncate(0)

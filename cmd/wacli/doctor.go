@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,7 +10,6 @@ import (
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
-	"github.com/steipete/wacli/internal/config"
 	"github.com/steipete/wacli/internal/lock"
 	"github.com/steipete/wacli/internal/out"
 )
@@ -24,11 +24,7 @@ func newDoctorCmd(flags *rootFlags) *cobra.Command {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
-			storeDir := flags.storeDir
-			if storeDir == "" {
-				storeDir = config.DefaultStoreDir()
-			}
-			storeDir, _ = filepath.Abs(storeDir)
+			storeDir := resolveStoreDir(flags)
 
 			var lockHeld bool
 			var lockInfo string
@@ -37,8 +33,10 @@ func newDoctorCmd(flags *rootFlags) *cobra.Command {
 			}
 			if lk, err := lock.Acquire(storeDir); err == nil {
 				_ = lk.Release()
-			} else {
+			} else if errors.Is(err, lock.ErrLocked) {
 				lockHeld = true
+			} else {
+				return err
 			}
 
 			a, lk, err := newApp(ctx, flags, connect, true)

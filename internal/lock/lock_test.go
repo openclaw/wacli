@@ -2,6 +2,7 @@ package lock
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -22,6 +23,15 @@ func TestLockBlocksOtherProcess(t *testing.T) {
 		if !strings.Contains(err.Error(), "store is locked") {
 			_, _ = fmt.Fprintf(os.Stdout, "UNEXPECTED_ERR:%v\n", err)
 			os.Exit(3)
+		}
+		if !errors.Is(err, ErrLocked) {
+			_, _ = fmt.Fprintf(os.Stdout, "UNEXPECTED_NOT_ERRLOCKED:%v\n", err)
+			os.Exit(4)
+		}
+		var ce *ContentionError
+		if !errors.As(err, &ce) {
+			_, _ = fmt.Fprintf(os.Stdout, "UNEXPECTED_NOT_CONTENTION:%v\n", err)
+			os.Exit(5)
 		}
 		_, _ = os.Stdout.WriteString("EXPECTED_LOCKED\n")
 		return

@@ -58,12 +58,22 @@ func execute(args []string) error {
 	return nil
 }
 
-func newApp(ctx context.Context, flags *rootFlags, needLock bool, allowUnauthed bool) (*app.App, *lock.Lock, error) {
+// resolveStoreDir returns the absolute path to the store directory,
+// using the flag value if set, otherwise the default.
+func resolveStoreDir(flags *rootFlags) string {
 	storeDir := flags.storeDir
 	if storeDir == "" {
 		storeDir = config.DefaultStoreDir()
 	}
-	storeDir, _ = filepath.Abs(storeDir)
+	abs, err := filepath.Abs(storeDir)
+	if err != nil {
+		return storeDir
+	}
+	return abs
+}
+
+func newApp(ctx context.Context, flags *rootFlags, needLock bool, allowUnauthed bool) (*app.App, *lock.Lock, error) {
+	storeDir := resolveStoreDir(flags)
 
 	var lk *lock.Lock
 	if needLock {
