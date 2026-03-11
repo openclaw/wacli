@@ -408,3 +408,60 @@ func TestDelegateSend_NoTimeoutWithoutDeadline(t *testing.T) {
 		t.Fatal("timeout waiting for request")
 	}
 }
+
+// waitForActiveConn polls until the server has an active connection.
+func waitForActiveConn(t *testing.T, srv *sendDelegateServer, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		srv.activeConnMu.Lock()
+		has := srv.activeConn != nil
+		srv.activeConnMu.Unlock()
+		if has {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for server to accept a connection")
+}
+
+func TestSendDelegateServer_CloseReturnsPromptlyWithStalledClient(t *testing.T) {
+	a := newIPCTestApp(t)
+	a.wa = newFakeWA()
+
+	srv, err := a.startSendDelegateServer()
+	if err != nil {
+		t.Fatalf("startSendDelegateServer: %v", err)
+	}
+	sockPath := SendSocketPath(a.opts.StoreDir)
+
+	// Connect but never send anything.
+	conn, err := net.Dial("unix", sockPath)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	// Wait until the server has accepted our connection.
+	waitForActiveConn(t, srv, 2*time.Second)
+
+	// Close the server; it must return promptly despite the stalled client.
+	closeDone := make(chan error, 1)
+	go func() {
+		closeDone <- srv.Close()
+	}()
+
+	select {
+	case closeErr := <-closeDone:
+		if closeErr != nil {
+			t.Errorf("Close returned error: %v", closeErr)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Close did not return promptly with stalled client")
+	}
+
+	// Socket should be removed.
+	if _, err := os.Stat(sockPath); !os.IsNotExist(err) {
+		t.Errorf("socket should be removed after Close, got err: %v", err)
+	}
+}

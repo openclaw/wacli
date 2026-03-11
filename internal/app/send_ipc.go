@@ -173,6 +173,11 @@ func delegateSend(ctx context.Context, storeDir string, req sendDelegateRequest)
 
 // --- Server ---
 
+// sendDelegateReadTimeout is the server-side deadline for reading a client
+// request after a connection is accepted. This bounds stalled clients so they
+// cannot block future delegated sends or delay sync shutdown.
+const sendDelegateReadTimeout = 1 * time.Second
+
 type sendDelegateServer struct {
 	app       *App
 	path      string
@@ -181,6 +186,9 @@ type sendDelegateServer struct {
 	cancel    context.CancelFunc
 	done      chan struct{}
 	closeOnce sync.Once
+
+	activeConnMu sync.Mutex
+	activeConn   *net.UnixConn
 }
 
 // startSendDelegateServer starts the IPC server for send delegation.
@@ -227,6 +235,15 @@ func (s *sendDelegateServer) Close() error {
 	s.closeOnce.Do(func() {
 		s.cancel()
 		firstErr = s.listener.Close()
+
+		// Force-close any active connection so handleConn unblocks
+		// and serve() can exit promptly.
+		s.activeConnMu.Lock()
+		if s.activeConn != nil {
+			_ = s.activeConn.Close()
+		}
+		s.activeConnMu.Unlock()
+
 		<-s.done
 		_ = os.Remove(s.path)
 	})
@@ -252,7 +269,23 @@ func (s *sendDelegateServer) serve() {
 }
 
 func (s *sendDelegateServer) handleConn(conn *net.UnixConn) {
-	defer conn.Close()
+	s.activeConnMu.Lock()
+	s.activeConn = conn
+	s.activeConnMu.Unlock()
+
+	defer func() {
+		s.activeConnMu.Lock()
+		if s.activeConn == conn {
+			s.activeConn = nil
+		}
+		s.activeConnMu.Unlock()
+		conn.Close()
+	}()
+
+	// Set a read deadline so stalled clients cannot block future sends.
+	if err := conn.SetReadDeadline(time.Now().Add(sendDelegateReadTimeout)); err != nil {
+		return
+	}
 
 	var req sendDelegateRequest
 	if err := json.NewDecoder(conn).Decode(&req); err != nil {
