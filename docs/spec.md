@@ -33,6 +33,7 @@ Proposed files:
 - `~/.wacli/wacli.db` — our SQLite DB (messages/chats, FTS, local metadata).
 - `~/.wacli/media/...` — downloaded media (optional, on-demand or background).
 - `~/.wacli/LOCK` — store lock to prevent concurrent access.
+- `~/.wacli/.send.sock` — IPC socket for send delegation (present only while `sync --follow` runs).
 
 Rationale for two SQLite files: reduce coupling and keep the `whatsmeow`-owned schema separate from `wacli`’s local schema. It’s still “one store directory” for the user.
 
@@ -212,6 +213,29 @@ Recommendation:
 
 - Write logs/progress (sync counters, reconnect notices) to stderr.
 - Write primary command output to stdout.
+
+## Send delegation (IPC)
+
+When `sync --follow` is running, it holds the exclusive store lock and hosts a
+JSON-over-Unix-domain-socket IPC server at `<storeDir>/.send.sock`.
+
+`wacli send text` and `wacli send file` implement a fallback chain:
+
+1. Attempt to acquire the store lock and send directly.
+2. If the lock is held (`ErrLocked`), attempt to delegate via the IPC socket.
+3. If the socket is unavailable, return the original lock error.
+4. If the remote process returns an application error (e.g., not authenticated),
+   surface that error to the user.
+5. If the delegation succeeds, format output identically to a direct send.
+
+The IPC protocol is version-tagged JSON (version 1). The sync process serializes
+all delegated sends through a single goroutine to prevent concurrent WhatsApp
+connection access. The socket is cleaned up automatically when sync exits.
+
+Only `sync --follow` hosts the IPC server. `sync --once` and `auth` do not.
+
+File sends normalize `--file` to an absolute path before delegation so the
+remote process resolves the same file regardless of working directory.
 
 ## Reliability considerations
 

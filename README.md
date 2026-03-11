@@ -13,6 +13,12 @@ This is a third-party tool that uses the WhatsApp Web protocol via `whatsmeow` a
 
 Core implementation is in place. See `docs/spec.md` for the full design notes.
 
+## Recent updates (0.3.0)
+
+- Send: automatic IPC delegation when `sync --follow` holds the store lock.
+  `wacli send text` and `wacli send file` can now send messages while
+  `sync --follow` is running, without needing to stop the sync process.
+
 ## Recent updates (0.2.0)
 
 - Messages: search/list includes display text for reactions, replies, and media types.
@@ -72,6 +78,31 @@ pnpm wacli send text --to 1234567890 --message "hello"
 pnpm wacli groups list
 pnpm wacli groups rename --jid 123456789@g.us --name "New name"
 ```
+
+## Send while syncing
+
+When `wacli sync --follow` is running, it holds an exclusive store lock.
+Previously, `wacli send` would fail because it couldn't acquire the lock.
+
+As of v0.3.0, `wacli send text` and `wacli send file` automatically detect
+the lock contention and delegate the send to the running sync process via
+a Unix-domain socket (`<store>/.send.sock`). This is fully transparent:
+
+```bash
+# Terminal 1: sync is running
+wacli sync --follow
+
+# Terminal 2: send works without stopping sync
+wacli send text --to 6591234567 --message "hello"
+wacli send file --to 6591234567 --file ./report.pdf --caption "Q3 report"
+```
+
+Behavior:
+- If the lock is free, send acquires it and sends directly (unchanged).
+- If the lock is held and `sync --follow` is hosting the IPC socket, the send
+  is delegated. Output is identical to a direct send.
+- If the lock is held but no socket exists (e.g., `sync --once`), the original
+  lock error is returned.
 
 ## Prior Art / Credit
 
