@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steipete/wacli/internal/linkpreview"
 	"github.com/steipete/wacli/internal/out"
 	"github.com/steipete/wacli/internal/store"
 	"github.com/steipete/wacli/internal/wa"
@@ -25,6 +26,7 @@ func newSendCmd(flags *rootFlags) *cobra.Command {
 func newSendTextCmd(flags *rootFlags) *cobra.Command {
 	var to string
 	var message string
+	var noPreview bool
 
 	cmd := &cobra.Command{
 		Use:   "text",
@@ -55,7 +57,30 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 
-			msgID, err := a.WA().SendText(ctx, toJID, message)
+			var msgID string
+
+			// Try to fetch link preview if the message contains a URL.
+			if !noPreview {
+				if rawURL := linkpreview.FindURL(message); rawURL != "" {
+					previewCtx, previewCancel := context.WithTimeout(ctx, 10*time.Second)
+					preview, previewErr := linkpreview.Fetch(previewCtx, rawURL)
+					previewCancel()
+					if previewErr == nil && preview != nil {
+						lp := &wa.LinkPreview{
+							URL:         preview.URL,
+							Title:       preview.Title,
+							Description: preview.Description,
+							Thumbnail:   preview.Thumbnail,
+						}
+						msgID, err = a.WA().SendTextWithPreview(ctx, toJID, message, lp)
+					}
+				}
+			}
+
+			// Fallback to plain text if no preview was fetched or preview send failed.
+			if msgID == "" && err == nil {
+				msgID, err = a.WA().SendText(ctx, toJID, message)
+			}
 			if err != nil {
 				return err
 			}
@@ -90,5 +115,6 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 
 	cmd.Flags().StringVar(&to, "to", "", "recipient phone number or JID")
 	cmd.Flags().StringVar(&message, "message", "", "message text")
+	cmd.Flags().BoolVar(&noPreview, "no-preview", false, "disable link preview")
 	return cmd
 }

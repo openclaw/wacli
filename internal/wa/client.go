@@ -183,6 +183,41 @@ func (c *Client) SendText(ctx context.Context, to types.JID, text string) (types
 	return resp.ID, nil
 }
 
+// LinkPreview holds metadata for a URL link preview.
+type LinkPreview struct {
+	URL         string
+	Title       string
+	Description string
+	Thumbnail   []byte // JPEG thumbnail data
+}
+
+func (c *Client) SendTextWithPreview(ctx context.Context, to types.JID, text string, preview *LinkPreview) (types.MessageID, error) {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || !cli.IsConnected() {
+		return "", fmt.Errorf("not connected")
+	}
+
+	previewType := waProto.ExtendedTextMessage_NONE.Enum()
+	msg := &waProto.Message{
+		ExtendedTextMessage: &waProto.ExtendedTextMessage{
+			Text:          &text,
+			MatchedText:   &preview.URL,
+			Title:         &preview.Title,
+			Description:   &preview.Description,
+			PreviewType:   previewType,
+			JPEGThumbnail: preview.Thumbnail,
+		},
+	}
+
+	resp, err := cli.SendMessage(ctx, to, msg)
+	if err != nil {
+		return "", err
+	}
+	return resp.ID, nil
+}
+
 func (c *Client) SendProtoMessage(ctx context.Context, to types.JID, msg *waProto.Message) (types.MessageID, error) {
 	c.mu.Lock()
 	cli := c.client
