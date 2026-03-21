@@ -74,6 +74,9 @@ func newGroupsRenameCmd(flags *rootFlags) *cobra.Command {
 		Use:   "rename",
 		Short: "Rename group",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := checkReadOnly(flags); err != nil {
+				return err
+			}
 			if strings.TrimSpace(jidStr) == "" || strings.TrimSpace(name) == "" {
 				return fmt.Errorf("--jid and --name are required")
 			}
@@ -121,6 +124,9 @@ func newGroupsLeaveCmd(flags *rootFlags) *cobra.Command {
 		Use:   "leave",
 		Short: "Leave a group",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := checkReadOnly(flags); err != nil {
+				return err
+			}
 			if strings.TrimSpace(jidStr) == "" {
 				return fmt.Errorf("--jid is required")
 			}

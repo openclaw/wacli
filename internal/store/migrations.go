@@ -18,6 +18,7 @@ var schemaMigrations = []migration{
 	{version: 1, name: "core schema", up: migrateCoreSchema},
 	{version: 2, name: "messages display_text column", up: migrateMessagesDisplayText},
 	{version: 3, name: "messages fts", up: migrateMessagesFTS},
+	{version: 4, name: "settings table", up: migrateSettings},
 }
 
 func (d *DB) ensureSchema() error {
@@ -247,6 +248,19 @@ func migrateMessagesFTS(d *DB) error {
 	}
 
 	d.ftsEnabled = true
+	return nil
+}
+
+func migrateSettings(d *DB) error {
+	_, err := d.sql.Exec(`
+		CREATE TABLE IF NOT EXISTS settings (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("create settings table: %w", err)
+	}
 	return nil
 }
 

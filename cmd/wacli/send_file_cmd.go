@@ -21,6 +21,9 @@ func newSendFileCmd(flags *rootFlags) *cobra.Command {
 		Use:   "file",
 		Short: "Send a file (image/video/audio/document)",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := checkReadOnly(flags); err != nil {
+				return err
+			}
 			if to == "" || filePath == "" {
 				return fmt.Errorf("--to and --file are required")
 			}

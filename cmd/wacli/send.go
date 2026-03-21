@@ -30,6 +30,9 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 		Use:   "text",
 		Short: "Send a text message",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := checkReadOnly(flags); err != nil {
+				return err
+			}
 			if to == "" || message == "" {
 				return fmt.Errorf("--to and --message are required")
 			}

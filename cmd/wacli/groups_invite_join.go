@@ -79,6 +79,9 @@ func newGroupsInviteLinkRevokeCmd(flags *rootFlags) *cobra.Command {
 		Use:   "revoke",
 		Short: "Revoke/reset invite link",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := checkReadOnly(flags); err != nil {
+				return err
+			}
 			if strings.TrimSpace(jidStr) == "" {
 				return fmt.Errorf("--jid is required")
 			}
@@ -122,6 +125,9 @@ func newGroupsJoinCmd(flags *rootFlags) *cobra.Command {
 		Use:   "join",
 		Short: "Join group by invite code",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := checkReadOnly(flags); err != nil {
+				return err
+			}
 			if strings.TrimSpace(code) == "" {
 				return fmt.Errorf("--code is required")
 			}

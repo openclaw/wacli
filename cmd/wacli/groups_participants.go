@@ -31,6 +31,9 @@ func newGroupsParticipantsActionCmd(flags *rootFlags, action string) *cobra.Comm
 		Use:   action,
 		Short: action + " participants",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := checkReadOnly(flags); err != nil {
+				return err
+			}
 			if strings.TrimSpace(group) == "" || len(users) == 0 {
 				return fmt.Errorf("--jid and at least one --user are required")
 			}

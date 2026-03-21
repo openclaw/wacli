@@ -18,6 +18,7 @@ func newAuthCmd(flags *rootFlags) *cobra.Command {
 	var follow bool
 	var idleExit time.Duration
 	var downloadMedia bool
+	var readOnly bool
 
 	cmd := &cobra.Command{
 		Use:   "auth",
@@ -31,6 +32,11 @@ func newAuthCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 			defer closeApp(a, lk)
+
+			// Persist readonly setting if requested (saved to wacli.db after sync)
+			if readOnly {
+				flags.readOnly = true
+			}
 
 			mode := appPkg.SyncModeBootstrap
 			if follow {
@@ -55,10 +61,20 @@ func newAuthCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 
+			// Persist readonly setting after successful auth
+			if readOnly {
+				if err := a.DB().SetReadOnly(true); err != nil {
+					return fmt.Errorf("persist readonly setting: %w", err)
+				}
+				fmt.Fprintln(os.Stderr, "Read-only mode enabled for this device. Write operations are permanently disabled.")
+				fmt.Fprintln(os.Stderr, "To disable, re-authenticate without --readonly.")
+			}
+
 			if flags.asJSON {
 				return out.WriteJSON(os.Stdout, map[string]interface{}{
 					"authenticated":   true,
 					"messages_stored": res.MessagesStored,
+					"readonly":        readOnly,
 				})
 			}
 
@@ -70,6 +86,7 @@ func newAuthCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().BoolVar(&follow, "follow", false, "keep syncing after auth")
 	cmd.Flags().DurationVar(&idleExit, "idle-exit", 30*time.Second, "exit after being idle (bootstrap/once modes)")
 	cmd.Flags().BoolVar(&downloadMedia, "download-media", false, "download media in the background during sync")
+	cmd.Flags().BoolVar(&readOnly, "readonly", false, "enable read-only mode for this device (persisted; blocks send/group mutations)")
 
 	cmd.AddCommand(newAuthStatusCmd(flags))
 	cmd.AddCommand(newAuthLogoutCmd(flags))
@@ -96,15 +113,21 @@ func newAuthStatusCmd(flags *rootFlags) *cobra.Command {
 			}
 			authed := a.WA().IsAuthed()
 
+			readOnlyStatus := a.DB().IsReadOnly()
+
 			if flags.asJSON {
 				return out.WriteJSON(os.Stdout, map[string]any{
 					"authenticated": authed,
+					"readonly":      readOnlyStatus,
 				})
 			}
 			if authed {
 				fmt.Fprintln(os.Stdout, "Authenticated.")
 			} else {
 				fmt.Fprintln(os.Stdout, "Not authenticated. Run `wacli auth`.")
+			}
+			if readOnlyStatus {
+				fmt.Fprintln(os.Stdout, "Read-only mode: enabled")
 			}
 			return nil
 		},
