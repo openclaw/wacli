@@ -109,7 +109,10 @@ func (c *Client) Connect(ctx context.Context, opts ConnectOptions) error {
 
 	var qrChan <-chan whatsmeow.QRChannelItem
 	if !authed {
-		ch, _ := cli.GetQRChannel(ctx)
+		ch, err := cli.GetQRChannel(ctx)
+		if err != nil {
+			return fmt.Errorf("get QR channel: %w", err)
+		}
 		qrChan = ch
 	}
 
@@ -128,7 +131,7 @@ func (c *Client) Connect(ctx context.Context, opts ConnectOptions) error {
 			return ctx.Err()
 		case evt, ok := <-qrChan:
 			if !ok {
-				return fmt.Errorf("QR channel closed")
+				return fmt.Errorf("QR channel closed unexpectedly")
 			}
 			switch evt.Event {
 			case "code":
@@ -140,9 +143,19 @@ func (c *Client) Connect(ctx context.Context, opts ConnectOptions) error {
 			case "success":
 				return nil
 			case "timeout":
-				return fmt.Errorf("QR code timed out")
+				return fmt.Errorf("QR code timed out; run `wacli auth` again to get a new code")
+			case "err-client-outdated":
+				return fmt.Errorf("WhatsApp client outdated; update whatsmeow dependency")
+			case "err-scanned-without-multidevice":
+				fmt.Fprintln(os.Stderr, "QR scanned but multi-device is not enabled on your phone. Enable it in WhatsApp settings and scan again.")
+				continue
 			case "error":
-				return fmt.Errorf("QR error")
+				if evt.Error != nil {
+					return fmt.Errorf("QR pairing failed: %w", evt.Error)
+				}
+				return fmt.Errorf("QR pairing failed")
+			default:
+				return fmt.Errorf("unexpected QR event: %s", evt.Event)
 			}
 		}
 	}
