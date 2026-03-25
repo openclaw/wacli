@@ -83,6 +83,14 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 		lastEvent.Store(time.Now().UTC().UnixNano())
 
 		switch v := evt.(type) {
+		case *events.PairSuccess:
+			fmt.Fprintf(os.Stderr, "\nPairing successful (device: %s, platform: %s).\n", v.ID.String(), v.Platform)
+		case *events.PairError:
+			fmt.Fprintf(os.Stderr, "\nPairing failed: %v\n", v.Error)
+		case *events.KeepAliveTimeout:
+			fmt.Fprintf(os.Stderr, "\nKeepAlive timeout (errors: %d, last success: %s).\n", v.ErrorCount, v.LastSuccess.Format(time.RFC3339))
+		case *events.KeepAliveRestored:
+			fmt.Fprintln(os.Stderr, "\nKeepAlive restored.")
 		case *events.Message:
 			pm := wa.ParseLiveMessage(v)
 			if pm.ReactionToID != "" && pm.ReactionEmoji == "" && v.Message != nil && v.Message.GetEncReactionMessage() != nil {
@@ -145,6 +153,11 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	if err := a.Connect(ctx, opts.AllowQR, opts.OnQRCode); err != nil {
 		return SyncResult{}, err
 	}
+
+	// Reset idle timer after connection is established. The initial lastEvent
+	// timestamp was set before Connect(), which blocks for QR code scanning.
+	// Without this reset, slow pairing (>IdleExit) causes immediate exit.
+	lastEvent.Store(time.Now().UTC().UnixNano())
 
 	if opts.DownloadMedia {
 		var err error
