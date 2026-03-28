@@ -37,7 +37,10 @@ func newAuthCmd(flags *rootFlags) *cobra.Command {
 				mode = appPkg.SyncModeFollow
 			}
 
-			fmt.Fprintln(os.Stderr, "Starting authentication…")
+			// Show which account we're authenticating (resolveStoreDir is idempotent).
+			if _, _, acctName, err := resolveStoreDir(flags); err == nil {
+				fmt.Fprintf(os.Stderr, "Starting authentication for account %q…\n", acctName)
+			}
 			res, err := a.Sync(ctx, appPkg.SyncOptions{
 				Mode:            mode,
 				AllowQR:         true,

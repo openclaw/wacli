@@ -19,6 +19,7 @@ var version = "0.5.0"
 
 type rootFlags struct {
 	storeDir string
+	account  string
 	asJSON   bool
 	timeout  time.Duration
 }
@@ -35,6 +36,7 @@ func execute(args []string) error {
 	rootCmd.SetVersionTemplate("wacli {{.Version}}\n")
 
 	rootCmd.PersistentFlags().StringVar(&flags.storeDir, "store", "", "store directory (default: ~/.wacli)")
+	rootCmd.PersistentFlags().StringVarP(&flags.account, "account", "a", "", "account name (default: from ~/.wacli/default_account or \"default\")")
 	rootCmd.PersistentFlags().BoolVar(&flags.asJSON, "json", false, "output JSON instead of human-readable text")
 	rootCmd.PersistentFlags().DurationVar(&flags.timeout, "timeout", 5*time.Minute, "command timeout (non-sync commands)")
 
@@ -49,6 +51,7 @@ func execute(args []string) error {
 	rootCmd.AddCommand(newChatsCmd(&flags))
 	rootCmd.AddCommand(newGroupsCmd(&flags))
 	rootCmd.AddCommand(newHistoryCmd(&flags))
+	rootCmd.AddCommand(newAccountsCmd(&flags))
 
 	rootCmd.SetArgs(args)
 	if err := rootCmd.Execute(); err != nil {
@@ -58,24 +61,43 @@ func execute(args []string) error {
 	return nil
 }
 
-func newApp(ctx context.Context, flags *rootFlags, needLock bool, allowUnauthed bool) (*app.App, *lock.Lock, error) {
-	storeDir := flags.storeDir
-	if storeDir == "" {
-		storeDir = config.DefaultStoreDir()
+// resolveStoreDir returns the base store dir and the account-specific store dir.
+func resolveStoreDir(flags *rootFlags) (baseDir string, accountDir string, accountName string, err error) {
+	baseDir = flags.storeDir
+	if baseDir == "" {
+		baseDir = config.DefaultStoreDir()
 	}
-	storeDir, _ = filepath.Abs(storeDir)
+	baseDir, _ = filepath.Abs(baseDir)
+
+	if err := config.MaybeMigrateLegacyStore(baseDir); err != nil {
+		return "", "", "", err
+	}
+
+	accountName, err = config.ResolveAccount(baseDir, flags.account)
+	if err != nil {
+		return "", "", "", err
+	}
+
+	accountDir = config.AccountDir(baseDir, accountName)
+	return baseDir, accountDir, accountName, nil
+}
+
+func newApp(ctx context.Context, flags *rootFlags, needLock bool, allowUnauthed bool) (*app.App, *lock.Lock, error) {
+	_, accountDir, _, err := resolveStoreDir(flags)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	var lk *lock.Lock
 	if needLock {
-		var err error
-		lk, err = lock.Acquire(storeDir)
+		lk, err = lock.Acquire(accountDir)
 		if err != nil {
 			return nil, nil, err
 		}
 	}
 
 	a, err := app.New(app.Options{
-		StoreDir:      storeDir,
+		StoreDir:      accountDir,
 		Version:       version,
 		JSON:          flags.asJSON,
 		AllowUnauthed: allowUnauthed,

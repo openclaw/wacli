@@ -9,7 +9,6 @@ import (
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
-	"github.com/steipete/wacli/internal/config"
 	"github.com/steipete/wacli/internal/lock"
 	"github.com/steipete/wacli/internal/out"
 )
@@ -24,18 +23,17 @@ func newDoctorCmd(flags *rootFlags) *cobra.Command {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
-			storeDir := flags.storeDir
-			if storeDir == "" {
-				storeDir = config.DefaultStoreDir()
+			_, accountDir, accountName, err := resolveStoreDir(flags)
+			if err != nil {
+				return err
 			}
-			storeDir, _ = filepath.Abs(storeDir)
 
 			var lockHeld bool
 			var lockInfo string
-			if b, err := os.ReadFile(filepath.Join(storeDir, "LOCK")); err == nil {
+			if b, err := os.ReadFile(filepath.Join(accountDir, "LOCK")); err == nil {
 				lockInfo = strings.TrimSpace(string(b))
 			}
-			if lk, err := lock.Acquire(storeDir); err == nil {
+			if lk, err := lock.Acquire(accountDir); err == nil {
 				_ = lk.Release()
 			} else {
 				lockHeld = true
@@ -59,6 +57,7 @@ func newDoctorCmd(flags *rootFlags) *cobra.Command {
 			}
 
 			type report struct {
+				Account    string `json:"account"`
 				StoreDir   string `json:"store_dir"`
 				LockHeld   bool   `json:"lock_held"`
 				LockInfo   string `json:"lock_info,omitempty"`
@@ -68,7 +67,8 @@ func newDoctorCmd(flags *rootFlags) *cobra.Command {
 			}
 
 			rep := report{
-				StoreDir:   storeDir,
+				Account:    accountName,
+				StoreDir:   accountDir,
 				LockHeld:   lockHeld,
 				LockInfo:   lockInfo,
 				Authed:     authed,
@@ -81,6 +81,7 @@ func newDoctorCmd(flags *rootFlags) *cobra.Command {
 			}
 
 			w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
+			fmt.Fprintf(w, "ACCOUNT\t%s\n", rep.Account)
 			fmt.Fprintf(w, "STORE\t%s\n", rep.StoreDir)
 			fmt.Fprintf(w, "LOCKED\t%v\n", rep.LockHeld)
 			if rep.LockHeld && rep.LockInfo != "" {
