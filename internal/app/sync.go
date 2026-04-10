@@ -53,6 +53,7 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	var messagesStored atomic.Int64
 	lastEvent := atomic.Int64{}
 	lastEvent.Store(time.Now().UTC().UnixNano())
+	eventWriter := a.Events()
 
 	disconnected := make(chan struct{}, 1)
 
@@ -96,7 +97,10 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 				}
 			}
 			if err := a.storeParsedMessage(ctx, pm); err == nil {
-				messagesStored.Add(1)
+				total := messagesStored.Add(1)
+				if total%25 == 0 {
+					_ = eventWriter.Emit("progress", map[string]any{"messages_synced": total})
+				}
 			}
 			if opts.DownloadMedia && pm.Media != nil && pm.ID != "" {
 				enqueueMedia(pm.Chat.String(), pm.ID)
@@ -105,6 +109,7 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 				fmt.Fprintf(os.Stderr, "\rSynced %d messages...", messagesStored.Load())
 			}
 		case *events.HistorySync:
+			_ = eventWriter.Emit("history_sync", map[string]any{"conversations": len(v.Data.Conversations)})
 			fmt.Fprintf(os.Stderr, "\nProcessing history sync (%d conversations)...\n", len(v.Data.Conversations))
 			for _, conv := range v.Data.Conversations {
 				lastEvent.Store(time.Now().UTC().UnixNano())
@@ -122,7 +127,10 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 						continue
 					}
 					if err := a.storeParsedMessage(ctx, pm); err == nil {
-						messagesStored.Add(1)
+						total := messagesStored.Add(1)
+						if total%25 == 0 {
+							_ = eventWriter.Emit("progress", map[string]any{"messages_synced": total})
+						}
 					}
 					if opts.DownloadMedia && pm.Media != nil && pm.ID != "" {
 						enqueueMedia(pm.Chat.String(), pm.ID)
@@ -131,8 +139,10 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 			}
 			fmt.Fprintf(os.Stderr, "\rSynced %d messages...", messagesStored.Load())
 		case *events.Connected:
+			_ = eventWriter.Emit("connected", nil)
 			fmt.Fprintln(os.Stderr, "\nConnected.")
 		case *events.Disconnected:
+			_ = eventWriter.Emit("disconnected", nil)
 			fmt.Fprintln(os.Stderr, "\nDisconnected.")
 			select {
 			case disconnected <- struct{}{}:
@@ -172,9 +182,11 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 		for {
 			select {
 			case <-ctx.Done():
+				_ = eventWriter.Emit("stopping", map[string]any{"messages_synced": messagesStored.Load()})
 				fmt.Fprintln(os.Stderr, "\nStopping sync.")
 				return SyncResult{MessagesStored: messagesStored.Load()}, nil
 			case <-disconnected:
+				_ = eventWriter.Emit("reconnecting", nil)
 				fmt.Fprintln(os.Stderr, "Reconnecting...")
 				if err := a.wa.ReconnectWithBackoff(ctx, 2*time.Second, 30*time.Second); err != nil {
 					return SyncResult{MessagesStored: messagesStored.Load()}, err
@@ -193,9 +205,11 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	for {
 		select {
 		case <-ctx.Done():
+			_ = eventWriter.Emit("stopping", map[string]any{"messages_synced": messagesStored.Load()})
 			fmt.Fprintln(os.Stderr, "\nStopping sync.")
 			return SyncResult{MessagesStored: messagesStored.Load()}, nil
 		case <-disconnected:
+			_ = eventWriter.Emit("reconnecting", nil)
 			fmt.Fprintln(os.Stderr, "Reconnecting...")
 			if err := a.wa.ReconnectWithBackoff(ctx, 2*time.Second, 30*time.Second); err != nil {
 				return SyncResult{MessagesStored: messagesStored.Load()}, err
@@ -203,6 +217,10 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 		case <-ticker.C:
 			last := time.Unix(0, lastEvent.Load())
 			if time.Since(last) >= opts.IdleExit {
+				_ = eventWriter.Emit("idle_exit", map[string]any{
+					"idle_duration":   opts.IdleExit.String(),
+					"messages_synced": messagesStored.Load(),
+				})
 				fmt.Fprintf(os.Stderr, "\nIdle for %s, exiting.\n", opts.IdleExit)
 				return SyncResult{MessagesStored: messagesStored.Load()}, nil
 			}

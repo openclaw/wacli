@@ -68,6 +68,7 @@ func (a *App) BackfillHistory(ctx context.Context, opts BackfillOptions) (Backfi
 	}
 
 	beforeCount, _ := a.db.CountMessages()
+	eventWriter := a.Events()
 
 	var mu sync.Mutex
 	var waitCh chan onDemandResponse
@@ -136,6 +137,11 @@ func (a *App) BackfillHistory(ctx context.Context, opts BackfillOptions) (Backfi
 				mu.Unlock()
 
 				requestsSent++
+				_ = eventWriter.Emit("backfill_requesting", map[string]any{
+					"chat_jid": chatStr,
+					"count":    opts.Count,
+					"request":  requestsSent,
+				})
 				fmt.Fprintf(os.Stderr, "Requesting %d older messages for %s...\n", opts.Count, chatStr)
 				if _, err := a.wa.RequestHistorySyncOnDemand(ctx, reqInfo, opts.Count); err != nil {
 					return err
@@ -158,17 +164,35 @@ func (a *App) BackfillHistory(ctx context.Context, opts BackfillOptions) (Backfi
 				mu.Unlock()
 
 				fmt.Fprintf(os.Stderr, "On-demand history sync: %d conversations, %d messages.\n", resp.conversations, resp.messages)
+				_ = eventWriter.Emit("backfill_response", map[string]any{
+					"chat_jid":       chatStr,
+					"conversations":  resp.conversations,
+					"messages":       resp.messages,
+					"responses_seen": responsesSeen,
+				})
 
 				newOldest, err := a.db.GetOldestMessageInfo(chatStr)
 				if err == nil && newOldest.MsgID == oldest.MsgID {
+					_ = eventWriter.Emit("backfill_stopped", map[string]any{
+						"chat_jid": chatStr,
+						"reason":   "no_older_messages_added",
+					})
 					fmt.Fprintln(os.Stderr, "No older messages were added (stopping).")
 					return nil
 				}
 				if resp.messages <= 0 {
+					_ = eventWriter.Emit("backfill_stopped", map[string]any{
+						"chat_jid": chatStr,
+						"reason":   "no_messages_returned",
+					})
 					fmt.Fprintln(os.Stderr, "No messages returned (stopping).")
 					return nil
 				}
 				if resp.endType == waHistorySync.Conversation_COMPLETE_AND_NO_MORE_MESSAGE_REMAIN_ON_PRIMARY {
+					_ = eventWriter.Emit("backfill_stopped", map[string]any{
+						"chat_jid": chatStr,
+						"reason":   "start_of_history_reached",
+					})
 					fmt.Fprintln(os.Stderr, "Reached start of chat history (stopping).")
 					return nil
 				}
