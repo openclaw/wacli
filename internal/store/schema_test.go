@@ -33,6 +33,28 @@ func TestOpenCreatesExpectedSchema(t *testing.T) {
 			t.Fatalf("expected messages column %q to exist", want)
 		}
 	}
+
+	backfillCols, err := tableColumns(db.sql, "history_backfill_state")
+	if err != nil {
+		t.Fatalf("tableColumns history_backfill_state: %v", err)
+	}
+	for _, want := range []string{
+		"chat_jid",
+		"status",
+		"last_backfill_at",
+		"last_success_at",
+		"requests_sent_total",
+		"responses_seen_total",
+		"consecutive_noop_requests",
+		"reached_start",
+		"blocked_reason",
+		"last_error",
+		"updated_at",
+	} {
+		if !backfillCols[want] {
+			t.Fatalf("expected history_backfill_state column %q to exist", want)
+		}
+	}
 }
 
 func tableColumns(db *sql.DB, table string) (map[string]bool, error) {

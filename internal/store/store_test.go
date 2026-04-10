@@ -319,3 +319,113 @@ func TestGroupsUpsertListAndParticipantsReplace(t *testing.T) {
 		t.Fatalf("expected roles admin=1 member=1, got admin=%d member=%d", admins, members)
 	}
 }
+
+func TestBackfillStateCoverageAndReset(t *testing.T) {
+	db := openTestDB(t)
+
+	readyChat := "100@s.whatsapp.net"
+	blockedChat := "200@s.whatsapp.net"
+	trackedChat := "300@s.whatsapp.net"
+	base := time.Date(2024, 4, 1, 0, 0, 0, 0, time.UTC)
+
+	if err := db.UpsertChat(readyChat, "dm", "Ready", base.Add(10*time.Minute)); err != nil {
+		t.Fatalf("UpsertChat ready: %v", err)
+	}
+	if err := db.UpsertChat(blockedChat, "dm", "Blocked", base.Add(9*time.Minute)); err != nil {
+		t.Fatalf("UpsertChat blocked: %v", err)
+	}
+	if err := db.UpsertChat(trackedChat, "group", "Tracked", base.Add(8*time.Minute)); err != nil {
+		t.Fatalf("UpsertChat tracked: %v", err)
+	}
+
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID:    readyChat,
+		ChatName:   "Ready",
+		MsgID:      "m2",
+		SenderJID:  readyChat,
+		SenderName: "Ready",
+		Timestamp:  base.Add(2 * time.Minute),
+		Text:       "hello",
+	}); err != nil {
+		t.Fatalf("UpsertMessage ready: %v", err)
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID:    trackedChat,
+		ChatName:   "Tracked",
+		MsgID:      "m3",
+		SenderJID:  trackedChat,
+		SenderName: "Tracked",
+		Timestamp:  base.Add(3 * time.Minute),
+		Text:       "tracked",
+	}); err != nil {
+		t.Fatalf("UpsertMessage tracked: %v", err)
+	}
+
+	now := base.Add(20 * time.Minute)
+	if err := db.PutBackfillState(BackfillState{
+		ChatJID:                 trackedChat,
+		Status:                  BackfillStatusInProgress,
+		LastBackfillAt:          now,
+		RequestsSentTotal:       2,
+		ResponsesSeenTotal:      2,
+		ConsecutiveNoopRequests: 1,
+		UpdatedAt:               now,
+	}); err != nil {
+		t.Fatalf("PutBackfillState: %v", err)
+	}
+
+	if err := db.ResetBackfillInProgress(now.Add(time.Minute)); err != nil {
+		t.Fatalf("ResetBackfillInProgress: %v", err)
+	}
+	state, err := db.GetBackfillState(trackedChat)
+	if err != nil {
+		t.Fatalf("GetBackfillState: %v", err)
+	}
+	if state.Status != BackfillStatusReady {
+		t.Fatalf("expected reset state ready, got %q", state.Status)
+	}
+
+	if err := db.PutBackfillState(BackfillState{
+		ChatJID:                 trackedChat,
+		Status:                  BackfillStatusComplete,
+		LastBackfillAt:          now,
+		LastSuccessAt:           now,
+		RequestsSentTotal:       3,
+		ResponsesSeenTotal:      3,
+		ConsecutiveNoopRequests: 0,
+		ReachedStart:            true,
+		UpdatedAt:               now,
+	}); err != nil {
+		t.Fatalf("PutBackfillState complete: %v", err)
+	}
+
+	coverage, err := db.ListChatCoverage(ListChatCoverageParams{Limit: 10, IncludeBlocked: true})
+	if err != nil {
+		t.Fatalf("ListChatCoverage: %v", err)
+	}
+	if len(coverage) != 3 {
+		t.Fatalf("expected 3 coverage rows, got %d", len(coverage))
+	}
+
+	byChat := map[string]ChatCoverage{}
+	for _, c := range coverage {
+		byChat[c.ChatJID] = c
+	}
+	if byChat[readyChat].Status != BackfillStatusReady {
+		t.Fatalf("expected ready chat status ready, got %q", byChat[readyChat].Status)
+	}
+	if byChat[blockedChat].Status != BackfillStatusBlocked || byChat[blockedChat].BlockedReason != BackfillBlockedNoLocalAnchor {
+		t.Fatalf("expected blocked chat no_local_anchor, got %+v", byChat[blockedChat])
+	}
+	if byChat[trackedChat].Status != BackfillStatusComplete || !byChat[trackedChat].HasState || !byChat[trackedChat].ReachedStart {
+		t.Fatalf("expected tracked chat complete with state, got %+v", byChat[trackedChat])
+	}
+
+	trackedOnly, err := db.ListChatCoverage(ListChatCoverageParams{Limit: 10, IncludeBlocked: true, OnlyTracked: true})
+	if err != nil {
+		t.Fatalf("ListChatCoverage tracked: %v", err)
+	}
+	if len(trackedOnly) != 1 || trackedOnly[0].ChatJID != trackedChat {
+		t.Fatalf("expected only tracked chat, got %+v", trackedOnly)
+	}
+}

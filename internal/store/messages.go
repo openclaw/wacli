@@ -119,6 +119,15 @@ func (d *DB) CountMessages() (int64, error) {
 	return n, nil
 }
 
+func (d *DB) CountMessagesForChat(chatJID string) (int64, error) {
+	row := d.sql.QueryRow(`SELECT COUNT(1) FROM messages WHERE chat_jid = ?`, chatJID)
+	var n int64
+	if err := row.Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
 func (d *DB) GetOldestMessageInfo(chatJID string) (MessageInfo, error) {
 	chatJID = strings.TrimSpace(chatJID)
 	if chatJID == "" {

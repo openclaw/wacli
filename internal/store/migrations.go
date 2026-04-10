@@ -18,6 +18,7 @@ var schemaMigrations = []migration{
 	{version: 1, name: "core schema", up: migrateCoreSchema},
 	{version: 2, name: "messages display_text column", up: migrateMessagesDisplayText},
 	{version: 3, name: "messages fts", up: migrateMessagesFTS},
+	{version: 4, name: "history backfill state", up: migrateHistoryBackfillState},
 }
 
 func (d *DB) ensureSchema() error {
@@ -247,6 +248,30 @@ func migrateMessagesFTS(d *DB) error {
 	}
 
 	d.ftsEnabled = true
+	return nil
+}
+
+func migrateHistoryBackfillState(d *DB) error {
+	if _, err := d.sql.Exec(`
+		CREATE TABLE IF NOT EXISTS history_backfill_state (
+			chat_jid TEXT PRIMARY KEY,
+			status TEXT NOT NULL,
+			last_backfill_at INTEGER,
+			last_success_at INTEGER,
+			requests_sent_total INTEGER NOT NULL DEFAULT 0,
+			responses_seen_total INTEGER NOT NULL DEFAULT 0,
+			consecutive_noop_requests INTEGER NOT NULL DEFAULT 0,
+			reached_start INTEGER NOT NULL DEFAULT 0,
+			blocked_reason TEXT,
+			last_error TEXT,
+			updated_at INTEGER NOT NULL,
+			FOREIGN KEY (chat_jid) REFERENCES chats(jid) ON DELETE CASCADE
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_history_backfill_state_status ON history_backfill_state(status);
+	`); err != nil {
+		return fmt.Errorf("create history_backfill_state table: %w", err)
+	}
 	return nil
 }
 
