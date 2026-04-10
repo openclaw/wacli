@@ -25,3 +25,28 @@ func TestSanitizeFilename(t *testing.T) {
 		t.Fatalf("expected a_b, got %q", got)
 	}
 }
+
+func TestSanitizeStripsNullByte(t *testing.T) {
+	if got := SanitizeSegment("foo" + string(rune(0)) + "bar"); got != "foobar" {
+		t.Fatalf("expected foobar, got %q", got)
+	}
+}
+
+func TestSanitizeStripsTab(t *testing.T) {
+	if got := SanitizeSegment("hello\tworld"); got != "helloworld" {
+		t.Fatalf("expected helloworld, got %q", got)
+	}
+}
+
+func TestSanitizeStripsControlChars(t *testing.T) {
+	input := "a" + string(rune(1)) + "b" + string(rune(31)) + "c" + string(rune(127)) + "d"
+	if got := SanitizeSegment(input); got != "abcd" {
+		t.Fatalf("expected abcd, got %q", got)
+	}
+}
+
+func TestSanitizeFilenameStripsControlChars(t *testing.T) {
+	if got := SanitizeFilename("file" + string(rune(0)) + "name"); got != "filename" {
+		t.Fatalf("expected filename, got %q", got)
+	}
+}
