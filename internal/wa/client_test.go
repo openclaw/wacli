@@ -7,21 +7,51 @@ import (
 )
 
 func TestParseUserOrJID(t *testing.T) {
-	j, err := ParseUserOrJID("1234567890")
-	if err != nil {
-		t.Fatalf("ParseUserOrJID: %v", err)
-	}
-	if j.Server != types.DefaultUserServer || j.User != "1234567890" {
-		t.Fatalf("unexpected jid: %+v", j)
-	}
+	t.Run("plain digits", func(t *testing.T) {
+		j, err := ParseUserOrJID("1234567890")
+		if err != nil {
+			t.Fatalf("ParseUserOrJID: %v", err)
+		}
+		if j.Server != types.DefaultUserServer || j.User != "1234567890" {
+			t.Fatalf("unexpected jid: %+v", j)
+		}
+	})
 
-	j, err = ParseUserOrJID("123@g.us")
-	if err != nil {
-		t.Fatalf("ParseUserOrJID group: %v", err)
-	}
-	if !IsGroupJID(j) {
-		t.Fatalf("expected group jid, got %+v", j)
-	}
+	t.Run("plus e164", func(t *testing.T) {
+		j, err := ParseUserOrJID("+15551234567")
+		if err != nil {
+			t.Fatalf("ParseUserOrJID plus: %v", err)
+		}
+		if j.Server != types.DefaultUserServer || j.User != "15551234567" {
+			t.Fatalf("unexpected jid: %+v", j)
+		}
+	})
+
+	t.Run("formatted phone", func(t *testing.T) {
+		j, err := ParseUserOrJID("+1 (555) 123-4567")
+		if err != nil {
+			t.Fatalf("ParseUserOrJID formatted: %v", err)
+		}
+		if j.Server != types.DefaultUserServer || j.User != "15551234567" {
+			t.Fatalf("unexpected jid: %+v", j)
+		}
+	})
+
+	t.Run("group jid", func(t *testing.T) {
+		j, err := ParseUserOrJID("123@g.us")
+		if err != nil {
+			t.Fatalf("ParseUserOrJID group: %v", err)
+		}
+		if !IsGroupJID(j) {
+			t.Fatalf("expected group jid, got %+v", j)
+		}
+	})
+
+	t.Run("invalid phone", func(t *testing.T) {
+		if _, err := ParseUserOrJID("+1-800-FLOWERS"); err == nil {
+			t.Fatalf("expected invalid phone number error")
+		}
+	})
 }
 
 func TestBestContactName(t *testing.T) {

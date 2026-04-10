@@ -62,6 +62,7 @@ pnpm wacli history backfill --chat 1234567890@s.whatsapp.net --requests 10 --cou
 
 # Send a message
 pnpm wacli send text --to 1234567890 --message "hello"
+# phone numbers can also be passed as +E164 or formatted input like "+1 (234) 567-8900"
 
 # Send a file
 ./wacli send file --to 1234567890 --file ./pic.jpg --caption "hi"

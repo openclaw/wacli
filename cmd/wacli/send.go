@@ -88,7 +88,7 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&to, "to", "", "recipient phone number or JID")
+	cmd.Flags().StringVar(&to, "to", "", "recipient phone number (+E164 and formatting ok) or JID")
 	cmd.Flags().StringVar(&message, "message", "", "message text")
 	return cmd
 }

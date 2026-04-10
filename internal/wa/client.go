@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/mdp/qrterminal/v3"
 	"go.mau.fi/whatsmeow"
@@ -255,7 +256,23 @@ func ParseUserOrJID(s string) (types.JID, error) {
 	if strings.Contains(s, "@") {
 		return types.ParseJID(s)
 	}
-	return types.JID{User: s, Server: types.DefaultUserServer}, nil
+
+	var digits strings.Builder
+	for _, r := range s {
+		switch {
+		case unicode.IsDigit(r):
+			digits.WriteRune(r)
+		case r == '+', r == ' ', r == '-', r == '(', r == ')', r == '.':
+			continue
+		default:
+			return types.JID{}, fmt.Errorf("invalid recipient phone number %q; use digits, optional leading +, or a full JID", s)
+		}
+	}
+	if digits.Len() == 0 {
+		return types.JID{}, fmt.Errorf("recipient phone number %q has no digits", s)
+	}
+
+	return types.JID{User: digits.String(), Server: types.DefaultUserServer}, nil
 }
 
 func IsGroupJID(jid types.JID) bool {

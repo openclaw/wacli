@@ -64,7 +64,7 @@ func newSendFileCmd(flags *rootFlags) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&to, "to", "", "recipient phone number or JID")
+	cmd.Flags().StringVar(&to, "to", "", "recipient phone number (+E164 and formatting ok) or JID")
 	cmd.Flags().StringVar(&filePath, "file", "", "path to file")
 	cmd.Flags().StringVar(&filename, "filename", "", "display name for the file (defaults to basename of --file)")
 	cmd.Flags().StringVar(&caption, "caption", "", "caption (images/videos/documents)")
