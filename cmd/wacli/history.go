@@ -1,11 +1,8 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -37,7 +34,7 @@ func newHistoryBackfillCmd(flags *rootFlags) *cobra.Command {
 				return fmt.Errorf("--chat is required")
 			}
 
-			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			ctx, stop := signalContext()
 			defer stop()
 
 			a, lk, err := newApp(ctx, flags, true, false)

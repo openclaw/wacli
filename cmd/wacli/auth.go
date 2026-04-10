@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/mdp/qrterminal/v3"
@@ -23,7 +21,7 @@ func newAuthCmd(flags *rootFlags) *cobra.Command {
 		Use:   "auth",
 		Short: "Authenticate with WhatsApp (QR) and bootstrap sync",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			ctx, stop := signalContext()
 			defer stop()
 
 			a, lk, err := newApp(ctx, flags, true, true)
