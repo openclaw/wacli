@@ -17,6 +17,7 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 	var once bool
 	var follow bool
 	var idleExit time.Duration
+	var maxReconnect time.Duration
 	var downloadMedia bool
 	var refreshContacts bool
 	var refreshGroups bool
@@ -54,6 +55,7 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 				RefreshContacts: refreshContacts,
 				RefreshGroups:   refreshGroups,
 				IdleExit:        idleExit,
+				MaxReconnect:    maxReconnect,
 			})
 			if err != nil {
 				return err
@@ -73,6 +75,7 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().BoolVar(&once, "once", false, "sync until idle and exit")
 	cmd.Flags().BoolVar(&follow, "follow", true, "keep syncing until Ctrl+C")
 	cmd.Flags().DurationVar(&idleExit, "idle-exit", 30*time.Second, "exit after being idle (once mode)")
+	cmd.Flags().DurationVar(&maxReconnect, "max-reconnect", 5*time.Minute, "give up reconnecting after this duration (0 = unlimited)")
 	cmd.Flags().BoolVar(&downloadMedia, "download-media", false, "download media in the background during sync")
 	cmd.Flags().BoolVar(&refreshContacts, "refresh-contacts", false, "refresh contacts from session store into local DB")
 	cmd.Flags().BoolVar(&refreshGroups, "refresh-groups", false, "refresh joined groups (live) into local DB")

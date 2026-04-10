@@ -31,6 +31,7 @@ type SyncOptions struct {
 	RefreshContacts bool
 	RefreshGroups   bool
 	IdleExit        time.Duration // only used for bootstrap/once
+	MaxReconnect    time.Duration // max time to attempt reconnection before giving up (0 = unlimited)
 	Verbosity       int           // future
 }
 
@@ -176,7 +177,7 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 				return SyncResult{MessagesStored: messagesStored.Load()}, nil
 			case <-disconnected:
 				fmt.Fprintln(os.Stderr, "Reconnecting...")
-				if err := a.wa.ReconnectWithBackoff(ctx, 2*time.Second, 30*time.Second); err != nil {
+				if err := a.reconnect(ctx, opts.MaxReconnect); err != nil {
 					return SyncResult{MessagesStored: messagesStored.Load()}, err
 				}
 			}
@@ -197,7 +198,7 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 			return SyncResult{MessagesStored: messagesStored.Load()}, nil
 		case <-disconnected:
 			fmt.Fprintln(os.Stderr, "Reconnecting...")
-			if err := a.wa.ReconnectWithBackoff(ctx, 2*time.Second, 30*time.Second); err != nil {
+			if err := a.reconnect(ctx, opts.MaxReconnect); err != nil {
 				return SyncResult{MessagesStored: messagesStored.Load()}, err
 			}
 		case <-ticker.C:
@@ -208,6 +209,24 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 			}
 		}
 	}
+}
+
+// reconnect wraps ReconnectWithBackoff with an optional deadline.
+// If maxDuration is positive, reconnection gives up after that long.
+// A zero or negative value means retry indefinitely (until ctx is cancelled).
+func (a *App) reconnect(ctx context.Context, maxDuration time.Duration) error {
+	rctx := ctx
+	var cancel context.CancelFunc
+	if maxDuration > 0 {
+		rctx, cancel = context.WithTimeout(ctx, maxDuration)
+		defer cancel()
+	}
+	err := a.wa.ReconnectWithBackoff(rctx, 2*time.Second, 30*time.Second)
+	if err != nil && ctx.Err() == nil {
+		// Deadline hit but parent context is still alive — we gave up, not the user.
+		return fmt.Errorf("could not reconnect after %s: %w", maxDuration, err)
+	}
+	return err
 }
 
 func chatKind(chat types.JID) string {
