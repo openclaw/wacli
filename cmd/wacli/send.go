@@ -55,7 +55,12 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 
-			msgID, err := a.WA().SendText(ctx, toJID, message)
+			msgID, err := runSendOperation(ctx, func(ctx context.Context) error {
+				a.WA().Close()
+				return a.Connect(ctx, false, nil)
+			}, func(ctx context.Context) (string, error) {
+				return a.WA().SendText(ctx, toJID, message)
+			})
 			if err != nil {
 				return err
 			}

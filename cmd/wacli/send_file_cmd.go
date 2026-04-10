@@ -46,10 +46,24 @@ func newSendFileCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 
-			msgID, meta, err := sendFile(ctx, a, toJID, filePath, filename, caption, mimeOverride)
+			type sendFileResult struct {
+				id   string
+				meta map[string]string
+			}
+			res, err := runSendOperation(ctx, func(ctx context.Context) error {
+				a.WA().Close()
+				return a.Connect(ctx, false, nil)
+			}, func(ctx context.Context) (sendFileResult, error) {
+				msgID, meta, err := sendFile(ctx, a, toJID, filePath, filename, caption, mimeOverride)
+				if err != nil {
+					return sendFileResult{}, err
+				}
+				return sendFileResult{id: msgID, meta: meta}, nil
+			})
 			if err != nil {
 				return err
 			}
+			msgID, meta := res.id, res.meta
 
 			if flags.asJSON {
 				return out.WriteJSON(os.Stdout, map[string]any{
