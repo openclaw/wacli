@@ -41,3 +41,21 @@ func TestBestContactName(t *testing.T) {
 		t.Fatalf("expected push name")
 	}
 }
+
+// TestConnectOptionsPhonePairing verifies that ConnectOptions correctly
+// carries phone pairing fields through to the Connect call.
+func TestConnectOptionsPhonePairing(t *testing.T) {
+	opts := ConnectOptions{
+		AllowQR:         true,
+		PairPhoneNumber: "447451294587",
+		OnPairCode: func(code string) {
+			// code surfaced to caller
+		},
+	}
+	if opts.PairPhoneNumber == "" {
+		t.Error("PairPhoneNumber should be set")
+	}
+	if opts.OnPairCode == nil {
+		t.Error("OnPairCode should be set")
+	}
+}

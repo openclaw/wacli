@@ -86,8 +86,14 @@ func (c *Client) IsConnected() bool {
 }
 
 type ConnectOptions struct {
-	AllowQR  bool
-	OnQRCode func(code string)
+	AllowQR        bool
+	OnQRCode       func(code string)
+	// PairPhoneNumber, if set, uses phone-number pairing instead of QR.
+	// The number must be in E.164 format (digits only, no leading +).
+	// Connect will print the 8-digit pairing code via OnPairCode and
+	// wait for the user to enter it on their phone.
+	PairPhoneNumber string
+	OnPairCode      func(code string)
 }
 
 func (c *Client) Connect(ctx context.Context, opts ConnectOptions) error {
@@ -121,6 +127,13 @@ func (c *Client) Connect(ctx context.Context, opts ConnectOptions) error {
 		return nil
 	}
 
+	// Phone-number pairing: request a code immediately after the first QR
+	// event confirms the websocket is ready, then wait for pairing to
+	// complete. The QR is never displayed to the user.
+	if opts.PairPhoneNumber != "" {
+		return c.connectWithPhonePairing(ctx, qrChan, opts)
+	}
+
 	// Wait for QR flow to succeed or fail.
 	for {
 		select {
@@ -144,6 +157,69 @@ func (c *Client) Connect(ctx context.Context, opts ConnectOptions) error {
 			case "error":
 				return fmt.Errorf("QR error")
 			}
+		}
+	}
+}
+
+// connectWithPhonePairing handles the phone-number pairing flow.
+// It waits for the first QR event (which signals the websocket is ready),
+// requests a pairing code for the given phone number, surfaces it via
+// opts.OnPairCode, and blocks until authentication completes.
+func (c *Client) connectWithPhonePairing(ctx context.Context, qrChan <-chan whatsmeow.QRChannelItem, opts ConnectOptions) error {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+
+	// Wait for the first QR event — it means the websocket is fully ready.
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case evt, ok := <-qrChan:
+		if !ok {
+			return fmt.Errorf("QR channel closed before phone pairing could start")
+		}
+		if evt.Event == "timeout" {
+			return fmt.Errorf("timed out waiting for websocket ready signal")
+		}
+		if evt.Event == "error" {
+			return fmt.Errorf("websocket error before phone pairing could start")
+		}
+		// evt.Event == "code": websocket is ready.
+	}
+
+	// Request the pairing code.
+	code, err := cli.PairPhone(ctx, opts.PairPhoneNumber, true, whatsmeow.PairClientChrome, "Chrome (Linux)")
+	if err != nil {
+		return fmt.Errorf("phone pairing: %w", err)
+	}
+
+	if opts.OnPairCode != nil {
+		opts.OnPairCode(code)
+	}
+
+	// Wait for the pairing to be confirmed (user enters code on their phone).
+	// The QR channel will emit "success" when pairing completes.
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case evt, ok := <-qrChan:
+			if !ok {
+				// Channel closed; check if we are now authenticated.
+				if cli.Store != nil && cli.Store.ID != nil {
+					return nil
+				}
+				return fmt.Errorf("QR channel closed before pairing completed")
+			}
+			switch evt.Event {
+			case "success":
+				return nil
+			case "timeout":
+				return fmt.Errorf("pairing code timed out (120s); please run auth again")
+			case "error":
+				return fmt.Errorf("pairing error")
+			}
+			// "code" events are new QR rotations — ignore them during phone pairing.
 		}
 	}
 }

@@ -119,12 +119,25 @@ func (a *App) StoreDir() string    { return a.opts.StoreDir }
 func (a *App) Version() string     { return a.opts.Version }
 func (a *App) AllowUnauthed() bool { return a.opts.AllowUnauthed }
 
-func (a *App) Connect(ctx context.Context, allowQR bool, qrWriter func(string)) error {
+func (a *App) Connect(ctx context.Context, allowQR bool, qrWriter func(string), pairPhone ...interface{}) error {
 	if err := a.OpenWA(); err != nil {
 		return err
 	}
-	return a.wa.Connect(ctx, wa.ConnectOptions{
+	opts := wa.ConnectOptions{
 		AllowQR:  allowQR,
 		OnQRCode: qrWriter,
-	})
+	}
+	// Optional phone pairing args: (phoneNumber string, onPairCode func(string))
+	if len(pairPhone) >= 1 {
+		if s, ok := pairPhone[0].(string); ok && s != "" {
+			opts.PairPhoneNumber = s
+			opts.AllowQR = true // phone pairing still needs the QR channel
+		}
+	}
+	if len(pairPhone) >= 2 {
+		if fn, ok := pairPhone[1].(func(string)); ok {
+			opts.OnPairCode = fn
+		}
+	}
+	return a.wa.Connect(ctx, opts)
 }

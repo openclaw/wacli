@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -18,10 +19,23 @@ func newAuthCmd(flags *rootFlags) *cobra.Command {
 	var follow bool
 	var idleExit time.Duration
 	var downloadMedia bool
+	var phone string
 
 	cmd := &cobra.Command{
 		Use:   "auth",
-		Short: "Authenticate with WhatsApp (QR) and bootstrap sync",
+		Short: "Authenticate with WhatsApp (QR scan or phone pairing code)",
+		Long: `Authenticate wacli with WhatsApp by linking it as a companion device.
+
+By default a QR code is printed to the terminal. Scan it with WhatsApp on
+your phone (Settings > Linked Devices > Link a Device).
+
+On headless servers or when a QR scan is inconvenient, use --phone to
+authenticate via a pairing code instead:
+
+  wacli auth --phone +15551234567
+
+WhatsApp will display an 8-digit code on your screen. Enter it on your phone
+under Settings > Linked Devices > Link a Device > Link with phone number.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
@@ -37,20 +51,33 @@ func newAuthCmd(flags *rootFlags) *cobra.Command {
 				mode = appPkg.SyncModeFollow
 			}
 
-			fmt.Fprintln(os.Stderr, "Starting authentication…")
-			res, err := a.Sync(ctx, appPkg.SyncOptions{
+			syncOpts := appPkg.SyncOptions{
 				Mode:            mode,
 				AllowQR:         true,
 				DownloadMedia:   downloadMedia,
 				RefreshContacts: true,
 				RefreshGroups:   true,
 				IdleExit:        idleExit,
-				OnQRCode: func(code string) {
+			}
+
+			if strings.TrimSpace(phone) != "" {
+				// Phone pairing: normalise number and wire up the code display.
+				syncOpts.PairPhoneNumber = normalizePhone(phone)
+				syncOpts.OnPairCode = func(code string) {
+					fmt.Fprintf(os.Stdout, "\nPairing code: %s\n\n", code)
+					fmt.Fprintln(os.Stdout, "On your phone: Settings -> Linked Devices -> Link a Device -> Link with phone number")
+					fmt.Fprintln(os.Stdout, "Enter the code above when prompted. Waiting for confirmation...")
+				}
+			} else {
+				syncOpts.OnQRCode = func(code string) {
 					fmt.Fprintln(os.Stderr, "\nScan this QR code with WhatsApp (Linked Devices):")
 					qrterminal.GenerateHalfBlock(code, qrterminal.M, os.Stderr)
 					fmt.Fprintln(os.Stderr)
-				},
-			})
+				}
+			}
+
+			fmt.Fprintln(os.Stderr, "Starting authentication...")
+			res, err := a.Sync(ctx, syncOpts)
 			if err != nil {
 				return err
 			}
@@ -70,11 +97,20 @@ func newAuthCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().BoolVar(&follow, "follow", false, "keep syncing after auth")
 	cmd.Flags().DurationVar(&idleExit, "idle-exit", 30*time.Second, "exit after being idle (bootstrap/once modes)")
 	cmd.Flags().BoolVar(&downloadMedia, "download-media", false, "download media in the background during sync")
+	cmd.Flags().StringVar(&phone, "phone", "", "phone number for pairing-code auth (e.g. +15551234567); skips QR scan")
 
 	cmd.AddCommand(newAuthStatusCmd(flags))
 	cmd.AddCommand(newAuthLogoutCmd(flags))
 
 	return cmd
+}
+
+// normalizePhone strips whitespace and leading + so the number is
+// digits-only as required by the WhatsApp pairing API.
+func normalizePhone(phone string) string {
+	phone = strings.TrimSpace(phone)
+	phone = strings.TrimPrefix(phone, "+")
+	return phone
 }
 
 func newAuthStatusCmd(flags *rootFlags) *cobra.Command {

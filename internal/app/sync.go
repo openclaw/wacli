@@ -26,6 +26,11 @@ type SyncOptions struct {
 	Mode            SyncMode
 	AllowQR         bool
 	OnQRCode        func(string)
+	// PairPhoneNumber, if set, uses phone-number pairing instead of QR.
+	// Must be digits-only E.164 (no leading +). OnPairCode is called with
+	// the 8-digit code to display to the user.
+	PairPhoneNumber string
+	OnPairCode      func(code string)
 	AfterConnect    func(context.Context) error
 	DownloadMedia   bool
 	RefreshContacts bool
@@ -142,7 +147,7 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	})
 	defer a.wa.RemoveEventHandler(handlerID)
 
-	if err := a.Connect(ctx, opts.AllowQR, opts.OnQRCode); err != nil {
+	if err := a.Connect(ctx, opts.AllowQR, opts.OnQRCode, opts.PairPhoneNumber, opts.OnPairCode); err != nil {
 		return SyncResult{}, err
 	}
 
