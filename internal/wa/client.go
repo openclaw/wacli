@@ -258,11 +258,13 @@ func ParseUserOrJID(s string) (types.JID, error) {
 	}
 
 	var digits strings.Builder
-	for _, r := range s {
+	for i, r := range s {
 		switch {
-		case unicode.IsDigit(r):
+		case r == '+' && i == 0:
+			continue
+		case unicode.IsDigit(r) && r <= unicode.MaxASCII:
 			digits.WriteRune(r)
-		case r == '+', r == ' ', r == '-', r == '(', r == ')', r == '.':
+		case r == ' ', r == '-', r == '(', r == ')', r == '.':
 			continue
 		default:
 			return types.JID{}, fmt.Errorf("invalid recipient phone number %q; use digits, optional leading +, or a full JID", s)

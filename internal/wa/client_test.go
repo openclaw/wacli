@@ -52,6 +52,18 @@ func TestParseUserOrJID(t *testing.T) {
 			t.Fatalf("expected invalid phone number error")
 		}
 	})
+
+	t.Run("plus only allowed first", func(t *testing.T) {
+		if _, err := ParseUserOrJID("12+34"); err == nil {
+			t.Fatalf("expected invalid phone number error")
+		}
+	})
+
+	t.Run("unicode digits rejected", func(t *testing.T) {
+		if _, err := ParseUserOrJID("١٢٣٤"); err == nil {
+			t.Fatalf("expected invalid phone number error")
+		}
+	})
 }
 
 func TestBestContactName(t *testing.T) {
