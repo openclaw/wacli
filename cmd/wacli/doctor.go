@@ -24,10 +24,7 @@ func newDoctorCmd(flags *rootFlags) *cobra.Command {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
-			storeDir := flags.storeDir
-			if storeDir == "" {
-				storeDir = config.DefaultStoreDir()
-			}
+			storeDir := config.ResolveStoreDir(flags.storeDir)
 			storeDir, _ = filepath.Abs(storeDir)
 
 			var lockHeld bool

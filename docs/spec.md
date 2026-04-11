@@ -132,7 +132,7 @@ Fallback:
 
 Global flags:
 
-- `--store DIR` (default `~/.wacli`)
+- `--store DIR` (default `WACLI_STORE_DIR` or `~/.wacli`)
 - `--json` (default: human text)
 - `--timeout DURATION` (non-sync commands; e.g. `5m`)
 - `--version` (prints version and exits)

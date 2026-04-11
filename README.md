@@ -38,7 +38,7 @@ Run (local build only):
 
 ## Quick start
 
-Default store directory is `~/.wacli` (override with `--store DIR`).
+Default store directory is `~/.wacli` (override with `--store DIR` or `WACLI_STORE_DIR`).
 
 ```bash
 # 1) Authenticate (shows QR), then bootstrap sync
@@ -87,12 +87,13 @@ This project is heavily inspired by (and learns from) the excellent `whatsapp-cl
 
 ## Storage
 
-Defaults to `~/.wacli` (override with `--store DIR`).
+Defaults to `~/.wacli` (override with `--store DIR` or `WACLI_STORE_DIR`).
 
 ## Environment overrides
 
 - `WACLI_DEVICE_LABEL`: set the linked device label (shown in WhatsApp).
 - `WACLI_DEVICE_PLATFORM`: override the linked device platform (defaults to `CHROME` if unset or invalid).
+- `WACLI_STORE_DIR`: override the default store directory when `--store` is not set.
 
 ## Backfilling older history
 
