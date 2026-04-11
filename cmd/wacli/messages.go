@@ -27,9 +27,13 @@ func newMessagesCmd(flags *rootFlags) *cobra.Command {
 
 func newMessagesListCmd(flags *rootFlags) *cobra.Command {
 	var chat string
+	var sender string
 	var limit int
 	var afterStr string
 	var beforeStr string
+	var fromMe bool
+	var fromThem bool
+	var asc bool
 
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -61,11 +65,22 @@ func newMessagesListCmd(flags *rootFlags) *cobra.Command {
 				before = &t
 			}
 
+			var fromMeFilter *bool
+			if fromMe {
+				t := true
+				fromMeFilter = &t
+			} else if fromThem {
+				f := false
+				fromMeFilter = &f
+			}
 			msgs, err := a.DB().ListMessages(store.ListMessagesParams{
-				ChatJID: chat,
-				Limit:   limit,
-				After:   after,
-				Before:  before,
+				ChatJID:   chat,
+				SenderJID: sender,
+				Limit:     limit,
+				After:     after,
+				Before:    before,
+				FromMe:    fromMeFilter,
+				Asc:       asc,
 			})
 			if err != nil {
 				return err
@@ -89,9 +104,11 @@ func newMessagesListCmd(flags *rootFlags) *cobra.Command {
 				if chatLabel == "" {
 					chatLabel = m.ChatJID
 				}
-				text := strings.TrimSpace(m.DisplayText)
+				// Prefer raw text; fall back to display text (which may contain
+				// protocol placeholders like "(message)").
+				text := strings.TrimSpace(m.Text)
 				if text == "" {
-					text = strings.TrimSpace(m.Text)
+					text = strings.TrimSpace(m.DisplayText)
 				}
 				if m.MediaType != "" && text == "" {
 					text = "Sent " + m.MediaType
@@ -109,10 +126,14 @@ func newMessagesListCmd(flags *rootFlags) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&chat, "chat", "", "chat JID")
-	cmd.Flags().IntVar(&limit, "limit", 50, "limit results")
+	cmd.Flags().StringVar(&chat, "chat", "", "filter by chat JID")
+	cmd.Flags().StringVar(&sender, "sender", "", "filter by sender JID")
+	cmd.Flags().IntVar(&limit, "limit", 50, "max number of messages to return")
 	cmd.Flags().StringVar(&afterStr, "after", "", "only messages after time (RFC3339 or YYYY-MM-DD)")
 	cmd.Flags().StringVar(&beforeStr, "before", "", "only messages before time (RFC3339 or YYYY-MM-DD)")
+	cmd.Flags().BoolVar(&fromMe, "from-me", false, "only messages sent by me")
+	cmd.Flags().BoolVar(&fromThem, "from-them", false, "only messages received (not sent by me)")
+	cmd.Flags().BoolVar(&asc, "asc", false, "show oldest messages first (default: newest first)")
 	return cmd
 }
 

@@ -59,10 +59,13 @@ func (d *DB) UpsertMessage(p UpsertMessageParams) error {
 }
 
 type ListMessagesParams struct {
-	ChatJID string
-	Limit   int
-	Before  *time.Time
-	After   *time.Time
+	ChatJID   string
+	SenderJID string
+	Limit     int
+	Before    *time.Time
+	After     *time.Time
+	FromMe    *bool // nil = all, true = sent by me, false = received
+	Asc       bool  // true = oldest first (default: newest first)
 }
 
 func (d *DB) ListMessages(p ListMessagesParams) ([]Message, error) {
@@ -87,7 +90,22 @@ func (d *DB) ListMessages(p ListMessagesParams) ([]Message, error) {
 		query += " AND m.ts < ?"
 		args = append(args, unix(*p.Before))
 	}
-	query += " ORDER BY m.ts DESC LIMIT ?"
+	if strings.TrimSpace(p.SenderJID) != "" {
+		query += " AND m.sender_jid = ?"
+		args = append(args, p.SenderJID)
+	}
+	if p.FromMe != nil {
+		if *p.FromMe {
+			query += " AND m.from_me = 1"
+		} else {
+			query += " AND m.from_me = 0"
+		}
+	}
+	if p.Asc {
+		query += " ORDER BY m.ts ASC LIMIT ?"
+	} else {
+		query += " ORDER BY m.ts DESC LIMIT ?"
+	}
 	args = append(args, p.Limit)
 	return d.scanMessages(query, args...)
 }
