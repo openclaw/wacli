@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"fmt"
+	"runtime"
 	"testing"
 	"time"
 
@@ -232,6 +234,81 @@ func TestSyncStoresDisplayText(t *testing.T) {
 	}
 	if msg.DisplayText != "Reacted 👍 to hello" {
 		t.Fatalf("unexpected reaction display text: %q", msg.DisplayText)
+	}
+}
+
+func TestSyncMediaEnqueueDropsOverflow(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	// Slow downloads so workers can't drain the channel during event processing.
+	f.downloadDelay = 5 * time.Second
+
+	chat := types.JID{User: "123", Server: types.DefaultUserServer}
+	f.contacts[chat.ToNonAD()] = types.ContactInfo{
+		Found:    true,
+		FullName: "Alice",
+		PushName: "Alice",
+	}
+
+	// Create 600 media messages — more than the 512 channel buffer.
+	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	var msgs []interface{}
+	for i := 0; i < 600; i++ {
+		msgs = append(msgs, &events.Message{
+			Info: types.MessageInfo{
+				MessageSource: types.MessageSource{
+					Chat:     chat,
+					Sender:   chat,
+					IsFromMe: false,
+					IsGroup:  false,
+				},
+				ID:        fmt.Sprintf("m-%d", i),
+				Timestamp: base.Add(time.Duration(i) * time.Second),
+				PushName:  "Alice",
+			},
+			Message: &waProto.Message{
+				ImageMessage: &waProto.ImageMessage{
+					Mimetype:      proto.String("image/jpeg"),
+					DirectPath:    proto.String("/direct"),
+					MediaKey:      []byte{1},
+					FileSHA256:    []byte{2},
+					FileEncSHA256: []byte{3},
+					FileLength:    proto.Uint64(10),
+				},
+			},
+		})
+	}
+	f.connectEvents = msgs
+
+	goroutinesBefore := runtime.NumGoroutine()
+	var goroutinesDuring int
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	_, err := a.Sync(ctx, SyncOptions{
+		Mode:          SyncModeFollow,
+		AllowQR:       false,
+		DownloadMedia: true,
+		AfterConnect: func(_ context.Context) error {
+			// All 600 events have been emitted by now. With slow workers,
+			// the 512-slot channel is full and overflow goroutines are blocked.
+			goroutinesDuring = runtime.NumGoroutine()
+			cancel()
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	// Before the fix, overflow media jobs spawned ~88 blocked goroutines
+	// (600 messages - 512 channel slots). With the fix, overflow is dropped.
+	leaked := goroutinesDuring - goroutinesBefore
+	if leaked > 20 {
+		t.Fatalf("goroutine leak: %d new goroutines during sync with 600 media messages (before=%d, during=%d)",
+			leaked, goroutinesBefore, goroutinesDuring)
 	}
 }
 

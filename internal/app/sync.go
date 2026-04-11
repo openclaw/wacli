@@ -68,13 +68,9 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 			select {
 			case mediaJobs <- mediaJob{chatJID: chatJID, msgID: msgID}:
 			default:
-				// Avoid blocking the event handler.
-				go func() {
-					select {
-					case mediaJobs <- mediaJob{chatJID: chatJID, msgID: msgID}:
-					case <-ctx.Done():
-					}
-				}()
+				// Drop the job rather than spawning an unbounded goroutine.
+				// Media can still be downloaded later via `wacli media download`.
+				fmt.Fprintf(os.Stderr, "\rmedia queue full, skipping download for %s/%s\n", chatJID, msgID)
 			}
 		}
 	}
