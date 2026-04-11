@@ -44,6 +44,18 @@ func (d *DB) searchLIKE(p SearchMessagesParams) ([]Message, error) {
 	return d.scanMessages(query, args...)
 }
 
+func sanitizeFTSQuery(q string) string {
+	tokens := strings.Fields(q)
+	if len(tokens) == 0 {
+		return `""`
+	}
+	quoted := make([]string, len(tokens))
+	for i, tok := range tokens {
+		quoted[i] = `"` + strings.ReplaceAll(tok, `"`, `""`) + `"`
+	}
+	return strings.Join(quoted, " ")
+}
+
 func (d *DB) searchFTS(p SearchMessagesParams) ([]Message, error) {
 	query := `
 		SELECT m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.media_type,''),
@@ -52,7 +64,7 @@ func (d *DB) searchFTS(p SearchMessagesParams) ([]Message, error) {
 		JOIN messages m ON messages_fts.rowid = m.rowid
 		LEFT JOIN chats c ON c.jid = m.chat_jid
 		WHERE messages_fts MATCH ?`
-	args := []interface{}{p.Query}
+	args := []interface{}{sanitizeFTSQuery(p.Query)}
 	query, args = applyMessageFilters(query, args, p)
 	query += " ORDER BY bm25(messages_fts) LIMIT ?"
 	args = append(args, p.Limit)
