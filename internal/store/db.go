@@ -35,12 +35,12 @@ func Open(path string) (*DB, error) {
 		return nil, err
 	}
 
-	// Ensure the DB file is owner-only regardless of umask.
+	// Ensure SQLite artifacts are owner-only regardless of umask.
 	// Must run after init() because sql.Open is lazy; the file is not
 	// created until the first query (PRAGMAs in init).
-	if err := os.Chmod(path, 0o600); err != nil {
+	if err := chmodSQLiteArtifacts(path); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("chmod db file: %w", err)
+		return nil, err
 	}
 
 	return s, nil
@@ -61,4 +61,14 @@ func (d *DB) init() error {
 	_, _ = d.sql.Exec("PRAGMA foreign_keys=ON;")
 
 	return d.ensureSchema()
+}
+
+func chmodSQLiteArtifacts(path string) error {
+	for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
+		target := path + suffix
+		if err := os.Chmod(target, 0o600); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("chmod db file: %w", err)
+		}
+	}
+	return nil
 }

@@ -40,12 +40,30 @@ func TestDBFilePermissions(t *testing.T) {
 	}
 	defer db.Close()
 
+	if err := db.UpsertChat("123@s.whatsapp.net", "dm", "Alice", time.Now()); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatalf("Stat db file: %v", err)
 	}
 	if perm := info.Mode().Perm(); perm != 0o600 {
 		t.Fatalf("expected db file permissions 0600, got %04o", perm)
+	}
+
+	for _, suffix := range []string{"-wal", "-shm", "-journal"} {
+		sidecar := path + suffix
+		info, err := os.Stat(sidecar)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			t.Fatalf("Stat %s: %v", sidecar, err)
+		}
+		if perm := info.Mode().Perm(); perm != 0o600 {
+			t.Fatalf("expected %s permissions 0600, got %04o", sidecar, perm)
+		}
 	}
 
 	// Verify a sub-directory created by Open uses 0700.
