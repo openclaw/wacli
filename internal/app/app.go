@@ -45,6 +45,8 @@ type WAClient interface {
 	DecryptReaction(ctx context.Context, reaction *events.Message) (*waProto.ReactionMessage, error)
 	RequestHistorySyncOnDemand(ctx context.Context, lastKnown types.MessageInfo, count int) (types.MessageID, error)
 	Logout(ctx context.Context) error
+	LinkedJID() string
+	SendReaction(ctx context.Context, chat, sender types.JID, targetID types.MessageID, reaction string) (types.MessageID, error)
 }
 
 type Options struct {

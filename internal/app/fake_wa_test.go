@@ -250,3 +250,9 @@ func (f *fakeWA) Logout(ctx context.Context) error {
 	f.authed = false
 	return nil
 }
+
+func (f *fakeWA) LinkedJID() string { return "5491112345678@s.whatsapp.net" }
+
+func (f *fakeWA) SendReaction(_ context.Context, _, _ types.JID, _ types.MessageID, _ string) (types.MessageID, error) {
+	return "reaction-msg-id", nil
+}

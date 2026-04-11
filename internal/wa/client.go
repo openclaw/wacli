@@ -370,3 +370,35 @@ func (c *Client) ReconnectWithBackoff(ctx context.Context, minDelay, maxDelay ti
 		}
 	}
 }
+
+// SendReaction sends an emoji reaction to a specific message.
+// Set chat to the conversation JID, sender to the message author's JID
+// (required for group messages; can be empty for DMs), targetID to the
+// message ID being reacted to, and reaction to the emoji (empty string
+// removes an existing reaction).
+func (c *Client) SendReaction(ctx context.Context, chat, sender types.JID, targetID types.MessageID, reaction string) (types.MessageID, error) {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || !cli.IsConnected() {
+		return "", fmt.Errorf("not connected")
+	}
+	msg := cli.BuildReaction(chat, sender, targetID, reaction)
+	resp, err := cli.SendMessage(ctx, chat, msg)
+	if err != nil {
+		return "", err
+	}
+	return resp.ID, nil
+}
+
+// LinkedJID returns the JID of the linked WhatsApp account, or an empty
+// string if not authenticated.
+func (c *Client) LinkedJID() string {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || cli.Store == nil || cli.Store.ID == nil {
+		return ""
+	}
+	return cli.Store.ID.ToNonAD().String()
+}
