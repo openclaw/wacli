@@ -81,7 +81,6 @@ func (a *App) runMediaWorkers(ctx context.Context, jobs <-chan mediaJob, workers
 		return func() {}, nil
 	}
 
-	ctx, cancel := context.WithCancel(ctx)
 	var wg sync.WaitGroup
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
@@ -104,7 +103,6 @@ func (a *App) runMediaWorkers(ctx context.Context, jobs <-chan mediaJob, workers
 	}
 
 	stop := func() {
-		cancel()
 		wg.Wait()
 	}
 	return stop, nil

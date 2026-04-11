@@ -58,16 +58,19 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 
 	var stopMedia func()
 	var mediaJobs chan mediaJob
+	mediaCtx := ctx
+	mediaCancel := func() {}
 	enqueueMedia := func(chatJID, msgID string) {}
 	if opts.DownloadMedia {
 		mediaJobs = make(chan mediaJob, 512)
+		mediaCtx, mediaCancel = context.WithCancel(ctx)
 		enqueueMedia = func(chatJID, msgID string) {
 			if strings.TrimSpace(chatJID) == "" || strings.TrimSpace(msgID) == "" {
 				return
 			}
 			select {
 			case mediaJobs <- mediaJob{chatJID: chatJID, msgID: msgID}:
-			case <-ctx.Done():
+			case <-mediaCtx.Done():
 			}
 		}
 	}
@@ -133,15 +136,20 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 			}
 		}
 	})
-	defer a.wa.RemoveEventHandler(handlerID)
+	defer func() {
+		a.wa.RemoveEventHandler(handlerID)
+		mediaCancel()
+		if stopMedia != nil {
+			stopMedia()
+		}
+	}()
 
 	if opts.DownloadMedia {
 		var err error
-		stopMedia, err = a.runMediaWorkers(ctx, mediaJobs, 4)
+		stopMedia, err = a.runMediaWorkers(mediaCtx, mediaJobs, 4)
 		if err != nil {
 			return SyncResult{}, err
 		}
-		defer stopMedia()
 	}
 
 	if err := a.Connect(ctx, opts.AllowQR, opts.OnQRCode); err != nil {

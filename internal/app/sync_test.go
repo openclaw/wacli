@@ -296,7 +296,7 @@ func TestSyncMediaEnqueueHandlesOverflow(t *testing.T) {
 		AfterConnect: func(_ context.Context) error {
 			deadline := time.Now().Add(10 * time.Second)
 			for time.Now().Before(deadline) {
-				if int(f.downloadCount.Load()) == totalJobs {
+				if f.downloadCount.Load() >= int64(totalJobs) {
 					goroutinesDuring = runtime.NumGoroutine()
 					cancel()
 					return nil
