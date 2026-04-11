@@ -237,13 +237,14 @@ func TestSyncStoresDisplayText(t *testing.T) {
 	}
 }
 
-func TestSyncMediaEnqueueDropsOverflow(t *testing.T) {
+func TestSyncMediaEnqueueHandlesOverflow(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
 	a.wa = f
 
-	// Slow downloads so workers can't drain the channel during event processing.
-	f.downloadDelay = 5 * time.Second
+	// Slow downloads so the media queue fills, but not so slow that the test
+	// takes an unreasonable amount of time to finish once backpressure kicks in.
+	f.downloadDelay = 20 * time.Millisecond
 
 	chat := types.JID{User: "123", Server: types.DefaultUserServer}
 	f.contacts[chat.ToNonAD()] = types.ContactInfo{
@@ -286,25 +287,32 @@ func TestSyncMediaEnqueueDropsOverflow(t *testing.T) {
 	var goroutinesDuring int
 
 	ctx, cancel := context.WithCancel(context.Background())
+	totalJobs := len(msgs)
 
 	_, err := a.Sync(ctx, SyncOptions{
 		Mode:          SyncModeFollow,
 		AllowQR:       false,
 		DownloadMedia: true,
 		AfterConnect: func(_ context.Context) error {
-			// All 600 events have been emitted by now. With slow workers,
-			// the 512-slot channel is full and overflow goroutines are blocked.
+			deadline := time.Now().Add(10 * time.Second)
+			for time.Now().Before(deadline) {
+				if int(f.downloadCount.Load()) == totalJobs {
+					goroutinesDuring = runtime.NumGoroutine()
+					cancel()
+					return nil
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
 			goroutinesDuring = runtime.NumGoroutine()
 			cancel()
-			return nil
+			return fmt.Errorf("expected %d media downloads, got %d", totalJobs, f.downloadCount.Load())
 		},
 	})
 	if err != nil {
 		t.Fatalf("Sync: %v", err)
 	}
 
-	// Before the fix, overflow media jobs spawned ~88 blocked goroutines
-	// (600 messages - 512 channel slots). With the fix, overflow is dropped.
+	// The queue should be backpressured, not leak goroutines or drop media jobs.
 	leaked := goroutinesDuring - goroutinesBefore
 	if leaked > 20 {
 		t.Fatalf("goroutine leak: %d new goroutines during sync with 600 media messages (before=%d, during=%d)",

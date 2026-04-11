@@ -67,10 +67,7 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 			}
 			select {
 			case mediaJobs <- mediaJob{chatJID: chatJID, msgID: msgID}:
-			default:
-				// Drop the job rather than spawning an unbounded goroutine.
-				// Media can still be downloaded later via `wacli media download`.
-				fmt.Fprintf(os.Stderr, "\rmedia queue full, skipping download for %s/%s\n", chatJID, msgID)
+			case <-ctx.Done():
 			}
 		}
 	}
@@ -138,10 +135,6 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	})
 	defer a.wa.RemoveEventHandler(handlerID)
 
-	if err := a.Connect(ctx, opts.AllowQR, opts.OnQRCode); err != nil {
-		return SyncResult{}, err
-	}
-
 	if opts.DownloadMedia {
 		var err error
 		stopMedia, err = a.runMediaWorkers(ctx, mediaJobs, 4)
@@ -149,6 +142,10 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 			return SyncResult{}, err
 		}
 		defer stopMedia()
+	}
+
+	if err := a.Connect(ctx, opts.AllowQR, opts.OnQRCode); err != nil {
+		return SyncResult{}, err
 	}
 
 	// Optional: bootstrap imports (helps contacts/groups management without waiting for events).

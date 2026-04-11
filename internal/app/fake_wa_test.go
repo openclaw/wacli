@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/steipete/wacli/internal/wa"
@@ -31,6 +32,7 @@ type fakeWA struct {
 
 	onDemandHistory func(lastKnown types.MessageInfo, count int) *events.HistorySync
 	downloadDelay   time.Duration
+	downloadCount   atomic.Int64
 }
 
 func newFakeWA() *fakeWA {
@@ -222,6 +224,7 @@ func (f *fakeWA) DecryptReaction(ctx context.Context, reaction *events.Message) 
 }
 
 func (f *fakeWA) DownloadMediaToFile(ctx context.Context, directPath string, encFileHash, fileHash, mediaKey []byte, fileLength uint64, mediaType, mmsType string, targetPath string) (int64, error) {
+	f.downloadCount.Add(1)
 	if f.downloadDelay > 0 {
 		select {
 		case <-time.After(f.downloadDelay):
