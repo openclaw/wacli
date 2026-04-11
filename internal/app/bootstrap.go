@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"time"
+
+	"github.com/steipete/wacli/internal/store"
 )
 
 func (a *App) refreshContacts(ctx context.Context) error {
@@ -30,7 +32,18 @@ func (a *App) refreshGroups(ctx context.Context) error {
 	if err := a.OpenWA(); err != nil {
 		return err
 	}
-	groups, err := a.wa.GetJoinedGroups(ctx)
+	return refreshGroups(ctx, a.wa, a.db)
+}
+
+type groupsStore interface {
+	UpsertGroup(jid, name, ownerJID string, created time.Time) error
+	UpsertChat(jid, kind, name string, lastTS time.Time) error
+	ListGroups(query string, limit int, includeLeft bool) ([]store.Group, error)
+	MarkGroupLeft(jid string) error
+}
+
+func refreshGroups(ctx context.Context, wa WAClient, db groupsStore) error {
+	groups, err := wa.GetJoinedGroups(ctx)
 	if err != nil {
 		return err
 	}
@@ -43,16 +56,19 @@ func (a *App) refreshGroups(ctx context.Context) error {
 			continue
 		}
 		joinedSet[g.JID.String()] = true
-		_ = a.db.UpsertGroup(g.JID.String(), g.GroupName.Name, g.OwnerJID.String(), g.GroupCreated)
-		_ = a.db.UpsertChat(g.JID.String(), "group", g.GroupName.Name, now)
+		_ = db.UpsertGroup(g.JID.String(), g.GroupName.Name, g.OwnerJID.String(), g.GroupCreated)
+		_ = db.UpsertChat(g.JID.String(), "group", g.GroupName.Name, now)
 	}
 
 	// Mark groups in DB that are no longer joined as left.
-	allGroups, err := a.db.ListGroups("", 0, true)
-	if err == nil {
-		for _, g := range allGroups {
-			if !joinedSet[g.JID] {
-				_ = a.db.MarkGroupLeft(g.JID)
+	allGroups, err := db.ListGroups("", 0, true)
+	if err != nil {
+		return err
+	}
+	for _, g := range allGroups {
+		if !joinedSet[g.JID] {
+			if err := db.MarkGroupLeft(g.JID); err != nil {
+				return err
 			}
 		}
 	}

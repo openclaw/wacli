@@ -2,12 +2,42 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
 
+	"github.com/steipete/wacli/internal/store"
 	"go.mau.fi/whatsmeow/types"
 )
+
+type failingGroupsStore struct {
+	listErr error
+	markErr error
+
+	listGroups []store.Group
+	marked     []string
+}
+
+func (f *failingGroupsStore) UpsertGroup(jid, name, ownerJID string, created time.Time) error {
+	return nil
+}
+
+func (f *failingGroupsStore) UpsertChat(jid, kind, name string, lastTS time.Time) error {
+	return nil
+}
+
+func (f *failingGroupsStore) ListGroups(query string, limit int, includeLeft bool) ([]store.Group, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	return append([]store.Group(nil), f.listGroups...), nil
+}
+
+func (f *failingGroupsStore) MarkGroupLeft(jid string) error {
+	f.marked = append(f.marked, jid)
+	return f.markErr
+}
 
 func TestRefreshContactsStoresContacts(t *testing.T) {
 	a := newTestApp(t)
@@ -109,5 +139,35 @@ func TestRefreshGroupsMarksMissingOlderGroupsLeft(t *testing.T) {
 	}
 	if all[len(all)-1].JID != "00000@g.us" {
 		t.Fatalf("expected oldest group to remain queryable, got %q", all[len(all)-1].JID)
+	}
+}
+
+func TestRefreshGroupsReturnsListGroupsError(t *testing.T) {
+	f := newFakeWA()
+	db := &failingGroupsStore{listErr: errors.New("list groups failed")}
+	f.groups[types.JID{User: "12345", Server: types.GroupServer}] = &types.GroupInfo{
+		JID:       types.JID{User: "12345", Server: types.GroupServer},
+		GroupName: types.GroupName{Name: "MyGroup"},
+	}
+
+	err := refreshGroups(context.Background(), f, db)
+	if !errors.Is(err, db.listErr) {
+		t.Fatalf("expected list error, got %v", err)
+	}
+}
+
+func TestRefreshGroupsReturnsMarkGroupLeftError(t *testing.T) {
+	f := newFakeWA()
+	db := &failingGroupsStore{
+		listGroups: []store.Group{{JID: "00000@g.us", Name: "Old Group"}},
+		markErr:    errors.New("mark group left failed"),
+	}
+
+	err := refreshGroups(context.Background(), f, db)
+	if !errors.Is(err, db.markErr) {
+		t.Fatalf("expected mark left error, got %v", err)
+	}
+	if len(db.marked) != 1 || db.marked[0] != "00000@g.us" {
+		t.Fatalf("expected mark left to be attempted for 00000@g.us, got %+v", db.marked)
 	}
 }

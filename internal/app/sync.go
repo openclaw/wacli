@@ -160,7 +160,9 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 		_ = a.refreshContacts(ctx)
 	}
 	if opts.RefreshGroups {
-		_ = a.refreshGroups(ctx)
+		if err := a.refreshGroups(ctx); err != nil {
+			return SyncResult{MessagesStored: messagesStored.Load()}, err
+		}
 	}
 	if opts.AfterConnect != nil {
 		if err := opts.AfterConnect(ctx); err != nil {

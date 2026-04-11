@@ -12,6 +12,21 @@ import (
 	"go.mau.fi/whatsmeow/types"
 )
 
+type groupLeaveWA interface {
+	LeaveGroup(ctx context.Context, group types.JID) error
+}
+
+type groupLeaveDB interface {
+	MarkGroupLeft(jid string) error
+}
+
+func leaveGroup(ctx context.Context, wa groupLeaveWA, db groupLeaveDB, gjid types.JID) error {
+	if err := wa.LeaveGroup(ctx, gjid); err != nil {
+		return err
+	}
+	return db.MarkGroupLeft(gjid.String())
+}
+
 func newGroupsInfoCmd(flags *rootFlags) *cobra.Command {
 	var jidStr string
 	cmd := &cobra.Command{
@@ -143,10 +158,9 @@ func newGroupsLeaveCmd(flags *rootFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := a.WA().LeaveGroup(ctx, gjid); err != nil {
+			if err := leaveGroup(ctx, a.WA(), a.DB(), gjid); err != nil {
 				return err
 			}
-			_ = a.DB().MarkGroupLeft(gjid.String())
 			if flags.asJSON {
 				return out.WriteJSON(os.Stdout, map[string]any{"jid": gjid.String(), "left": true})
 			}
