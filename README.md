@@ -60,8 +60,12 @@ pnpm wacli history backfill --chat 1234567890@s.whatsapp.net --requests 10 --cou
 # Download media for a message (after syncing)
 ./wacli media download --chat 1234567890@s.whatsapp.net --id <message-id>
 
-# Send a message
+# Send a message — by JID, phone, or a name from your contacts/groups/chats
 pnpm wacli send text --to 1234567890 --message "hello"
+pnpm wacli send text --to "mom" --message "landed"
+pnpm wacli send text --to "Family" --message "on my way"
+# Ambiguous name? Pick non-interactively with --pick N:
+pnpm wacli send text --to john --pick 2 --message "hi"
 
 # Send a file
 ./wacli send file --to 1234567890 --file ./pic.jpg --caption "hi"
