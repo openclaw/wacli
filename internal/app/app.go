@@ -39,6 +39,7 @@ type WAClient interface {
 
 	SendText(ctx context.Context, to types.JID, text string) (types.MessageID, error)
 	SendProtoMessage(ctx context.Context, to types.JID, msg *waProto.Message) (types.MessageID, error)
+	SendReaction(ctx context.Context, chatJID types.JID, targetMsgID string, emoji string) (whatsmeow.SendResponse, error)
 	Upload(ctx context.Context, data []byte, mediaType whatsmeow.MediaType) (whatsmeow.UploadResponse, error)
 	DownloadMediaToFile(ctx context.Context, directPath string, encFileHash, fileHash, mediaKey []byte, fileLength uint64, mediaType, mmsType string, targetPath string) (int64, error)
 
@@ -64,7 +65,7 @@ func New(opts Options) (*App, error) {
 	if opts.StoreDir == "" {
 		return nil, fmt.Errorf("store dir is required")
 	}
-	if err := os.MkdirAll(opts.StoreDir, 0700); err != nil {
+	if err := os.MkdirAll(opts.StoreDir, 0o700); err != nil {
 		return nil, fmt.Errorf("create store dir: %w", err)
 	}
 

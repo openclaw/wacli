@@ -19,6 +19,7 @@ func newSendCmd(flags *rootFlags) *cobra.Command {
 	}
 	cmd.AddCommand(newSendTextCmd(flags))
 	cmd.AddCommand(newSendFileCmd(flags))
+	cmd.AddCommand(newSendReactCmd(flags))
 	return cmd
 }
 

@@ -197,6 +197,30 @@ func (c *Client) SendProtoMessage(ctx context.Context, to types.JID, msg *waProt
 	return resp.ID, nil
 }
 
+func (c *Client) SendReaction(ctx context.Context, chatJID types.JID, targetMsgID string, emoji string) (whatsmeow.SendResponse, error) {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || !cli.IsConnected() {
+		return whatsmeow.SendResponse{}, fmt.Errorf("not connected")
+	}
+
+	remoteJID := chatJID.String()
+	msg := &waProto.Message{
+		ReactionMessage: &waProto.ReactionMessage{
+			Key: &waProto.MessageKey{
+				RemoteJID: &remoteJID,
+				ID:        &targetMsgID,
+			},
+			Text:              &emoji,
+			SenderTimestampMS: ptrInt64(time.Now().UnixMilli()),
+		},
+	}
+	return cli.SendMessage(ctx, chatJID, msg)
+}
+
+func ptrInt64(v int64) *int64 { return &v }
+
 func (c *Client) Upload(ctx context.Context, data []byte, mediaType whatsmeow.MediaType) (whatsmeow.UploadResponse, error) {
 	c.mu.Lock()
 	cli := c.client

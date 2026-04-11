@@ -212,6 +212,10 @@ func (f *fakeWA) SendProtoMessage(ctx context.Context, to types.JID, msg *waProt
 	return types.MessageID("msgid"), nil
 }
 
+func (f *fakeWA) SendReaction(ctx context.Context, chatJID types.JID, targetMsgID string, emoji string) (whatsmeow.SendResponse, error) {
+	return whatsmeow.SendResponse{ID: types.MessageID("reactid")}, nil
+}
+
 func (f *fakeWA) Upload(ctx context.Context, data []byte, mediaType whatsmeow.MediaType) (whatsmeow.UploadResponse, error) {
 	return whatsmeow.UploadResponse{}, nil
 }
