@@ -2,7 +2,9 @@ package store
 
 import (
 	"database/sql"
+	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -317,5 +319,31 @@ func TestGroupsUpsertListAndParticipantsReplace(t *testing.T) {
 	members := countRows(t, db.sql, "SELECT COUNT(*) FROM group_participants WHERE group_jid=? AND role='member'", gid)
 	if admins != 1 || members != 1 {
 		t.Fatalf("expected roles admin=1 member=1, got admin=%d member=%d", admins, members)
+	}
+}
+
+// TestDBFilePermissions verifies that database files are created with
+// owner-only permissions (0600) regardless of the process umask (#50).
+func TestDBFilePermissions(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+
+	// Set a permissive umask to simulate the worst-case scenario where
+	// sqlite3 would create files world-readable without explicit chmod.
+	old := syscall.Umask(0o022)
+	defer syscall.Umask(old)
+
+	db, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	info, err := os.Stat(dbPath)
+	if err != nil {
+		t.Fatalf("Stat %s: %v", dbPath, err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("expected DB file permissions 0600, got %04o", perm)
 	}
 }

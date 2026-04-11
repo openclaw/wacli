@@ -46,9 +46,24 @@ func (c *Client) init() error {
 
 	ctx := context.Background()
 	dbLog := waLog.Stdout("Database", "ERROR", true)
+	// Ensure the session DB file and its WAL/SHM sidecars are owner-only
+	// before opening. The file may not exist yet on first run; ignore that.
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		p := c.opts.StorePath + suffix
+		if err := os.Chmod(p, 0o600); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("chmod session db %s: %w", suffix, err)
+		}
+	}
 	container, err := sqlstore.New(ctx, "sqlite3", fmt.Sprintf("file:%s?_foreign_keys=on", c.opts.StorePath), dbLog)
 	if err != nil {
 		return fmt.Errorf("open whatsmeow store: %w", err)
+	}
+	// Chmod again post-open so the driver-created file gets the right perms.
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		p := c.opts.StorePath + suffix
+		if err := os.Chmod(p, 0o600); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("chmod session db %s: %w", suffix, err)
+		}
 	}
 
 	deviceStore, err := container.GetFirstDevice(ctx)
@@ -369,4 +384,15 @@ func (c *Client) ReconnectWithBackoff(ctx context.Context, minDelay, maxDelay ti
 			delay = maxDelay
 		}
 	}
+}
+
+// PairPhone requests a pairing code for linking without QR scan.
+func (c *Client) PairPhone(ctx context.Context, phone string, showPush bool, clientType whatsmeow.PairClientType, clientName string) (string, error) {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil {
+		return "", fmt.Errorf("whatsapp client is not initialized")
+	}
+	return cli.PairPhone(ctx, phone, showPush, clientType, clientName)
 }
