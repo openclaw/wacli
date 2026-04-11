@@ -128,6 +128,76 @@ func TestMessageUpsertIdempotentAndContext(t *testing.T) {
 	}
 }
 
+func TestSearchMessagesFiltersByHasMediaAndType(t *testing.T) {
+	db := openTestDB(t)
+
+	chat := "123@s.whatsapp.net"
+	if err := db.UpsertChat(chat, "dm", "Alice", time.Now()); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+
+	base := time.Date(2024, 4, 1, 0, 0, 0, 0, time.UTC)
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID:    chat,
+		ChatName:   "Alice",
+		MsgID:      "text-1",
+		SenderJID:  chat,
+		SenderName: "Alice",
+		Timestamp:  base,
+		FromMe:     false,
+		Text:       "quarterly report ready",
+	}); err != nil {
+		t.Fatalf("UpsertMessage text: %v", err)
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID:      chat,
+		ChatName:     "Alice",
+		MsgID:        "image-1",
+		SenderJID:    chat,
+		SenderName:   "Alice",
+		Timestamp:    base.Add(time.Second),
+		FromMe:       false,
+		MediaType:    "image",
+		MediaCaption: "quarterly report screenshot",
+		Filename:     "report.png",
+		MimeType:     "image/png",
+	}); err != nil {
+		t.Fatalf("UpsertMessage image: %v", err)
+	}
+
+	results, err := db.SearchMessages(SearchMessagesParams{Query: "report", Limit: 10})
+	if err != nil {
+		t.Fatalf("SearchMessages all: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 matching messages, got %d", len(results))
+	}
+
+	results, err = db.SearchMessages(SearchMessagesParams{Query: "report", Limit: 10, HasMedia: true})
+	if err != nil {
+		t.Fatalf("SearchMessages has-media: %v", err)
+	}
+	if len(results) != 1 || results[0].MsgID != "image-1" {
+		t.Fatalf("expected only image-1 for has-media search, got %+v", results)
+	}
+
+	results, err = db.SearchMessages(SearchMessagesParams{Query: "report", Limit: 10, Type: "text"})
+	if err != nil {
+		t.Fatalf("SearchMessages type=text: %v", err)
+	}
+	if len(results) != 1 || results[0].MsgID != "text-1" {
+		t.Fatalf("expected only text-1 for type=text search, got %+v", results)
+	}
+
+	results, err = db.SearchMessages(SearchMessagesParams{Query: "report", Limit: 10, Type: "image"})
+	if err != nil {
+		t.Fatalf("SearchMessages type=image: %v", err)
+	}
+	if len(results) != 1 || results[0].MsgID != "image-1" {
+		t.Fatalf("expected only image-1 for type=image search, got %+v", results)
+	}
+}
+
 func TestMediaDownloadInfoAndMarkDownloaded(t *testing.T) {
 	db := openTestDB(t)
 
