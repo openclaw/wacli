@@ -44,6 +44,24 @@ func (d *DB) searchLIKE(p SearchMessagesParams) ([]Message, error) {
 	return d.scanMessages(query, args...)
 }
 
+// sanitizeFTSQuery converts a raw user query into a safe FTS5 expression by
+// quoting each whitespace-delimited token individually. This prevents FTS5
+// query-syntax injection (AND/OR/NOT/NEAR/column filters) while preserving
+// intuitive multi-word search: "hello world" matches messages containing both
+// words (implicit AND), not necessarily as an exact phrase.
+func sanitizeFTSQuery(q string) string {
+	tokens := strings.Fields(q)
+	if len(tokens) == 0 {
+		return `""`
+	}
+	quoted := make([]string, len(tokens))
+	for i, tok := range tokens {
+		// Escape embedded double-quotes by doubling them (FTS5 convention).
+		quoted[i] = `"` + strings.ReplaceAll(tok, `"`, `""`) + `"`
+	}
+	return strings.Join(quoted, " ")
+}
+
 func (d *DB) searchFTS(p SearchMessagesParams) ([]Message, error) {
 	query := `
 		SELECT m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.media_type,''),
@@ -52,7 +70,10 @@ func (d *DB) searchFTS(p SearchMessagesParams) ([]Message, error) {
 		JOIN messages m ON messages_fts.rowid = m.rowid
 		LEFT JOIN chats c ON c.jid = m.chat_jid
 		WHERE messages_fts MATCH ?`
-	args := []interface{}{p.Query}
+	// Sanitize to prevent FTS5 query-syntax injection (#57).
+	// Each token is individually quoted so multi-word queries still work
+	// as implicit AND (both words present, any order).
+	args := []interface{}{sanitizeFTSQuery(p.Query)}
 	query, args = applyMessageFilters(query, args, p)
 	query += " ORDER BY bm25(messages_fts) LIMIT ?"
 	args = append(args, p.Limit)
