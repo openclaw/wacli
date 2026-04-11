@@ -129,7 +129,7 @@ func (a *App) downloadMediaJob(ctx context.Context, job mediaJob) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o700); err != nil {
 		return err
 	}
 

@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -27,6 +28,42 @@ func countRows(t *testing.T, db *sql.DB, q string, args ...any) int {
 		t.Fatalf("countRows scan: %v", err)
 	}
 	return n
+}
+
+func TestDBFilePermissions(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "perm-test.db")
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat db file: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Fatalf("expected db file permissions 0600, got %04o", perm)
+	}
+
+	// Verify a sub-directory created by Open uses 0700.
+	subDir := filepath.Join(dir, "sub")
+	subPath := filepath.Join(subDir, "nested.db")
+	db2, err := Open(subPath)
+	if err != nil {
+		t.Fatalf("Open nested: %v", err)
+	}
+	defer db2.Close()
+
+	subInfo, err := os.Stat(subDir)
+	if err != nil {
+		t.Fatalf("Stat sub dir: %v", err)
+	}
+	if perm := subInfo.Mode().Perm(); perm != 0o700 {
+		t.Fatalf("expected sub dir permissions 0700, got %04o", perm)
+	}
 }
 
 func TestUpsertChatNameAndLastMessageTS(t *testing.T) {

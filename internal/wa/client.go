@@ -51,6 +51,11 @@ func (c *Client) init() error {
 		return fmt.Errorf("open whatsmeow store: %w", err)
 	}
 
+	// Ensure session DB file is owner-only regardless of umask.
+	if err := os.Chmod(c.opts.StorePath, 0o600); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("chmod session db: %w", err)
+	}
+
 	deviceStore, err := container.GetFirstDevice(ctx)
 	if err != nil {
 		if err == sql.ErrNoRows {

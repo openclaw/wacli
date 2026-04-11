@@ -43,7 +43,7 @@ func (c *Client) DownloadMediaToFile(ctx context.Context, directPath string, enc
 		return 0, err
 	}
 
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o700); err != nil {
 		return 0, fmt.Errorf("create output dir: %w", err)
 	}
 
@@ -76,6 +76,9 @@ func (c *Client) DownloadMediaToFile(ctx context.Context, directPath string, enc
 	}
 	if err := os.Rename(tmpName, targetPath); err != nil {
 		return 0, fmt.Errorf("move media file: %w", err)
+	}
+	if err := os.Chmod(targetPath, 0o600); err != nil {
+		return 0, fmt.Errorf("chmod media file: %w", err)
 	}
 	success = true
 

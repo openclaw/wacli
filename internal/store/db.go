@@ -34,6 +34,15 @@ func Open(path string) (*DB, error) {
 		_ = db.Close()
 		return nil, err
 	}
+
+	// Ensure the DB file is owner-only regardless of umask.
+	// Must run after init() because sql.Open is lazy; the file is not
+	// created until the first query (PRAGMAs in init).
+	if err := os.Chmod(path, 0o600); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("chmod db file: %w", err)
+	}
+
 	return s, nil
 }
 

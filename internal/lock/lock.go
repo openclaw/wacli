@@ -15,11 +15,11 @@ type Lock struct {
 }
 
 func Acquire(storeDir string) (*Lock, error) {
-	if err := os.MkdirAll(storeDir, 0700); err != nil {
+	if err := os.MkdirAll(storeDir, 0o700); err != nil {
 		return nil, fmt.Errorf("create store dir: %w", err)
 	}
 	path := filepath.Join(storeDir, "LOCK")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open lock file: %w", err)
 	}
