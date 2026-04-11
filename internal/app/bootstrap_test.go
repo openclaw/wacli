@@ -50,7 +50,7 @@ func TestRefreshGroupsStoresGroupsAndChats(t *testing.T) {
 	if err := a.refreshGroups(context.Background()); err != nil {
 		t.Fatalf("refreshGroups: %v", err)
 	}
-	gs, err := a.db.ListGroups("MyGroup", 10)
+	gs, err := a.db.ListGroups("MyGroup", 10, false)
 	if err != nil {
 		t.Fatalf("ListGroups: %v", err)
 	}

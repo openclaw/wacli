@@ -57,6 +57,7 @@ func newGroupsRefreshCmd(flags *rootFlags) *cobra.Command {
 func newGroupsListCmd(flags *rootFlags) *cobra.Command {
 	var query string
 	var limit int
+	var includeLeft bool
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List known groups (from local DB; run sync to populate)",
@@ -70,7 +71,7 @@ func newGroupsListCmd(flags *rootFlags) *cobra.Command {
 			}
 			defer closeApp(a, lk)
 
-			gs, err := a.DB().ListGroups(query, limit)
+			gs, err := a.DB().ListGroups(query, limit, includeLeft)
 			if err != nil {
 				return err
 			}
@@ -93,5 +94,6 @@ func newGroupsListCmd(flags *rootFlags) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&query, "query", "", "search query")
 	cmd.Flags().IntVar(&limit, "limit", 50, "limit")
+	cmd.Flags().BoolVar(&includeLeft, "include-left", false, "include groups you have left")
 	return cmd
 }

@@ -34,13 +34,28 @@ func (a *App) refreshGroups(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	// Build set of currently joined group JIDs.
+	joinedSet := make(map[string]bool, len(groups))
 	now := time.Now().UTC()
 	for _, g := range groups {
 		if g == nil {
 			continue
 		}
+		joinedSet[g.JID.String()] = true
 		_ = a.db.UpsertGroup(g.JID.String(), g.GroupName.Name, g.OwnerJID.String(), g.GroupCreated)
 		_ = a.db.UpsertChat(g.JID.String(), "group", g.GroupName.Name, now)
 	}
+
+	// Mark groups in DB that are no longer joined as left.
+	allGroups, err := a.db.ListGroups("", 0, true)
+	if err == nil {
+		for _, g := range allGroups {
+			if !joinedSet[g.JID] {
+				_ = a.db.MarkGroupLeft(g.JID)
+			}
+		}
+	}
+
 	return nil
 }

@@ -146,6 +146,7 @@ func newGroupsLeaveCmd(flags *rootFlags) *cobra.Command {
 			if err := a.WA().LeaveGroup(ctx, gjid); err != nil {
 				return err
 			}
+			_ = a.DB().MarkGroupLeft(gjid.String())
 			if flags.asJSON {
 				return out.WriteJSON(os.Stdout, map[string]any{"jid": gjid.String(), "left": true})
 			}

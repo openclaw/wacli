@@ -18,6 +18,7 @@ var schemaMigrations = []migration{
 	{version: 1, name: "core schema", up: migrateCoreSchema},
 	{version: 2, name: "messages display_text column", up: migrateMessagesDisplayText},
 	{version: 3, name: "messages fts", up: migrateMessagesFTS},
+	{version: 4, name: "groups left_at column", up: migrateGroupsLeftAt},
 }
 
 func (d *DB) ensureSchema() error {
@@ -247,6 +248,20 @@ func migrateMessagesFTS(d *DB) error {
 	}
 
 	d.ftsEnabled = true
+	return nil
+}
+
+func migrateGroupsLeftAt(d *DB) error {
+	hasLeftAt, err := d.tableHasColumn("groups", "left_at")
+	if err != nil {
+		return err
+	}
+	if hasLeftAt {
+		return nil
+	}
+	if _, err := d.sql.Exec(`ALTER TABLE groups ADD COLUMN left_at INTEGER`); err != nil {
+		return fmt.Errorf("add left_at column: %w", err)
+	}
 	return nil
 }
 

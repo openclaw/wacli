@@ -162,14 +162,21 @@ func (d *DB) UpsertContact(jid, phone, pushName, fullName, firstName, businessNa
 func (d *DB) UpsertGroup(jid, name, ownerJID string, created time.Time) error {
 	now := time.Now().UTC().Unix()
 	_, err := d.sql.Exec(`
-		INSERT INTO groups(jid, name, owner_jid, created_ts, updated_at)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO groups(jid, name, owner_jid, created_ts, updated_at, left_at)
+		VALUES (?, ?, ?, ?, ?, NULL)
 		ON CONFLICT(jid) DO UPDATE SET
 			name=COALESCE(NULLIF(excluded.name,''), groups.name),
 			owner_jid=COALESCE(NULLIF(excluded.owner_jid,''), groups.owner_jid),
 			created_ts=COALESCE(NULLIF(excluded.created_ts,0), groups.created_ts),
-			updated_at=excluded.updated_at
+			updated_at=excluded.updated_at,
+			left_at=NULL
 	`, jid, name, ownerJID, unix(created), now)
+	return err
+}
+
+func (d *DB) MarkGroupLeft(jid string) error {
+	now := time.Now().UTC().Unix()
+	_, err := d.sql.Exec(`UPDATE groups SET left_at = ? WHERE jid = ? AND left_at IS NULL`, now, jid)
 	return err
 }
 
@@ -206,12 +213,15 @@ func (d *DB) ReplaceGroupParticipants(groupJID string, participants []GroupParti
 	return tx.Commit()
 }
 
-func (d *DB) ListGroups(query string, limit int) ([]Group, error) {
+func (d *DB) ListGroups(query string, limit int, includeLeft bool) ([]Group, error) {
 	if limit <= 0 {
 		limit = 50
 	}
 	q := `SELECT jid, COALESCE(name,''), COALESCE(owner_jid,''), COALESCE(created_ts,0), updated_at FROM groups WHERE 1=1`
 	var args []interface{}
+	if !includeLeft {
+		q += ` AND left_at IS NULL`
+	}
 	if strings.TrimSpace(query) != "" {
 		needle := "%" + query + "%"
 		q += ` AND (LOWER(name) LIKE LOWER(?) OR LOWER(jid) LIKE LOWER(?))`
