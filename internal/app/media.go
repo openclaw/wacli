@@ -87,6 +87,13 @@ func (a *App) runMediaWorkers(ctx context.Context, jobs <-chan mediaJob, workers
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			// Recover from panics to prevent a bad media job from crashing
+			// the whole process (#52).
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Fprintf(os.Stderr, "media worker panic (recovered): %v\n", r)
+				}
+			}()
 			for {
 				select {
 				case <-ctx.Done():

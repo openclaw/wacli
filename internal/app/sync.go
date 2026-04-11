@@ -80,6 +80,13 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	}
 
 	handlerID := a.wa.AddEventHandler(func(evt interface{}) {
+		// Recover from panics so unexpected message structures do not
+		// crash the entire process (#52).
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(os.Stderr, "\nevent handler panic (recovered): %v\n", r)
+			}
+		}()
 		lastEvent.Store(time.Now().UTC().UnixNano())
 
 		switch v := evt.(type) {
