@@ -214,9 +214,6 @@ func (d *DB) ReplaceGroupParticipants(groupJID string, participants []GroupParti
 }
 
 func (d *DB) ListGroups(query string, limit int, includeLeft bool) ([]Group, error) {
-	if limit <= 0 {
-		limit = 50
-	}
 	q := `SELECT jid, COALESCE(name,''), COALESCE(owner_jid,''), COALESCE(created_ts,0), updated_at FROM groups WHERE 1=1`
 	var args []interface{}
 	if !includeLeft {
@@ -227,8 +224,11 @@ func (d *DB) ListGroups(query string, limit int, includeLeft bool) ([]Group, err
 		q += ` AND (LOWER(name) LIKE LOWER(?) OR LOWER(jid) LIKE LOWER(?))`
 		args = append(args, needle, needle)
 	}
-	q += ` ORDER BY COALESCE(created_ts,0) DESC LIMIT ?`
-	args = append(args, limit)
+	q += ` ORDER BY COALESCE(created_ts,0) DESC`
+	if limit > 0 {
+		q += ` LIMIT ?`
+		args = append(args, limit)
+	}
 
 	rows, err := d.sql.Query(q, args...)
 	if err != nil {

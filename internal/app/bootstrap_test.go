@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -63,5 +64,50 @@ func TestRefreshGroupsStoresGroupsAndChats(t *testing.T) {
 	}
 	if c.Kind != "group" {
 		t.Fatalf("expected chat kind group, got %q", c.Kind)
+	}
+}
+
+func TestRefreshGroupsMarksMissingOlderGroupsLeft(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 55; i++ {
+		gid := types.JID{User: fmt.Sprintf("%05d", i), Server: types.GroupServer}
+		created := base.Add(time.Duration(i) * time.Minute)
+		if err := a.db.UpsertGroup(gid.String(), fmt.Sprintf("Group %02d", i), "", created); err != nil {
+			t.Fatalf("seed UpsertGroup(%d): %v", i, err)
+		}
+		if i != 0 {
+			f.groups[gid] = &types.GroupInfo{
+				JID:          gid,
+				GroupName:    types.GroupName{Name: fmt.Sprintf("Group %02d", i)},
+				GroupCreated: created,
+			}
+		}
+	}
+
+	if err := a.refreshGroups(context.Background()); err != nil {
+		t.Fatalf("refreshGroups: %v", err)
+	}
+
+	active, err := a.db.ListGroups("", 0, false)
+	if err != nil {
+		t.Fatalf("ListGroups active: %v", err)
+	}
+	if len(active) != 54 {
+		t.Fatalf("expected 54 active groups after marking one left, got %d", len(active))
+	}
+
+	all, err := a.db.ListGroups("", 0, true)
+	if err != nil {
+		t.Fatalf("ListGroups all: %v", err)
+	}
+	if len(all) != 55 {
+		t.Fatalf("expected 55 total groups including left ones, got %d", len(all))
+	}
+	if all[len(all)-1].JID != "00000@g.us" {
+		t.Fatalf("expected oldest group to remain queryable, got %q", all[len(all)-1].JID)
 	}
 }
