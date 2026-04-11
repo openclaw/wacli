@@ -255,7 +255,17 @@ func ParseUserOrJID(s string) (types.JID, error) {
 	if strings.Contains(s, "@") {
 		return types.ParseJID(s)
 	}
-	return types.JID{User: s, Server: types.DefaultUserServer}, nil
+	// Validate phone number: strip optional leading +, then require 7-15 digits (#55).
+	digits := strings.TrimPrefix(s, "+")
+	if len(digits) < 7 || len(digits) > 15 {
+		return types.JID{}, fmt.Errorf("invalid phone number %q: must be 7-15 digits (got %d)", s, len(digits))
+	}
+	for _, ch := range digits {
+		if ch < '0' || ch > '9' {
+			return types.JID{}, fmt.Errorf("invalid phone number %q: unexpected character %q", s, ch)
+		}
+	}
+	return types.JID{User: digits, Server: types.DefaultUserServer}, nil
 }
 
 func IsGroupJID(jid types.JID) bool {
