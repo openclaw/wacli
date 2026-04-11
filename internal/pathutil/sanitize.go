@@ -3,6 +3,7 @@ package pathutil
 import (
 	"path/filepath"
 	"strings"
+	"unicode"
 )
 
 var replacer = strings.NewReplacer(
@@ -17,8 +18,20 @@ var replacer = strings.NewReplacer(
 	"|", "_",
 )
 
+// stripControlChars removes null bytes and non-printable control characters
+// from s, providing defense-in-depth against path injection attacks.
+func stripControlChars(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == 0 || unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
 func SanitizeSegment(seg string) string {
 	seg = strings.TrimSpace(seg)
+	seg = stripControlChars(seg)
 	if seg == "" {
 		return "unknown"
 	}
@@ -30,6 +43,7 @@ func SanitizeSegment(seg string) string {
 
 func SanitizeFilename(name string) string {
 	name = strings.TrimSpace(name)
+	name = stripControlChars(name)
 	if name == "" {
 		return "file"
 	}
