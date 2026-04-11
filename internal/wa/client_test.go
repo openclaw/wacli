@@ -1,6 +1,8 @@
 package wa
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"go.mau.fi/whatsmeow/types"
@@ -39,5 +41,49 @@ func TestBestContactName(t *testing.T) {
 	}
 	if BestContactName(types.ContactInfo{Found: true, PushName: "Push"}) != "Push" {
 		t.Fatalf("expected push name")
+	}
+}
+
+func TestNewChmodsSQLiteArtifactsAfterInit(t *testing.T) {
+	orig := chmodFile
+	t.Cleanup(func() { chmodFile = orig })
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.db")
+	calls := make([]string, 0, 4)
+	firstCall := true
+
+	chmodFile = func(target string, mode os.FileMode) error {
+		if firstCall {
+			firstCall = false
+			if _, err := os.Stat(path); err != nil {
+				t.Fatalf("expected session db to exist before chmod, got %v", err)
+			}
+		}
+		calls = append(calls, target)
+		return nil
+	}
+
+	c, err := New(Options{StorePath: path})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if c == nil {
+		t.Fatal("expected client")
+	}
+
+	want := []string{
+		path,
+		path + "-wal",
+		path + "-shm",
+		path + "-journal",
+	}
+	if len(calls) != len(want) {
+		t.Fatalf("expected %d chmod calls, got %d: %v", len(want), len(calls), calls)
+	}
+	for i, target := range want {
+		if calls[i] != target {
+			t.Fatalf("chmod call %d: expected %q, got %q", i, target, calls[i])
+		}
 	}
 }

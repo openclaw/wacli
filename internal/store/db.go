@@ -10,6 +10,8 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
+var chmodFile = os.Chmod
+
 type DB struct {
 	path       string
 	sql        *sql.DB
@@ -66,8 +68,8 @@ func (d *DB) init() error {
 func chmodSQLiteArtifacts(path string) error {
 	for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
 		target := path + suffix
-		if err := os.Chmod(target, 0o600); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("chmod db file: %w", err)
+		if err := chmodFile(target, 0o600); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("chmod %s: %w", target, err)
 		}
 	}
 	return nil

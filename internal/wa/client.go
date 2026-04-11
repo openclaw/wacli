@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/mdp/qrterminal/v3"
 	"go.mau.fi/whatsmeow"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
@@ -17,6 +18,8 @@ import (
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
 )
+
+var chmodFile = os.Chmod
 
 type Options struct {
 	StorePath string
@@ -51,11 +54,6 @@ func (c *Client) init() error {
 		return fmt.Errorf("open whatsmeow store: %w", err)
 	}
 
-	// Ensure session DB file is owner-only regardless of umask.
-	if err := os.Chmod(c.opts.StorePath, 0o600); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("chmod session db: %w", err)
-	}
-
 	deviceStore, err := container.GetFirstDevice(ctx)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -65,8 +63,25 @@ func (c *Client) init() error {
 		}
 	}
 
+	// Ensure session DB artifacts are owner-only regardless of umask.
+	// Must run after GetFirstDevice/NewDevice because sqlstore is lazy and the
+	// file is not guaranteed to exist until the first DB touch.
+	if err := chmodSQLiteArtifacts(c.opts.StorePath); err != nil {
+		return fmt.Errorf("chmod session db: %w", err)
+	}
+
 	logger := waLog.Stdout("Client", "ERROR", true)
 	c.client = whatsmeow.NewClient(deviceStore, logger)
+	return nil
+}
+
+func chmodSQLiteArtifacts(path string) error {
+	for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
+		target := path + suffix
+		if err := chmodFile(target, 0o600); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("chmod %s: %w", target, err)
+		}
+	}
 	return nil
 }
 

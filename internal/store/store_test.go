@@ -2,8 +2,10 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -81,6 +83,27 @@ func TestDBFilePermissions(t *testing.T) {
 	}
 	if perm := subInfo.Mode().Perm(); perm != 0o700 {
 		t.Fatalf("expected sub dir permissions 0700, got %04o", perm)
+	}
+}
+
+func TestChmodSQLiteArtifactsIncludesTargetPath(t *testing.T) {
+	orig := chmodFile
+	t.Cleanup(func() { chmodFile = orig })
+
+	want := filepath.Join(t.TempDir(), "db.sqlite-wal")
+	chmodFile = func(target string, mode os.FileMode) error {
+		if target == want {
+			return errors.New("boom")
+		}
+		return nil
+	}
+
+	err := chmodSQLiteArtifacts(strings.TrimSuffix(want, "-wal"))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("expected error to include target path %q, got %v", want, err)
 	}
 }
 
