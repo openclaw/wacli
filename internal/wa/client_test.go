@@ -41,3 +41,28 @@ func TestBestContactName(t *testing.T) {
 		t.Fatalf("expected push name")
 	}
 }
+
+// TestParseUserOrJIDPlusPrefix verifies that a leading '+' is stripped from
+// phone numbers so "+15551234567" and "15551234567" produce the same JID (#28).
+func TestParseUserOrJIDPlusPrefix(t *testing.T) {
+	cases := []struct {
+		input    string
+		wantUser string
+	}{
+		{"+15551234567", "15551234567"},
+		{"+49123456789", "49123456789"},
+		{"15551234567", "15551234567"},   // no + — unchanged
+		{"+1 555 123 4567", "1 555 123 4567"}, // spaces preserved (WA strips them)
+	}
+	for _, tc := range cases {
+		t.Run(tc.input, func(t *testing.T) {
+			j, err := ParseUserOrJID(tc.input)
+			if err != nil {
+				t.Fatalf("ParseUserOrJID(%q): %v", tc.input, err)
+			}
+			if j.User != tc.wantUser {
+				t.Errorf("ParseUserOrJID(%q).User = %q, want %q", tc.input, j.User, tc.wantUser)
+			}
+		})
+	}
+}

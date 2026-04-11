@@ -255,6 +255,10 @@ func ParseUserOrJID(s string) (types.JID, error) {
 	if strings.Contains(s, "@") {
 		return types.ParseJID(s)
 	}
+	// Strip a leading + so both "+15551234567" and "15551234567" work.
+	// WhatsApp JIDs use digits only; a leading + causes usync query timeouts
+	// because the server receives "+15551234567@s.whatsapp.net" which is invalid.
+	s = strings.TrimPrefix(s, "+")
 	return types.JID{User: s, Server: types.DefaultUserServer}, nil
 }
 
