@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -51,9 +52,14 @@ func (c *Client) init() error {
 		return fmt.Errorf("open whatsmeow store: %w", err)
 	}
 
-	// Ensure session DB file is owner-only regardless of umask.
-	if err := os.Chmod(c.opts.StorePath, 0o600); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("chmod session db: %w", err)
+	// Ensure session DB file and WAL/SHM sidecars are owner-only regardless of umask.
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		p := c.opts.StorePath + suffix
+		if _, statErr := os.Stat(p); statErr == nil {
+			if err := os.Chmod(p, 0o600); err != nil {
+				return fmt.Errorf("chmod %s: %w", filepath.Base(p), err)
+			}
+		}
 	}
 
 	deviceStore, err := container.GetFirstDevice(ctx)
