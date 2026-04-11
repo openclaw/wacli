@@ -263,6 +263,11 @@ func (d *DB) tableExists(table string) (bool, error) {
 }
 
 func (d *DB) tableHasColumn(table, column string) (bool, error) {
+	// table is always a hardcoded identifier at call sites; validate to prevent
+	// accidental misuse with user-controlled input (#58).
+	if table == "" {
+		return false, fmt.Errorf("tableHasColumn: table name is required")
+	}
 	rows, err := d.sql.Query("PRAGMA table_info(" + table + ")")
 	if err != nil {
 		return false, err
