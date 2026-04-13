@@ -66,6 +66,20 @@ func (d *DB) ensureSchema() error {
 		}
 	}
 
+	// Post-migration: detect FTS5 availability even when migration 3 was
+	// already applied by a non-FTS5 build. The table may exist (created by
+	// system sqlite or a prior run) but ftsEnabled was never set because the
+	// migration was skipped.
+	if !d.ftsEnabled {
+		if ok, _ := d.tableExists("messages_fts"); ok {
+			var dummy int
+			err := d.sql.QueryRow(`SELECT rowid FROM messages_fts LIMIT 1`).Scan(&dummy)
+			if err == nil || errors.Is(err, sql.ErrNoRows) {
+				d.ftsEnabled = true
+			}
+		}
+	}
+
 	return nil
 }
 
