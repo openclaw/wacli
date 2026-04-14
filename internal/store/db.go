@@ -64,9 +64,13 @@ func (d *DB) detectFTS() {
 	if err != nil {
 		return
 	}
-	if ok {
-		d.ftsEnabled = true
+	if !ok {
+		_ = migrateMessagesFTS(d)
 		return
 	}
-	_ = migrateMessagesFTS(d)
+	// Table exists — verify the engine can actually query it.
+	var n int
+	if d.sql.QueryRow("SELECT COUNT(*) FROM messages_fts LIMIT 1").Scan(&n) == nil {
+		d.ftsEnabled = true
+	}
 }
