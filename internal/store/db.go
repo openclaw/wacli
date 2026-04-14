@@ -51,5 +51,22 @@ func (d *DB) init() error {
 	_, _ = d.sql.Exec("PRAGMA temp_store=MEMORY;")
 	_, _ = d.sql.Exec("PRAGMA foreign_keys=ON;")
 
-	return d.ensureSchema()
+	if err := d.ensureSchema(); err != nil {
+		return err
+	}
+
+	d.detectFTS()
+	return nil
+}
+
+func (d *DB) detectFTS() {
+	ok, err := d.tableExists("messages_fts")
+	if err != nil {
+		return
+	}
+	if ok {
+		d.ftsEnabled = true
+		return
+	}
+	_ = migrateMessagesFTS(d)
 }
