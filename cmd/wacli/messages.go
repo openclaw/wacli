@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"text/tabwriter"
@@ -22,6 +23,7 @@ func newMessagesCmd(flags *rootFlags) *cobra.Command {
 	cmd.AddCommand(newMessagesSearchCmd(flags))
 	cmd.AddCommand(newMessagesShowCmd(flags))
 	cmd.AddCommand(newMessagesContextCmd(flags))
+	cmd.AddCommand(newMessagesExportCmd(flags))
 	return cmd
 }
 
@@ -330,5 +332,123 @@ func newMessagesContextCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().StringVar(&id, "id", "", "message ID")
 	cmd.Flags().IntVar(&before, "before", 5, "messages before")
 	cmd.Flags().IntVar(&after, "after", 5, "messages after")
+	return cmd
+}
+
+func newMessagesExportCmd(flags *rootFlags) *cobra.Command {
+	var chat string
+	var query string
+	var limit int
+	var output string
+	var format string
+	var afterStr string
+	var beforeStr string
+
+	cmd := &cobra.Command{
+		Use:   "export",
+		Short: "Export messages to Markdown or JSON",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if chat == "" && query == "" {
+				return fmt.Errorf("either --chat or --query is required")
+			}
+			if format != "obsidian" && format != "plain-md" {
+				return fmt.Errorf("--format must be obsidian or plain-md, got %q", format)
+			}
+
+			ctx, cancel := withTimeout(context.Background(), flags)
+			defer cancel()
+
+			a, lk, err := newApp(ctx, flags, false, false)
+			if err != nil {
+				return err
+			}
+			defer closeApp(a, lk)
+
+			var after *time.Time
+			var before *time.Time
+			if afterStr != "" {
+				t, err := parseTime(afterStr)
+				if err != nil {
+					return err
+				}
+				after = &t
+			}
+			if beforeStr != "" {
+				t, err := parseTime(beforeStr)
+				if err != nil {
+					return err
+				}
+				before = &t
+			}
+
+			var msgs []store.Message
+			var chatName string
+			var chatJID string
+
+			if query != "" {
+				msgs, err = a.DB().SearchMessages(store.SearchMessagesParams{
+					Query:   query,
+					ChatJID: chat,
+					Limit:   limit,
+					After:   after,
+					Before:  before,
+				})
+				chatName = "Search: " + query
+				chatJID = "search"
+			} else {
+				msgs, err = a.DB().ListMessages(store.ListMessagesParams{
+					ChatJID: chat,
+					Limit:   limit,
+					After:   after,
+					Before:  before,
+				})
+				chatJID = chat
+				if len(msgs) > 0 {
+					chatName = msgs[0].ChatName
+				}
+				if chatName == "" {
+					chatName = chat
+				}
+			}
+			if err != nil {
+				return err
+			}
+
+			// Sort chronologically for export (DB returns newest first)
+			for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
+				msgs[i], msgs[j] = msgs[j], msgs[i]
+			}
+
+			var w io.Writer = os.Stdout
+			if output != "" {
+				f, err := os.Create(output)
+				if err != nil {
+					return err
+				}
+				defer f.Close()
+				w = f
+			}
+
+			if flags.asJSON {
+				return out.WriteJSON(w, map[string]any{
+					"messages": msgs,
+					"fts":      a.DB().HasFTS(),
+				})
+			}
+
+			if format == "plain-md" {
+				return out.WritePlainMarkdown(w, chatName, msgs)
+			}
+			return out.WriteObsidianMarkdown(w, chatName, chatJID, msgs)
+		},
+	}
+
+	cmd.Flags().StringVar(&chat, "chat", "", "chat JID to export")
+	cmd.Flags().StringVar(&query, "query", "", "search query to export results")
+	cmd.Flags().IntVar(&limit, "limit", 1000, "limit number of messages")
+	cmd.Flags().StringVar(&output, "output", "", "output file path (default: stdout)")
+	cmd.Flags().StringVar(&format, "format", "obsidian", "output format: obsidian|plain-md (ignored when --json is set)")
+	cmd.Flags().StringVar(&afterStr, "after", "", "only messages after time (RFC3339 or YYYY-MM-DD)")
+	cmd.Flags().StringVar(&beforeStr, "before", "", "only messages before time (RFC3339 or YYYY-MM-DD)")
 	return cmd
 }
