@@ -2,6 +2,15 @@ package app
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -12,6 +21,8 @@ import (
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/steipete/wacli/internal/wa"
 )
 
 func TestSyncStoresLiveAndHistoryMessages(t *testing.T) {
@@ -254,5 +265,111 @@ func TestSyncOnceIdleExit(t *testing.T) {
 	}
 	if time.Since(start) > 1500*time.Millisecond {
 		t.Fatalf("expected to exit quickly on idle, took %s", time.Since(start))
+	}
+}
+
+func TestDispatchHooks_Exec(t *testing.T) {
+	tmp := t.TempDir()
+	outFile := filepath.Join(tmp, "out.json")
+
+	a := newTestApp(t)
+	pm := wa.ParsedMessage{ID: "exec-test-id", Text: "exec hook payload"}
+	opts := SyncOptions{ExecCommand: "cat > " + outFile}
+
+	a.dispatchHooks(context.Background(), opts, pm)
+
+	data, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatalf("exec hook did not create output file: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("exec hook output is not valid JSON: %v\noutput: %s", err, data)
+	}
+	if got["ID"] != "exec-test-id" {
+		t.Errorf("expected ID=exec-test-id, got %v", got["ID"])
+	}
+}
+
+func TestDispatchHooks_Webhook(t *testing.T) {
+	var gotContentType string
+	var gotBody []byte
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotContentType = r.Header.Get("Content-Type")
+		gotBody, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	a := newTestApp(t)
+	pm := wa.ParsedMessage{ID: "wh-test-id", Text: "webhook payload"}
+	opts := SyncOptions{WebhookURL: srv.URL}
+
+	a.dispatchHooks(context.Background(), opts, pm)
+
+	if gotContentType != "application/json" {
+		t.Errorf("Content-Type: got %q, want application/json", gotContentType)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(gotBody, &got); err != nil {
+		t.Fatalf("webhook body is not valid JSON: %v", err)
+	}
+	if got["ID"] != "wh-test-id" {
+		t.Errorf("expected ID=wh-test-id, got %v", got["ID"])
+	}
+}
+
+func TestDispatchHooks_WebhookHMAC(t *testing.T) {
+	var gotSig string
+	var gotBody []byte
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotSig = r.Header.Get("X-Wacli-Signature")
+		gotBody, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	a := newTestApp(t)
+	pm := wa.ParsedMessage{ID: "hmac-test-id", Text: "signed payload"}
+	opts := SyncOptions{WebhookURL: srv.URL, WebhookSecret: "supersecret"}
+
+	a.dispatchHooks(context.Background(), opts, pm)
+
+	if gotSig == "" {
+		t.Fatal("X-Wacli-Signature header not present")
+	}
+	mac := hmac.New(sha256.New, []byte("supersecret"))
+	mac.Write(gotBody)
+	want := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+	if gotSig != want {
+		t.Errorf("HMAC mismatch\ngot:  %s\nwant: %s", gotSig, want)
+	}
+}
+
+func TestDispatchHooks_WebhookTimeout(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	a := newTestApp(t)
+	pm := wa.ParsedMessage{ID: "timeout-id"}
+	opts := SyncOptions{WebhookURL: srv.URL}
+
+	done := make(chan struct{})
+	go func() {
+		a.dispatchHooks(ctx, opts, pm)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("dispatchHooks hung on a cancelled context")
 	}
 }
