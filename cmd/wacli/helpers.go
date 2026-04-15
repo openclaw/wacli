@@ -27,14 +27,15 @@ func parseTime(s string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("unsupported time format %q (use RFC3339 or YYYY-MM-DD)", s)
 }
 
-func truncate(s string, max int) string {
+func truncate(s string, maxRunes int) string {
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.TrimSpace(s)
-	if max <= 0 || len(s) <= max {
+	runes := []rune(s)
+	if maxRunes <= 0 || len(runes) <= maxRunes {
 		return s
 	}
-	if max <= 1 {
-		return s[:max]
+	if maxRunes <= 1 {
+		return string(runes[:maxRunes])
 	}
-	return s[:max-1] + "…"
+	return string(runes[:maxRunes-1]) + "…"
 }

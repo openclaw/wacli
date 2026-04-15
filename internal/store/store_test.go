@@ -319,3 +319,111 @@ func TestGroupsUpsertListAndParticipantsReplace(t *testing.T) {
 		t.Fatalf("expected roles admin=1 member=1, got admin=%d member=%d", admins, members)
 	}
 }
+
+// TestListChatsWildcardEscape verifies that LIKE wildcards in chat search
+// queries are treated as literals, not SQL pattern chars.
+func TestListChatsWildcardEscape(t *testing.T) {
+	db := openTestDB(t)
+
+	if err := db.UpsertChat("100@s.whatsapp.net", "dm", "100% sure", time.Now()); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	if err := db.UpsertChat("101@s.whatsapp.net", "dm", "some_person", time.Now()); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	if err := db.UpsertChat("102@s.whatsapp.net", "dm", "another chat", time.Now()); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+
+	t.Run("percent returns only exact match", func(t *testing.T) {
+		cs, err := db.ListChats("100%", 50)
+		if err != nil {
+			t.Fatalf("ListChats: %v", err)
+		}
+		if len(cs) != 1 || cs[0].JID != "100@s.whatsapp.net" {
+			t.Fatalf("expected only 100@s, got %d results: %v", len(cs), cs)
+		}
+	})
+
+	t.Run("underscore returns only exact match", func(t *testing.T) {
+		cs, err := db.ListChats("some_person", 50)
+		if err != nil {
+			t.Fatalf("ListChats: %v", err)
+		}
+		if len(cs) != 1 || cs[0].JID != "101@s.whatsapp.net" {
+			t.Fatalf("expected only 101@s, got %d results: %v", len(cs), cs)
+		}
+	})
+}
+
+// TestListGroupsWildcardEscape verifies that LIKE wildcards in group search
+// queries are treated as literals, not SQL pattern chars.
+func TestListGroupsWildcardEscape(t *testing.T) {
+	db := openTestDB(t)
+
+	if err := db.UpsertGroup("200@g.us", "Team A 100%", "owner@s.whatsapp.net", time.Now()); err != nil {
+		t.Fatalf("UpsertGroup: %v", err)
+	}
+	if err := db.UpsertGroup("201@g.us", "Team_B", "owner@s.whatsapp.net", time.Now()); err != nil {
+		t.Fatalf("UpsertGroup: %v", err)
+	}
+	if err := db.UpsertGroup("202@g.us", "Team C", "owner@s.whatsapp.net", time.Now()); err != nil {
+		t.Fatalf("UpsertGroup: %v", err)
+	}
+
+	t.Run("percent returns only exact match", func(t *testing.T) {
+		gs, err := db.ListGroups("100%", 50)
+		if err != nil {
+			t.Fatalf("ListGroups: %v", err)
+		}
+		if len(gs) != 1 || gs[0].JID != "200@g.us" {
+			t.Fatalf("expected only 200@g.us, got %d results: %v", len(gs), gs)
+		}
+	})
+
+	t.Run("underscore returns only exact match", func(t *testing.T) {
+		gs, err := db.ListGroups("Team_B", 50)
+		if err != nil {
+			t.Fatalf("ListGroups: %v", err)
+		}
+		if len(gs) != 1 || gs[0].JID != "201@g.us" {
+			t.Fatalf("expected only 201@g.us, got %d results: %v", len(gs), gs)
+		}
+	})
+}
+
+// TestSearchContactsWildcardEscape verifies that LIKE wildcards in contact
+// search queries are treated as literals, not SQL pattern chars.
+func TestSearchContactsWildcardEscape(t *testing.T) {
+	db := openTestDB(t)
+
+	if err := db.UpsertContact("300@s.whatsapp.net", "300", "Push", "100% Alice", "First", ""); err != nil {
+		t.Fatalf("UpsertContact: %v", err)
+	}
+	if err := db.UpsertContact("301@s.whatsapp.net", "301", "Push", "some_person", "First", ""); err != nil {
+		t.Fatalf("UpsertContact: %v", err)
+	}
+	if err := db.UpsertContact("302@s.whatsapp.net", "302", "Push", "Other", "First", ""); err != nil {
+		t.Fatalf("UpsertContact: %v", err)
+	}
+
+	t.Run("percent returns only exact match", func(t *testing.T) {
+		cs, err := db.SearchContacts("100%", 50)
+		if err != nil {
+			t.Fatalf("SearchContacts: %v", err)
+		}
+		if len(cs) != 1 || cs[0].JID != "300@s.whatsapp.net" {
+			t.Fatalf("expected only 300@s, got %d results: %v", len(cs), cs)
+		}
+	})
+
+	t.Run("underscore returns only exact match", func(t *testing.T) {
+		cs, err := db.SearchContacts("some_person", 50)
+		if err != nil {
+			t.Fatalf("SearchContacts: %v", err)
+		}
+		if len(cs) != 1 || cs[0].JID != "301@s.whatsapp.net" {
+			t.Fatalf("expected only 301@s, got %d results: %v", len(cs), cs)
+		}
+	})
+}
