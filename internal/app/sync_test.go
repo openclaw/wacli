@@ -276,7 +276,7 @@ func TestDispatchHooks_Exec(t *testing.T) {
 	pm := wa.ParsedMessage{ID: "exec-test-id", Text: "exec hook payload"}
 	opts := SyncOptions{ExecCommand: "cat > " + outFile}
 
-	a.dispatchHooks(context.Background(), opts, pm)
+	a.dispatchHooks(context.Background(), opts, pm, 0)
 
 	data, err := os.ReadFile(outFile)
 	if err != nil {
@@ -306,7 +306,7 @@ func TestDispatchHooks_Webhook(t *testing.T) {
 	pm := wa.ParsedMessage{ID: "wh-test-id", Text: "webhook payload"}
 	opts := SyncOptions{WebhookURL: srv.URL}
 
-	a.dispatchHooks(context.Background(), opts, pm)
+	a.dispatchHooks(context.Background(), opts, pm, 0)
 
 	if gotContentType != "application/json" {
 		t.Errorf("Content-Type: got %q, want application/json", gotContentType)
@@ -335,7 +335,7 @@ func TestDispatchHooks_WebhookHMAC(t *testing.T) {
 	pm := wa.ParsedMessage{ID: "hmac-test-id", Text: "signed payload"}
 	opts := SyncOptions{WebhookURL: srv.URL, WebhookSecret: "supersecret"}
 
-	a.dispatchHooks(context.Background(), opts, pm)
+	a.dispatchHooks(context.Background(), opts, pm, 0)
 
 	if gotSig == "" {
 		t.Fatal("X-Wacli-Signature header not present")
@@ -363,7 +363,7 @@ func TestDispatchHooks_WebhookTimeout(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		a.dispatchHooks(ctx, opts, pm)
+		a.dispatchHooks(ctx, opts, pm, 0)
 		close(done)
 	}()
 

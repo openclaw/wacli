@@ -64,8 +64,9 @@ type App struct {
 }
 
 type parsedMessageJob struct {
-	pm   wa.ParsedMessage
-	opts SyncOptions
+	pm       wa.ParsedMessage
+	opts     SyncOptions
+	attempts int
 }
 
 func New(opts Options) (*App, error) {
@@ -156,7 +157,7 @@ func (a *App) StartHookWorkers(ctx context.Context, numWorkers int) {
 					if !ok {
 						return
 					}
-					a.dispatchHooks(ctx, job.opts, job.pm)
+					a.dispatchHooks(ctx, job.opts, job.pm, job.attempts)
 				case <-ctx.Done():
 					return
 				}

@@ -470,7 +470,7 @@ func mediaLabel(mediaType string) string {
 	}
 }
 
-func (a *App) dispatchHooks(ctx context.Context, opts SyncOptions, pm wa.ParsedMessage) {
+func (a *App) dispatchHooks(ctx context.Context, opts SyncOptions, pm wa.ParsedMessage, attempts int) {
 	data, err := json.Marshal(pm)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "\nError marshaling message for hooks: %v\n", err)
@@ -481,7 +481,7 @@ func (a *App) dispatchHooks(ctx context.Context, opts SyncOptions, pm wa.ParsedM
 	if opts.ExecCommand != "" {
 		cmd := exec.CommandContext(ctx, "sh", "-c", opts.ExecCommand)
 		cmd.Stdin = bytes.NewReader(data)
-		cmd.Env = append(os.Environ(), 
+		cmd.Env = append(os.Environ(),
 			"WACLI_MSG_ID="+pm.ID,
 			"WACLI_CHAT_JID="+pm.Chat.String(),
 			"WACLI_SENDER_JID="+pm.SenderJID,
@@ -493,9 +493,6 @@ func (a *App) dispatchHooks(ctx context.Context, opts SyncOptions, pm wa.ParsedM
 
 	// Webhook Hook
 	if opts.WebhookURL != "" {
-		httpClient := &http.Client{
-			Timeout: 15 * time.Second,
-		}
 		req, err := http.NewRequestWithContext(ctx, "POST", opts.WebhookURL, bytes.NewReader(data))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "\nWebhook request error: %v\n", err)
@@ -509,7 +506,7 @@ func (a *App) dispatchHooks(ctx context.Context, opts SyncOptions, pm wa.ParsedM
 			req.Header.Set("X-Wacli-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
 		}
 
-		resp, err := httpClient.Do(req)
+		resp, err := a.httpClient.Do(req)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "\nWebhook post error: %v\n", err)
 			return
@@ -520,3 +517,4 @@ func (a *App) dispatchHooks(ctx context.Context, opts SyncOptions, pm wa.ParsedM
 		}
 	}
 }
+
