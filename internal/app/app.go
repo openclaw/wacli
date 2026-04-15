@@ -55,9 +55,15 @@ type Options struct {
 }
 
 type App struct {
-	opts Options
-	wa   WAClient
-	db   *store.DB
+	opts     Options
+	wa       WAClient
+	db       *store.DB
+	hookChan chan parsedMessageJob
+}
+
+type parsedMessageJob struct {
+	pm   wa.ParsedMessage
+	opts SyncOptions
 }
 
 func New(opts Options) (*App, error) {
@@ -127,4 +133,26 @@ func (a *App) Connect(ctx context.Context, allowQR bool, qrWriter func(string)) 
 		AllowQR:  allowQR,
 		OnQRCode: qrWriter,
 	})
+}
+
+func (a *App) StartHookWorkers(ctx context.Context, numWorkers int) {
+	if a.hookChan != nil {
+		return
+	}
+	a.hookChan = make(chan parsedMessageJob, 100)
+	for i := 0; i < numWorkers; i++ {
+		go func() {
+			for {
+				select {
+				case job, ok := <-a.hookChan:
+					if !ok {
+						return
+					}
+					a.dispatchHooks(ctx, job.opts, job.pm)
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	}
 }

@@ -18,6 +18,10 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 	var downloadMedia bool
 	var refreshContacts bool
 	var refreshGroups bool
+	var execCommand string
+	var webhookURL string
+	var webhookSecret string
+	var hookWorkers int
 
 	cmd := &cobra.Command{
 		Use:   "sync",
@@ -34,6 +38,11 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 
 			if err := a.EnsureAuthed(); err != nil {
 				return err
+			}
+
+			// Start hook workers if a command or webhook is provided
+			if execCommand != "" || webhookURL != "" {
+				a.StartHookWorkers(ctx, hookWorkers)
 			}
 
 			mode := appPkg.SyncModeFollow
@@ -53,6 +62,9 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 				RefreshGroups:   refreshGroups,
 				IdleExit:        idleExit,
 				MaxReconnect:    maxReconnect,
+				ExecCommand:     execCommand,
+				WebhookURL:      webhookURL,
+				WebhookSecret:   webhookSecret,
 			})
 			if err != nil {
 				return err
@@ -76,5 +88,9 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().BoolVar(&downloadMedia, "download-media", false, "download media in the background during sync")
 	cmd.Flags().BoolVar(&refreshContacts, "refresh-contacts", false, "refresh contacts from session store into local DB")
 	cmd.Flags().BoolVar(&refreshGroups, "refresh-groups", false, "refresh joined groups (live) into local DB")
+	cmd.Flags().StringVar(&execCommand, "exec", "", "command to execute on new message (JSON passed via STDIN)")
+	cmd.Flags().StringVar(&webhookURL, "webhook", "", "URL to POST new message JSON")
+	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "HMAC-SHA256 secret for X-Wacli-Signature header")
+	cmd.Flags().IntVar(&hookWorkers, "hook-workers", 4, "number of parallel workers for hook dispatch")
 	return cmd
 }
