@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -371,5 +372,93 @@ func TestDispatchHooks_WebhookTimeout(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("dispatchHooks hung on a cancelled context")
+	}
+}
+
+func TestDispatchWebhook_Retry(t *testing.T) {
+	var attempts atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count := attempts.Add(1)
+		if count < 3 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	a, _ := New(Options{StoreDir: t.TempDir()})
+	a.hookChan = make(chan parsedMessageJob, 10)
+	
+	// Start a worker to consume retries
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		for {
+			select {
+			case job := <-a.hookChan:
+				a.dispatchHooks(ctx, job.opts, job.pm, job.attempts)
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	opts := SyncOptions{
+		WebhookURL: srv.URL,
+		WebhookMaxRetries: 3,
+		WebhookRetryDelay: 10 * time.Millisecond,
+	}
+	pm := wa.ParsedMessage{ID: "retry-test"}
+
+	// First attempt
+	a.dispatchHooks(context.Background(), opts, pm, 0)
+
+	// Wait for retries
+	time.Sleep(200 * time.Millisecond)
+
+	if attempts.Load() != 3 {
+		t.Errorf("expected 3 attempts, got %d", attempts.Load())
+	}
+}
+
+func TestDispatchWebhook_MaxRetries(t *testing.T) {
+	var attempts atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	a, _ := New(Options{StoreDir: t.TempDir()})
+	a.hookChan = make(chan parsedMessageJob, 10)
+	
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		for {
+			select {
+			case job := <-a.hookChan:
+				a.dispatchHooks(ctx, job.opts, job.pm, job.attempts)
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	opts := SyncOptions{
+		WebhookURL: srv.URL,
+		WebhookMaxRetries: 2,
+		WebhookRetryDelay: 5 * time.Millisecond,
+	}
+	pm := wa.ParsedMessage{ID: "max-retry-test"}
+
+	a.dispatchHooks(context.Background(), opts, pm, 0)
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Initial (0) + Retry (1) + Retry (2) = 3 attempts total
+	if attempts.Load() != 3 {
+		t.Errorf("expected 3 total attempts (initial + 2 retries), got %d", attempts.Load())
 	}
 }

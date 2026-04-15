@@ -43,6 +43,8 @@ type SyncOptions struct {
 	ExecCommand     string        // command to execute on new message
 	WebhookURL      string        // URL to POST new message JSON
 	WebhookSecret   string        // secret for HMAC-SHA256 X-Wacli-Signature header
+	WebhookMaxRetries int         // maximum number of retry attempts
+	WebhookRetryDelay time.Duration // initial delay for retries
 }
 
 type SyncResult struct {
@@ -507,14 +509,31 @@ func (a *App) dispatchHooks(ctx context.Context, opts SyncOptions, pm wa.ParsedM
 		}
 
 		resp, err := a.httpClient.Do(req)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "\nWebhook post error: %v\n", err)
+		if err != nil || (resp != nil && resp.StatusCode >= 400) {
+			if attempts < opts.WebhookMaxRetries {
+				nextAttempt := attempts + 1
+				delay := opts.WebhookRetryDelay * time.Duration(1<<(nextAttempt-1))
+				fmt.Fprintf(os.Stderr, "\nWebhook failure (attempt %d/%d), retrying in %s...\n", nextAttempt, opts.WebhookMaxRetries, delay)
+				time.AfterFunc(delay, func() {
+					select {
+					case a.hookChan <- parsedMessageJob{pm: pm, opts: opts, attempts: nextAttempt}:
+					default:
+						fmt.Fprintln(os.Stderr, "Warning: Hook queue full, skipping retry.")
+					}
+				})
+			} else {
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "\nWebhook failed after %d attempts: %v\n", attempts+1, err)
+				} else {
+					fmt.Fprintf(os.Stderr, "\nWebhook failed after %d attempts: %s\n", attempts+1, resp.Status)
+				}
+			}
+			if resp != nil {
+				resp.Body.Close()
+			}
 			return
 		}
-		defer resp.Body.Close()
-		if resp.StatusCode >= 400 {
-			fmt.Fprintf(os.Stderr, "\nWebhook returned status: %s\n", resp.Status)
-		}
+		resp.Body.Close()
 	}
 }
 
