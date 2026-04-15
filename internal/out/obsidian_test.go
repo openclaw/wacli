@@ -31,18 +31,24 @@ func TestWriteObsidianMarkdown_YAMLFrontmatter(t *testing.T) {
 
 	out := buf.String()
 
+	// Must open and close the YAML block
 	if !strings.Contains(out, "---\n") {
 		t.Error("missing YAML frontmatter delimiter ---")
 	}
 
+	// Must contain required keys
 	for _, key := range []string{"projeto:", "tipo:", "agente:", "data:", "status:", "tags:"} {
 		if !strings.Contains(out, key) {
 			t.Errorf("missing YAML key %q", key)
 		}
 	}
 
+	// Unescaped double-quotes in a YAML double-quoted string are invalid
 	for _, line := range strings.Split(out, "\n") {
 		if strings.HasPrefix(line, "projeto:") {
+			// Must NOT contain a bare " after the opening quote
+			// valid:   projeto: "Chat \"with\" quotes"
+			// invalid: projeto: "Chat "with" quotes"
 			inner := strings.TrimPrefix(line, "projeto: ")
 			inner = strings.Trim(inner, `"`)
 			if strings.Contains(inner, `"`) && !strings.Contains(inner, `\"`) {
@@ -62,10 +68,11 @@ func TestWriteObsidianMarkdown_NewlineInChatName(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
+	// The YAML block must contain exactly two --- delimiters
 	out := buf.String()
 	parts := strings.SplitN(out, "---\n", 3)
 	if len(parts) < 3 {
-		t.Errorf("YAML block corrupted by newline in chat name: got %d parts", len(parts))
+		t.Errorf("YAML block corrupted by newline in chat name: got %d parts after splitting on ---", len(parts))
 	}
 }
 
@@ -134,6 +141,7 @@ func TestWritePlainMarkdown_SameContent(t *testing.T) {
 	_ = WriteObsidianMarkdown(&obsidianBuf, "Chat", "123@g.us", msgs)
 	_ = WritePlainMarkdown(&plainBuf, "Chat", msgs)
 
+	// Strip the YAML frontmatter from the obsidian output
 	obsidianBody := obsidianBuf.String()
 	parts := strings.SplitN(obsidianBody, "---\n", 3)
 	if len(parts) == 3 {

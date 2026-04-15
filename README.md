@@ -48,11 +48,20 @@ pnpm wacli auth
 # 2) Keep syncing (never shows QR; requires prior auth)
 pnpm wacli sync --follow
 
+# Sync with webhook and HMAC-SHA256 signature
+pnpm wacli sync --webhook "https://example.com/hook" --webhook-secret "mysecret"
+
 # Diagnostics
 pnpm wacli doctor
 
 # Search messages
 pnpm wacli messages search "meeting"
+
+# Export messages to Markdown (Obsidian format by default)
+pnpm wacli messages export --chat 1234567890@s.whatsapp.net --output chat.md
+
+# Export messages with time filters and plain Markdown format
+pnpm wacli messages export --chat 1234567890@s.whatsapp.net --after 2024-01-01 --format plain-md
 
 # Backfill older messages for a chat (best-effort; requires your primary device online)
 pnpm wacli history backfill --chat 1234567890@s.whatsapp.net --requests 10 --count 50

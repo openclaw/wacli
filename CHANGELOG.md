@@ -2,9 +2,20 @@
 
 ## 0.5.0 - Unreleased
 
+### Added
+
+- Messages: `messages export` now supports `--after`, `--before` time filters and `--json` output.
+- Messages: new `--format obsidian|plain-md` flag for `messages export` (default: `obsidian`).
+- Sync: support for HMAC-SHA256 webhook signatures via `--webhook-secret`.
+- Sync: configurable worker count for hook dispatch via `--hook-workers` (default: 4).
+
 ### Changed
 
 - Internal architecture: split store and groups command logic into focused modules for cleaner maintenance and safer follow-up changes.
+
+### Fixed
+
+- Out: YAML frontmatter injection vulnerability in Obsidian exporter (proper quoting/escaping).
 
 ### Build
 
