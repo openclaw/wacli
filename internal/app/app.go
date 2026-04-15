@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -55,10 +56,11 @@ type Options struct {
 }
 
 type App struct {
-	opts     Options
-	wa       WAClient
-	db       *store.DB
-	hookChan chan parsedMessageJob
+	opts       Options
+	wa         WAClient
+	db         *store.DB
+	hookChan   chan parsedMessageJob
+	httpClient *http.Client
 }
 
 type parsedMessageJob struct {
@@ -81,7 +83,13 @@ func New(opts Options) (*App, error) {
 		return nil, err
 	}
 
-	return &App{opts: opts, db: db}, nil
+	return &App{
+		opts: opts,
+		db:   db,
+		httpClient: &http.Client{
+			Timeout: 15 * time.Second,
+		},
+	}, nil
 }
 
 func (a *App) OpenWA() error {
