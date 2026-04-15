@@ -1,9 +1,16 @@
 package app
 
 import (
+	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
+	"os/exec"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -33,6 +40,9 @@ type SyncOptions struct {
 	IdleExit        time.Duration // only used for bootstrap/once
 	MaxReconnect    time.Duration // max time to attempt reconnection before giving up (0 = unlimited)
 	Verbosity       int           // future
+	ExecCommand     string        // command to execute on new message
+	WebhookURL      string        // URL to POST new message JSON
+	WebhookSecret   string        // secret for HMAC-SHA256 X-Wacli-Signature header
 }
 
 type SyncResult struct {
@@ -105,6 +115,14 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 			}
 			if err := a.storeParsedMessage(ctx, pm); err == nil {
 				messagesStored.Add(1)
+				// Dispatch hooks via worker pool
+				if a.hookChan != nil && (opts.ExecCommand != "" || opts.WebhookURL != "") {
+					select {
+					case a.hookChan <- parsedMessageJob{pm: pm, opts: opts}:
+					default:
+						fmt.Fprintln(os.Stderr, "\nWarning: Hook queue full, skipping message.")
+					}
+				}
 			}
 			if opts.DownloadMedia && pm.Media != nil && pm.ID != "" {
 				enqueueMedia(pm.Chat.String(), pm.ID)
@@ -449,5 +467,56 @@ func mediaLabel(mediaType string) string {
 		return "message"
 	default:
 		return mt
+	}
+}
+
+func (a *App) dispatchHooks(ctx context.Context, opts SyncOptions, pm wa.ParsedMessage) {
+	data, err := json.Marshal(pm)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "\nError marshaling message for hooks: %v\n", err)
+		return
+	}
+
+	// Exec Hook
+	if opts.ExecCommand != "" {
+		cmd := exec.CommandContext(ctx, "sh", "-c", opts.ExecCommand)
+		cmd.Stdin = bytes.NewReader(data)
+		cmd.Env = append(os.Environ(), 
+			"WACLI_MSG_ID="+pm.ID,
+			"WACLI_CHAT_JID="+pm.Chat.String(),
+			"WACLI_SENDER_JID="+pm.SenderJID,
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			fmt.Fprintf(os.Stderr, "\nExec hook error: %v (output: %s)\n", err, string(out))
+		}
+	}
+
+	// Webhook Hook
+	if opts.WebhookURL != "" {
+		httpClient := &http.Client{
+			Timeout: 15 * time.Second,
+		}
+		req, err := http.NewRequestWithContext(ctx, "POST", opts.WebhookURL, bytes.NewReader(data))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "\nWebhook request error: %v\n", err)
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("User-Agent", "wacli-bridge/"+a.Version())
+		if opts.WebhookSecret != "" {
+			mac := hmac.New(sha256.New, []byte(opts.WebhookSecret))
+			mac.Write(data)
+			req.Header.Set("X-Wacli-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
+		}
+
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "\nWebhook post error: %v\n", err)
+			return
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode >= 400 {
+			fmt.Fprintf(os.Stderr, "\nWebhook returned status: %s\n", resp.Status)
+		}
 	}
 }
