@@ -48,8 +48,8 @@ pnpm wacli auth
 # 2) Keep syncing (never shows QR; requires prior auth)
 pnpm wacli sync --follow
 
-# Sync with webhook and HMAC-SHA256 signature
-pnpm wacli sync --webhook "https://example.com/hook" --webhook-secret "mysecret"
+# Sync with webhook, HMAC-SHA256 signature, and retries
+pnpm wacli sync --webhook "https://example.com/hook" --webhook-secret "mysecret" --webhook-max-retries 5 --webhook-retry-delay 2s
 
 # Diagnostics
 pnpm wacli doctor

@@ -7,6 +7,7 @@
 - Messages: `messages export` now supports `--after`, `--before` time filters and `--json` output.
 - Messages: new `--format obsidian|plain-md` flag for `messages export` (default: `obsidian`).
 - Sync: support for HMAC-SHA256 webhook signatures via `--webhook-secret`.
+- Sync: async retries with exponential backoff for webhooks via `--webhook-max-retries` and `--webhook-retry-delay`.
 - Sync: configurable worker count for hook dispatch via `--hook-workers` (default: 4).
 
 ### Changed
