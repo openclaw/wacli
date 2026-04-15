@@ -21,6 +21,8 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 	var execCommand string
 	var webhookURL string
 	var webhookSecret string
+	var webhookMaxRetries int
+	var webhookRetryDelay time.Duration
 	var hookWorkers int
 
 	cmd := &cobra.Command{
@@ -55,16 +57,18 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 			}
 
 			res, err := a.Sync(ctx, appPkg.SyncOptions{
-				Mode:            mode,
-				AllowQR:         false,
-				DownloadMedia:   downloadMedia,
-				RefreshContacts: refreshContacts,
-				RefreshGroups:   refreshGroups,
-				IdleExit:        idleExit,
-				MaxReconnect:    maxReconnect,
-				ExecCommand:     execCommand,
-				WebhookURL:      webhookURL,
-				WebhookSecret:   webhookSecret,
+				Mode:              mode,
+				AllowQR:           false,
+				DownloadMedia:     downloadMedia,
+				RefreshContacts:   refreshContacts,
+				RefreshGroups:     refreshGroups,
+				IdleExit:          idleExit,
+				MaxReconnect:      maxReconnect,
+				ExecCommand:       execCommand,
+				WebhookURL:        webhookURL,
+				WebhookSecret:     webhookSecret,
+				WebhookMaxRetries: webhookMaxRetries,
+				WebhookRetryDelay: webhookRetryDelay,
 			})
 			if err != nil {
 				return err
@@ -91,6 +95,8 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().StringVar(&execCommand, "exec", "", "command to execute on new message (JSON passed via STDIN)")
 	cmd.Flags().StringVar(&webhookURL, "webhook", "", "URL to POST new message JSON")
 	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "HMAC-SHA256 secret for X-Wacli-Signature header")
+	cmd.Flags().IntVar(&webhookMaxRetries, "webhook-max-retries", 3, "maximum number of retry attempts for webhooks")
+	cmd.Flags().DurationVar(&webhookRetryDelay, "webhook-retry-delay", 5*time.Second, "initial delay for webhook retries")
 	cmd.Flags().IntVar(&hookWorkers, "hook-workers", 4, "number of parallel workers for hook dispatch")
 	return cmd
 }
