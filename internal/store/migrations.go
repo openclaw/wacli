@@ -20,15 +20,26 @@ var schemaMigrations = []migration{
 	{version: 3, name: "messages fts", up: migrateMessagesFTS},
 }
 
+const (
+	messagesFTSStateKey     = "messages_fts_state"
+	messagesFTSStateVersion = "display_text_v1"
+)
+
 func (d *DB) ensureSchema() error {
 	if _, err := d.sql.Exec(`
 		CREATE TABLE IF NOT EXISTS schema_migrations (
 			version INTEGER PRIMARY KEY,
 			name TEXT NOT NULL,
 			applied_at INTEGER NOT NULL
+		);
+
+		CREATE TABLE IF NOT EXISTS store_metadata (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL,
+			updated_at INTEGER NOT NULL
 		)
 	`); err != nil {
-		return fmt.Errorf("create schema_migrations table: %w", err)
+		return fmt.Errorf("create schema tables: %w", err)
 	}
 
 	applied := map[int]bool{}
@@ -66,17 +77,7 @@ func (d *DB) ensureSchema() error {
 		}
 	}
 
-	// Detect FTS5 availability on every open, not just when the migration runs.
-	// The migration sets ftsEnabled only on first apply; subsequent opens need
-	// to re-check whether the FTS table exists and is usable.
-	if ftsOK, _ := d.tableExists("messages_fts"); ftsOK {
-		var version string
-		if err := d.sql.QueryRow(`SELECT fts5_source_id()`).Scan(&version); err == nil {
-			d.ftsEnabled = true
-		}
-	}
-
-	return nil
+	return d.ensureMessagesFTS()
 }
 
 func migrateCoreSchema(d *DB) error {
@@ -177,44 +178,139 @@ func migrateMessagesDisplayText(d *DB) error {
 	return nil
 }
 
-func migrateMessagesFTS(d *DB) error {
-	ftsExists, err := d.tableExists("messages_fts")
+func migrateMessagesFTS(_ *DB) error {
+	// Historical schema marker. Runtime FTS setup is tracked separately so
+	// non-FTS builds still open and later FTS-capable builds can repair safely.
+	return nil
+}
+
+func (d *DB) ensureMessagesFTS() error {
+	d.ftsEnabled = false
+
+	if !d.sqliteSupportsFTS5() {
+		return nil
+	}
+
+	state, err := d.metadataValue(messagesFTSStateKey)
 	if err != nil {
 		return err
 	}
-	if ftsExists {
-		hasDisplay, err := d.tableHasColumn("messages_fts", "display_text")
+
+	if state == messagesFTSStateVersion {
+		healthy, err := d.messagesFTSHealthy()
 		if err != nil {
 			return err
 		}
-		if !hasDisplay {
-			if _, err := d.sql.Exec(`DROP TABLE IF EXISTS messages_fts`); err != nil {
-				return fmt.Errorf("drop messages_fts: %w", err)
-			}
-			ftsExists = false
-		}
-	}
-
-	created := false
-	if !ftsExists {
-		if _, err := d.sql.Exec(`
-			CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
-				text,
-				media_caption,
-				filename,
-				chat_name,
-				sender_name,
-				display_text
-			)
-		`); err != nil {
-			// Continue without FTS (fallback to LIKE).
-			d.ftsEnabled = false
+		if healthy {
+			d.ftsEnabled = true
 			return nil
 		}
-		created = true
 	}
 
-	// Ensure triggers match expected semantics.
+	if err := d.rebuildMessagesFTSState(); err != nil {
+		_ = d.deleteMetadata(messagesFTSStateKey)
+		d.ftsEnabled = false
+		return nil
+	}
+
+	if err := d.setMetadata(messagesFTSStateKey, messagesFTSStateVersion); err != nil {
+		// Keep FTS enabled for this process; a missing marker only forces a
+		// one-time rebuild on a later open.
+	}
+
+	d.ftsEnabled = true
+	return nil
+}
+
+func (d *DB) sqliteSupportsFTS5() bool {
+	var version string
+	return d.sql.QueryRow(`SELECT fts5_source_id()`).Scan(&version) == nil
+}
+
+func (d *DB) messagesFTSHealthy() (bool, error) {
+	ftsExists, err := d.tableExists("messages_fts")
+	if err != nil {
+		return false, err
+	}
+	if !ftsExists {
+		return false, nil
+	}
+
+	hasDisplay, err := d.tableHasColumn("messages_fts", "display_text")
+	if err != nil {
+		return false, err
+	}
+	if !hasDisplay {
+		return false, nil
+	}
+
+	triggersReady, err := d.messagesFTSTriggersReady()
+	if err != nil {
+		return false, err
+	}
+	if !triggersReady {
+		return false, nil
+	}
+
+	if err := d.probeMessagesFTS(); err != nil {
+		return false, nil
+	}
+
+	return true, nil
+}
+
+func (d *DB) messagesFTSTriggersReady() (bool, error) {
+	for _, name := range []string{"messages_ai", "messages_ad", "messages_au"} {
+		ok, err := d.triggerExists(name)
+		if err != nil {
+			return false, err
+		}
+		if !ok {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func (d *DB) rebuildMessagesFTSState() error {
+	d.resetMessagesFTS()
+
+	if err := d.createMessagesFTSTable(); err != nil {
+		return err
+	}
+	if err := d.createMessagesFTSTriggers(); err != nil {
+		d.resetMessagesFTS()
+		return err
+	}
+	if err := d.backfillMessagesFTS(); err != nil {
+		d.resetMessagesFTS()
+		return err
+	}
+	if err := d.probeMessagesFTS(); err != nil {
+		d.resetMessagesFTS()
+		return err
+	}
+
+	return nil
+}
+
+func (d *DB) createMessagesFTSTable() error {
+	if _, err := d.sql.Exec(`
+		CREATE VIRTUAL TABLE messages_fts USING fts5(
+			text,
+			media_caption,
+			filename,
+			chat_name,
+			sender_name,
+			display_text
+		)
+	`); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (d *DB) createMessagesFTSTriggers() error {
 	if _, err := d.sql.Exec(`
 		DROP TRIGGER IF EXISTS messages_ai;
 		DROP TRIGGER IF EXISTS messages_ad;
@@ -235,28 +331,109 @@ func migrateMessagesFTS(d *DB) error {
 			VALUES (new.rowid, COALESCE(new.text,''), COALESCE(new.media_caption,''), COALESCE(new.filename,''), COALESCE(new.chat_name,''), COALESCE(new.sender_name,''), COALESCE(new.display_text,''));
 		END;
 	`); err != nil {
-		d.ftsEnabled = false
-		return nil
+		return err
 	}
+	return nil
+}
 
-	if created {
-		if _, err := d.sql.Exec(`
-			INSERT INTO messages_fts(rowid, text, media_caption, filename, chat_name, sender_name, display_text)
-			SELECT rowid,
-			       COALESCE(text,''),
-			       COALESCE(media_caption,''),
-			       COALESCE(filename,''),
-			       COALESCE(chat_name,''),
-			       COALESCE(sender_name,''),
-			       COALESCE(display_text,'')
-			FROM messages
-		`); err != nil {
-			d.ftsEnabled = false
-			return nil
+func (d *DB) backfillMessagesFTS() error {
+	if _, err := d.sql.Exec(`
+		INSERT INTO messages_fts(rowid, text, media_caption, filename, chat_name, sender_name, display_text)
+		SELECT rowid,
+		       COALESCE(text,''),
+		       COALESCE(media_caption,''),
+		       COALESCE(filename,''),
+		       COALESCE(chat_name,''),
+		       COALESCE(sender_name,''),
+		       COALESCE(display_text,'')
+		FROM messages
+	`); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (d *DB) probeMessagesFTS() error {
+	rows, err := d.sql.Query(`SELECT rowid FROM messages_fts LIMIT 1`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var rowid int64
+		if err := rows.Scan(&rowid); err != nil {
+			return err
 		}
+		break
 	}
 
-	d.ftsEnabled = true
+	return rows.Err()
+}
+
+func (d *DB) resetMessagesFTS() {
+	_ = d.dropMessagesFTSTriggers()
+	for _, table := range []string{
+		"messages_fts",
+		"messages_fts_data",
+		"messages_fts_idx",
+		"messages_fts_docsize",
+		"messages_fts_config",
+		"messages_fts_content",
+	} {
+		_, _ = d.sql.Exec("DROP TABLE IF EXISTS " + table)
+	}
+}
+
+func (d *DB) dropMessagesFTSTriggers() error {
+	if _, err := d.sql.Exec(`
+		DROP TRIGGER IF EXISTS messages_ai;
+		DROP TRIGGER IF EXISTS messages_ad;
+		DROP TRIGGER IF EXISTS messages_au;
+	`); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (d *DB) triggerExists(trigger string) (bool, error) {
+	row := d.sql.QueryRow(`SELECT 1 FROM sqlite_master WHERE name = ? AND type = 'trigger'`, trigger)
+	var one int
+	if err := row.Scan(&one); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func (d *DB) metadataValue(key string) (string, error) {
+	row := d.sql.QueryRow(`SELECT value FROM store_metadata WHERE key = ?`, key)
+	var value string
+	if err := row.Scan(&value); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		return "", err
+	}
+	return value, nil
+}
+
+func (d *DB) setMetadata(key, value string) error {
+	if _, err := d.sql.Exec(`
+		INSERT INTO store_metadata(key, value, updated_at) VALUES(?, ?, ?)
+		ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
+	`, key, value, time.Now().UTC().Unix()); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (d *DB) deleteMetadata(key string) error {
+	if _, err := d.sql.Exec(`DELETE FROM store_metadata WHERE key = ?`, key); err != nil {
+		return err
+	}
 	return nil
 }
 

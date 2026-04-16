@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -33,6 +34,14 @@ func TestOpenCreatesExpectedSchema(t *testing.T) {
 			t.Fatalf("expected messages column %q to exist", want)
 		}
 	}
+
+	metaExists, err := tableExists(db.sql, "store_metadata")
+	if err != nil {
+		t.Fatalf("tableExists(store_metadata): %v", err)
+	}
+	if !metaExists {
+		t.Fatalf("expected store_metadata table to exist")
+	}
 }
 
 func tableColumns(db *sql.DB, table string) (map[string]bool, error) {
@@ -56,4 +65,16 @@ func tableColumns(db *sql.DB, table string) (map[string]bool, error) {
 		cols[strings.ToLower(name)] = true
 	}
 	return cols, rows.Err()
+}
+
+func tableExists(db *sql.DB, table string) (bool, error) {
+	row := db.QueryRow(`SELECT 1 FROM sqlite_master WHERE name = ? AND type = 'table'`, table)
+	var one int
+	if err := row.Scan(&one); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }

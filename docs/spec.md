@@ -117,6 +117,10 @@ Approach:
   - media caption
   - document filename
   - (optionally) denormalized sender/chat names for convenience
+- Persist a small readiness marker once the FTS table, triggers, and initial backfill
+  have been built successfully.
+- On startup, if SQLite supports FTS5 but the readiness marker is missing or stale,
+  rebuild the FTS table and triggers once before enabling `MATCH` search.
 
 Query behavior:
 
@@ -127,6 +131,8 @@ Query behavior:
 Fallback:
 
 - If FTS5 is unavailable, fall back to `LIKE` with an explicit warning (slower).
+- If the FTS table is damaged or repair fails, keep the store usable and fall back
+  to `LIKE` instead of failing startup.
 
 ## CLI command surface (v1)
 

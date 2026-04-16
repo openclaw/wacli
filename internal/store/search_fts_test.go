@@ -148,6 +148,13 @@ func TestHasFTSRemainsEnabledAfterReopen(t *testing.T) {
 	if !db.HasFTS() {
 		t.Fatalf("expected HasFTS=true on first open")
 	}
+	state, err := db.metadataValue(messagesFTSStateKey)
+	if err != nil {
+		t.Fatalf("metadataValue on first open: %v", err)
+	}
+	if state != messagesFTSStateVersion {
+		t.Fatalf("expected FTS state marker %q, got %q", messagesFTSStateVersion, state)
+	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close first db: %v", err)
 	}
@@ -159,5 +166,134 @@ func TestHasFTSRemainsEnabledAfterReopen(t *testing.T) {
 	defer db.Close()
 	if !db.HasFTS() {
 		t.Fatalf("expected HasFTS=true after reopen")
+	}
+	state, err = db.metadataValue(messagesFTSStateKey)
+	if err != nil {
+		t.Fatalf("metadataValue after reopen: %v", err)
+	}
+	if state != messagesFTSStateVersion {
+		t.Fatalf("expected FTS state marker %q after reopen, got %q", messagesFTSStateVersion, state)
+	}
+}
+
+func TestEnsureMessagesFTSRepairsMissingTriggersAndBackfillAfterReopen(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "wacli.db")
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open first time: %v", err)
+	}
+
+	chat := "repair@s.whatsapp.net"
+	if err := db.UpsertChat(chat, "dm", "Repair", time.Now()); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID:    chat,
+		ChatName:   "Repair",
+		MsgID:      "m1",
+		SenderJID:  chat,
+		SenderName: "Repair",
+		Timestamp:  time.Now(),
+		Text:       "first repair message",
+	}); err != nil {
+		t.Fatalf("UpsertMessage m1: %v", err)
+	}
+
+	if _, err := db.sql.Exec(`
+		DROP TRIGGER IF EXISTS messages_ai;
+		DROP TRIGGER IF EXISTS messages_ad;
+		DROP TRIGGER IF EXISTS messages_au;
+		DELETE FROM messages_fts;
+	`); err != nil {
+		t.Fatalf("break FTS state: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close first db: %v", err)
+	}
+
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("Open second time: %v", err)
+	}
+	defer db.Close()
+	if !db.HasFTS() {
+		t.Fatalf("expected HasFTS=true after repair")
+	}
+
+	ms, err := db.SearchMessages(SearchMessagesParams{Query: "first", Limit: 10})
+	if err != nil {
+		t.Fatalf("SearchMessages after repair: %v", err)
+	}
+	if len(ms) != 1 || ms[0].MsgID != "m1" {
+		t.Fatalf("expected rebuilt index to return m1, got %v", ms)
+	}
+
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID:    chat,
+		ChatName:   "Repair",
+		MsgID:      "m2",
+		SenderJID:  chat,
+		SenderName: "Repair",
+		Timestamp:  time.Now().Add(time.Second),
+		Text:       "second repair message",
+	}); err != nil {
+		t.Fatalf("UpsertMessage m2: %v", err)
+	}
+
+	ms, err = db.SearchMessages(SearchMessagesParams{Query: "second", Limit: 10})
+	if err != nil {
+		t.Fatalf("SearchMessages for new message: %v", err)
+	}
+	if len(ms) != 1 || ms[0].MsgID != "m2" {
+		t.Fatalf("expected recreated triggers to index m2, got %v", ms)
+	}
+}
+
+func TestEnsureMessagesFTSFallsBackOrRepairsDamagedShadowTables(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "wacli.db")
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open first time: %v", err)
+	}
+
+	chat := "damaged@s.whatsapp.net"
+	if err := db.UpsertChat(chat, "dm", "Damaged", time.Now()); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID:    chat,
+		ChatName:   "Damaged",
+		MsgID:      "m1",
+		SenderJID:  chat,
+		SenderName: "Damaged",
+		Timestamp:  time.Now(),
+		Text:       "damaged shadow table message",
+	}); err != nil {
+		t.Fatalf("UpsertMessage m1: %v", err)
+	}
+
+	if _, err := db.sql.Exec(`DROP TABLE messages_fts_data`); err != nil {
+		t.Fatalf("damage shadow table: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close first db: %v", err)
+	}
+
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("Open after damage should fall back or repair, got: %v", err)
+	}
+	defer db.Close()
+
+	ms, err := db.SearchMessages(SearchMessagesParams{Query: "damaged", Limit: 10})
+	if err != nil {
+		t.Fatalf("SearchMessages after damage: %v", err)
+	}
+	if len(ms) != 1 || ms[0].MsgID != "m1" {
+		t.Fatalf("expected search to keep working after damage, got %v", ms)
 	}
 }
