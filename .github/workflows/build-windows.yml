@@ -1,0 +1,53 @@
+name: Build Windows Executable
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v0.1.0) or leave empty for latest'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.version || github.ref }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install mingw-w64
+        run: |
+          choco install mingw -y
+          echo "C:\ProgramData\mingw64\mingw64\bin" >> $env:GITHUB_PATH
+
+      - name: Build Windows executable
+        env:
+          CGO_ENABLED: 1
+        run: |
+          $VERSION = "${{ github.event.inputs.version || github.ref_name }}"
+          go build -trimpath -tags sqlite_fts5 -ldflags "-s -w -X main.version=$VERSION" -o wacli.exe ./cmd/wacli
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wacli-windows-amd64
+          path: wacli.exe
+          retention-days: 30
+
+      - name: Show build info
+        run: |
+          Write-Host "✅ Build complete!"
+          Write-Host "📦 Binary: wacli.exe"
+          Get-ChildItem wacli.exe

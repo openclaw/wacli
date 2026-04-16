@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -24,7 +23,7 @@ func Acquire(storeDir string) (*Lock, error) {
 		return nil, fmt.Errorf("open lock file: %w", err)
 	}
 
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err := flock(int(f.Fd()), lockEx|lockNb); err != nil {
 		_, _ = f.Seek(0, 0)
 		b, _ := os.ReadFile(path)
 		_ = f.Close()
@@ -47,7 +46,7 @@ func (l *Lock) Release() error {
 	if l == nil || l.f == nil {
 		return nil
 	}
-	_ = syscall.Flock(int(l.f.Fd()), syscall.LOCK_UN)
+	_ = flock(int(l.f.Fd()), lockUn)
 	err := l.f.Close()
 	l.f = nil
 	return err
