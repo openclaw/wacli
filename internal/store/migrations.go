@@ -66,6 +66,16 @@ func (d *DB) ensureSchema() error {
 		}
 	}
 
+	// Detect FTS5 availability on every open, not just when the migration runs.
+	// The migration sets ftsEnabled only on first apply; subsequent opens need
+	// to re-check whether the FTS table exists and is usable.
+	if ftsOK, _ := d.tableExists("messages_fts"); ftsOK {
+		var version string
+		if err := d.sql.QueryRow(`SELECT fts5_source_id()`).Scan(&version); err == nil {
+			d.ftsEnabled = true
+		}
+	}
+
 	return nil
 }
 
