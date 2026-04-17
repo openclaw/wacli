@@ -7,6 +7,7 @@ import (
 	"mime"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -87,13 +88,6 @@ func (a *App) runMediaWorkers(ctx context.Context, jobs <-chan mediaJob, workers
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			// Recover from panics to prevent a bad media job from crashing
-			// the whole process (#52).
-			defer func() {
-				if r := recover(); r != nil {
-					fmt.Fprintf(os.Stderr, "media worker panic (recovered): %v\n", r)
-				}
-			}()
 			for {
 				select {
 				case <-ctx.Done():
@@ -102,9 +96,19 @@ func (a *App) runMediaWorkers(ctx context.Context, jobs <-chan mediaJob, workers
 					if strings.TrimSpace(job.chatJID) == "" || strings.TrimSpace(job.msgID) == "" {
 						continue
 					}
-					if err := a.downloadMediaJob(ctx, job); err != nil {
-						fmt.Fprintf(os.Stderr, "media download failed for %s/%s: %v\n", job.chatJID, job.msgID, err)
-					}
+					// Recover per job so a panic fails one download
+					// instead of killing the worker permanently (#52).
+					func() {
+						defer func() {
+							if r := recover(); r != nil {
+								fmt.Fprintf(os.Stderr, "media worker panic (recovered) for %s/%s: %v\n%s\n",
+									job.chatJID, job.msgID, r, debug.Stack())
+							}
+						}()
+						if err := a.downloadMediaJob(ctx, job); err != nil {
+							fmt.Fprintf(os.Stderr, "media download failed for %s/%s: %v\n", job.chatJID, job.msgID, err)
+						}
+					}()
 				}
 			}
 		}()
