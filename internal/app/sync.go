@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -80,12 +81,17 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 		}
 	}
 
+	var panicCount atomic.Int64
 	handlerID := a.wa.AddEventHandler(func(evt interface{}) {
 		// Recover from panics so unexpected message structures do not
-		// crash the entire process (#52).
+		// crash the entire process (#52). Log a stack trace, the event
+		// type, and a running counter so recoveries do not go silently
+		// unnoticed (#178).
 		defer func() {
 			if r := recover(); r != nil {
-				fmt.Fprintf(os.Stderr, "\nevent handler panic (recovered): %v\n", r)
+				n := panicCount.Add(1)
+				fmt.Fprintf(os.Stderr, "\nevent handler panic (recovered, total=%d) event=%T: %v\n%s\n",
+					n, evt, r, debug.Stack())
 			}
 		}()
 		lastEvent.Store(time.Now().UTC().UnixNano())
