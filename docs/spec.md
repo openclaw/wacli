@@ -21,18 +21,20 @@ This document defines the v1 plan for `wacli`: a WhatsApp CLI that syncs message
 ## Terminology
 
 - **JID**: WhatsApp Jabber ID, e.g. `1234567890@s.whatsapp.net` (user) or `123456789@g.us` (group).
-- **Store directory**: directory containing all local state, default `~/.wacli`.
+- **Store directory**: directory containing all local state, default
+  `${XDG_STATE_HOME:-~/.local/state}/wacli` on Linux and `~/.wacli` elsewhere.
 
 ## Storage layout
 
-Default store: `~/.wacli` (override with `--store DIR`).
+Default store: `${XDG_STATE_HOME:-~/.local/state}/wacli` on Linux and `~/.wacli`
+elsewhere (override with `--store DIR` or `WACLI_STORE_DIR`).
 
 Proposed files:
 
-- `~/.wacli/session.db` — `whatsmeow` SQL store (device identity, keys, app-state).
-- `~/.wacli/wacli.db` — our SQLite DB (messages/chats, FTS, local metadata).
-- `~/.wacli/media/...` — downloaded media (optional, on-demand or background).
-- `~/.wacli/LOCK` — store lock to prevent concurrent access.
+- `<store>/session.db` — `whatsmeow` SQL store (device identity, keys, app-state).
+- `<store>/wacli.db` — our SQLite DB (messages/chats, FTS, local metadata).
+- `<store>/media/...` — downloaded media (optional, on-demand or background).
+- `<store>/LOCK` — store lock to prevent concurrent access.
 
 Rationale for two SQLite files: reduce coupling and keep the `whatsmeow`-owned schema separate from `wacli`’s local schema. It’s still “one store directory” for the user.
 
@@ -132,7 +134,7 @@ Fallback:
 
 Global flags:
 
-- `--store DIR` (default `~/.wacli`)
+- `--store DIR` (default `${XDG_STATE_HOME:-~/.local/state}/wacli` on Linux, `~/.wacli` elsewhere)
 - `--json` (default: human text)
 - `--timeout DURATION` (non-sync commands; e.g. `5m`)
 - `--version` (prints version and exits)
@@ -234,7 +236,8 @@ Recommendation:
 - `sync` (non-interactive, follow mode)
 - `messages list/search` with FTS5
 - `send text`
-- store locking, default `~/.wacli`
+- store locking, default `${XDG_STATE_HOME:-~/.local/state}/wacli` on Linux and
+  `~/.wacli` elsewhere
 
 ### v0.2
 

@@ -52,4 +52,6 @@
 - Groups: list/refresh/info/rename; participants add/remove/promote/demote; invite link get/revoke; join/leave.
 - Diagnostics: `wacli doctor` for store path, lock status/info, auth/connection check, and FTS status.
 - CLI UX: human-readable output by default with `--json`, global `--store`/`--timeout`, plus `wacli version`.
-- Storage: default `~/.wacli`, lock file for single-instance safety, SQLite DB with FTS5, WhatsApp session store, and media directory.
+- Storage: default `${XDG_STATE_HOME:-~/.local/state}/wacli` on Linux and
+  `~/.wacli` elsewhere, plus a lock file for single-instance safety, SQLite DB
+  with FTS5, WhatsApp session store, and media directory.

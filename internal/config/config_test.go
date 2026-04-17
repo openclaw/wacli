@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -15,11 +16,30 @@ func TestDefaultStoreDir(t *testing.T) {
 		}
 	})
 
-	t.Run("falls back to ~/.wacli when env unset", func(t *testing.T) {
+	t.Run("uses XDG state dir on linux when env unset", func(t *testing.T) {
 		t.Setenv(EnvStoreDir, "")
+		t.Setenv("XDG_STATE_HOME", "")
 		got := DefaultStoreDir()
 		home, _ := os.UserHomeDir()
 		want := filepath.Join(home, ".wacli")
+		if runtime.GOOS == "linux" {
+			want = filepath.Join(home, ".local", "state", "wacli")
+		}
+		if got != want {
+			t.Errorf("DefaultStoreDir() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("uses XDG_STATE_HOME on linux", func(t *testing.T) {
+		t.Setenv(EnvStoreDir, "")
+		t.Setenv("XDG_STATE_HOME", "/tmp/xdg-state")
+
+		got := DefaultStoreDir()
+		want := filepath.Join("/tmp/xdg-state", "wacli")
+		if runtime.GOOS != "linux" {
+			home, _ := os.UserHomeDir()
+			want = filepath.Join(home, ".wacli")
+		}
 		if got != want {
 			t.Errorf("DefaultStoreDir() = %q, want %q", got, want)
 		}

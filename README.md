@@ -38,7 +38,8 @@ Run (local build only):
 
 ## Quick start
 
-Default store directory is `~/.wacli` (override with `--store DIR`).
+Default store directory is `${XDG_STATE_HOME:-~/.local/state}/wacli` on Linux and
+`~/.wacli` elsewhere (override with `--store DIR` or `WACLI_STORE_DIR`).
 
 ```bash
 # 1) Authenticate (shows QR), then bootstrap sync
@@ -87,7 +88,8 @@ This project is heavily inspired by (and learns from) the excellent `whatsapp-cl
 
 ## Storage
 
-Defaults to `~/.wacli` (override with `--store DIR`).
+Defaults to `${XDG_STATE_HOME:-~/.local/state}/wacli` on Linux and `~/.wacli`
+elsewhere (override with `--store DIR` or `WACLI_STORE_DIR`).
 
 ## Environment overrides
 
