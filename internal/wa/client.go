@@ -62,6 +62,12 @@ func (c *Client) init() error {
 
 	logger := waLog.Stdout("Client", "ERROR", true)
 	c.client = whatsmeow.NewClient(deviceStore, logger)
+	// Persist recently-sent messages so whatsmeow can answer retry-receipts
+	// across process restarts. Without this, recipients whose Signal session
+	// has not been freshly bootstrapped (typically other linked devices)
+	// see "Waiting for this message" indefinitely because whatsmeow can't
+	// find the original plaintext to re-encrypt when the retry arrives.
+	c.client.UseRetryMessageStore = true
 	return nil
 }
 
