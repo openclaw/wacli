@@ -311,7 +311,13 @@ func newMessagesContextCmd(flags *rootFlags) *cobra.Command {
 				if m.FromMe {
 					from = "me"
 				}
-				line := m.Text
+				line := strings.TrimSpace(m.DisplayText)
+				if line == "" {
+					line = strings.TrimSpace(m.Text)
+				}
+				if m.MediaType != "" && line == "" {
+					line = "Sent " + m.MediaType
+				}
 				if m.MsgID == id {
 					line = ">> " + line
 				}
