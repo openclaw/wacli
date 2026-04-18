@@ -55,5 +55,21 @@ func (d *DB) init() error {
 	_, _ = d.sql.Exec("PRAGMA temp_store=MEMORY;")
 	_, _ = d.sql.Exec("PRAGMA foreign_keys=ON;")
 
-	return d.ensureSchema()
+	if err := d.ensureSchema(); err != nil {
+		return err
+	}
+
+	// Detect FTS5 availability independently of migration state.
+	// The migration sets ftsEnabled only on first run; subsequent
+	// opens skip the migration and leave ftsEnabled as false.
+	if !d.ftsEnabled {
+		if ok, _ := d.tableExists("messages_fts"); ok {
+			var n int
+			if err := d.sql.QueryRow("SELECT 1 FROM messages_fts LIMIT 1").Scan(&n); err == nil {
+				d.ftsEnabled = true
+			}
+		}
+	}
+
+	return nil
 }
