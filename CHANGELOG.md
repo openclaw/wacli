@@ -21,6 +21,7 @@
 - Send: strip a leading `+` from phone-number recipients before building WhatsApp JIDs. (#74 — thanks @FrederickStempfle)
 - Search: keep FTS5 enabled after reopening existing databases with already-applied migrations. (#185 — thanks @iamhitarth)
 - Send: persist retry-message plaintext so linked devices can decrypt retried messages. (#186 — thanks @SimDamDev)
+- Sync: keep `sync --once` idle timing focused on message/history events so connection chatter cannot hang exit. (#119 — thanks @jyothepro)
 - Sync: start `sync --once` idle timing after the `Connected` event. (#171 — thanks @fuleinist)
 - Sync: include event type, stack trace, and recovery count when logging recovered event-handler panics. (#181 — thanks @shaun0927)
 - Windows: split store locking by platform so the lock package compiles on Windows. (#188 — thanks @dinakars777)

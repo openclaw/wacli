@@ -69,6 +69,7 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	if err := a.Connect(ctx, opts.AllowQR, opts.OnQRCode); err != nil {
 		return SyncResult{}, err
 	}
+	lastEvent.Store(time.Now().UTC().UnixNano())
 
 	if opts.DownloadMedia {
 		var err error

@@ -257,6 +257,41 @@ func TestSyncOnceIdleExit(t *testing.T) {
 	}
 }
 
+func TestSyncOnceIdleExitIgnoresNonMessageEvents(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	go func() {
+		ticker := time.NewTicker(30 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				f.emit(&events.Connected{})
+			}
+		}
+	}()
+
+	start := time.Now()
+	_, err := a.Sync(ctx, SyncOptions{
+		Mode:     SyncModeOnce,
+		AllowQR:  false,
+		IdleExit: 200 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 1500*time.Millisecond {
+		t.Fatalf("expected non-message events not to reset idle timer, took %s", elapsed)
+	}
+}
+
 func TestSyncOnceIdleExitStartsAfterConnected(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()

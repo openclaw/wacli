@@ -44,12 +44,12 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 					n, evt, r, debug.Stack())
 			}
 		}()
-		lastEvent.Store(time.Now().UTC().UnixNano())
-
 		switch v := evt.(type) {
 		case *events.Message:
+			lastEvent.Store(time.Now().UTC().UnixNano())
 			a.handleLiveSyncMessage(ctx, opts, v, messagesStored, enqueueMedia)
 		case *events.HistorySync:
+			lastEvent.Store(time.Now().UTC().UnixNano())
 			a.handleHistorySync(ctx, opts, v, messagesStored, lastEvent, enqueueMedia)
 		case *events.Connected:
 			fmt.Fprintln(os.Stderr, "\nConnected.")
