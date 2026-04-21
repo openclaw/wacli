@@ -270,3 +270,10 @@ func (f *fakeWA) Logout(ctx context.Context) error {
 	f.authed = false
 	return nil
 }
+
+func (f *fakeWA) LinkedJID() string {
+	if !f.IsAuthed() {
+		return ""
+	}
+	return "1234567890@s.whatsapp.net"
+}

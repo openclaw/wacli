@@ -55,6 +55,15 @@ func (c *Client) IsAuthed() bool {
 	return c.client != nil && c.client.Store != nil && c.client.Store.ID != nil
 }
 
+func (c *Client) LinkedJID() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.client == nil || c.client.Store == nil || c.client.Store.ID == nil {
+		return ""
+	}
+	return c.client.Store.ID.ToNonAD().String()
+}
+
 func (c *Client) IsConnected() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()

@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/mdp/qrterminal/v3"
@@ -93,20 +95,50 @@ func newAuthStatusCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 			authed := a.WA().IsAuthed()
+			var linkedJID string
+			if authed {
+				linkedJID = a.WA().LinkedJID()
+			}
 
 			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{
-					"authenticated": authed,
-				})
+				return out.WriteJSON(os.Stdout, authStatusPayload(authed, linkedJID))
 			}
-			if authed {
-				fmt.Fprintln(os.Stdout, "Authenticated.")
-			} else {
-				fmt.Fprintln(os.Stdout, "Not authenticated. Run `wacli auth`.")
-			}
+			writeAuthStatus(os.Stdout, authed, linkedJID)
 			return nil
 		},
 	}
+}
+
+func authStatusPayload(authed bool, linkedJID string) map[string]any {
+	data := map[string]any{"authenticated": authed}
+	if !authed || linkedJID == "" {
+		return data
+	}
+	data["linked_jid"] = linkedJID
+	if phone := phoneFromLinkedJID(linkedJID); phone != "" {
+		data["phone"] = phone
+	}
+	return data
+}
+
+func writeAuthStatus(w io.Writer, authed bool, linkedJID string) {
+	if !authed {
+		fmt.Fprintln(w, "Not authenticated. Run `wacli auth`.")
+		return
+	}
+	if linkedJID != "" {
+		fmt.Fprintf(w, "Authenticated as %s\n", linkedJID)
+		return
+	}
+	fmt.Fprintln(w, "Authenticated.")
+}
+
+func phoneFromLinkedJID(linkedJID string) string {
+	phone, _, ok := strings.Cut(linkedJID, "@")
+	if !ok {
+		return ""
+	}
+	return phone
 }
 
 func newAuthLogoutCmd(flags *rootFlags) *cobra.Command {

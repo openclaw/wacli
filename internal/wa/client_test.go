@@ -20,6 +20,9 @@ func TestNewEnablesRetryMessageStore(t *testing.T) {
 	if !c.client.UseRetryMessageStore {
 		t.Fatal("expected retry message store to be enabled")
 	}
+	if got := c.LinkedJID(); got != "" {
+		t.Fatalf("LinkedJID before auth = %q", got)
+	}
 }
 
 func TestParseUserOrJID(t *testing.T) {
