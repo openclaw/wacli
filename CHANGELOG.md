@@ -13,6 +13,7 @@
 ### Security
 
 - Auth: reject `?` and `#` in whatsmeow session store paths to avoid SQLite URI parameter injection. (#180 — thanks @shaun0927)
+- Send: validate phone-number recipients before constructing WhatsApp JIDs. (#144 — thanks @draix)
 - Store: restrict index and session SQLite database files to owner-only permissions. (#147 — thanks @draix)
 
 ### Fixed

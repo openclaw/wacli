@@ -33,8 +33,17 @@ func TestParseUserOrJID(t *testing.T) {
 		{name: "phone", input: "1234567890", wantUser: "1234567890", wantServer: types.DefaultUserServer},
 		{name: "phone with plus", input: "+1234567890", wantUser: "1234567890", wantServer: types.DefaultUserServer},
 		{name: "phone with spaces and plus", input: " +1234567890 ", wantUser: "1234567890", wantServer: types.DefaultUserServer},
+		{name: "minimum length phone", input: "1234567", wantUser: "1234567", wantServer: types.DefaultUserServer},
+		{name: "maximum length phone", input: "123456789012345", wantUser: "123456789012345", wantServer: types.DefaultUserServer},
 		{name: "group jid", input: "123@g.us", wantUser: "123", wantServer: types.GroupServer},
 		{name: "empty after plus", input: "+", wantErr: true},
+		{name: "too short phone", input: "123456", wantErr: true},
+		{name: "too long phone", input: "1234567890123456", wantErr: true},
+		{name: "letters in phone", input: "123abc456", wantErr: true},
+		{name: "punctuation in phone", input: "123-456-7890", wantErr: true},
+		{name: "spaces inside phone", input: "123 456 7890", wantErr: true},
+		{name: "plus inside phone", input: "12+34567", wantErr: true},
+		{name: "double leading plus", input: "++1234567", wantErr: true},
 	}
 
 	for _, tt := range tests {
