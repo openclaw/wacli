@@ -9,6 +9,7 @@
 ### Fixed
 
 - Media: recover panics per download job so one bad payload no longer drains the worker pool. (#179 — thanks @shaun0927)
+- Messages: show display text for replies, reactions, and media in `messages context`. (#183 — thanks @fuleinist)
 - Send: persist retry-message plaintext so linked devices can decrypt retried messages. (#186 — thanks @SimDamDev)
 - Sync: include event type, stack trace, and recovery count when logging recovered event-handler panics. (#181 — thanks @shaun0927)
 

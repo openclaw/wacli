@@ -311,13 +311,7 @@ func newMessagesContextCmd(flags *rootFlags) *cobra.Command {
 				if m.FromMe {
 					from = "me"
 				}
-				line := strings.TrimSpace(m.DisplayText)
-				if line == "" {
-					line = strings.TrimSpace(m.Text)
-				}
-				if m.MediaType != "" && line == "" {
-					line = "Sent " + m.MediaType
-				}
+				line := messageContextLine(m)
 				if m.MsgID == id {
 					line = ">> " + line
 				}
@@ -337,4 +331,25 @@ func newMessagesContextCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().IntVar(&before, "before", 5, "messages before")
 	cmd.Flags().IntVar(&after, "after", 5, "messages after")
 	return cmd
+}
+
+func messageContextLine(m store.Message) string {
+	if line := strings.TrimSpace(m.DisplayText); line != "" {
+		return line
+	}
+	if line := strings.TrimSpace(m.Text); line != "" {
+		return line
+	}
+	if strings.TrimSpace(m.MediaType) != "" {
+		return "Sent " + messageMediaLabel(m.MediaType)
+	}
+	return ""
+}
+
+func messageMediaLabel(mediaType string) string {
+	mt := strings.ToLower(strings.TrimSpace(mediaType))
+	if mt == "" {
+		return "message"
+	}
+	return mt
 }
