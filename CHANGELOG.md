@@ -5,6 +5,7 @@
 ### Added
 
 - CLI: add `--full` to disable table truncation; piped output now keeps full message IDs. (#13 — thanks @rickhallett)
+- CLI: add `presence typing` and `presence paused` commands for WhatsApp composing indicators. (#76 — thanks @redemerco)
 - Messages: add `messages list --sender`, `--from-me`, `--from-them`, and `--asc` filters. (#153 — thanks @draix)
 - Messages: extract searchable/display text from WhatsApp Business templates, buttons, interactive messages, and list replies. (#79 — thanks @terry-li-hm)
 

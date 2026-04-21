@@ -300,6 +300,17 @@ func (c *Client) GetGroupInfo(ctx context.Context, jid types.JID) (*types.GroupI
 	return cli.GetGroupInfo(ctx, jid)
 }
 
+// SendChatPresence sends a typing or paused indicator to a chat.
+func (c *Client) SendChatPresence(ctx context.Context, jid types.JID, state types.ChatPresence, media types.ChatPresenceMedia) error {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || !cli.IsConnected() {
+		return fmt.Errorf("not connected")
+	}
+	return cli.SendChatPresence(ctx, jid, state, media)
+}
+
 func (c *Client) Logout(ctx context.Context) error {
 	c.mu.Lock()
 	cli := c.client

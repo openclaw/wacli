@@ -225,6 +225,10 @@ func (f *fakeWA) Upload(ctx context.Context, data []byte, mediaType whatsmeow.Me
 	return whatsmeow.UploadResponse{}, nil
 }
 
+func (f *fakeWA) SendChatPresence(ctx context.Context, jid types.JID, state types.ChatPresence, media types.ChatPresenceMedia) error {
+	return nil
+}
+
 func (f *fakeWA) DecryptReaction(ctx context.Context, reaction *events.Message) (*waProto.ReactionMessage, error) {
 	return nil, fmt.Errorf("not supported")
 }
