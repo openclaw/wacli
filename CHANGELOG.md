@@ -2,6 +2,10 @@
 
 ## 0.6.1 - Unreleased
 
+### Fixed
+
+- Send: persist retry-message plaintext so linked devices can decrypt retried messages. (#186 — thanks @SimDamDev)
+
 ### Docs
 
 - Maintainers: add CODEOWNERS and maintainer contact info.

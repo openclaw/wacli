@@ -1,10 +1,26 @@
 package wa
 
 import (
+	"path/filepath"
 	"testing"
 
 	"go.mau.fi/whatsmeow/types"
 )
+
+func TestNewEnablesRetryMessageStore(t *testing.T) {
+	c, err := New(Options{StorePath: filepath.Join(t.TempDir(), "session.db")})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer c.Close()
+
+	if c.client == nil {
+		t.Fatal("expected whatsmeow client")
+	}
+	if !c.client.UseRetryMessageStore {
+		t.Fatal("expected retry message store to be enabled")
+	}
+}
 
 func TestParseUserOrJID(t *testing.T) {
 	j, err := ParseUserOrJID("1234567890")
