@@ -23,20 +23,36 @@ func TestNewEnablesRetryMessageStore(t *testing.T) {
 }
 
 func TestParseUserOrJID(t *testing.T) {
-	j, err := ParseUserOrJID("1234567890")
-	if err != nil {
-		t.Fatalf("ParseUserOrJID: %v", err)
-	}
-	if j.Server != types.DefaultUserServer || j.User != "1234567890" {
-		t.Fatalf("unexpected jid: %+v", j)
+	tests := []struct {
+		name       string
+		input      string
+		wantUser   string
+		wantServer string
+		wantErr    bool
+	}{
+		{name: "phone", input: "1234567890", wantUser: "1234567890", wantServer: types.DefaultUserServer},
+		{name: "phone with plus", input: "+1234567890", wantUser: "1234567890", wantServer: types.DefaultUserServer},
+		{name: "phone with spaces and plus", input: " +1234567890 ", wantUser: "1234567890", wantServer: types.DefaultUserServer},
+		{name: "group jid", input: "123@g.us", wantUser: "123", wantServer: types.GroupServer},
+		{name: "empty after plus", input: "+", wantErr: true},
 	}
 
-	j, err = ParseUserOrJID("123@g.us")
-	if err != nil {
-		t.Fatalf("ParseUserOrJID group: %v", err)
-	}
-	if !IsGroupJID(j) {
-		t.Fatalf("expected group jid, got %+v", j)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			j, err := ParseUserOrJID(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got %+v", j)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseUserOrJID: %v", err)
+			}
+			if j.Server != tt.wantServer || j.User != tt.wantUser {
+				t.Fatalf("unexpected jid: %+v", j)
+			}
+		})
 	}
 }
 
