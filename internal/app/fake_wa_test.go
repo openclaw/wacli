@@ -25,6 +25,7 @@ type fakeWA struct {
 	handlers      map[uint32]func(interface{})
 
 	connectEvents []interface{}
+	connectDelay  time.Duration
 
 	contacts map[types.JID]types.ContactInfo
 	groups   map[types.JID]*types.GroupInfo
@@ -72,6 +73,13 @@ func (f *fakeWA) Connect(ctx context.Context, opts wa.ConnectOptions) error {
 
 	if !authed && !opts.AllowQR {
 		return fmt.Errorf("not authenticated; run `wacli auth`")
+	}
+	if f.connectDelay > 0 {
+		select {
+		case <-time.After(f.connectDelay):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 	f.emit(&events.Connected{})
 	for _, e := range eventsToEmit {

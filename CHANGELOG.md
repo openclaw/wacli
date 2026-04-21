@@ -12,6 +12,7 @@
 - Messages: show display text for replies, reactions, and media in `messages context`. (#183 — thanks @fuleinist)
 - Search: keep FTS5 enabled after reopening existing databases with already-applied migrations. (#185 — thanks @iamhitarth)
 - Send: persist retry-message plaintext so linked devices can decrypt retried messages. (#186 — thanks @SimDamDev)
+- Sync: start `sync --once` idle timing after the `Connected` event. (#171 — thanks @fuleinist)
 - Sync: include event type, stack trace, and recovery count when logging recovered event-handler panics. (#181 — thanks @shaun0927)
 
 ### Docs

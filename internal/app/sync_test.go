@@ -256,3 +256,26 @@ func TestSyncOnceIdleExit(t *testing.T) {
 		t.Fatalf("expected to exit quickly on idle, took %s", time.Since(start))
 	}
 }
+
+func TestSyncOnceIdleExitStartsAfterConnected(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	f.connectDelay = 400 * time.Millisecond
+	a.wa = f
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	_, err := a.Sync(ctx, SyncOptions{
+		Mode:     SyncModeOnce,
+		AllowQR:  false,
+		IdleExit: 600 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed < f.connectDelay+600*time.Millisecond {
+		t.Fatalf("expected idle timer to start after connect, exited after %s", elapsed)
+	}
+}
