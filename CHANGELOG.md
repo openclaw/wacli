@@ -2,6 +2,10 @@
 
 ## 0.6.1 - Unreleased
 
+### Security
+
+- Auth: reject `?` and `#` in whatsmeow session store paths to avoid SQLite URI parameter injection. (#180 — thanks @shaun0927)
+
 ### Fixed
 
 - Send: persist retry-message plaintext so linked devices can decrypt retried messages. (#186 — thanks @SimDamDev)
