@@ -22,6 +22,7 @@
 - Messages: show display text for replies, reactions, and media in `messages context`. (#183 — thanks @fuleinist)
 - Send: strip a leading `+` from phone-number recipients before building WhatsApp JIDs. (#74 — thanks @FrederickStempfle)
 - Search: keep FTS5 enabled after reopening existing databases with already-applied migrations. (#185 — thanks @iamhitarth)
+- Send: add `send text --reply-to` for quoted replies, with sender inference for synced group messages. (#154 — thanks @draix)
 - Send: persist retry-message plaintext so linked devices can decrypt retried messages. (#186 — thanks @SimDamDev)
 - Sync: keep `sync --once` idle timing focused on message/history events so connection chatter cannot hang exit. (#119 — thanks @jyothepro)
 - Sync: start `sync --once` idle timing after the `Connected` event. (#171 — thanks @fuleinist)
