@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- Media: recover panics per download job so one bad payload no longer drains the worker pool. (#179 — thanks @shaun0927)
 - Send: persist retry-message plaintext so linked devices can decrypt retried messages. (#186 — thanks @SimDamDev)
 
 ### Docs

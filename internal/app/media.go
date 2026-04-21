@@ -92,7 +92,10 @@ func (a *App) runMediaWorkers(ctx context.Context, jobs <-chan mediaJob, workers
 				select {
 				case <-ctx.Done():
 					return
-				case job := <-jobs:
+				case job, ok := <-jobs:
+					if !ok {
+						return
+					}
 					if strings.TrimSpace(job.chatJID) == "" || strings.TrimSpace(job.msgID) == "" {
 						continue
 					}
