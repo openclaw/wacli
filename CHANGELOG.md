@@ -15,6 +15,7 @@
 - Send: persist retry-message plaintext so linked devices can decrypt retried messages. (#186 — thanks @SimDamDev)
 - Sync: start `sync --once` idle timing after the `Connected` event. (#171 — thanks @fuleinist)
 - Sync: include event type, stack trace, and recovery count when logging recovered event-handler panics. (#181 — thanks @shaun0927)
+- Windows: split store locking by platform so the lock package compiles on Windows. (#188 — thanks @dinakars777)
 
 ### Docs
 
@@ -22,6 +23,7 @@
 
 ### Chore
 
+- CI: compile-test the Windows lock package to catch platform regressions. (#188 — thanks @dinakars777)
 - Dependencies: update Go modules including `whatsmeow`, `go-sqlite3`, `x/*`, and related runtime libs.
 
 ## 0.6.0 - 2026-04-14

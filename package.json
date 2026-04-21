@@ -6,9 +6,10 @@
     "wacli": "bash -lc 'pnpm -s build >/dev/null && exec ./dist/wacli \"$@\"' _",
     "build": "mkdir -p dist && CGO_CFLAGS=\"${CGO_CFLAGS:+$CGO_CFLAGS }-Wno-error=missing-braces\" go build -tags sqlite_fts5 -o dist/wacli ./cmd/wacli",
     "start": "pnpm -s build && ./dist/wacli",
-    "test": "pnpm -s test:go && pnpm -s test:fts",
+    "test": "pnpm -s test:go && pnpm -s test:fts && pnpm -s test:windows-lock",
     "test:go": "go test ./...",
     "test:fts": "go test -tags sqlite_fts5 ./...",
+    "test:windows-lock": "bash -lc 'tmp=\"${TMPDIR:-/tmp}/wacli-lock-windows.test.exe\"; GOOS=windows GOARCH=amd64 go test -c ./internal/lock -o \"$tmp\"; rm -f \"$tmp\"'",
     "lint": "go vet ./...",
     "format": "gofmt -w .",
     "format:check": "bash -lc 'out=$(gofmt -l .); if [ -n \"$out\" ]; then echo \"$out\"; exit 1; fi'"
