@@ -95,3 +95,15 @@ func TestWriteMessagesListFullOutput(t *testing.T) {
 		t.Fatalf("expected display text, got output:\n%s", full.String())
 	}
 }
+
+func TestMessagesSearchCommandExposesMediaFilters(t *testing.T) {
+	cmd := newMessagesSearchCmd(&rootFlags{})
+	for _, name := range []string{"has-media", "type"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Fatalf("expected --%s flag", name)
+		}
+	}
+	if got := cmd.Flags().Lookup("type").Usage; !strings.Contains(got, "text|image|video|audio|document") {
+		t.Fatalf("type usage = %q", got)
+	}
+}

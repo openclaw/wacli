@@ -107,7 +107,7 @@ pnpm wacli presence paused --to 1234567890
 - `wacli auth logout`
 - `wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--download-media] [--refresh-contacts] [--refresh-groups]`
 - `wacli messages list [--chat JID] [--sender JID] [--from-me|--from-them] [--asc] [--limit N] [--after DATE] [--before DATE]`
-- `wacli messages search <query> [--chat JID] [--from JID] [--type image|video|audio|document]`
+- `wacli messages search <query> [--chat JID] [--from JID] [--has-media] [--type text|image|video|audio|document]`
 - `wacli messages show --chat JID --id MSG_ID`
 - `wacli messages context --chat JID --id MSG_ID [--before N] [--after N]`
 - `wacli send text --to PHONE_OR_JID --message TEXT [--reply-to MSG_ID] [--reply-to-sender JID]`

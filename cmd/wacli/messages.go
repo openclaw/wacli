@@ -118,6 +118,7 @@ func newMessagesSearchCmd(flags *rootFlags) *cobra.Command {
 	var limit int
 	var afterStr string
 	var beforeStr string
+	var hasMedia bool
 	var msgType string
 
 	cmd := &cobra.Command{
@@ -152,13 +153,14 @@ func newMessagesSearchCmd(flags *rootFlags) *cobra.Command {
 			}
 
 			msgs, err := a.DB().SearchMessages(store.SearchMessagesParams{
-				Query:   args[0],
-				ChatJID: chat,
-				From:    from,
-				Limit:   limit,
-				After:   after,
-				Before:  before,
-				Type:    msgType,
+				Query:    args[0],
+				ChatJID:  chat,
+				From:     from,
+				Limit:    limit,
+				After:    after,
+				Before:   before,
+				HasMedia: hasMedia,
+				Type:     msgType,
 			})
 			if err != nil {
 				return err
@@ -186,7 +188,8 @@ func newMessagesSearchCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().IntVar(&limit, "limit", 50, "limit results")
 	cmd.Flags().StringVar(&afterStr, "after", "", "only messages after time (RFC3339 or YYYY-MM-DD)")
 	cmd.Flags().StringVar(&beforeStr, "before", "", "only messages before time (RFC3339 or YYYY-MM-DD)")
-	cmd.Flags().StringVar(&msgType, "type", "", "media type filter (image|video|audio|document)")
+	cmd.Flags().BoolVar(&hasMedia, "has-media", false, "only messages with media")
+	cmd.Flags().StringVar(&msgType, "type", "", "message type filter (text|image|video|audio|document)")
 	return cmd
 }
 
