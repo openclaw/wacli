@@ -3,6 +3,7 @@
 package store
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -39,6 +40,30 @@ func TestSearchMessagesUsesFTSWhenEnabled(t *testing.T) {
 	}
 	if ms[0].Snippet == "" {
 		t.Fatalf("expected snippet for FTS search, got empty")
+	}
+}
+
+func TestExistingEmptyFTSTableDetectedOnReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "store.db")
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if !db.HasFTS() {
+		t.Fatalf("expected initial FTS migration to enable FTS")
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer db.Close()
+	if !db.HasFTS() {
+		t.Fatalf("expected existing empty FTS table to enable FTS after reopen")
 	}
 }
 

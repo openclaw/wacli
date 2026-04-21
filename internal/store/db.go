@@ -59,17 +59,24 @@ func (d *DB) init() error {
 		return err
 	}
 
-	// Detect FTS5 availability independently of migration state.
-	// The migration sets ftsEnabled only on first run; subsequent
-	// opens skip the migration and leave ftsEnabled as false.
+	// Detect FTS5 availability independently of migration state. The migration
+	// sets ftsEnabled only on first run; subsequent opens skip the migration.
 	if !d.ftsEnabled {
-		if ok, _ := d.tableExists("messages_fts"); ok {
-			var n int
-			if err := d.sql.QueryRow("SELECT 1 FROM messages_fts LIMIT 1").Scan(&n); err == nil {
-				d.ftsEnabled = true
-			}
-		}
+		d.ftsEnabled = d.detectMessagesFTS()
 	}
 
 	return nil
+}
+
+func (d *DB) detectMessagesFTS() bool {
+	ok, err := d.tableExists("messages_fts")
+	if err != nil || !ok {
+		return false
+	}
+	hasDisplayText, err := d.tableHasColumn("messages_fts", "display_text")
+	if err != nil || !hasDisplayText {
+		return false
+	}
+	var n int
+	return d.sql.QueryRow("SELECT count(*) FROM messages_fts").Scan(&n) == nil
 }
