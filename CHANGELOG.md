@@ -24,6 +24,7 @@
 - Sync: keep `sync --once` idle timing focused on message/history events so connection chatter cannot hang exit. (#119 — thanks @jyothepro)
 - Sync: start `sync --once` idle timing after the `Connected` event. (#171 — thanks @fuleinist)
 - Sync: include event type, stack trace, and recovery count when logging recovered event-handler panics. (#181 — thanks @shaun0927)
+- Sync: apply bounded backpressure to media download enqueueing instead of spawning unbounded overflow goroutines. (#121 — thanks @jyothepro)
 - Windows: split store locking by platform so the lock package compiles on Windows. (#188 — thanks @dinakars777)
 
 ### Docs

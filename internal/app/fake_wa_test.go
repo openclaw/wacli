@@ -26,6 +26,7 @@ type fakeWA struct {
 
 	connectEvents []interface{}
 	connectDelay  time.Duration
+	downloadDelay time.Duration
 
 	contacts map[types.JID]types.ContactInfo
 	groups   map[types.JID]*types.GroupInfo
@@ -229,6 +230,13 @@ func (f *fakeWA) DecryptReaction(ctx context.Context, reaction *events.Message) 
 }
 
 func (f *fakeWA) DownloadMediaToFile(ctx context.Context, directPath string, encFileHash, fileHash, mediaKey []byte, fileLength uint64, mediaType, mmsType string, targetPath string) (int64, error) {
+	if f.downloadDelay > 0 {
+		select {
+		case <-time.After(f.downloadDelay):
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		}
+	}
 	if err := os.MkdirAll(filepath.Dir(targetPath), 0o700); err != nil {
 		return 0, err
 	}

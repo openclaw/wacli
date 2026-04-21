@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"fmt"
+	"runtime"
 	"testing"
 	"time"
 
@@ -232,6 +234,71 @@ func TestSyncStoresDisplayText(t *testing.T) {
 	}
 	if msg.DisplayText != "Reacted 👍 to hello" {
 		t.Fatalf("unexpected reaction display text: %q", msg.DisplayText)
+	}
+}
+
+func TestSyncMediaEnqueueUsesBoundedBackpressure(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+	f.downloadDelay = 5 * time.Millisecond
+
+	chat := types.JID{User: "123", Server: types.DefaultUserServer}
+	f.contacts[chat.ToNonAD()] = types.ContactInfo{
+		Found:    true,
+		FullName: "Alice",
+		PushName: "Alice",
+	}
+
+	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 600; i++ {
+		f.connectEvents = append(f.connectEvents, &events.Message{
+			Info: types.MessageInfo{
+				MessageSource: types.MessageSource{
+					Chat:     chat,
+					Sender:   chat,
+					IsFromMe: false,
+				},
+				ID:        fmt.Sprintf("media-%03d", i),
+				Timestamp: base.Add(time.Duration(i) * time.Second),
+				PushName:  "Alice",
+			},
+			Message: &waProto.Message{
+				ImageMessage: &waProto.ImageMessage{
+					Mimetype:      proto.String("image/jpeg"),
+					DirectPath:    proto.String("/direct"),
+					MediaKey:      []byte{1},
+					FileSHA256:    []byte{2},
+					FileEncSHA256: []byte{3},
+					FileLength:    proto.Uint64(10),
+				},
+			},
+		})
+	}
+
+	before := runtime.NumGoroutine()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var during int
+	res, err := a.Sync(ctx, SyncOptions{
+		Mode:          SyncModeFollow,
+		AllowQR:       false,
+		DownloadMedia: true,
+		AfterConnect: func(context.Context) error {
+			during = runtime.NumGoroutine()
+			cancel()
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if res.MessagesStored != 600 {
+		t.Fatalf("expected 600 messages stored, got %d", res.MessagesStored)
+	}
+	if leaked := during - before; leaked > 20 {
+		t.Fatalf("expected bounded media enqueue goroutines, saw +%d (before=%d during=%d)", leaked, before, during)
 	}
 }
 

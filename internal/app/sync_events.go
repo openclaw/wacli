@@ -20,14 +20,7 @@ func newMediaEnqueuer(ctx context.Context, jobs chan<- mediaJob) func(chatJID, m
 		}
 		select {
 		case jobs <- mediaJob{chatJID: chatJID, msgID: msgID}:
-		default:
-			// Avoid blocking the event handler.
-			go func() {
-				select {
-				case jobs <- mediaJob{chatJID: chatJID, msgID: msgID}:
-				case <-ctx.Done():
-				}
-			}()
+		case <-ctx.Done():
 		}
 	}
 }

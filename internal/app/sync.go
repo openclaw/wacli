@@ -66,11 +66,6 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	handlerID := a.addSyncEventHandler(ctx, opts, &messagesStored, &lastEvent, disconnected, enqueueMedia)
 	defer a.wa.RemoveEventHandler(handlerID)
 
-	if err := a.Connect(ctx, opts.AllowQR, opts.OnQRCode); err != nil {
-		return SyncResult{}, err
-	}
-	lastEvent.Store(time.Now().UTC().UnixNano())
-
 	if opts.DownloadMedia {
 		var err error
 		stopMedia, err = a.runMediaWorkers(ctx, mediaJobs, 4)
@@ -79,6 +74,11 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 		}
 		defer stopMedia()
 	}
+
+	if err := a.Connect(ctx, opts.AllowQR, opts.OnQRCode); err != nil {
+		return SyncResult{}, err
+	}
+	lastEvent.Store(time.Now().UTC().UnixNano())
 
 	// Optional: bootstrap imports (helps contacts/groups management without waiting for events).
 	if opts.RefreshContacts {
