@@ -58,7 +58,10 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 func (a *App) handleLiveSyncMessage(ctx context.Context, opts SyncOptions, v *events.Message, messagesStored *atomic.Int64, enqueueMedia func(string, string)) {
 	pm := wa.ParseLiveMessage(v)
 	if pm.ReactionToID != "" && pm.ReactionEmoji == "" && v.Message != nil && v.Message.GetEncReactionMessage() != nil {
-		if reaction, err := a.wa.DecryptReaction(ctx, v); err == nil && reaction != nil {
+		reaction, err := a.wa.DecryptReaction(ctx, v)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "\rwarning: failed to decrypt reaction message %s: %v\n", pm.ID, err)
+		} else if reaction != nil {
 			pm.ReactionEmoji = reaction.GetText()
 			if pm.ReactionToID == "" {
 				if key := reaction.GetKey(); key != nil {
