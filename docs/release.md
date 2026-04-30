@@ -24,10 +24,10 @@ Other artifacts:
 
 ## Homebrew Tap
 
-The tap formula lives in `../homebrew-tap/Formula/wacli.rb`.
+The release workflow dispatches the `Update Formula` workflow in `steipete/homebrew-tap` after the macOS artifact is published. The tap workflow owns the formula-editing logic and updates both the macOS artifact SHA256 and the Linux source archive SHA256 in `Formula/wacli.rb`.
 
-Once a release exists, update the tap formula by running the `Update Formula` workflow in the tap repo with:
+Required repository secret:
 
-- `formula`: `wacli`
-- `tag`: `vX.Y.Z`
-- `repository`: `steipete/wacli`
+- `HOMEBREW_TAP_TOKEN`: token with permission to run workflows in `steipete/homebrew-tap`
+
+To backfill an existing release, rerun the `release` workflow manually with `tag: vX.Y.Z`.

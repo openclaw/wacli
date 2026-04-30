@@ -47,6 +47,35 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  update-homebrew-tap:
+    runs-on: ubuntu-latest
+    needs: goreleaser-darwin
+    steps:
+      - name: Resolve release tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "RELEASE_TAG=${{ inputs.tag }}" >> $GITHUB_ENV
+          else
+            echo "RELEASE_TAG=${{ github.ref_name }}" >> $GITHUB_ENV
+          fi
+
+      - name: Dispatch tap formula update
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::Set HOMEBREW_TAP_TOKEN with workflow access to steipete/homebrew-tap"
+            exit 1
+          fi
+
+          gh workflow run update-formula.yml \
+            --repo steipete/homebrew-tap \
+            --ref main \
+            -f formula=wacli \
+            -f tag="$RELEASE_TAG" \
+            -f repository=steipete/wacli \
+            -f macos_artifact=wacli-macos-universal.tar.gz
+
   goreleaser-linux-windows:
     runs-on: ubuntu-latest
     needs: goreleaser-darwin
