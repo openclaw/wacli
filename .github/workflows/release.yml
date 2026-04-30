@@ -68,25 +68,38 @@ jobs:
             exit 1
           fi
 
+          request_id="wacli-${RELEASE_TAG}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          expected_title="Update wacli for ${RELEASE_TAG} (${request_id})"
+
           gh workflow run update-formula.yml \
             --repo steipete/homebrew-tap \
             --ref main \
             -f formula=wacli \
             -f tag="$RELEASE_TAG" \
             -f repository=steipete/wacli \
-            -f macos_artifact=wacli-macos-universal.tar.gz
+            -f macos_artifact=wacli-macos-universal.tar.gz \
+            -f request_id="$request_id"
 
           run_id=""
-          until [ -n "$run_id" ]; do
+          for _ in {1..30}; do
             run_id=$(gh run list \
               --repo steipete/homebrew-tap \
               --workflow update-formula.yml \
               --branch main \
               --event workflow_dispatch \
-              --limit 1 \
-              --json databaseId \
-              --jq '.[0].databaseId')
+              --limit 20 \
+              --json databaseId,displayTitle \
+              --jq ".[] | select(.displayTitle == \"$expected_title\") | .databaseId" | head -n1)
+            if [ -n "$run_id" ]; then
+              break
+            fi
+            sleep 5
           done
+
+          if [ -z "$run_id" ]; then
+            echo "::error::Could not find tap workflow run with title: $expected_title"
+            exit 1
+          fi
 
           gh run watch "$run_id" \
             --repo steipete/homebrew-tap \
