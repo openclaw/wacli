@@ -76,6 +76,23 @@ jobs:
             -f repository=steipete/wacli \
             -f macos_artifact=wacli-macos-universal.tar.gz
 
+          run_id=""
+          until [ -n "$run_id" ]; do
+            run_id=$(gh run list \
+              --repo steipete/homebrew-tap \
+              --workflow update-formula.yml \
+              --branch main \
+              --event workflow_dispatch \
+              --limit 1 \
+              --json databaseId \
+              --jq '.[0].databaseId')
+          done
+
+          gh run watch "$run_id" \
+            --repo steipete/homebrew-tap \
+            --exit-status \
+            --interval 10
+
   goreleaser-linux-windows:
     runs-on: ubuntu-latest
     needs: goreleaser-darwin
