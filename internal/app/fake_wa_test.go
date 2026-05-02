@@ -275,6 +275,10 @@ func (f *fakeWA) Logout(ctx context.Context) error {
 	return nil
 }
 
+func (f *fakeWA) SetProfilePicture(ctx context.Context, avatar []byte) (string, error) {
+	return "pic-id-fake", nil
+}
+
 func (f *fakeWA) LinkedJID() string {
 	if !f.IsAuthed() {
 		return ""

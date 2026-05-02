@@ -10,6 +10,7 @@ import (
 
 	"github.com/mdp/qrterminal/v3"
 	"go.mau.fi/whatsmeow"
+	waBinary "go.mau.fi/whatsmeow/binary"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -342,6 +343,49 @@ func (c *Client) Logout(ctx context.Context) error {
 		return fmt.Errorf("not initialized")
 	}
 	return cli.Logout(ctx)
+}
+
+// SetProfilePicture sets the profile picture of the authenticated account.
+// avatar must be JPEG bytes; pass nil to remove the picture.
+// Returns the new picture ID assigned by WhatsApp.
+//
+// Uses DangerousInternals.SendIQ to send the w:profile:picture IQ stanza
+// without a "target" attribute, which is the correct format for updating
+// your own profile picture (as opposed to SetGroupPhoto which always sets target).
+func (c *Client) SetProfilePicture(ctx context.Context, avatar []byte) (string, error) {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || !cli.IsConnected() {
+		return "", fmt.Errorf("not connected")
+	}
+
+	var content interface{}
+	if avatar != nil {
+		content = []waBinary.Node{{
+			Tag:     "picture",
+			Attrs:   waBinary.Attrs{"type": "image"},
+			Content: avatar,
+		}}
+	}
+
+	resp, err := cli.DangerousInternals().SendIQ(ctx, whatsmeow.DangerousInfoQuery{
+		Namespace: "w:profile:picture",
+		Type:      "set",
+		To:        types.ServerJID,
+		Content:   content,
+	})
+	if err != nil {
+		return "", err
+	}
+	if avatar == nil {
+		return "remove", nil
+	}
+	pictureID, ok := resp.GetChildByTag("picture").Attrs["id"].(string)
+	if !ok {
+		return "", fmt.Errorf("no picture ID in response")
+	}
+	return pictureID, nil
 }
 
 // Reconnect loop helper.

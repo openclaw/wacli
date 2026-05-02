@@ -57,6 +57,7 @@ func execute(args []string) error {
 	rootCmd.AddCommand(newGroupsCmd(&flags))
 	rootCmd.AddCommand(newHistoryCmd(&flags))
 	rootCmd.AddCommand(newPresenceCmd(&flags))
+	rootCmd.AddCommand(newProfileCmd(&flags))
 
 	rootCmd.SetArgs(args)
 	if err := rootCmd.Execute(); err != nil {
