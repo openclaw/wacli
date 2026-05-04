@@ -27,6 +27,7 @@ Core implementation is in place. Start with [docs/overview.md](docs/overview.md)
 - [Groups](docs/groups.md): group list, refresh, info, rename, leave, participants, invites, join.
 - [History](docs/history.md): `history backfill`.
 - [Presence](docs/presence.md): `presence typing/paused`.
+- [Profile](docs/profile.md): `profile set-picture`.
 - [Doctor](docs/doctor.md): `doctor [--connect]`.
 - [Version](docs/version.md): `version`, `--version`.
 - [Completion](docs/completion.md): generated shell completions.
@@ -42,6 +43,7 @@ Core implementation is in place. Start with [docs/overview.md](docs/overview.md)
 - **Media**: download synced message media on demand, or download in the background during auth/sync; send-file uploads and downloads are capped at 100 MiB.
 - **Contacts/chats/groups**: search/show contacts, local aliases/tags, list/show chats, refresh/list/info/rename groups, manage participants, invite links, join, and leave; left groups are hidden after leave.
 - **Presence**: send typing/paused indicators.
+- **Profile**: set the authenticated account profile picture from JPEG or PNG input.
 - **Diagnostics + safety**: `doctor`, read-only mode, store locks with lock-owner reporting, lock waiting, owner-only database permissions, panic recovery, reconnect bounds, and bounded media queue backpressure.
 - **CLI UX**: human-readable tables by default; `--json` for scripts; `--full` to avoid truncation.
 
@@ -175,6 +177,7 @@ Full command docs live under [docs/overview.md](docs/overview.md). Quick referen
 - `wacli history backfill --chat JID [--count 50] [--requests N]`
 - `wacli presence typing --to PHONE_OR_JID [--media audio]`
 - `wacli presence paused --to PHONE_OR_JID`
+- `wacli profile set-picture IMAGE`
 - `wacli doctor [--connect]`
 - `wacli version`
 - `wacli completion bash|zsh|fish|powershell [--no-descriptions]`

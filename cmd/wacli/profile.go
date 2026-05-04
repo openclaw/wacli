@@ -30,7 +30,7 @@ func newProfileCmd(flags *rootFlags) *cobra.Command {
 func newProfileSetPictureCmd(flags *rootFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "set-picture <image>",
-		Short: "Set your WhatsApp profile picture (JPEG or PNG, auto-resized to ≤640px)",
+		Short: "Set your WhatsApp profile picture (JPEG or PNG, auto-resized to <=640px)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := flags.requireWritable(); err != nil {
@@ -73,7 +73,7 @@ func newProfileSetPictureCmd(flags *rootFlags) *cobra.Command {
 	return cmd
 }
 
-// readAsJPEG reads the file at path, decodes it, resizes to ≤profileMaxPx if
+// readAsJPEG reads the file at path, decodes it, resizes to <=profileMaxPx if
 // needed, and returns JPEG-encoded bytes suitable for WhatsApp.
 func readAsJPEG(path string) ([]byte, error) {
 	data, err := os.ReadFile(path)

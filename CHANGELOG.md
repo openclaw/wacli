@@ -15,6 +15,7 @@
 - Auth: add `auth --qr-format text` to print the raw WhatsApp QR payload for external renderers. (#22 — thanks @teren-papercutlabs)
 - Auth: add `auth --phone` for WhatsApp's phone-number pairing flow on headless systems. (#148, #184 — thanks @giovanninibarbosa and @KillerSnails)
 - Auth: auto-detect a readable linked-device label and default linked-device platform to desktop. (#100 — thanks @pmatheus)
+- Profile: add `profile set-picture` to update the authenticated account profile picture from JPEG or PNG input. (#198 — thanks @gado-ships-it)
 - Send: add `send react` to add or clear reactions, with group sender validation. (#151 — thanks @draix)
 - Send: add `send file --reply-to` for quoted media/document replies. (#68 — thanks @vlassance)
 - Send: accept common phone-number formatting in recipient flags while still storing digits-only WhatsApp JIDs. (#130 — thanks @fahmidme and @ImLukeF)

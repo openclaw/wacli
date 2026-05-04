@@ -27,6 +27,7 @@ Read when: you need the user-facing command map, global flags, store model, or l
 - [groups](groups.md) - refresh, inspect, rename, leave, join, invite, and manage participants.
 - [history](history.md) - request older per-chat history from the primary device.
 - [presence](presence.md) - send typing/paused indicators.
+- [profile](profile.md) - set the authenticated account profile picture.
 - [doctor](doctor.md) - diagnose store, auth, search, and optional live connectivity.
 - [version](version.md) - print the CLI version.
 - [completion](completion.md) - generate shell completion scripts.
