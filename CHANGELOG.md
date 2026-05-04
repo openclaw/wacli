@@ -41,6 +41,7 @@
 - Messages: normalize device-specific `@s.whatsapp.net` JIDs before storing chats, contacts, and senders.
 - Messages: include mapped `@lid` rows when listing, searching, showing, or contextualizing by phone-number chat JID.
 - Messages: read stored sender names back from SQLite and resolve blank historical `@lid` senders at display time.
+- Store: migrate historical `@lid` chat and message rows to mapped phone-number JIDs during authenticated startup. (#31, #89 — thanks @bhaskoro-muthohar, @alexph-dev, and @dinakars777)
 - Messages: make `messages show` prefer stored display text and include stored media/download details.
 - Messages: store structured reaction target IDs and emoji in SQLite. (#67 — thanks @vlassance)
 - Messages: store forwarded-message metadata and add `--forwarded` filters for list/search. (#24 — thanks @bnvyas)
