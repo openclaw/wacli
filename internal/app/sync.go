@@ -24,6 +24,8 @@ type SyncOptions struct {
 	Mode            SyncMode
 	AllowQR         bool
 	OnQRCode        func(string)
+	PairPhoneNumber string
+	OnPairCode      func(string)
 	AfterConnect    func(context.Context) error
 	DownloadMedia   bool
 	RefreshContacts bool
@@ -75,7 +77,12 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 		defer stopMedia()
 	}
 
-	if err := a.Connect(ctx, opts.AllowQR, opts.OnQRCode); err != nil {
+	if err := a.wa.Connect(ctx, wa.ConnectOptions{
+		AllowQR:         opts.AllowQR,
+		OnQRCode:        opts.OnQRCode,
+		PairPhoneNumber: opts.PairPhoneNumber,
+		OnPairCode:      opts.OnPairCode,
+	}); err != nil {
 		return SyncResult{}, err
 	}
 	lastEvent.Store(nowUTC().UnixNano())
@@ -114,6 +121,7 @@ func chatKind(chat types.JID) string {
 }
 
 func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error {
+	pm.Chat = a.canonicalStoreJID(ctx, pm.Chat)
 	chatJID := canonicalJIDString(pm.Chat)
 	chatName := a.wa.ResolveChatName(ctx, pm.Chat, pm.PushName)
 	if err := a.db.UpsertChat(chatJID, chatKind(pm.Chat), chatName, pm.Timestamp); err != nil {
@@ -144,7 +152,7 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 	senderJID := pm.SenderJID
 	if pm.SenderJID != "" {
 		if jid, err := types.ParseJID(pm.SenderJID); err == nil {
-			contactJID := canonicalJID(jid)
+			contactJID := a.canonicalStoreJID(ctx, jid)
 			senderJID = contactJID.String()
 			if info, err := a.wa.GetContact(ctx, contactJID); err == nil {
 				if name := wa.BestContactName(info); name != "" {
@@ -202,24 +210,28 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 	displayText := a.buildDisplayText(ctx, pm)
 
 	return a.db.UpsertMessage(store.UpsertMessageParams{
-		ChatJID:       chatJID,
-		ChatName:      chatName,
-		MsgID:         pm.ID,
-		SenderJID:     senderJID,
-		SenderName:    senderName,
-		Timestamp:     pm.Timestamp,
-		FromMe:        pm.FromMe,
-		Text:          pm.Text,
-		DisplayText:   displayText,
-		MediaType:     mediaType,
-		MediaCaption:  caption,
-		Filename:      filename,
-		MimeType:      mimeType,
-		DirectPath:    directPath,
-		MediaKey:      mediaKey,
-		FileSHA256:    fileSha,
-		FileEncSHA256: fileEncSha,
-		FileLength:    fileLen,
+		ChatJID:         chatJID,
+		ChatName:        chatName,
+		MsgID:           pm.ID,
+		SenderJID:       senderJID,
+		SenderName:      senderName,
+		Timestamp:       pm.Timestamp,
+		FromMe:          pm.FromMe,
+		Text:            pm.Text,
+		DisplayText:     displayText,
+		IsForwarded:     pm.IsForwarded,
+		ForwardingScore: pm.ForwardingScore,
+		ReactionToID:    pm.ReactionToID,
+		ReactionEmoji:   pm.ReactionEmoji,
+		MediaType:       mediaType,
+		MediaCaption:    caption,
+		Filename:        filename,
+		MimeType:        mimeType,
+		DirectPath:      directPath,
+		MediaKey:        mediaKey,
+		FileSHA256:      fileSha,
+		FileEncSHA256:   fileEncSha,
+		FileLength:      fileLen,
 	})
 }
 

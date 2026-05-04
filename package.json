@@ -4,12 +4,13 @@
   "packageManager": "pnpm@10.33.2",
   "scripts": {
     "wacli": "bash -lc 'pnpm -s build >/dev/null && exec ./dist/wacli \"$@\"' _",
-    "build": "mkdir -p dist && CGO_CFLAGS=\"${CGO_CFLAGS:+$CGO_CFLAGS }-Wno-error=missing-braces\" go build -tags sqlite_fts5 -o dist/wacli ./cmd/wacli",
+    "build": "mkdir -p dist && CGO_ENABLED=1 CGO_CFLAGS=\"${CGO_CFLAGS:+$CGO_CFLAGS }-Wno-error=missing-braces\" go build -tags sqlite_fts5 -o dist/wacli ./cmd/wacli",
     "start": "pnpm -s build && ./dist/wacli",
-    "test": "pnpm -s test:go && pnpm -s test:fts && pnpm -s test:windows-lock",
+    "test": "pnpm -s test:go && pnpm -s test:fts && pnpm -s test:windows-lock && pnpm -s test:cgo-required",
     "test:go": "go test ./...",
     "test:fts": "go test -tags sqlite_fts5 ./...",
     "test:windows-lock": "bash -lc 'tmp=\"${TMPDIR:-/tmp}/wacli-lock-windows.test.exe\"; GOOS=windows GOARCH=amd64 go test -c ./internal/lock -o \"$tmp\"; rm -f \"$tmp\"'",
+    "test:cgo-required": "bash -lc 'set +e; out=$(CGO_ENABLED=0 go build ./cmd/wacli 2>&1); status=$?; set -e; echo \"$out\" | grep -q wacli_requires_cgo_enabled_1_for_go_sqlite3; test $status -ne 0'",
     "lint": "go vet ./...",
     "format": "gofmt -w .",
     "format:check": "bash -lc 'out=$(gofmt -l .); if [ -n \"$out\" ]; then echo \"$out\"; exit 1; fi'"

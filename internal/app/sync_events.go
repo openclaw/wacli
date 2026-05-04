@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 
 	"github.com/steipete/wacli/internal/wa"
+	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types/events"
 )
 
@@ -56,16 +57,12 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 }
 
 func (a *App) handleLiveSyncMessage(ctx context.Context, opts SyncOptions, v *events.Message, messagesStored *atomic.Int64, enqueueMedia func(string, string)) {
+	if historySyncNotificationFromMessage(v) != nil {
+		return
+	}
 	pm := wa.ParseLiveMessage(v)
 	if pm.ReactionToID != "" && pm.ReactionEmoji == "" && v.Message != nil && v.Message.GetEncReactionMessage() != nil {
-		if reaction, err := a.wa.DecryptReaction(ctx, v); err == nil && reaction != nil {
-			pm.ReactionEmoji = reaction.GetText()
-			if pm.ReactionToID == "" {
-				if key := reaction.GetKey(); key != nil {
-					pm.ReactionToID = key.GetID()
-				}
-			}
-		}
+		a.decryptEncryptedReaction(ctx, &pm, v)
 	}
 	if err := a.storeParsedMessage(ctx, pm); err == nil {
 		messagesStored.Add(1)
@@ -76,6 +73,13 @@ func (a *App) handleLiveSyncMessage(ctx context.Context, opts SyncOptions, v *ev
 	if messagesStored.Load()%25 == 0 {
 		fmt.Fprintf(os.Stderr, "\rSynced %d messages...", messagesStored.Load())
 	}
+}
+
+func historySyncNotificationFromMessage(v *events.Message) *waE2E.HistorySyncNotification {
+	if v == nil || v.Message == nil {
+		return nil
+	}
+	return v.Message.GetProtocolMessage().GetHistorySyncNotification()
 }
 
 func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events.HistorySync, messagesStored, lastEvent *atomic.Int64, enqueueMedia func(string, string)) {
@@ -95,6 +99,14 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 			if pm.ID == "" || pm.Chat.IsEmpty() {
 				continue
 			}
+			if pm.ReactionToID != "" && pm.ReactionEmoji == "" && m.Message.GetMessage().GetEncReactionMessage() != nil {
+				evt, err := a.wa.ParseWebMessage(pm.Chat, m.Message)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "\rwarning: failed to parse encrypted reaction message %s: %v\n", pm.ID, err)
+				} else {
+					a.decryptEncryptedReaction(ctx, &pm, evt)
+				}
+			}
 			if err := a.storeParsedMessage(ctx, pm); err == nil {
 				messagesStored.Add(1)
 			}
@@ -104,4 +116,21 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 		}
 	}
 	fmt.Fprintf(os.Stderr, "\rSynced %d messages...", messagesStored.Load())
+}
+
+func (a *App) decryptEncryptedReaction(ctx context.Context, pm *wa.ParsedMessage, msg *events.Message) {
+	reaction, err := a.wa.DecryptReaction(ctx, msg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "\rwarning: failed to decrypt reaction message %s: %v\n", pm.ID, err)
+		return
+	}
+	if reaction == nil {
+		return
+	}
+	pm.ReactionEmoji = reaction.GetText()
+	if pm.ReactionToID == "" {
+		if key := reaction.GetKey(); key != nil {
+			pm.ReactionToID = key.GetID()
+		}
+	}
 }

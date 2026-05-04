@@ -74,7 +74,7 @@ func newSendReactCmd(flags *rootFlags) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&to, "to", "", "recipient phone number or JID")
+	cmd.Flags().StringVar(&to, "to", "", "recipient phone number (+E164 and formatting ok) or JID")
 	cmd.Flags().StringVar(&msgID, "id", "", "target message ID")
 	cmd.Flags().StringVar(&emoji, "reaction", "\U0001f44d", "reaction emoji (pass an empty string to remove)")
 	cmd.Flags().StringVar(&sender, "sender", "", "message sender JID (required for group messages)")

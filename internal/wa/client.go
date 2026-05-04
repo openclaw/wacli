@@ -12,6 +12,9 @@ import (
 	"go.mau.fi/whatsmeow"
 	waBinary "go.mau.fi/whatsmeow/binary"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
+	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/proto/waHistorySync"
+	"go.mau.fi/whatsmeow/proto/waWeb"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 )
@@ -72,8 +75,10 @@ func (c *Client) IsConnected() bool {
 }
 
 type ConnectOptions struct {
-	AllowQR  bool
-	OnQRCode func(code string)
+	AllowQR         bool
+	OnQRCode        func(code string)
+	PairPhoneNumber string
+	OnPairCode      func(code string)
 }
 
 func (c *Client) Connect(ctx context.Context, opts ConnectOptions) error {
@@ -89,13 +94,16 @@ func (c *Client) Connect(ctx context.Context, opts ConnectOptions) error {
 	}
 
 	authed := cli.Store != nil && cli.Store.ID != nil
-	if !authed && !opts.AllowQR {
+	if !authed && !opts.AllowQR && opts.PairPhoneNumber == "" {
 		return fmt.Errorf("not authenticated; run `wacli auth`")
 	}
 
 	var qrChan <-chan whatsmeow.QRChannelItem
 	if !authed {
-		ch, _ := cli.GetQRChannel(ctx)
+		ch, err := cli.GetQRChannel(ctx)
+		if err != nil {
+			return fmt.Errorf("get QR channel: %w", err)
+		}
 		qrChan = ch
 	}
 
@@ -108,6 +116,7 @@ func (c *Client) Connect(ctx context.Context, opts ConnectOptions) error {
 	}
 
 	// Wait for QR flow to succeed or fail.
+	pairCodeRequested := false
 	for {
 		select {
 		case <-ctx.Done():
@@ -116,21 +125,53 @@ func (c *Client) Connect(ctx context.Context, opts ConnectOptions) error {
 			if !ok {
 				return fmt.Errorf("QR channel closed")
 			}
-			switch evt.Event {
-			case "code":
-				if opts.OnQRCode != nil {
+			switch {
+			case evt.Event == whatsmeow.QRChannelEventCode:
+				if opts.PairPhoneNumber != "" {
+					if pairCodeRequested {
+						continue
+					}
+					code, err := cli.PairPhone(ctx, opts.PairPhoneNumber, true, whatsmeow.PairClientChrome, "Chrome (Linux)")
+					if err != nil {
+						return fmt.Errorf("pair phone: %w", err)
+					}
+					pairCodeRequested = true
+					if opts.OnPairCode != nil {
+						opts.OnPairCode(code)
+					}
+				} else if opts.OnQRCode != nil {
 					opts.OnQRCode(evt.Code)
 				} else {
 					qrterminal.GenerateHalfBlock(evt.Code, qrterminal.M, os.Stdout)
 				}
-			case "success":
+			case evt == whatsmeow.QRChannelSuccess:
 				return nil
-			case "timeout":
-				return fmt.Errorf("QR code timed out")
-			case "error":
-				return fmt.Errorf("QR error")
+			default:
+				if err := qrChannelEventError(evt); err != nil {
+					return err
+				}
 			}
 		}
+	}
+}
+
+func qrChannelEventError(evt whatsmeow.QRChannelItem) error {
+	switch {
+	case evt == whatsmeow.QRChannelTimeout:
+		return fmt.Errorf("QR code timed out; run `wacli auth` again to get a new code")
+	case evt == whatsmeow.QRChannelClientOutdated:
+		return fmt.Errorf("WhatsApp client outdated; update wacli and try again")
+	case evt == whatsmeow.QRChannelScannedWithoutMultidevice:
+		return fmt.Errorf("QR scanned, but multi-device is not enabled on the phone")
+	case evt == whatsmeow.QRChannelErrUnexpectedEvent:
+		return fmt.Errorf("unexpected QR pairing state; run `wacli auth` again")
+	case evt.Event == whatsmeow.QRChannelEventError:
+		if evt.Error != nil {
+			return fmt.Errorf("QR pairing failed: %w", evt.Error)
+		}
+		return fmt.Errorf("QR pairing failed")
+	default:
+		return nil
 	}
 }
 
@@ -217,6 +258,34 @@ func (c *Client) DecryptReaction(ctx context.Context, reaction *events.Message) 
 	return cli.DecryptReaction(ctx, reaction)
 }
 
+func (c *Client) ParseWebMessage(chatJID types.JID, webMsg *waWeb.WebMessageInfo) (*events.Message, error) {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil {
+		return nil, fmt.Errorf("whatsapp client is not initialized")
+	}
+	return cli.ParseWebMessage(chatJID, webMsg)
+}
+
+func (c *Client) SetManualHistorySyncDownload(enabled bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.client != nil {
+		c.client.ManualHistorySyncDownload = enabled
+	}
+}
+
+func (c *Client) DownloadHistorySync(ctx context.Context, notif *waE2E.HistorySyncNotification) (*waHistorySync.HistorySync, error) {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil {
+		return nil, fmt.Errorf("whatsapp client is not initialized")
+	}
+	return cli.DownloadHistorySync(ctx, notif, false)
+}
+
 func (c *Client) RequestHistorySyncOnDemand(ctx context.Context, lastKnown types.MessageInfo, count int) (types.MessageID, error) {
 	c.mu.Lock()
 	cli := c.client
@@ -265,6 +334,40 @@ func (c *Client) GetAllContacts(ctx context.Context) (map[types.JID]types.Contac
 		return nil, fmt.Errorf("contacts store not available")
 	}
 	return cli.Store.Contacts.GetAllContacts(ctx)
+}
+
+func (c *Client) ResolveLIDToPN(ctx context.Context, jid types.JID) types.JID {
+	if jid.Server != types.HiddenUserServer {
+		return jid
+	}
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || cli.Store == nil || cli.Store.LIDs == nil {
+		return jid
+	}
+	pn, err := cli.Store.LIDs.GetPNForLID(ctx, jid.ToNonAD())
+	if err != nil || pn.IsEmpty() {
+		return jid
+	}
+	return pn
+}
+
+func (c *Client) ResolvePNToLID(ctx context.Context, jid types.JID) types.JID {
+	if jid.Server != types.DefaultUserServer {
+		return jid
+	}
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || cli.Store == nil || cli.Store.LIDs == nil {
+		return jid
+	}
+	lid, err := cli.Store.LIDs.GetLIDForPN(ctx, jid.ToNonAD())
+	if err != nil || lid.IsEmpty() {
+		return jid
+	}
+	return lid
 }
 
 func BestContactName(info types.ContactInfo) string {

@@ -7,8 +7,10 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -65,20 +67,20 @@ func (a *App) BackfillHistory(ctx context.Context, opts BackfillOptions) (Backfi
 	if err := a.OpenWA(); err != nil {
 		return BackfillResult{}, err
 	}
+	a.wa.SetManualHistorySyncDownload(true)
+	defer a.wa.SetManualHistorySyncDownload(false)
 
 	beforeCount, _ := a.db.CountMessages()
 
 	var mu sync.Mutex
 	var waitCh chan onDemandResponse
-	handlerID := a.wa.AddEventHandler(func(evt interface{}) {
-		hs, ok := evt.(*events.HistorySync)
-		if !ok || hs == nil || hs.Data == nil {
+	var manualMessagesStored atomic.Int64
+	var manualLastEvent atomic.Int64
+	manualLastEvent.Store(nowUTC().UnixNano())
+	handleOnDemand := func(hs *events.HistorySync) {
+		if hs == nil || hs.Data == nil || hs.Data.GetSyncType() != waHistorySync.HistorySync_ON_DEMAND {
 			return
 		}
-		if hs.Data.GetSyncType() != waHistorySync.HistorySync_ON_DEMAND {
-			return
-		}
-
 		for _, conv := range hs.Data.GetConversations() {
 			if strings.TrimSpace(conv.GetID()) != chatStr {
 				continue
@@ -99,6 +101,28 @@ func (a *App) BackfillHistory(ctx context.Context, opts BackfillOptions) (Backfi
 			default:
 			}
 			return
+		}
+	}
+	handlerID := a.wa.AddEventHandler(func(evt interface{}) {
+		switch v := evt.(type) {
+		case *events.HistorySync:
+			handleOnDemand(v)
+		case *events.Message:
+			notif := historySyncNotificationFromMessage(v)
+			if notif == nil || notif.GetSyncType() != waE2E.HistorySyncType_ON_DEMAND {
+				return
+			}
+			data, err := a.wa.DownloadHistorySync(ctx, notif)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "\rwarning: failed to download on-demand history sync: %v\n", err)
+				return
+			}
+			if data.GetSyncType() != waHistorySync.HistorySync_ON_DEMAND {
+				return
+			}
+			hs := &events.HistorySync{Data: data}
+			a.handleHistorySync(ctx, SyncOptions{}, hs, &manualMessagesStored, &manualLastEvent, func(string, string) {})
+			handleOnDemand(hs)
 		}
 	})
 	defer a.wa.RemoveEventHandler(handlerID)

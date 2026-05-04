@@ -1,9 +1,12 @@
 package wa
 
 import (
+	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/types"
 )
 
@@ -36,6 +39,8 @@ func TestParseUserOrJID(t *testing.T) {
 		{name: "phone", input: "1234567890", wantUser: "1234567890", wantServer: types.DefaultUserServer},
 		{name: "phone with plus", input: "+1234567890", wantUser: "1234567890", wantServer: types.DefaultUserServer},
 		{name: "phone with spaces and plus", input: " +1234567890 ", wantUser: "1234567890", wantServer: types.DefaultUserServer},
+		{name: "formatted phone", input: "+1 (234) 567-8900", wantUser: "12345678900", wantServer: types.DefaultUserServer},
+		{name: "dotted phone", input: "1.234.567.8900", wantUser: "12345678900", wantServer: types.DefaultUserServer},
 		{name: "minimum length phone", input: "1234567", wantUser: "1234567", wantServer: types.DefaultUserServer},
 		{name: "maximum length phone", input: "123456789012345", wantUser: "123456789012345", wantServer: types.DefaultUserServer},
 		{name: "group jid", input: "123@g.us", wantUser: "123", wantServer: types.GroupServer},
@@ -43,10 +48,9 @@ func TestParseUserOrJID(t *testing.T) {
 		{name: "too short phone", input: "123456", wantErr: true},
 		{name: "too long phone", input: "1234567890123456", wantErr: true},
 		{name: "letters in phone", input: "123abc456", wantErr: true},
-		{name: "punctuation in phone", input: "123-456-7890", wantErr: true},
-		{name: "spaces inside phone", input: "123 456 7890", wantErr: true},
 		{name: "plus inside phone", input: "12+34567", wantErr: true},
 		{name: "double leading plus", input: "++1234567", wantErr: true},
+		{name: "unicode digits rejected", input: "١٢٣٤٥٦٧", wantErr: true},
 	}
 
 	for _, tt := range tests {
@@ -63,6 +67,28 @@ func TestParseUserOrJID(t *testing.T) {
 			}
 			if j.Server != tt.wantServer || j.User != tt.wantUser {
 				t.Fatalf("unexpected jid: %+v", j)
+			}
+		})
+	}
+}
+
+func TestQRChannelEventError(t *testing.T) {
+	cases := []struct {
+		name string
+		evt  whatsmeow.QRChannelItem
+		want string
+	}{
+		{name: "timeout", evt: whatsmeow.QRChannelTimeout, want: "QR code timed out"},
+		{name: "client outdated", evt: whatsmeow.QRChannelClientOutdated, want: "WhatsApp client outdated"},
+		{name: "multidevice disabled", evt: whatsmeow.QRChannelScannedWithoutMultidevice, want: "multi-device is not enabled"},
+		{name: "unexpected state", evt: whatsmeow.QRChannelErrUnexpectedEvent, want: "unexpected QR pairing state"},
+		{name: "pair error", evt: whatsmeow.QRChannelItem{Event: whatsmeow.QRChannelEventError, Error: errors.New("bad code")}, want: "bad code"},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			err := qrChannelEventError(tt.evt)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want substring %q", err, tt.want)
 			}
 		})
 	}

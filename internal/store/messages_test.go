@@ -79,9 +79,10 @@ func TestListMessagesFiltersAndOrdering(t *testing.T) {
 		}
 	}
 	rows := []UpsertMessageParams{
-		{ChatJID: chat, MsgID: "old-from-alice", SenderJID: "alice@s.whatsapp.net", Timestamp: base, Text: "old"},
+		{ChatJID: chat, MsgID: "old-from-alice", SenderJID: "alice@s.whatsapp.net", SenderName: "Alice", Timestamp: base, Text: "old"},
 		{ChatJID: chat, MsgID: "new-from-me", SenderJID: "me@s.whatsapp.net", Timestamp: base.Add(time.Second), FromMe: true, Text: "new"},
-		{ChatJID: otherChat, MsgID: "other-chat", SenderJID: "alice@s.whatsapp.net", Timestamp: base.Add(2 * time.Second), Text: "other"},
+		{ChatJID: chat, MsgID: "forwarded", SenderJID: "bob@s.whatsapp.net", Timestamp: base.Add(2 * time.Second), Text: "forwarded", IsForwarded: true, ForwardingScore: 2},
+		{ChatJID: otherChat, MsgID: "other-chat", SenderJID: "alice@s.whatsapp.net", Timestamp: base.Add(3 * time.Second), Text: "other"},
 	}
 	for _, row := range rows {
 		if err := db.UpsertMessage(row); err != nil {
@@ -93,15 +94,18 @@ func TestListMessagesFiltersAndOrdering(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListMessages: %v", err)
 	}
-	if got := messageIDs(msgs); got != "new-from-me,old-from-alice" {
+	if got := messageIDs(msgs); got != "forwarded,new-from-me,old-from-alice" {
 		t.Fatalf("default order = %s", got)
+	}
+	if msgs[2].SenderName != "Alice" {
+		t.Fatalf("SenderName = %q, want Alice", msgs[2].SenderName)
 	}
 
 	msgs, err = db.ListMessages(ListMessagesParams{ChatJID: chat, Limit: 10, Asc: true})
 	if err != nil {
 		t.Fatalf("ListMessages asc: %v", err)
 	}
-	if got := messageIDs(msgs); got != "old-from-alice,new-from-me" {
+	if got := messageIDs(msgs); got != "old-from-alice,new-from-me,forwarded" {
 		t.Fatalf("asc order = %s", got)
 	}
 
@@ -120,6 +124,101 @@ func TestListMessagesFiltersAndOrdering(t *testing.T) {
 	}
 	if got := messageIDs(msgs); got != "old-from-alice" {
 		t.Fatalf("sender filter = %s", got)
+	}
+
+	msgs, err = db.ListMessages(ListMessagesParams{ChatJID: chat, Limit: 10, Forwarded: true})
+	if err != nil {
+		t.Fatalf("ListMessages forwarded: %v", err)
+	}
+	if got := messageIDs(msgs); got != "forwarded" {
+		t.Fatalf("forwarded filter = %s", got)
+	}
+	if msgs[0].ForwardingScore != 2 {
+		t.Fatalf("ForwardingScore = %d, want 2", msgs[0].ForwardingScore)
+	}
+}
+
+func TestListMessagesFiltersMultipleChatJIDs(t *testing.T) {
+	db := openTestDB(t)
+	pn := "15551234567@s.whatsapp.net"
+	lid := "123456789@lid"
+	other := "other@s.whatsapp.net"
+	base := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+	for _, jid := range []string{pn, lid, other} {
+		if err := db.UpsertChat(jid, "dm", jid, base); err != nil {
+			t.Fatalf("UpsertChat %s: %v", jid, err)
+		}
+	}
+	rows := []UpsertMessageParams{
+		{ChatJID: pn, MsgID: "pn-row", SenderJID: pn, Timestamp: base, Text: "phone"},
+		{ChatJID: lid, MsgID: "lid-row", SenderJID: lid, Timestamp: base.Add(time.Second), Text: "hidden"},
+		{ChatJID: other, MsgID: "other-row", SenderJID: other, Timestamp: base.Add(2 * time.Second), Text: "other"},
+	}
+	for _, row := range rows {
+		if err := db.UpsertMessage(row); err != nil {
+			t.Fatalf("UpsertMessage %s: %v", row.MsgID, err)
+		}
+	}
+
+	msgs, err := db.ListMessages(ListMessagesParams{ChatJIDs: []string{pn, lid}, Limit: 10})
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if got := messageIDs(msgs); got != "lid-row,pn-row" {
+		t.Fatalf("ids = %s", got)
+	}
+}
+
+func TestGetMessageReturnsRichDetails(t *testing.T) {
+	db := openTestDB(t)
+	chat := "123@s.whatsapp.net"
+	base := time.Date(2024, 3, 2, 0, 0, 0, 0, time.UTC)
+	if err := db.UpsertChat(chat, "dm", "Alice", base); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID:       chat,
+		ChatName:      "Alice",
+		MsgID:         "mid",
+		SenderJID:     chat,
+		SenderName:    "Alice Example",
+		Timestamp:     base,
+		Text:          "raw caption",
+		DisplayText:   "Sent image",
+		ReactionToID:  "target-mid",
+		ReactionEmoji: "👍",
+		MediaType:     "image",
+		MediaCaption:  "raw caption",
+		Filename:      "pic.jpg",
+		MimeType:      "image/jpeg",
+		DirectPath:    "/direct/path",
+		MediaKey:      []byte{1, 2, 3},
+		FileSHA256:    []byte{4, 5},
+		FileEncSHA256: []byte{6, 7},
+		FileLength:    123,
+	}); err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+	downloadedAt := base.Add(time.Second)
+	if err := db.MarkMediaDownloaded(chat, "mid", "/tmp/pic.jpg", downloadedAt); err != nil {
+		t.Fatalf("MarkMediaDownloaded: %v", err)
+	}
+
+	msg, err := db.GetMessage(chat, "mid")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if msg.SenderName != "Alice Example" || msg.DisplayText != "Sent image" {
+		t.Fatalf("unexpected text fields: %+v", msg)
+	}
+	if msg.ReactionToID != "target-mid" || msg.ReactionEmoji != "👍" {
+		t.Fatalf("unexpected reaction fields: %+v", msg)
+	}
+	if msg.MediaCaption != "raw caption" || msg.Filename != "pic.jpg" || msg.MimeType != "image/jpeg" || msg.DirectPath != "/direct/path" {
+		t.Fatalf("unexpected media fields: %+v", msg)
+	}
+	if msg.LocalPath != "/tmp/pic.jpg" || !msg.DownloadedAt.Equal(downloadedAt) {
+		t.Fatalf("unexpected download fields: %+v", msg)
 	}
 }
 

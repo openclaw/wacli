@@ -4,18 +4,159 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/steipete/wacli/internal/wa"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow/proto/waCommon"
+	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/proto/waWeb"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
 )
+
+func TestLiveSyncWarnsOnEncryptedReactionDecryptFailure(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	chat := types.JID{User: "123", Server: types.DefaultUserServer}
+	reactionMsg := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:     chat,
+				Sender:   chat,
+				IsFromMe: false,
+				IsGroup:  false,
+			},
+			ID:        "m-enc-react",
+			Timestamp: time.Date(2024, 1, 3, 0, 0, 0, 0, time.UTC),
+			PushName:  "Alice",
+		},
+		Message: &waProto.Message{
+			EncReactionMessage: &waProto.EncReactionMessage{
+				TargetMessageKey: &waCommon.MessageKey{ID: proto.String("m-text")},
+			},
+		},
+	}
+
+	var messagesStored atomic.Int64
+	out := captureStderr(t, func() {
+		a.handleLiveSyncMessage(context.Background(), SyncOptions{}, reactionMsg, &messagesStored, func(string, string) {})
+	})
+
+	if !strings.Contains(out, "warning: failed to decrypt reaction message m-enc-react: not supported") {
+		t.Fatalf("expected encrypted reaction decrypt warning, got:\n%s", out)
+	}
+	if messagesStored.Load() != 1 {
+		t.Fatalf("expected message to still be stored, got %d", messagesStored.Load())
+	}
+	msg, err := a.db.GetMessage(chat.String(), "m-enc-react")
+	if err != nil {
+		t.Fatalf("GetMessage encrypted reaction: %v", err)
+	}
+	if msg.DisplayText != "Reacted to message" {
+		t.Fatalf("expected fallback reaction display text, got %q", msg.DisplayText)
+	}
+}
+
+func TestLiveSyncIgnoresHistorySyncProtocolMessage(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	syncType := waE2E.HistorySyncType_INITIAL_BOOTSTRAP
+	evt := &events.Message{
+		Message: &waProto.Message{
+			ProtocolMessage: &waProto.ProtocolMessage{
+				HistorySyncNotification: &waE2E.HistorySyncNotification{SyncType: &syncType},
+			},
+		},
+	}
+
+	var messagesStored atomic.Int64
+	a.handleLiveSyncMessage(context.Background(), SyncOptions{}, evt, &messagesStored, func(string, string) {})
+
+	if messagesStored.Load() != 0 {
+		t.Fatalf("history sync protocol message stored count = %d, want 0", messagesStored.Load())
+	}
+	count, err := a.db.CountMessages()
+	if err != nil {
+		t.Fatalf("CountMessages: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("db messages = %d, want 0", count)
+	}
+}
+
+func TestHistorySyncDecryptsEncryptedReaction(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	chat := types.JID{User: "123", Server: types.DefaultUserServer}
+	f.contacts[chat.ToNonAD()] = types.ContactInfo{Found: true, FullName: "Alice"}
+	f.decryptedReaction = &waProto.ReactionMessage{
+		Text: proto.String("❤️"),
+		Key:  &waCommon.MessageKey{ID: proto.String("m-text")},
+	}
+
+	base := time.Date(2024, 1, 3, 0, 0, 0, 0, time.UTC)
+	textMsg := &waWeb.WebMessageInfo{
+		Key: &waCommon.MessageKey{
+			RemoteJID: proto.String(chat.String()),
+			FromMe:    proto.Bool(false),
+			ID:        proto.String("m-text"),
+		},
+		MessageTimestamp: proto.Uint64(uint64(base.Unix())),
+		Message:          &waProto.Message{Conversation: proto.String("hello")},
+	}
+	reactionMsg := &waWeb.WebMessageInfo{
+		Key: &waCommon.MessageKey{
+			RemoteJID: proto.String(chat.String()),
+			FromMe:    proto.Bool(false),
+			ID:        proto.String("m-enc-react"),
+		},
+		MessageTimestamp: proto.Uint64(uint64(base.Add(time.Second).Unix())),
+		Message: &waProto.Message{
+			EncReactionMessage: &waProto.EncReactionMessage{
+				TargetMessageKey: &waCommon.MessageKey{ID: proto.String("m-text")},
+			},
+		},
+	}
+	history := &events.HistorySync{
+		Data: &waHistorySync.HistorySync{
+			SyncType: waHistorySync.HistorySync_FULL.Enum(),
+			Conversations: []*waHistorySync.Conversation{{
+				ID:       proto.String(chat.String()),
+				Messages: []*waHistorySync.HistorySyncMsg{{Message: textMsg}, {Message: reactionMsg}},
+			}},
+		},
+	}
+
+	var messagesStored atomic.Int64
+	var lastEvent atomic.Int64
+	a.handleHistorySync(context.Background(), SyncOptions{}, history, &messagesStored, &lastEvent, func(string, string) {})
+
+	if messagesStored.Load() != 2 {
+		t.Fatalf("expected 2 stored messages, got %d", messagesStored.Load())
+	}
+	msg, err := a.db.GetMessage(chat.String(), "m-enc-react")
+	if err != nil {
+		t.Fatalf("GetMessage encrypted reaction: %v", err)
+	}
+	if msg.DisplayText != "Reacted ❤️ to hello" {
+		t.Fatalf("DisplayText = %q, want decrypted reaction display", msg.DisplayText)
+	}
+	if msg.ReactionToID != "m-text" || msg.ReactionEmoji != "❤️" {
+		t.Fatalf("unexpected reaction fields: to=%q emoji=%q", msg.ReactionToID, msg.ReactionEmoji)
+	}
+}
 
 func TestSyncStoresLiveAndHistoryMessages(t *testing.T) {
 	a := newTestApp(t)
@@ -122,6 +263,76 @@ func TestStoreParsedMessageNormalizesDefaultUserADJIDs(t *testing.T) {
 	}
 	if msg.SenderJID != wantSender.ToNonAD().String() {
 		t.Fatalf("SenderJID = %q, want %q", msg.SenderJID, wantSender.ToNonAD().String())
+	}
+}
+
+func TestStoreParsedMessageResolvesLIDChatAndSender(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	lid := types.JID{User: "999123456789", Server: types.HiddenUserServer}
+	pn := types.JID{User: "15551234567", Server: types.DefaultUserServer}
+	f.lids[lid.ToNonAD()] = pn
+	f.contacts[pn.ToNonAD()] = types.ContactInfo{Found: true, FullName: "Alice"}
+
+	err := a.storeParsedMessage(context.Background(), wa.ParsedMessage{
+		Chat:      lid,
+		ID:        "m-lid",
+		SenderJID: lid.String(),
+		Timestamp: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+		Text:      "hello",
+	})
+	if err != nil {
+		t.Fatalf("storeParsedMessage: %v", err)
+	}
+
+	msg, err := a.db.GetMessage(pn.String(), "m-lid")
+	if err != nil {
+		t.Fatalf("GetMessage resolved chat: %v", err)
+	}
+	if msg.ChatJID != pn.String() {
+		t.Fatalf("ChatJID = %q, want %q", msg.ChatJID, pn.String())
+	}
+	if msg.SenderJID != pn.String() {
+		t.Fatalf("SenderJID = %q, want %q", msg.SenderJID, pn.String())
+	}
+	if msg.ChatName != "Alice" {
+		t.Fatalf("ChatName = %q, want Alice", msg.ChatName)
+	}
+	if _, err := a.db.GetMessage(lid.String(), "m-lid"); err == nil {
+		t.Fatalf("message was also stored under unresolved LID chat")
+	}
+}
+
+func TestStoreParsedMessageStoresForwardedMetadata(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	chat := types.JID{User: "123", Server: types.DefaultUserServer}
+	err := a.storeParsedMessage(context.Background(), wa.ParsedMessage{
+		Chat:            chat,
+		ID:              "m-forwarded",
+		SenderJID:       chat.String(),
+		Timestamp:       time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+		Text:            "forwarded",
+		IsForwarded:     true,
+		ForwardingScore: 4,
+	})
+	if err != nil {
+		t.Fatalf("storeParsedMessage: %v", err)
+	}
+
+	msg, err := a.db.GetMessage(chat.String(), "m-forwarded")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if !msg.IsForwarded {
+		t.Fatalf("expected forwarded message, got %+v", msg)
+	}
+	if msg.ForwardingScore != 4 {
+		t.Fatalf("ForwardingScore = %d, want 4", msg.ForwardingScore)
 	}
 }
 
@@ -272,6 +483,9 @@ func TestSyncStoresDisplayText(t *testing.T) {
 	}
 	if msg.DisplayText != "Reacted 👍 to hello" {
 		t.Fatalf("unexpected reaction display text: %q", msg.DisplayText)
+	}
+	if msg.ReactionToID != "m-text" || msg.ReactionEmoji != "👍" {
+		t.Fatalf("unexpected reaction fields: to=%q emoji=%q", msg.ReactionToID, msg.ReactionEmoji)
 	}
 }
 

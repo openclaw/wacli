@@ -7,14 +7,16 @@ import (
 )
 
 type SearchMessagesParams struct {
-	Query    string
-	ChatJID  string
-	From     string
-	Limit    int
-	Before   *time.Time
-	After    *time.Time
-	HasMedia bool
-	Type     string
+	Query     string
+	ChatJID   string
+	ChatJIDs  []string
+	From      string
+	Limit     int
+	Before    *time.Time
+	After     *time.Time
+	HasMedia  bool
+	Type      string
+	Forwarded bool
 }
 
 func (d *DB) SearchMessages(p SearchMessagesParams) ([]Message, error) {
@@ -53,7 +55,7 @@ func likeContains(s string) string {
 
 func (d *DB) searchLIKE(p SearchMessagesParams) ([]Message, error) {
 	query := `
-		SELECT m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.media_type,''), ''
+		SELECT m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), m.is_forwarded, m.forwarding_score, COALESCE(m.reaction_to_id,''), COALESCE(m.reaction_emoji,''), COALESCE(m.media_type,''), COALESCE(m.media_caption,''), COALESCE(m.filename,''), COALESCE(m.mime_type,''), COALESCE(m.direct_path,''), COALESCE(m.local_path,''), COALESCE(m.downloaded_at,0), ''
 		FROM messages m
 		LEFT JOIN chats c ON c.jid = m.chat_jid
 	WHERE (LOWER(m.text) LIKE LOWER(?) ESCAPE '\' OR LOWER(m.display_text) LIKE LOWER(?) ESCAPE '\' OR LOWER(m.media_caption) LIKE LOWER(?) ESCAPE '\' OR LOWER(m.filename) LIKE LOWER(?) ESCAPE '\' OR LOWER(COALESCE(m.chat_name,'')) LIKE LOWER(?) ESCAPE '\' OR LOWER(COALESCE(m.sender_name,'')) LIKE LOWER(?) ESCAPE '\' OR LOWER(COALESCE(c.name,'')) LIKE LOWER(?) ESCAPE '\')`
@@ -86,7 +88,7 @@ func sanitizeFTSQuery(q string) string {
 
 func (d *DB) searchFTS(p SearchMessagesParams) ([]Message, error) {
 	query := `
-		SELECT m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.media_type,''),
+		SELECT m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), m.is_forwarded, m.forwarding_score, COALESCE(m.reaction_to_id,''), COALESCE(m.reaction_emoji,''), COALESCE(m.media_type,''), COALESCE(m.media_caption,''), COALESCE(m.filename,''), COALESCE(m.mime_type,''), COALESCE(m.direct_path,''), COALESCE(m.local_path,''), COALESCE(m.downloaded_at,0),
 		       snippet(messages_fts, 0, '[', ']', '…', 12)
 		FROM messages_fts
 		JOIN messages m ON messages_fts.rowid = m.rowid
@@ -103,10 +105,7 @@ func (d *DB) searchFTS(p SearchMessagesParams) ([]Message, error) {
 }
 
 func applyMessageFilters(query string, args []interface{}, p SearchMessagesParams) (string, []interface{}) {
-	if strings.TrimSpace(p.ChatJID) != "" {
-		query += " AND m.chat_jid = ?"
-		args = append(args, p.ChatJID)
-	}
+	query, args = appendStringFilter(query, args, "m.chat_jid", p.ChatJID, p.ChatJIDs)
 	if strings.TrimSpace(p.From) != "" {
 		query += " AND m.sender_jid = ?"
 		args = append(args, p.From)
@@ -121,6 +120,9 @@ func applyMessageFilters(query string, args []interface{}, p SearchMessagesParam
 	}
 	if p.HasMedia {
 		query += " AND COALESCE(m.media_type,'') != ''"
+	}
+	if p.Forwarded {
+		query += " AND m.is_forwarded = 1"
 	}
 	if msgType := normalizedMessageType(p.Type); msgType != "" {
 		if msgType == "text" {

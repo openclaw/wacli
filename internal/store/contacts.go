@@ -20,11 +20,11 @@ func (d *DB) SearchContacts(query string, limit int) ([]Contact, error) {
 		       c.updated_at
 		FROM contacts c
 		LEFT JOIN contact_aliases a ON a.jid = c.jid
-		WHERE LOWER(COALESCE(a.alias,'')) LIKE LOWER(?) ESCAPE '\' OR LOWER(COALESCE(c.full_name,'')) LIKE LOWER(?) ESCAPE '\' OR LOWER(COALESCE(c.push_name,'')) LIKE LOWER(?) ESCAPE '\' OR LOWER(COALESCE(c.phone,'')) LIKE LOWER(?) ESCAPE '\' OR LOWER(c.jid) LIKE LOWER(?) ESCAPE '\'
-		ORDER BY COALESCE(NULLIF(a.alias,''), NULLIF(c.full_name,''), NULLIF(c.push_name,''), c.jid)
+		WHERE LOWER(COALESCE(a.alias,'')) LIKE LOWER(?) ESCAPE '\' OR LOWER(COALESCE(c.full_name,'')) LIKE LOWER(?) ESCAPE '\' OR LOWER(COALESCE(c.push_name,'')) LIKE LOWER(?) ESCAPE '\' OR LOWER(COALESCE(c.first_name,'')) LIKE LOWER(?) ESCAPE '\' OR LOWER(COALESCE(c.business_name,'')) LIKE LOWER(?) ESCAPE '\' OR LOWER(COALESCE(c.phone,'')) LIKE LOWER(?) ESCAPE '\' OR LOWER(c.jid) LIKE LOWER(?) ESCAPE '\'
+		ORDER BY COALESCE(NULLIF(a.alias,''), NULLIF(c.full_name,''), NULLIF(c.push_name,''), NULLIF(c.business_name,''), NULLIF(c.first_name,''), c.jid)
 		LIMIT ?`
 	needle := likeContains(query)
-	rows, err := d.sql.Query(q, needle, needle, needle, needle, needle, limit)
+	rows, err := d.sql.Query(q, needle, needle, needle, needle, needle, needle, needle, limit)
 	if err != nil {
 		return nil, err
 	}

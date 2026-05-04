@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"mime"
 	"net/http"
 	"os"
@@ -17,11 +18,13 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+const maxSendFileSize = 100 * 1024 * 1024
+
 func sendFile(ctx context.Context, a interface {
 	WA() app.WAClient
 	DB() *store.DB
-}, to types.JID, filePath, filename, caption, mimeOverride string) (string, map[string]string, error) {
-	data, err := os.ReadFile(filePath)
+}, to types.JID, filePath, filename, caption, mimeOverride, replyTo, replyToSender string) (string, map[string]string, error) {
+	data, err := readSendFileData(filePath)
 	if err != nil {
 		return "", nil, err
 	}
@@ -30,18 +33,7 @@ func sendFile(ctx context.Context, a interface {
 	if name == "" {
 		name = filepath.Base(filePath)
 	}
-	mimeType := strings.TrimSpace(mimeOverride)
-	if mimeType == "" {
-		// Use filePath for MIME detection, not the display name override
-		mimeType = mime.TypeByExtension(strings.ToLower(filepath.Ext(filePath)))
-	}
-	if mimeType == "" {
-		sniff := data
-		if len(sniff) > 512 {
-			sniff = sniff[:512]
-		}
-		mimeType = http.DetectContentType(sniff)
-	}
+	mimeType := detectSendFileMIME(filePath, mimeOverride, data)
 
 	mediaType := "document"
 	uploadType, _ := wa.MediaTypeFromString("document")
@@ -64,6 +56,10 @@ func sendFile(ctx context.Context, a interface {
 
 	now := time.Now().UTC()
 	msg := &waProto.Message{}
+	replyContext, err := buildReplyContextInfo(a.DB(), to, replyTo, replyToSender)
+	if err != nil {
+		return "", nil, err
+	}
 
 	switch mediaType {
 	case "image":
@@ -113,6 +109,7 @@ func sendFile(ctx context.Context, a interface {
 			Title:         proto.String(name),
 		}
 	}
+	attachSendFileReplyContext(msg, replyContext)
 
 	id, err := a.WA().SendProtoMessage(ctx, to, msg)
 	if err != nil {
@@ -149,6 +146,33 @@ func sendFile(ctx context.Context, a interface {
 	}, nil
 }
 
+func readSendFileData(filePath string) ([]byte, error) {
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return nil, err
+	}
+	if info.Size() > maxSendFileSize {
+		return nil, fmt.Errorf("file too large (%d bytes); maximum send file size is %d bytes", info.Size(), maxSendFileSize)
+	}
+	return os.ReadFile(filePath)
+}
+
+func attachSendFileReplyContext(msg *waProto.Message, info *waProto.ContextInfo) {
+	if info == nil {
+		return
+	}
+	switch {
+	case msg.GetImageMessage() != nil:
+		msg.ImageMessage.ContextInfo = info
+	case msg.GetVideoMessage() != nil:
+		msg.VideoMessage.ContextInfo = info
+	case msg.GetAudioMessage() != nil:
+		msg.AudioMessage.ContextInfo = info
+	case msg.GetDocumentMessage() != nil:
+		msg.DocumentMessage.ContextInfo = info
+	}
+}
+
 func chatKindFromJID(j types.JID) string {
 	if j.Server == types.GroupServer {
 		return "group"
@@ -160,4 +184,23 @@ func chatKindFromJID(j types.JID) string {
 		return "dm"
 	}
 	return "unknown"
+}
+
+func detectSendFileMIME(filePath, mimeOverride string, data []byte) string {
+	mimeType := strings.TrimSpace(mimeOverride)
+	if mimeType == "" {
+		// Use filePath for MIME detection, not the display name override.
+		mimeType = mime.TypeByExtension(strings.ToLower(filepath.Ext(filePath)))
+	}
+	if mimeType == "" {
+		sniff := data
+		if len(sniff) > 512 {
+			sniff = sniff[:512]
+		}
+		mimeType = http.DetectContentType(sniff)
+	}
+	if mimeType == "audio/ogg" || mimeType == "application/ogg" {
+		return "audio/ogg; codecs=opus"
+	}
+	return mimeType
 }

@@ -34,7 +34,7 @@ func newPresenceTypingCmd(flags *rootFlags) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&to, "to", "", "recipient phone number or JID")
+	cmd.Flags().StringVar(&to, "to", "", "recipient phone number (+E164 and formatting ok) or JID")
 	cmd.Flags().StringVar(&media, "media", "", "media type: 'audio' for recording indicator (default: typing text)")
 	return cmd
 }
@@ -50,7 +50,7 @@ func newPresencePausedCmd(flags *rootFlags) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&to, "to", "", "recipient phone number or JID")
+	cmd.Flags().StringVar(&to, "to", "", "recipient phone number (+E164 and formatting ok) or JID")
 	return cmd
 }
 

@@ -3,7 +3,6 @@ package wa
 import (
 	"context"
 	"fmt"
-	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +10,8 @@ import (
 	"github.com/steipete/wacli/internal/fsutil"
 	"go.mau.fi/whatsmeow"
 )
+
+const MaxMediaDownloadSize = 100 * 1024 * 1024
 
 func MediaTypeFromString(mediaType string) (whatsmeow.MediaType, error) {
 	switch strings.ToLower(strings.TrimSpace(mediaType)) {
@@ -61,9 +62,9 @@ func (c *Client) DownloadMediaToFile(ctx context.Context, directPath string, enc
 		}
 	}()
 
-	length := -1
-	if fileLength > 0 && fileLength < math.MaxInt32 {
-		length = int(fileLength)
+	length, err := mediaDownloadLength(fileLength)
+	if err != nil {
+		return 0, err
 	}
 
 	if err := cli.DownloadMediaWithPathToFile(ctx, directPath, encFileHash, fileHash, mediaKey, length, mt, mmsType, tmpFile); err != nil {
@@ -85,4 +86,14 @@ func (c *Client) DownloadMediaToFile(ctx context.Context, directPath string, enc
 		return 0, fmt.Errorf("stat output file: %w", err)
 	}
 	return info.Size(), nil
+}
+
+func mediaDownloadLength(fileLength uint64) (int, error) {
+	if fileLength > MaxMediaDownloadSize {
+		return 0, fmt.Errorf("media too large (%d bytes); maximum download size is %d bytes", fileLength, MaxMediaDownloadSize)
+	}
+	if fileLength > 0 {
+		return int(fileLength), nil
+	}
+	return -1, nil
 }

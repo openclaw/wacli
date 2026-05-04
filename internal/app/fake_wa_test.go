@@ -11,6 +11,9 @@ import (
 	"github.com/steipete/wacli/internal/wa"
 	"go.mau.fi/whatsmeow"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
+	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/proto/waHistorySync"
+	"go.mau.fi/whatsmeow/proto/waWeb"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 )
@@ -30,8 +33,15 @@ type fakeWA struct {
 
 	contacts map[types.JID]types.ContactInfo
 	groups   map[types.JID]*types.GroupInfo
+	lids     map[types.JID]types.JID
 
-	onDemandHistory func(lastKnown types.MessageInfo, count int) *events.HistorySync
+	decryptedReaction  *waProto.ReactionMessage
+	decryptReactionErr error
+	onDemandHistory    func(lastKnown types.MessageInfo, count int) *events.HistorySync
+	onDemandEvent      func(lastKnown types.MessageInfo, count int) interface{}
+	downloadHistory    func(notif *waE2E.HistorySyncNotification) (*waHistorySync.HistorySync, error)
+
+	manualHistorySyncCalls []bool
 }
 
 func newFakeWA() *fakeWA {
@@ -40,6 +50,7 @@ func newFakeWA() *fakeWA {
 		handlers:      map[uint32]func(interface{}){},
 		contacts:      map[types.JID]types.ContactInfo{},
 		groups:        map[types.JID]*types.GroupInfo{},
+		lids:          map[types.JID]types.JID{},
 		nextHandlerID: 1,
 	}
 }
@@ -123,6 +134,28 @@ func (f *fakeWA) ResolveChatName(ctx context.Context, chat types.JID, pushName s
 		}
 	}
 	return chat.String()
+}
+
+func (f *fakeWA) ResolveLIDToPN(ctx context.Context, jid types.JID) types.JID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if pn, ok := f.lids[jid.ToNonAD()]; ok {
+		pn.Device = jid.Device
+		return pn
+	}
+	return jid
+}
+
+func (f *fakeWA) ResolvePNToLID(ctx context.Context, jid types.JID) types.JID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for lid, pn := range f.lids {
+		if pn == jid.ToNonAD() {
+			lid.Device = jid.Device
+			return lid
+		}
+	}
+	return jid
 }
 
 func (f *fakeWA) GetContact(ctx context.Context, jid types.JID) (types.ContactInfo, error) {
@@ -234,7 +267,60 @@ func (f *fakeWA) SendChatPresence(ctx context.Context, jid types.JID, state type
 }
 
 func (f *fakeWA) DecryptReaction(ctx context.Context, reaction *events.Message) (*waProto.ReactionMessage, error) {
+	if f.decryptReactionErr != nil {
+		return nil, f.decryptReactionErr
+	}
+	if f.decryptedReaction != nil {
+		return f.decryptedReaction, nil
+	}
 	return nil, fmt.Errorf("not supported")
+}
+
+func (f *fakeWA) SetManualHistorySyncDownload(enabled bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.manualHistorySyncCalls = append(f.manualHistorySyncCalls, enabled)
+}
+
+func (f *fakeWA) DownloadHistorySync(ctx context.Context, notif *waE2E.HistorySyncNotification) (*waHistorySync.HistorySync, error) {
+	f.mu.Lock()
+	cb := f.downloadHistory
+	f.mu.Unlock()
+	if cb == nil {
+		return nil, fmt.Errorf("not supported")
+	}
+	return cb(notif)
+}
+
+func (f *fakeWA) ParseWebMessage(chatJID types.JID, webMsg *waWeb.WebMessageInfo) (*events.Message, error) {
+	if chatJID.IsEmpty() {
+		parsed, err := types.ParseJID(webMsg.GetKey().GetRemoteJID())
+		if err != nil {
+			return nil, err
+		}
+		chatJID = parsed
+	}
+	sender := chatJID
+	if participant := webMsg.GetParticipant(); participant != "" {
+		parsed, err := types.ParseJID(participant)
+		if err != nil {
+			return nil, err
+		}
+		sender = parsed
+	}
+	return &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:     chatJID,
+				Sender:   sender,
+				IsFromMe: webMsg.GetKey().GetFromMe(),
+				IsGroup:  chatJID.Server == types.GroupServer,
+			},
+			ID:        webMsg.GetKey().GetID(),
+			Timestamp: time.Unix(int64(webMsg.GetMessageTimestamp()), 0).UTC(),
+		},
+		Message: webMsg.GetMessage(),
+	}, nil
 }
 
 func (f *fakeWA) DownloadMediaToFile(ctx context.Context, directPath string, encFileHash, fileHash, mediaKey []byte, fileLength uint64, mediaType, mmsType string, targetPath string) (int64, error) {
@@ -260,9 +346,12 @@ func (f *fakeWA) DownloadMediaToFile(ctx context.Context, directPath string, enc
 
 func (f *fakeWA) RequestHistorySyncOnDemand(ctx context.Context, lastKnown types.MessageInfo, count int) (types.MessageID, error) {
 	f.mu.Lock()
+	eventCB := f.onDemandEvent
 	cb := f.onDemandHistory
 	f.mu.Unlock()
-	if cb != nil {
+	if eventCB != nil {
+		f.emit(eventCB(lastKnown, count))
+	} else if cb != nil {
 		f.emit(cb(lastKnown, count))
 	}
 	return types.MessageID("req"), nil

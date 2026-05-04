@@ -32,6 +32,7 @@ func newSendCmd(flags *rootFlags) *cobra.Command {
 
 func newSendTextCmd(flags *rootFlags) *cobra.Command {
 	var to string
+	var pick int
 	var message string
 	var replyTo string
 	var replyToSender string
@@ -59,12 +60,12 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 			if err := a.EnsureAuthed(); err != nil {
 				return err
 			}
-			if err := a.Connect(ctx, false, nil); err != nil {
+
+			toJID, err := resolveRecipient(a, to, recipientOptions{pick: pick, asJSON: flags.asJSON})
+			if err != nil {
 				return err
 			}
-
-			toJID, err := wa.ParseUserOrJID(to)
-			if err != nil {
+			if err := a.Connect(ctx, false, nil); err != nil {
 				return err
 			}
 
@@ -103,7 +104,8 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&to, "to", "", "recipient phone number or JID")
+	cmd.Flags().StringVar(&to, "to", "", "recipient JID, phone number, or contact/group/chat name")
+	cmd.Flags().IntVar(&pick, "pick", 0, "when --to is ambiguous, pick the Nth match (1-indexed)")
 	cmd.Flags().StringVar(&message, "message", "", "message text")
 	cmd.Flags().StringVar(&replyTo, "reply-to", "", "message ID to quote/reply to")
 	cmd.Flags().StringVar(&replyToSender, "reply-to-sender", "", "sender JID of the quoted message (required for unsynced group replies)")
@@ -116,21 +118,12 @@ type sendTextApp interface {
 }
 
 func sendTextMessage(ctx context.Context, a sendTextApp, to types.JID, text, replyTo, replyToSender string) (types.MessageID, error) {
-	replyTo = strings.TrimSpace(replyTo)
-	if replyTo == "" {
-		return a.WA().SendText(ctx, to, text)
-	}
-
-	sender, err := resolveReplySender(a.DB(), to, replyTo, replyToSender)
+	info, err := buildReplyContextInfo(a.DB(), to, replyTo, replyToSender)
 	if err != nil {
 		return "", err
 	}
-
-	stanzaID := replyTo
-	info := &waProto.ContextInfo{StanzaID: proto.String(stanzaID)}
-	if !sender.IsEmpty() {
-		participant := sender.String()
-		info.Participant = proto.String(participant)
+	if info == nil {
+		return a.WA().SendText(ctx, to, text)
 	}
 
 	return a.WA().SendProtoMessage(ctx, to, &waProto.Message{
@@ -139,6 +132,26 @@ func sendTextMessage(ctx context.Context, a sendTextApp, to types.JID, text, rep
 			ContextInfo: info,
 		},
 	})
+}
+
+func buildReplyContextInfo(db *store.DB, chat types.JID, replyTo, replyToSender string) (*waProto.ContextInfo, error) {
+	replyTo = strings.TrimSpace(replyTo)
+	if replyTo == "" {
+		return nil, nil
+	}
+
+	sender, err := resolveReplySender(db, chat, replyTo, replyToSender)
+	if err != nil {
+		return nil, err
+	}
+
+	stanzaID := replyTo
+	info := &waProto.ContextInfo{StanzaID: proto.String(stanzaID)}
+	if !sender.IsEmpty() {
+		participant := sender.String()
+		info.Participant = proto.String(participant)
+	}
+	return info, nil
 }
 
 func resolveReplySender(db *store.DB, chat types.JID, replyTo, override string) (types.JID, error) {

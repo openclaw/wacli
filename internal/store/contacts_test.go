@@ -40,6 +40,16 @@ func TestContactsAliasTagsAndSearch(t *testing.T) {
 		t.Fatalf("expected to find contact by alias, got %+v", found)
 	}
 
+	for _, query := range []string{"First", "Biz"} {
+		found, err := db.SearchContacts(query, 10)
+		if err != nil {
+			t.Fatalf("SearchContacts %q: %v", query, err)
+		}
+		if len(found) != 1 || found[0].JID != jid {
+			t.Fatalf("expected to find contact by %q, got %+v", query, found)
+		}
+	}
+
 	if err := db.RemoveTag(jid, "work"); err != nil {
 		t.Fatalf("RemoveTag: %v", err)
 	}

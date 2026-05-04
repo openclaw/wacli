@@ -82,6 +82,6 @@ func newGroupsParticipantsActionCmd(flags *rootFlags, action string) *cobra.Comm
 		},
 	}
 	cmd.Flags().StringVar(&group, "jid", "", "group JID (…@g.us)")
-	cmd.Flags().StringSliceVar(&users, "user", nil, "user phone number or JID (repeatable)")
+	cmd.Flags().StringSliceVar(&users, "user", nil, "user phone number (+E164 and formatting ok) or JID (repeatable)")
 	return cmd
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/steipete/wacli/internal/fsutil"
@@ -11,6 +12,9 @@ import (
 	"github.com/steipete/wacli/internal/wa"
 	"go.mau.fi/whatsmeow"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
+	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/proto/waHistorySync"
+	"go.mau.fi/whatsmeow/proto/waWeb"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 )
@@ -26,6 +30,8 @@ type WAClient interface {
 	ReconnectWithBackoff(ctx context.Context, minDelay, maxDelay time.Duration) error
 
 	ResolveChatName(ctx context.Context, chat types.JID, pushName string) string
+	ResolveLIDToPN(ctx context.Context, jid types.JID) types.JID
+	ResolvePNToLID(ctx context.Context, jid types.JID) types.JID
 	GetContact(ctx context.Context, jid types.JID) (types.ContactInfo, error)
 	GetAllContacts(ctx context.Context) (map[types.JID]types.ContactInfo, error)
 
@@ -44,7 +50,10 @@ type WAClient interface {
 	DownloadMediaToFile(ctx context.Context, directPath string, encFileHash, fileHash, mediaKey []byte, fileLength uint64, mediaType, mmsType string, targetPath string) (int64, error)
 
 	SendChatPresence(ctx context.Context, jid types.JID, state types.ChatPresence, media types.ChatPresenceMedia) error
+	ParseWebMessage(chatJID types.JID, webMsg *waWeb.WebMessageInfo) (*events.Message, error)
 	DecryptReaction(ctx context.Context, reaction *events.Message) (*waProto.ReactionMessage, error)
+	SetManualHistorySyncDownload(enabled bool)
+	DownloadHistorySync(ctx context.Context, notif *waE2E.HistorySyncNotification) (*waHistorySync.HistorySync, error)
 	RequestHistorySyncOnDemand(ctx context.Context, lastKnown types.MessageInfo, count int) (types.MessageID, error)
 	Logout(ctx context.Context) error
 	LinkedJID() string
@@ -61,6 +70,7 @@ type Options struct {
 
 type App struct {
 	opts Options
+	waMu sync.Mutex
 	wa   WAClient
 	db   *store.DB
 }
@@ -84,6 +94,8 @@ func New(opts Options) (*App, error) {
 }
 
 func (a *App) OpenWA() error {
+	a.waMu.Lock()
+	defer a.waMu.Unlock()
 	if a.wa != nil {
 		return nil
 	}
@@ -100,8 +112,11 @@ func (a *App) OpenWA() error {
 }
 
 func (a *App) Close() {
-	if a.wa != nil {
-		a.wa.Close()
+	a.waMu.Lock()
+	waClient := a.wa
+	a.waMu.Unlock()
+	if waClient != nil {
+		waClient.Close()
 	}
 	if a.db != nil {
 		_ = a.db.Close()
@@ -118,7 +133,11 @@ func (a *App) EnsureAuthed() error {
 	return fmt.Errorf("not authenticated; run `wacli auth`")
 }
 
-func (a *App) WA() WAClient        { return a.wa }
+func (a *App) WA() WAClient {
+	a.waMu.Lock()
+	defer a.waMu.Unlock()
+	return a.wa
+}
 func (a *App) DB() *store.DB       { return a.db }
 func (a *App) StoreDir() string    { return a.opts.StoreDir }
 func (a *App) Version() string     { return a.opts.Version }

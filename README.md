@@ -12,15 +12,34 @@ This is a third-party tool that uses the WhatsApp Web protocol via `whatsmeow` a
 
 ## Status
 
-Core implementation is in place. See `docs/spec.md` for design notes.
+Core implementation is in place. Start with [docs/overview.md](docs/overview.md) for the command map and [docs/spec.md](docs/spec.md) for design notes.
+
+## Documentation
+
+- [Overview](docs/overview.md): store model, global flags, common flow, command index.
+- [Auth](docs/auth.md): `auth`, `auth status`, `auth logout`.
+- [Sync](docs/sync.md): `sync --once`, `sync --follow`, refresh, media download.
+- [Messages](docs/messages.md): `messages list/search/show/context`.
+- [Send](docs/send.md): `send text/file/react`, recipient resolution, replies.
+- [Media](docs/media.md): `media download`.
+- [Contacts](docs/contacts.md): `contacts search/show/refresh`, aliases, tags.
+- [Chats](docs/chats.md): `chats list/show`.
+- [Groups](docs/groups.md): group list, refresh, info, rename, leave, participants, invites, join.
+- [History](docs/history.md): `history backfill`.
+- [Presence](docs/presence.md): `presence typing/paused`.
+- [Doctor](docs/doctor.md): `doctor [--connect]`.
+- [Version](docs/version.md): `version`, `--version`.
+- [Completion](docs/completion.md): generated shell completions.
+- [Help](docs/help.md): `help`, per-command `--help`.
+- [Release](docs/release.md): release workflow and artifact expectations.
 
 ## Major features
 
 - **Auth + sync**: `auth` shows QR login and bootstraps sync; `sync` is non-interactive, can run once or follow continuously, and can refresh contacts/groups.
 - **Offline message store**: local SQLite store with FTS5 search when available and LIKE fallback.
 - **Message tools**: list/search/show/context with chat, sender, direction, time, order, and media-type filters.
-- **Sending**: send text, quoted text replies, and image/video/audio/document files with captions, MIME override, and custom display filenames.
-- **Media**: download synced message media on demand, or download in the background during auth/sync.
+- **Sending**: send text, quoted replies, and image/video/audio/document files with captions, MIME override, and custom display filenames.
+- **Media**: download synced message media on demand, or download in the background during auth/sync; send-file uploads and downloads are capped at 100 MiB.
 - **Contacts/chats/groups**: search/show contacts, local aliases/tags, list/show chats, refresh/list/info/rename groups, manage participants, invite links, join, and leave; left groups are hidden after leave.
 - **Presence**: send typing/paused indicators.
 - **Diagnostics + safety**: `doctor`, read-only mode, store locks with lock-owner reporting, lock waiting, owner-only database permissions, panic recovery, reconnect bounds, and bounded media queue backpressure.
@@ -35,9 +54,22 @@ If you install via Homebrew, you can skip the local build step.
 
 - `brew install steipete/tap/wacli`
 
+If a Linux install from the tap reports `Binary was compiled with 'CGO_ENABLED=0'`,
+update the tap and rebuild the formula:
+
+- `brew update`
+- `brew reinstall steipete/tap/wacli`
+
 ### Option B: Build locally
 
-- `go build -tags sqlite_fts5 -o ./dist/wacli ./cmd/wacli`
+`wacli` uses `go-sqlite3`, so local builds require cgo and a C compiler:
+
+- macOS: Xcode Command Line Tools are enough.
+- Debian/Ubuntu: `sudo apt install build-essential`
+
+Build:
+
+- `CGO_ENABLED=1 go build -tags sqlite_fts5 -o ./dist/wacli ./cmd/wacli`
 
 Run (local build only):
 
@@ -73,14 +105,19 @@ pnpm wacli history backfill --chat 1234567890@s.whatsapp.net --requests 10 --cou
 # Download media for a message (after syncing)
 pnpm wacli media download --chat 1234567890@s.whatsapp.net --id <message-id>
 
-# Send a message
+# Send a message by phone/JID, or by a synced contact/group/chat name
 pnpm wacli send text --to 1234567890 --message "hello"
+# Phone numbers can also be passed as +E164 or formatted input like "+1 (234) 567-8900"
+pnpm wacli send text --to mom --message "hello"
+pnpm wacli send text --to "Family" --pick 2 --message "hello"
 
 # Send a quoted reply
 pnpm wacli send text --to 1234567890 --message "replying" --reply-to <message-id>
 
 # Send a file
 pnpm wacli send file --to 1234567890 --file ./pic.jpg --caption "hi"
+# Send a quoted reply with a file
+pnpm wacli send file --to 1234567890 --file ./pic.jpg --caption "replying" --reply-to <message-id>
 # Or override display name
 pnpm wacli send file --to 1234567890 --file /tmp/abc123 --filename report.pdf
 
@@ -106,16 +143,18 @@ pnpm wacli presence paused --to 1234567890
 
 ## Command surface
 
-- `wacli auth [--follow] [--idle-exit 30s] [--download-media]`
+Full command docs live under [docs/overview.md](docs/overview.md). Quick reference:
+
+- `wacli auth [--follow] [--idle-exit 30s] [--download-media] [--qr-format terminal|text] [--phone PHONE]`
 - `wacli auth status`
 - `wacli auth logout`
 - `wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--download-media] [--refresh-contacts] [--refresh-groups]`
-- `wacli messages list [--chat JID] [--sender JID] [--from-me|--from-them] [--asc] [--limit N] [--after DATE] [--before DATE]`
-- `wacli messages search <query> [--chat JID] [--from JID] [--has-media] [--type text|image|video|audio|document]`
+- `wacli messages list [--chat JID] [--sender JID] [--from-me|--from-them] [--asc] [--limit N] [--after DATE] [--before DATE] [--forwarded]`
+- `wacli messages search <query> [--chat JID] [--from JID] [--has-media] [--type text|image|video|audio|document] [--forwarded]`
 - `wacli messages show --chat JID --id MSG_ID`
 - `wacli messages context --chat JID --id MSG_ID [--before N] [--after N]`
-- `wacli send text --to PHONE_OR_JID --message TEXT [--reply-to MSG_ID] [--reply-to-sender JID]`
-- `wacli send file --to PHONE_OR_JID --file PATH [--caption TEXT] [--filename NAME] [--mime TYPE]`
+- `wacli send text --to RECIPIENT --message TEXT [--pick N] [--reply-to MSG_ID] [--reply-to-sender JID]`
+- `wacli send file --to RECIPIENT --file PATH [--pick N] [--caption TEXT] [--filename NAME] [--mime TYPE] [--reply-to MSG_ID] [--reply-to-sender JID]`
 - `wacli send react --to PHONE_OR_JID --id MSG_ID [--reaction TEXT] [--sender JID]`
 - `wacli media download --chat JID --id MSG_ID [--output PATH]`
 - `wacli contacts search <query>`
@@ -138,6 +177,10 @@ pnpm wacli presence paused --to 1234567890
 - `wacli presence paused --to PHONE_OR_JID`
 - `wacli doctor [--connect]`
 - `wacli version`
+- `wacli completion bash|zsh|fish|powershell [--no-descriptions]`
+- `wacli help [command]`
+
+`RECIPIENT` for `send text/file` accepts a JID, phone number, or synced contact/group/chat name. If a name is ambiguous, interactive terminals prompt; scripts can pass `--pick N`.
 
 ## Storage
 
@@ -154,8 +197,8 @@ Global flags:
 
 ## Environment overrides
 
-- `WACLI_DEVICE_LABEL`: set the linked device label (shown in WhatsApp).
-- `WACLI_DEVICE_PLATFORM`: override the linked device platform (defaults to `CHROME` if unset or invalid).
+- `WACLI_DEVICE_LABEL`: override the linked device label shown in WhatsApp (defaults to `wacli - <OS> (<hostname>)` when detectable).
+- `WACLI_DEVICE_PLATFORM`: override the linked device platform (defaults to `DESKTOP`; invalid values fall back to `CHROME`).
 - `WACLI_READONLY`: set to `1`, `true`, `yes`, or `on` to enable read-only mode.
 - `WACLI_STORE_DIR`: override the default store directory.
 
@@ -168,6 +211,7 @@ Important notes:
 - This is **best-effort**: WhatsApp may not return full history.
 - Your **primary device must be online**.
 - Requests are **per chat** (DM or group). `wacli` uses the *oldest locally stored message* in that chat as the anchor.
+- Backfill skips automatic initial history-sync blob downloads and only processes on-demand responses, which keeps memory use bounded on small Linux/ARM devices.
 - Recommended `--count` is `50` per request; maximum is `500`.
 - Maximum `--requests` per run is `100`.
 
@@ -183,7 +227,7 @@ This loops through chats already known in your local DB:
 
 ```bash
 pnpm -s wacli -- --json chats list --limit 100000 \
-  | jq -r '.[].JID' \
+  | jq -r '.data[].JID' \
   | while read -r jid; do
       pnpm -s wacli -- history backfill --chat "$jid" --requests 3 --count 50
     done

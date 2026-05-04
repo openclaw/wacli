@@ -12,19 +12,35 @@
 - Messages: add `messages list --sender`, `--from-me`, `--from-them`, and `--asc` filters. (#153 — thanks @draix)
 - Messages: add `messages search --has-media`, `--type text`, case-insensitive media types, and validation for contradictory filters. (#128 — thanks @ImLukeF and @Mansehej)
 - Messages: extract searchable/display text from WhatsApp Business templates, buttons, interactive messages, and list replies. (#79 — thanks @terry-li-hm)
+- Auth: add `auth --qr-format text` to print the raw WhatsApp QR payload for external renderers. (#22 — thanks @teren-papercutlabs)
+- Auth: add `auth --phone` for WhatsApp's phone-number pairing flow on headless systems. (#148, #184 — thanks @giovanninibarbosa and @KillerSnails)
+- Auth: auto-detect a readable linked-device label and default linked-device platform to desktop. (#100 — thanks @pmatheus)
 - Send: add `send react` to add or clear reactions, with group sender validation. (#151 — thanks @draix)
+- Send: add `send file --reply-to` for quoted media/document replies. (#68 — thanks @vlassance)
+- Send: accept common phone-number formatting in recipient flags while still storing digits-only WhatsApp JIDs. (#130 — thanks @fahmidme and @ImLukeF)
+- Send: resolve `send text/file --to` against local contacts, groups, and chats, with `--pick` for non-interactive disambiguation. (#122 — thanks @AndroidPoet)
 
 ### Security
 
 - Auth: reject `?` and `#` in whatsmeow session store paths to avoid SQLite URI parameter injection. (#180 — thanks @shaun0927)
+- Media: reject send-file uploads and media downloads larger than 100 MiB before reading or writing the payload. (#63 — thanks @alexander-morris)
 - Send: validate phone-number recipients before constructing WhatsApp JIDs. (#144 — thanks @draix)
 - Store: restrict index and session SQLite database files to owner-only permissions. (#147 — thanks @draix)
 
 ### Fixed
 
+- Auth: propagate QR channel setup errors and surface actionable QR pairing failures. (#100 — thanks @pmatheus)
+- Build: fail cgo-disabled CLI builds at compile time instead of shipping a go-sqlite3 stub binary. (#194 — thanks @rajgopalv)
+- Chats: resolve mapped historical `@lid` chat rows in `chats list/show` output. (#31, #89 — thanks @bhaskoro-muthohar and @alexph-dev)
 - Groups: hide groups after `groups leave`, mark missing joined groups as left during refresh, and show them again if a later refresh reports membership. (#125, #129 — thanks @SeifBenayed and @ImLukeF)
 - History: cap on-demand backfill at 500 messages per request and 100 requests per run.
+- History: skip automatic initial history-sync blob downloads during on-demand backfill to avoid OOM on constrained Linux/ARM devices. (#84 — thanks @jyothepro)
 - Messages: normalize device-specific `@s.whatsapp.net` JIDs before storing chats, contacts, and senders.
+- Messages: include mapped `@lid` rows when listing, searching, showing, or contextualizing by phone-number chat JID.
+- Messages: read stored sender names back from SQLite and resolve blank historical `@lid` senders at display time.
+- Messages: make `messages show` prefer stored display text and include stored media/download details.
+- Messages: store structured reaction target IDs and emoji in SQLite. (#67 — thanks @vlassance)
+- Messages: store forwarded-message metadata and add `--forwarded` filters for list/search. (#24 — thanks @bnvyas)
 - Doctor: report lock owner PID and distinguish paired stores locked by another process. (#105 — thanks @artemgetmann)
 - Media: recover panics per download job so one bad payload no longer drains the worker pool. (#179 — thanks @shaun0927)
 - Messages: attribute history messages from LID-addressed groups to the top-level participant sender. (#19 — thanks @entropyy0)
@@ -33,8 +49,13 @@
 - Search: keep FTS5 enabled after reopening existing databases with already-applied migrations. (#185 — thanks @iamhitarth)
 - Send: add `send text --reply-to` for quoted replies, with sender inference for synced group messages. (#154 — thanks @draix)
 - Send: bound send attempts and reconnect once for stale-session/time-out failures instead of hanging indefinitely. (#115 — thanks @0xatrilla)
+- Send: include the Opus codec parameter when sending OGG audio so WhatsApp delivers it as audio. (#41 — thanks @emre6943)
 - Send: persist retry-message plaintext so linked devices can decrypt retried messages. (#186 — thanks @SimDamDev)
 - Store: use the XDG state directory on Linux by default, while keeping existing `~/.wacli` stores working. (#172, #164 — thanks @txhno)
+- Sync: guard lazy WhatsApp client initialization against concurrent `OpenWA` calls. (#62 — thanks @thakoreh)
+- Sync: decrypt encrypted reactions delivered through history sync before storing them. (#192 — thanks @matrixise)
+- Sync: resolve live `@lid` chat and sender JIDs to phone-number JIDs before storing messages. (#196 — thanks @mahidconseil)
+- Sync: warn when encrypted reaction messages cannot be decrypted instead of dropping the failure silently. (#192 — thanks @matrixise and @dinakars777)
 - Sync: keep `sync --once` idle timing focused on message/history events so connection chatter cannot hang exit. (#119 — thanks @jyothepro)
 - Sync: start `sync --once` idle timing after the `Connected` event. (#171 — thanks @fuleinist)
 - Sync: include event type, stack trace, and recovery count when logging recovered event-handler panics. (#181 — thanks @shaun0927)
@@ -43,6 +64,8 @@
 
 ### Docs
 
+- README: add a documentation index and complete command quick reference.
+- Docs: add an overview plus one page for every top-level CLI subcommand.
 - Maintainers: add CODEOWNERS and maintainer contact info.
 - Agents: add AGENTS.md for AI agent guidance. (#190 — thanks @adhitShet)
 

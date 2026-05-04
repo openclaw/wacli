@@ -22,18 +22,20 @@ type Media struct {
 }
 
 type ParsedMessage struct {
-	Chat           types.JID
-	ID             string
-	SenderJID      string
-	Timestamp      time.Time
-	FromMe         bool
-	Text           string
-	Media          *Media
-	PushName       string
-	ReplyToID      string
-	ReplyToDisplay string
-	ReactionToID   string
-	ReactionEmoji  string
+	Chat            types.JID
+	ID              string
+	SenderJID       string
+	Timestamp       time.Time
+	FromMe          bool
+	Text            string
+	Media           *Media
+	PushName        string
+	ReplyToID       string
+	ReplyToDisplay  string
+	ReactionToID    string
+	ReactionEmoji   string
+	IsForwarded     bool
+	ForwardingScore uint32
 }
 
 func ParseLiveMessage(evt *events.Message) ParsedMessage {
@@ -97,6 +99,8 @@ func extractWAProto(m *waProto.Message, pm *ParsedMessage) {
 		if quoted := ctx.GetQuotedMessage(); quoted != nil {
 			pm.ReplyToDisplay = strings.TrimSpace(displayTextForProto(quoted))
 		}
+		pm.ForwardingScore = ctx.GetForwardingScore()
+		pm.IsForwarded = ctx.GetIsForwarded() || pm.ForwardingScore > 0
 	}
 }
 

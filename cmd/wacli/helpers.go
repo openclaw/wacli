@@ -13,6 +13,10 @@ func isTTY() bool {
 	return term.IsTerminal(int(os.Stdout.Fd()))
 }
 
+func isInteractive() bool {
+	return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stderr.Fd()))
+}
+
 func parseTime(s string) (time.Time, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {

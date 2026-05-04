@@ -180,6 +180,41 @@ func TestParseLiveMessageReply(t *testing.T) {
 	}
 }
 
+func TestParseLiveMessageForwarded(t *testing.T) {
+	chat, _ := types.ParseJID("123@s.whatsapp.net")
+	sender, _ := types.ParseJID("sender@s.whatsapp.net")
+
+	ev := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:     chat,
+				Sender:   sender,
+				IsFromMe: false,
+			},
+			ID:        "mid",
+			Timestamp: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+			PushName:  "Sender",
+		},
+		Message: &waProto.Message{
+			ExtendedTextMessage: &waProto.ExtendedTextMessage{
+				Text: proto.String("forwarded text"),
+				ContextInfo: &waProto.ContextInfo{
+					IsForwarded:     proto.Bool(true),
+					ForwardingScore: proto.Uint32(3),
+				},
+			},
+		},
+	}
+
+	pm := ParseLiveMessage(ev)
+	if !pm.IsForwarded {
+		t.Fatalf("expected forwarded message, got %+v", pm)
+	}
+	if pm.ForwardingScore != 3 {
+		t.Fatalf("ForwardingScore = %d, want 3", pm.ForwardingScore)
+	}
+}
+
 func TestParseTemplateMessage(t *testing.T) {
 	chat, _ := types.ParseJID("123@s.whatsapp.net")
 	sender, _ := types.ParseJID("biz@s.whatsapp.net")
