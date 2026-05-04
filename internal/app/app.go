@@ -128,7 +128,7 @@ func (a *App) EnsureAuthed() error {
 		return err
 	}
 	if a.wa.IsAuthed() {
-		return nil
+		return a.migrateHistoricalLIDs(context.Background())
 	}
 	return fmt.Errorf("not authenticated; run `wacli auth`")
 }

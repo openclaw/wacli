@@ -67,6 +67,44 @@ func TestExistingEmptyFTSTableDetectedOnReopen(t *testing.T) {
 	}
 }
 
+func TestMigrateLIDToPNMaintainsFTSRows(t *testing.T) {
+	db := openTestDB(t)
+	if !db.HasFTS() {
+		t.Skip("FTS5 not enabled")
+	}
+
+	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	pn := "15551234567@s.whatsapp.net"
+	lid := "999123456789@lid"
+	if err := db.UpsertChat(lid, "unknown", lid, base); err != nil {
+		t.Fatalf("UpsertChat lid: %v", err)
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID:   lid,
+		MsgID:     "m-lid",
+		SenderJID: lid,
+		Timestamp: base,
+		Text:      "needle migrated",
+	}); err != nil {
+		t.Fatalf("UpsertMessage lid: %v", err)
+	}
+
+	if err := db.MigrateLIDToPN(lid, pn); err != nil {
+		t.Fatalf("MigrateLIDToPN: %v", err)
+	}
+
+	msgs, err := db.SearchMessages(SearchMessagesParams{Query: "needle", ChatJID: pn, Limit: 10})
+	if err != nil {
+		t.Fatalf("SearchMessages: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("search results = %d, want 1", len(msgs))
+	}
+	if msgs[0].ChatJID != pn {
+		t.Fatalf("search result chat = %q, want %q", msgs[0].ChatJID, pn)
+	}
+}
+
 // TestSanitizeFTSQuery verifies that user input is sanitized before being
 // passed to the FTS5 MATCH clause, preventing query-syntax injection (#57).
 func TestSanitizeFTSQuery(t *testing.T) {

@@ -101,6 +101,9 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 		return SyncResult{}, err
 	}
 	lastEvent.Store(nowUTC().UnixNano())
+	if err := a.migrateHistoricalLIDs(syncCtx); err != nil {
+		return SyncResult{MessagesStored: messagesStored.Load()}, err
+	}
 
 	// Optional: bootstrap imports (helps contacts/groups management without waiting for events).
 	if opts.RefreshContacts {
