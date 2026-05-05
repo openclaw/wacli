@@ -493,7 +493,7 @@ func newMessagesExportCmd(flags *rootFlags) *cobra.Command {
 
 			dst := os.Stdout
 			if output != "" {
-				f, err := os.Create(output)
+				f, err := os.OpenFile(output, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 				if err != nil {
 					return err
 				}

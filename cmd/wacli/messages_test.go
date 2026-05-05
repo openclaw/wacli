@@ -228,6 +228,13 @@ func TestMessagesExportCommandAppliesDateFilters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
+	info, err := os.Stat(output)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("output mode = %04o, want 0600", got)
+	}
 	var got struct {
 		Success bool `json:"success"`
 		Data    struct {
