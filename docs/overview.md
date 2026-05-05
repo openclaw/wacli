@@ -16,6 +16,7 @@ Read when: you need the user-facing command map, global flags, store model, or l
 - Use `--read-only` or `WACLI_READONLY=1` to reject commands that write WhatsApp or local state.
 - Use `sync --max-messages`, `sync --max-db-size`, `WACLI_SYNC_MAX_MESSAGES`, or `WACLI_SYNC_MAX_DB_SIZE` to bound local history growth.
 - Authenticated startup resolves historical `@lid` chat/message rows to phone-number JIDs when the WhatsApp session store has the mapping.
+- Companion tools should prefer `--json`, `--events`, webhooks, or read-only access to `wacli.db`; see [companion integrations](integrations.md).
 
 ## Command pages
 
@@ -35,6 +36,7 @@ Read when: you need the user-facing command map, global flags, store model, or l
 - [version](version.md) - print the CLI version.
 - [completion](completion.md) - generate shell completion scripts.
 - [help](help.md) - inspect command help from the CLI.
+- [companion integrations](integrations.md) - build read-only local tools on top of synced data.
 
 ## Common flow
 

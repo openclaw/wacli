@@ -92,6 +92,7 @@
 
 - README: add a documentation index and complete command quick reference.
 - Docs: add an overview plus one page for every top-level CLI subcommand.
+- Docs: add companion integration guidance for safe read-only SQLite, JSON, events, and webhook usage. (#71 — thanks @jaredtribe)
 - Maintainers: add CODEOWNERS and maintainer contact info.
 - Agents: add AGENTS.md for AI agent guidance. (#190 — thanks @adhitShet)
 

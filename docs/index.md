@@ -25,6 +25,7 @@ A script-friendly WhatsApp CLI built on [`whatsmeow`](https://github.com/tulir/w
 - **Managing chat state.** Read [Chats](chats.md) for archive, pin, mute, and read/unread commands.
 - **Sending from scripts.** Read [Send](send.md) for recipient resolution, replies, mentions, files, and reactions.
 - **Wiring up an agent.** Pair `--read-only`, `--json`, and `--events` from [Overview](overview.md); read [Doctor](doctor.md) for self-checks.
+- **Building companion tools.** Read [Companion integrations](integrations.md) for safe read-only SQLite and JSON integration patterns.
 - **Looking up a flag.** Open the per-command pages from [Overview](overview.md).
 
 ## Status

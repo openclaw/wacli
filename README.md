@@ -19,6 +19,7 @@ Core implementation is in place. The full documentation site lives at [wacli.sh]
 Full docs site: <https://wacli.sh>.
 
 - [Overview](docs/overview.md): store model, global flags, common flow, command index.
+- [Companion integrations](docs/integrations.md): safe read-only SQLite, JSON, events, and webhook integration patterns.
 - [Auth](docs/auth.md): `auth`, `auth status`, `auth logout`.
 - [Sync](docs/sync.md): `sync --once`, `sync --follow`, refresh, media download.
 - [Messages](docs/messages.md): `messages list/search/starred/show/context/export/edit/delete`.
