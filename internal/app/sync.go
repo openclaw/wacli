@@ -40,6 +40,8 @@ type SyncOptions struct {
 	MaxMessages     int64         // 0 = unlimited
 	MaxDBSizeBytes  int64         // 0 = unlimited
 	WarnNoLimits    bool
+	WebhookURL      string
+	WebhookSecret   string
 	Verbosity       int // future
 }
 
@@ -87,9 +89,6 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 		enqueueMedia = newMediaEnqueuer(syncCtx, mediaJobs)
 	}
 
-	handlerID := a.addSyncEventHandler(syncCtx, opts, &messagesStored, &lastEvent, disconnected, enqueueMedia, limits)
-	defer a.wa.RemoveEventHandler(handlerID)
-
 	if opts.DownloadMedia {
 		var err error
 		stopMedia, err = a.runMediaWorkers(syncCtx, mediaJobs, 4)
@@ -98,6 +97,19 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 		}
 		defer stopMedia()
 	}
+
+	var stopWebhook func()
+	var webhookJobs chan wa.ParsedMessage
+	enqueueWebhook := func(wa.ParsedMessage) {}
+	if syncWebhookEnabled(opts) {
+		webhookJobs = make(chan wa.ParsedMessage, 512)
+		enqueueWebhook = a.newSyncWebhookEnqueuer(syncCtx, webhookJobs)
+		stopWebhook = a.runSyncWebhookWorker(syncCtx, opts, webhookJobs)
+		defer stopWebhook()
+	}
+
+	handlerID := a.addSyncEventHandler(syncCtx, opts, &messagesStored, &lastEvent, disconnected, enqueueMedia, enqueueWebhook, limits)
+	defer a.wa.RemoveEventHandler(handlerID)
 
 	if err := a.connectForSync(syncCtx, opts); err != nil {
 		return SyncResult{}, err

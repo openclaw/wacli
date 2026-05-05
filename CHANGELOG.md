@@ -21,6 +21,7 @@
 - Auth: add `auth --phone` for WhatsApp's phone-number pairing flow on headless systems. (#148, #184 — thanks @giovanninibarbosa and @KillerSnails)
 - Auth: auto-detect a readable linked-device label and default linked-device platform to desktop. (#100 — thanks @pmatheus)
 - Profile: add `profile set-picture` to update the authenticated account profile picture from JPEG or PNG input. (#198 — thanks @gado-ships-it)
+- Sync: add signed live-message webhooks with `--webhook` and `--webhook-secret`. (#203 — thanks @dinakars777 and @Melostack)
 - Send: add `send react` to add or clear reactions, with group sender validation. (#151 — thanks @draix)
 - Send: add `send file --reply-to` for quoted media/document replies. (#68 — thanks @vlassance)
 - Send: add repeatable `send text --mention` for WhatsApp user mentions in group messages. (#16 — thanks @nicozefrench and @sheepworrier)

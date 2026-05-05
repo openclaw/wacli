@@ -30,7 +30,7 @@ func newMediaEnqueuer(ctx context.Context, jobs chan<- mediaJob) func(chatJID, m
 	}
 }
 
-func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, messagesStored, lastEvent *atomic.Int64, disconnected chan<- struct{}, enqueueMedia func(string, string), limits *syncStorageLimits) uint32 {
+func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, messagesStored, lastEvent *atomic.Int64, disconnected chan<- struct{}, enqueueMedia func(string, string), enqueueWebhook func(wa.ParsedMessage), limits *syncStorageLimits) uint32 {
 	var panicCount atomic.Int64
 	var appStateRecoveries sync.Map
 	return a.wa.AddEventHandler(func(evt interface{}) {
@@ -55,7 +55,7 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 		switch v := evt.(type) {
 		case *events.Message:
 			lastEvent.Store(nowUTC().UnixNano())
-			a.handleLiveSyncMessage(ctx, opts, v, messagesStored, enqueueMedia, limits)
+			a.handleLiveSyncMessage(ctx, opts, v, messagesStored, enqueueMedia, enqueueWebhook, limits)
 		case *events.HistorySync:
 			lastEvent.Store(nowUTC().UnixNano())
 			a.handleHistorySync(ctx, opts, v, messagesStored, lastEvent, enqueueMedia, limits)
@@ -140,7 +140,7 @@ func (a *App) handleAppStateSyncError(ctx context.Context, evt *events.AppStateS
 	}()
 }
 
-func (a *App) handleLiveSyncMessage(ctx context.Context, opts SyncOptions, v *events.Message, messagesStored *atomic.Int64, enqueueMedia func(string, string), limits ...*syncStorageLimits) {
+func (a *App) handleLiveSyncMessage(ctx context.Context, opts SyncOptions, v *events.Message, messagesStored *atomic.Int64, enqueueMedia func(string, string), enqueueWebhook func(wa.ParsedMessage), limits ...*syncStorageLimits) {
 	if historySyncNotificationFromMessage(v) != nil {
 		return
 	}
@@ -150,6 +150,9 @@ func (a *App) handleLiveSyncMessage(ctx context.Context, opts SyncOptions, v *ev
 	}
 	if err := a.storeParsedMessageForSync(ctx, pm, limits...); err == nil {
 		a.emitSyncProgress(messagesStored.Add(1))
+		if enqueueWebhook != nil {
+			enqueueWebhook(pm)
+		}
 	}
 	if opts.DownloadMedia && pm.Media != nil && pm.ID != "" {
 		enqueueMedia(pm.Chat.String(), pm.ID)

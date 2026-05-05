@@ -91,6 +91,8 @@ pnpm wacli auth
 
 # 2) Keep syncing (never shows QR; requires prior auth)
 pnpm wacli sync --follow
+# Optionally POST live messages to a signed webhook
+pnpm wacli sync --follow --webhook https://example.com/wacli --webhook-secret "$WACLI_WEBHOOK_SECRET"
 
 # Diagnostics
 pnpm wacli doctor
@@ -169,7 +171,7 @@ Full command docs live under [docs/overview.md](docs/overview.md). Quick referen
 - `wacli auth [--follow] [--idle-exit 30s] [--download-media] [--qr-format terminal|text] [--phone PHONE]`
 - `wacli auth status`
 - `wacli auth logout`
-- `wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--max-messages N] [--max-db-size SIZE] [--download-media] [--refresh-contacts] [--refresh-groups]`
+- `wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--max-messages N] [--max-db-size SIZE] [--download-media] [--refresh-contacts] [--refresh-groups] [--webhook URL] [--webhook-secret SECRET]`
 - `wacli messages list [--chat JID] [--sender JID] [--from-me|--from-them] [--asc] [--limit N] [--after DATE] [--before DATE] [--forwarded] [--starred]`
 - `wacli messages search <query> [--chat JID] [--from JID] [--has-media] [--type text|image|video|audio|document] [--forwarded] [--starred]`
 - `wacli messages starred [--chat JID] [--limit N] [--after DATE] [--before DATE] [--asc]`

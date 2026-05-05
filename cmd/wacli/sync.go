@@ -19,6 +19,8 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 	var downloadMedia bool
 	var refreshContacts bool
 	var refreshGroups bool
+	var webhookURL string
+	var webhookSecret string
 	var storage syncStorageLimitFlags
 
 	cmd := &cobra.Command{
@@ -31,6 +33,9 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 			maxMessages, maxDBSize, err := resolveSyncStorageLimits(storage)
 			if err != nil {
 				return err
+			}
+			if webhookSecret != "" && webhookURL == "" {
+				return fmt.Errorf("--webhook-secret requires --webhook")
 			}
 			ctx, stop := signalContextWithEvents(out.NewEventWriter(os.Stderr, flags.events))
 			defer stop()
@@ -84,6 +89,8 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 				MaxMessages:     maxMessages,
 				MaxDBSizeBytes:  maxDBSize,
 				WarnNoLimits:    true,
+				WebhookURL:      webhookURL,
+				WebhookSecret:   webhookSecret,
 			})
 			if err != nil {
 				return err
@@ -107,6 +114,8 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().BoolVar(&downloadMedia, "download-media", false, "download media in the background during sync")
 	cmd.Flags().BoolVar(&refreshContacts, "refresh-contacts", false, "refresh contacts from session store into local DB")
 	cmd.Flags().BoolVar(&refreshGroups, "refresh-groups", false, "refresh joined groups (live) into local DB")
+	cmd.Flags().StringVar(&webhookURL, "webhook", "", "URL to POST live message JSON")
+	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "HMAC-SHA256 secret for X-Wacli-Signature header")
 	cmd.Flags().Int64Var(&storage.maxMessages, "max-messages", 0, "maximum total messages to keep in the local DB before sync stops (0 = unlimited, or WACLI_SYNC_MAX_MESSAGES)")
 	cmd.Flags().StringVar(&storage.maxDBSize, "max-db-size", "", "maximum wacli.db disk usage before sync stops, e.g. 500MB or 2GB (default: WACLI_SYNC_MAX_DB_SIZE or unlimited)")
 	return cmd

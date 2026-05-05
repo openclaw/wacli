@@ -154,12 +154,15 @@ Global flags:
 
 ### Sync
 
-- `wacli sync [--once] [--follow] [--download-media]`
+- `wacli sync [--once] [--follow] [--download-media] [--webhook URL] [--webhook-secret SECRET]`
 
 Notes:
 
 - `sync` errors if not authenticated (never prints QR).
 - `--download-media` runs a bounded/concurrent media downloader for messages that contain downloadable media metadata.
+- `--webhook` posts live message JSON after successful local storage on a bounded background worker.
+- `--webhook-secret` adds an HMAC-SHA256 `X-Wacli-Signature` header and requires `--webhook`.
+- Webhook failures and full-queue drops emit warnings but do not fail sync.
 
 ### History backfill (best-effort)
 

@@ -52,7 +52,7 @@ func TestLiveSyncWarnsOnEncryptedReactionDecryptFailure(t *testing.T) {
 
 	var messagesStored atomic.Int64
 	out := captureStderr(t, func() {
-		a.handleLiveSyncMessage(context.Background(), SyncOptions{}, reactionMsg, &messagesStored, func(string, string) {})
+		a.handleLiveSyncMessage(context.Background(), SyncOptions{}, reactionMsg, &messagesStored, func(string, string) {}, nil)
 	})
 
 	if !strings.Contains(out, "warning: failed to decrypt reaction message m-enc-react: not supported") {
@@ -183,7 +183,7 @@ func TestLiveSyncIgnoresHistorySyncProtocolMessage(t *testing.T) {
 	}
 
 	var messagesStored atomic.Int64
-	a.handleLiveSyncMessage(context.Background(), SyncOptions{}, evt, &messagesStored, func(string, string) {})
+	a.handleLiveSyncMessage(context.Background(), SyncOptions{}, evt, &messagesStored, func(string, string) {}, nil)
 
 	if messagesStored.Load() != 0 {
 		t.Fatalf("history sync protocol message stored count = %d, want 0", messagesStored.Load())
