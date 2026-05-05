@@ -36,6 +36,8 @@ type ParsedMessage struct {
 	ReactionEmoji   string
 	IsForwarded     bool
 	ForwardingScore uint32
+	StarredKnown    bool
+	Starred         bool
 }
 
 func ParseLiveMessage(evt *events.Message) ParsedMessage {
@@ -65,6 +67,10 @@ func ParseHistoryMessage(chatJID string, hist *waProto.WebMessageInfo) ParsedMes
 		ID:        hist.GetKey().GetID(),
 		Timestamp: time.Unix(int64(hist.GetMessageTimestamp()), 0).UTC(),
 		FromMe:    hist.GetKey().GetFromMe(),
+	}
+	if hist.Starred != nil {
+		pm.StarredKnown = true
+		pm.Starred = hist.GetStarred()
 	}
 
 	sender := strings.TrimSpace(hist.GetParticipant())

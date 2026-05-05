@@ -71,6 +71,24 @@ func TestParseHistoryMessageKeyParticipantStillWorks(t *testing.T) {
 	}
 }
 
+func TestParseHistoryMessageStarred(t *testing.T) {
+	starred := true
+	h := &waProto.WebMessageInfo{
+		Key: &waProto.MessageKey{
+			ID:     proto.String("starred-msg"),
+			FromMe: proto.Bool(false),
+		},
+		MessageTimestamp: proto.Uint64(uint64(time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC).Unix())),
+		Message:          &waProto.Message{Conversation: proto.String("saved")},
+		Starred:          &starred,
+	}
+
+	pm := ParseHistoryMessage("123@s.whatsapp.net", h)
+	if !pm.StarredKnown || !pm.Starred {
+		t.Fatalf("expected starred state, got %+v", pm)
+	}
+}
+
 func TestParseLiveMessageImageClonesBytes(t *testing.T) {
 	chat, _ := types.ParseJID("123@s.whatsapp.net")
 	sender, _ := types.ParseJID("sender@s.whatsapp.net")

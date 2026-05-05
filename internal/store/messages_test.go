@@ -89,6 +89,17 @@ func TestListMessagesFiltersAndOrdering(t *testing.T) {
 			t.Fatalf("UpsertMessage %s: %v", row.MsgID, err)
 		}
 	}
+	starredAt := base.Add(4 * time.Second)
+	if err := db.SetStarred(SetStarredParams{
+		ChatJID:   chat,
+		MsgID:     "new-from-me",
+		SenderJID: "me@s.whatsapp.net",
+		FromMe:    true,
+		Starred:   true,
+		StarredAt: starredAt,
+	}); err != nil {
+		t.Fatalf("SetStarred: %v", err)
+	}
 
 	msgs, err := db.ListMessages(ListMessagesParams{ChatJID: chat, Limit: 10})
 	if err != nil {
@@ -135,6 +146,17 @@ func TestListMessagesFiltersAndOrdering(t *testing.T) {
 	}
 	if msgs[0].ForwardingScore != 2 {
 		t.Fatalf("ForwardingScore = %d, want 2", msgs[0].ForwardingScore)
+	}
+
+	msgs, err = db.ListMessages(ListMessagesParams{ChatJID: chat, Limit: 10, Starred: true})
+	if err != nil {
+		t.Fatalf("ListMessages starred: %v", err)
+	}
+	if got := messageIDs(msgs); got != "new-from-me" {
+		t.Fatalf("starred filter = %s", got)
+	}
+	if !msgs[0].Starred || !msgs[0].StarredAt.Equal(starredAt) {
+		t.Fatalf("unexpected starred metadata: %+v", msgs[0])
 	}
 }
 
@@ -203,6 +225,16 @@ func TestGetMessageReturnsRichDetails(t *testing.T) {
 	if err := db.MarkMediaDownloaded(chat, "mid", "/tmp/pic.jpg", downloadedAt); err != nil {
 		t.Fatalf("MarkMediaDownloaded: %v", err)
 	}
+	starredAt := base.Add(2 * time.Second)
+	if err := db.SetStarred(SetStarredParams{
+		ChatJID:   chat,
+		MsgID:     "mid",
+		SenderJID: chat,
+		Starred:   true,
+		StarredAt: starredAt,
+	}); err != nil {
+		t.Fatalf("SetStarred: %v", err)
+	}
 
 	msg, err := db.GetMessage(chat, "mid")
 	if err != nil {
@@ -219,6 +251,51 @@ func TestGetMessageReturnsRichDetails(t *testing.T) {
 	}
 	if msg.LocalPath != "/tmp/pic.jpg" || !msg.DownloadedAt.Equal(downloadedAt) {
 		t.Fatalf("unexpected download fields: %+v", msg)
+	}
+	if !msg.Starred || !msg.StarredAt.Equal(starredAt) {
+		t.Fatalf("unexpected starred fields: %+v", msg)
+	}
+}
+
+func TestListStarredMessagesOrdersByStarredTime(t *testing.T) {
+	db := openTestDB(t)
+	chat := "starred@s.whatsapp.net"
+	base := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+	if err := db.UpsertChat(chat, "dm", "Starred", base); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	for _, row := range []UpsertMessageParams{
+		{ChatJID: chat, MsgID: "m1", SenderJID: chat, Timestamp: base, Text: "first"},
+		{ChatJID: chat, MsgID: "m2", SenderJID: chat, Timestamp: base.Add(time.Second), Text: "second"},
+	} {
+		if err := db.UpsertMessage(row); err != nil {
+			t.Fatalf("UpsertMessage %s: %v", row.MsgID, err)
+		}
+	}
+	if err := db.SetStarred(SetStarredParams{ChatJID: chat, MsgID: "m1", Starred: true, StarredAt: base.Add(10 * time.Second)}); err != nil {
+		t.Fatalf("SetStarred m1: %v", err)
+	}
+	if err := db.SetStarred(SetStarredParams{ChatJID: chat, MsgID: "m2", Starred: true, StarredAt: base.Add(5 * time.Second)}); err != nil {
+		t.Fatalf("SetStarred m2: %v", err)
+	}
+
+	msgs, err := db.ListStarredMessages(ListStarredMessagesParams{ChatJID: chat, Limit: 10})
+	if err != nil {
+		t.Fatalf("ListStarredMessages: %v", err)
+	}
+	if got := messageIDs(msgs); got != "m1,m2" {
+		t.Fatalf("starred order = %s", got)
+	}
+
+	if err := db.SetStarred(SetStarredParams{ChatJID: chat, MsgID: "m1", Starred: false}); err != nil {
+		t.Fatalf("unstar m1: %v", err)
+	}
+	msgs, err = db.ListStarredMessages(ListStarredMessagesParams{ChatJID: chat, Limit: 10})
+	if err != nil {
+		t.Fatalf("ListStarredMessages after unstar: %v", err)
+	}
+	if got := messageIDs(msgs); got != "m2" {
+		t.Fatalf("starred after unstar = %s", got)
 	}
 }
 

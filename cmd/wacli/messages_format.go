@@ -51,6 +51,26 @@ func writeMessagesSearch(dst io.Writer, msgs []store.Message, fullOutput bool) e
 	return w.Flush()
 }
 
+func writeMessagesStarred(dst io.Writer, msgs []store.Message, fullOutput bool) error {
+	w := newTableWriter(dst)
+	fmt.Fprintln(w, "STARRED\tTIME\tCHAT\tFROM\tID\tTEXT")
+	for _, m := range msgs {
+		chatLabel := m.ChatName
+		if chatLabel == "" {
+			chatLabel = m.ChatJID
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+			m.StarredAt.Local().Format("2006-01-02 15:04:05"),
+			m.Timestamp.Local().Format("2006-01-02 15:04:05"),
+			tableCell(chatLabel, 24, fullOutput),
+			tableCell(messageFrom(m), 18, fullOutput),
+			tableCell(m.MsgID, 14, fullOutput),
+			tableCell(messageText(m), 80, fullOutput),
+		)
+	}
+	return w.Flush()
+}
+
 func writeMessageShow(dst io.Writer, m store.Message) error {
 	fmt.Fprintf(dst, "Chat: %s\n", m.ChatJID)
 	if m.ChatName != "" {
@@ -81,6 +101,12 @@ func writeMessageShow(dst io.Writer, m store.Message) error {
 		fmt.Fprintln(dst, "Forwarded: yes")
 		if m.ForwardingScore > 0 {
 			fmt.Fprintf(dst, "Forwarding score: %d\n", m.ForwardingScore)
+		}
+	}
+	if m.Starred {
+		fmt.Fprintln(dst, "Starred: yes")
+		if !m.StarredAt.IsZero() {
+			fmt.Fprintf(dst, "Starred at: %s\n", m.StarredAt.Local().Format(time.RFC3339))
 		}
 	}
 	fmt.Fprintf(dst, "\n%s\n", messageText(m))

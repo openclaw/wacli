@@ -21,7 +21,7 @@ Full docs site: <https://wacli.sh>.
 - [Overview](docs/overview.md): store model, global flags, common flow, command index.
 - [Auth](docs/auth.md): `auth`, `auth status`, `auth logout`.
 - [Sync](docs/sync.md): `sync --once`, `sync --follow`, refresh, media download.
-- [Messages](docs/messages.md): `messages list/search/show/context`.
+- [Messages](docs/messages.md): `messages list/search/starred/show/context`.
 - [Send](docs/send.md): `send text/file/react`, recipient resolution, replies.
 - [Media](docs/media.md): `media download`.
 - [Contacts](docs/contacts.md): `contacts search/show/refresh`, aliases, tags.
@@ -163,8 +163,9 @@ Full command docs live under [docs/overview.md](docs/overview.md). Quick referen
 - `wacli auth status`
 - `wacli auth logout`
 - `wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--max-messages N] [--max-db-size SIZE] [--download-media] [--refresh-contacts] [--refresh-groups]`
-- `wacli messages list [--chat JID] [--sender JID] [--from-me|--from-them] [--asc] [--limit N] [--after DATE] [--before DATE] [--forwarded]`
-- `wacli messages search <query> [--chat JID] [--from JID] [--has-media] [--type text|image|video|audio|document] [--forwarded]`
+- `wacli messages list [--chat JID] [--sender JID] [--from-me|--from-them] [--asc] [--limit N] [--after DATE] [--before DATE] [--forwarded] [--starred]`
+- `wacli messages search <query> [--chat JID] [--from JID] [--has-media] [--type text|image|video|audio|document] [--forwarded] [--starred]`
+- `wacli messages starred [--chat JID] [--limit N] [--after DATE] [--before DATE] [--asc]`
 - `wacli messages export [--chat JID] [--limit N] [--after DATE] [--before DATE] [--output PATH]`
 - `wacli messages show --chat JID --id MSG_ID`
 - `wacli messages context --chat JID --id MSG_ID [--before N] [--after N]`

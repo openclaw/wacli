@@ -20,6 +20,7 @@ var schemaMigrations = []migration{
 	{version: 4, name: "groups left_at column", up: migrateGroupsLeftAt},
 	{version: 5, name: "messages forwarded columns", up: migrateMessagesForwardedColumns},
 	{version: 6, name: "messages reaction columns", up: migrateMessagesReactionColumns},
+	{version: 7, name: "starred messages", up: migrateStarredMessages},
 }
 
 func (d *DB) ensureSchema() error {
@@ -134,6 +135,23 @@ func migrateMessagesReactionColumns(d *DB) error {
 		if _, err := d.sql.Exec(fmt.Sprintf("ALTER TABLE messages ADD COLUMN %s TEXT", col)); err != nil {
 			return fmt.Errorf("add messages.%s column: %w", col, err)
 		}
+	}
+	return nil
+}
+
+func migrateStarredMessages(d *DB) error {
+	if _, err := d.sql.Exec(`
+		CREATE TABLE IF NOT EXISTS starred (
+			chat_jid TEXT NOT NULL,
+			msg_id TEXT NOT NULL,
+			sender_jid TEXT,
+			from_me INTEGER NOT NULL DEFAULT 0,
+			starred_at INTEGER NOT NULL,
+			PRIMARY KEY (chat_jid, msg_id)
+		);
+		CREATE INDEX IF NOT EXISTS idx_starred_starred_at ON starred(starred_at);
+	`); err != nil {
+		return fmt.Errorf("create starred table: %w", err)
 	}
 	return nil
 }

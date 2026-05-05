@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/steipete/wacli/internal/store"
 	"github.com/steipete/wacli/internal/wa"
 	"go.mau.fi/whatsmeow/appstate"
 	"go.mau.fi/whatsmeow/proto/waE2E"
@@ -58,6 +59,9 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 		case *events.HistorySync:
 			lastEvent.Store(nowUTC().UnixNano())
 			a.handleHistorySync(ctx, opts, v, messagesStored, lastEvent, enqueueMedia, limits)
+		case *events.Star:
+			lastEvent.Store(nowUTC().UnixNano())
+			a.handleStarEvent(ctx, v)
 		case *events.Connected:
 			a.emitOrPrint("connected", nil, "\nConnected.\n")
 		case *events.Disconnected:
@@ -70,6 +74,30 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 			a.handleAppStateSyncError(ctx, v, &appStateRecoveries)
 		}
 	})
+}
+
+func (a *App) handleStarEvent(ctx context.Context, evt *events.Star) {
+	if evt == nil || evt.ChatJID.IsEmpty() || strings.TrimSpace(evt.MessageID) == "" || evt.Action == nil {
+		return
+	}
+	senderJID := ""
+	if !evt.SenderJID.IsEmpty() {
+		senderJID = canonicalJIDString(a.canonicalStoreJID(ctx, evt.SenderJID))
+	}
+	if err := a.db.SetStarred(store.SetStarredParams{
+		ChatJID:   canonicalJIDString(a.canonicalStoreJID(ctx, evt.ChatJID)),
+		MsgID:     evt.MessageID,
+		SenderJID: senderJID,
+		FromMe:    evt.IsFromMe,
+		Starred:   evt.Action.GetStarred(),
+		StarredAt: evt.Timestamp,
+	}); err != nil {
+		a.emitWarning(
+			"starred_store_failed",
+			fmt.Sprintf("warning: failed to store starred state for message %s: %v", evt.MessageID, err),
+			map[string]any{"message_id": evt.MessageID, "error": err.Error()},
+		)
+	}
 }
 
 func (a *App) handleAppStateSyncError(ctx context.Context, evt *events.AppStateSyncError, recoveries *sync.Map) {

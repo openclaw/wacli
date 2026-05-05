@@ -17,6 +17,7 @@ type SearchMessagesParams struct {
 	HasMedia  bool
 	Type      string
 	Forwarded bool
+	Starred   bool
 }
 
 func (d *DB) SearchMessages(p SearchMessagesParams) ([]Message, error) {
@@ -55,9 +56,10 @@ func likeContains(s string) string {
 
 func (d *DB) searchLIKE(p SearchMessagesParams) ([]Message, error) {
 	query := `
-		SELECT m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), m.is_forwarded, m.forwarding_score, COALESCE(m.reaction_to_id,''), COALESCE(m.reaction_emoji,''), COALESCE(m.media_type,''), COALESCE(m.media_caption,''), COALESCE(m.filename,''), COALESCE(m.mime_type,''), COALESCE(m.direct_path,''), COALESCE(m.local_path,''), COALESCE(m.downloaded_at,0), ''
+		SELECT ` + messageSelectColumns("") + `
 		FROM messages m
 		LEFT JOIN chats c ON c.jid = m.chat_jid
+		LEFT JOIN starred s ON s.chat_jid = m.chat_jid AND s.msg_id = m.msg_id
 	WHERE (LOWER(m.text) LIKE LOWER(?) ESCAPE '\' OR LOWER(m.display_text) LIKE LOWER(?) ESCAPE '\' OR LOWER(m.media_caption) LIKE LOWER(?) ESCAPE '\' OR LOWER(m.filename) LIKE LOWER(?) ESCAPE '\' OR LOWER(COALESCE(m.chat_name,'')) LIKE LOWER(?) ESCAPE '\' OR LOWER(COALESCE(m.sender_name,'')) LIKE LOWER(?) ESCAPE '\' OR LOWER(COALESCE(c.name,'')) LIKE LOWER(?) ESCAPE '\')`
 	// Escape wildcards before wrapping in % so user input is literal (#56).
 	needle := likeContains(p.Query)
@@ -88,11 +90,11 @@ func sanitizeFTSQuery(q string) string {
 
 func (d *DB) searchFTS(p SearchMessagesParams) ([]Message, error) {
 	query := `
-		SELECT m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), m.is_forwarded, m.forwarding_score, COALESCE(m.reaction_to_id,''), COALESCE(m.reaction_emoji,''), COALESCE(m.media_type,''), COALESCE(m.media_caption,''), COALESCE(m.filename,''), COALESCE(m.mime_type,''), COALESCE(m.direct_path,''), COALESCE(m.local_path,''), COALESCE(m.downloaded_at,0),
-		       snippet(messages_fts, 0, '[', ']', '…', 12)
+		SELECT ` + messageSelectColumns("snippet(messages_fts, 0, '[', ']', '…', 12)") + `
 		FROM messages_fts
 		JOIN messages m ON messages_fts.rowid = m.rowid
 		LEFT JOIN chats c ON c.jid = m.chat_jid
+		LEFT JOIN starred s ON s.chat_jid = m.chat_jid AND s.msg_id = m.msg_id
 		WHERE messages_fts MATCH ?`
 	// Sanitize to prevent FTS5 query-syntax injection (#57).
 	// Each token is individually quoted so multi-word queries still work
@@ -123,6 +125,9 @@ func applyMessageFilters(query string, args []interface{}, p SearchMessagesParam
 	}
 	if p.Forwarded {
 		query += " AND m.is_forwarded = 1"
+	}
+	if p.Starred {
+		query += " AND s.msg_id IS NOT NULL"
 	}
 	if msgType := normalizedMessageType(p.Type); msgType != "" {
 		if msgType == "text" {

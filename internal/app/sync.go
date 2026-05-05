@@ -344,7 +344,7 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 
 	displayText := a.buildDisplayText(ctx, pm)
 
-	return a.db.UpsertMessage(store.UpsertMessageParams{
+	if err := a.db.UpsertMessage(store.UpsertMessageParams{
 		ChatJID:         chatJID,
 		ChatName:        chatName,
 		MsgID:           pm.ID,
@@ -367,7 +367,20 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 		FileSHA256:      fileSha,
 		FileEncSHA256:   fileEncSha,
 		FileLength:      fileLen,
-	})
+	}); err != nil {
+		return err
+	}
+	if pm.StarredKnown {
+		return a.db.SetStarred(store.SetStarredParams{
+			ChatJID:   chatJID,
+			MsgID:     pm.ID,
+			SenderJID: senderJID,
+			FromMe:    pm.FromMe,
+			Starred:   pm.Starred,
+			StarredAt: pm.Timestamp,
+		})
+	}
+	return nil
 }
 
 func (a *App) buildDisplayText(ctx context.Context, pm wa.ParsedMessage) string {

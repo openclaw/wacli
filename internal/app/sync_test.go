@@ -11,12 +11,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/steipete/wacli/internal/store"
 	"github.com/steipete/wacli/internal/wa"
 	"go.mau.fi/whatsmeow/appstate"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/proto/waHistorySync"
+	"go.mau.fi/whatsmeow/proto/waSyncAction"
 	"go.mau.fi/whatsmeow/proto/waWeb"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -112,6 +114,57 @@ func TestAppStateNonLTHashErrorDoesNotRequestRecovery(t *testing.T) {
 	defer f.mu.Unlock()
 	if len(f.appStateRecoveries) != 0 {
 		t.Fatalf("recovery requests = %v, want none", f.appStateRecoveries)
+	}
+}
+
+func TestStarEventStoresAndClearsStarredState(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	chat := types.JID{User: "123", Server: types.DefaultUserServer}
+	if err := a.db.UpsertChat(chat.String(), "dm", "Alice", time.Now()); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	msgTime := time.Date(2024, 1, 3, 0, 0, 0, 0, time.UTC)
+	if err := a.db.UpsertMessage(store.UpsertMessageParams{
+		ChatJID:   chat.String(),
+		MsgID:     "m-star",
+		SenderJID: chat.String(),
+		Timestamp: msgTime,
+		Text:      "save this",
+	}); err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+
+	starredAt := msgTime.Add(time.Minute)
+	a.handleStarEvent(context.Background(), &events.Star{
+		ChatJID:   chat,
+		SenderJID: chat,
+		MessageID: "m-star",
+		Timestamp: starredAt,
+		Action:    &waSyncAction.StarAction{Starred: proto.Bool(true)},
+	})
+	msg, err := a.db.GetMessage(chat.String(), "m-star")
+	if err != nil {
+		t.Fatalf("GetMessage starred: %v", err)
+	}
+	if !msg.Starred || !msg.StarredAt.Equal(starredAt) {
+		t.Fatalf("unexpected starred state: %+v", msg)
+	}
+
+	a.handleStarEvent(context.Background(), &events.Star{
+		ChatJID:   chat,
+		MessageID: "m-star",
+		Timestamp: starredAt.Add(time.Minute),
+		Action:    &waSyncAction.StarAction{Starred: proto.Bool(false)},
+	})
+	msg, err = a.db.GetMessage(chat.String(), "m-star")
+	if err != nil {
+		t.Fatalf("GetMessage unstarred: %v", err)
+	}
+	if msg.Starred {
+		t.Fatalf("expected unstarred message, got %+v", msg)
 	}
 }
 

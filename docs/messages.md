@@ -7,8 +7,9 @@ Read when: listing, searching, exporting, showing, or inspecting local message c
 ## Commands
 
 ```bash
-wacli messages list [--chat JID] [--sender JID] [--from-me|--from-them] [--asc] [--limit N] [--after DATE] [--before DATE] [--forwarded]
-wacli messages search <query> [--chat JID] [--from JID] [--has-media] [--type text|image|video|audio|document] [--forwarded] [--limit N] [--after DATE] [--before DATE]
+wacli messages list [--chat JID] [--sender JID] [--from-me|--from-them] [--asc] [--limit N] [--after DATE] [--before DATE] [--forwarded] [--starred]
+wacli messages search <query> [--chat JID] [--from JID] [--has-media] [--type text|image|video|audio|document] [--forwarded] [--starred] [--limit N] [--after DATE] [--before DATE]
+wacli messages starred [--chat JID] [--limit N] [--after DATE] [--before DATE] [--asc]
 wacli messages export [--chat JID] [--limit N] [--after DATE] [--before DATE] [--output PATH]
 wacli messages show --chat JID --id MSG_ID
 wacli messages context --chat JID --id MSG_ID [--before N] [--after N]
@@ -19,7 +20,14 @@ wacli messages context --chat JID --id MSG_ID [--before N] [--after N]
 - Uses SQLite FTS5 when the binary was built with `-tags sqlite_fts5`.
 - Falls back to `LIKE` if FTS5 is not available.
 - `--type` accepts `text`, `image`, `video`, `audio`, or `document`.
+- `--starred` restricts list/search results to messages marked as starred by WhatsApp.
 - Time filters accept RFC3339 or `YYYY-MM-DD`.
+
+## Starred
+
+- `messages starred` lists starred messages ordered by star time when app-state events provide it; history-imported rows fall back to message time.
+- `--after` and `--before` on `messages starred` filter by that stored star time.
+- Starred state is imported from history sync and app-state star/unstar events.
 
 ## Export
 
@@ -37,7 +45,9 @@ When a phone-number chat JID maps to a stored `@lid` row, list/search/show/conte
 ```bash
 wacli messages list --chat 1234567890@s.whatsapp.net --asc
 wacli messages list --from-me --limit 20
+wacli messages starred --limit 20
 wacli messages search "invoice" --has-media --type document
+wacli messages search "invoice" --starred
 wacli messages export --chat 1234567890@s.whatsapp.net --after 2024-01-01 --before 2024-02-01 --output messages.json
 wacli messages show --chat 1234567890@s.whatsapp.net --id ABC123
 wacli messages context --chat 1234567890@s.whatsapp.net --id ABC123 --before 3 --after 3

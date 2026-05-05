@@ -37,6 +37,16 @@ func TestOpenCreatesExpectedSchema(t *testing.T) {
 			t.Fatalf("expected messages column %q to exist", want)
 		}
 	}
+
+	starredCols, err := tableColumns(db.sql, "starred")
+	if err != nil {
+		t.Fatalf("starred tableColumns: %v", err)
+	}
+	for _, want := range []string{"chat_jid", "msg_id", "sender_jid", "from_me", "starred_at"} {
+		if !starredCols[want] {
+			t.Fatalf("expected starred column %q to exist", want)
+		}
+	}
 }
 
 func tableColumns(db *sql.DB, table string) (map[string]bool, error) {

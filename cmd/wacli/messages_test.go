@@ -160,7 +160,7 @@ func TestWriteMessageShowPrefersDisplayTextAndMediaDetails(t *testing.T) {
 
 func TestMessagesSearchCommandExposesMediaFilters(t *testing.T) {
 	cmd := newMessagesSearchCmd(&rootFlags{})
-	for _, name := range []string{"has-media", "type", "forwarded"} {
+	for _, name := range []string{"has-media", "type", "forwarded", "starred"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Fatalf("expected --%s flag", name)
 		}
@@ -170,10 +170,21 @@ func TestMessagesSearchCommandExposesMediaFilters(t *testing.T) {
 	}
 }
 
-func TestMessagesListCommandExposesForwardedFilter(t *testing.T) {
+func TestMessagesListCommandExposesMessageFilters(t *testing.T) {
 	cmd := newMessagesListCmd(&rootFlags{})
-	if cmd.Flags().Lookup("forwarded") == nil {
-		t.Fatalf("expected --forwarded flag")
+	for _, name := range []string{"forwarded", "starred"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Fatalf("expected --%s flag", name)
+		}
+	}
+}
+
+func TestMessagesStarredCommandExposesFilters(t *testing.T) {
+	cmd := newMessagesStarredCmd(&rootFlags{})
+	for _, name := range []string{"chat", "limit", "after", "before", "asc"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Fatalf("expected --%s flag", name)
+		}
 	}
 }
 

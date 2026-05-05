@@ -66,6 +66,15 @@ func TestSearchMessagesFiltersByMediaAndType(t *testing.T) {
 			t.Fatalf("UpsertMessage %s: %v", row.MsgID, err)
 		}
 	}
+	if err := db.SetStarred(SetStarredParams{
+		ChatJID:   chat,
+		MsgID:     "image-1",
+		SenderJID: chat,
+		Starred:   true,
+		StarredAt: base.Add(4 * time.Second),
+	}); err != nil {
+		t.Fatalf("SetStarred: %v", err)
+	}
 
 	tests := []struct {
 		name string
@@ -101,6 +110,11 @@ func TestSearchMessagesFiltersByMediaAndType(t *testing.T) {
 			name: "forwarded",
 			p:    SearchMessagesParams{Query: "forwarded", Limit: 10, Forwarded: true},
 			want: "forwarded-1",
+		},
+		{
+			name: "starred",
+			p:    SearchMessagesParams{Query: "report", Limit: 10, Starred: true},
+			want: "image-1",
 		},
 	}
 

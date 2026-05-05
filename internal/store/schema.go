@@ -84,6 +84,17 @@ const coreSchemaSQL = `
 
 	CREATE INDEX IF NOT EXISTS idx_messages_chat_ts ON messages(chat_jid, ts);
 	CREATE INDEX IF NOT EXISTS idx_messages_ts ON messages(ts);
+
+	CREATE TABLE IF NOT EXISTS starred (
+		chat_jid TEXT NOT NULL,
+		msg_id TEXT NOT NULL,
+		sender_jid TEXT,
+		from_me INTEGER NOT NULL DEFAULT 0,
+		starred_at INTEGER NOT NULL,
+		PRIMARY KEY (chat_jid, msg_id)
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_starred_starred_at ON starred(starred_at);
 `
 
 func migrateCoreSchema(d *DB) error {

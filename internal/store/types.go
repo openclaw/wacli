@@ -67,6 +67,8 @@ type Message struct {
 	DirectPath      string
 	LocalPath       string
 	DownloadedAt    time.Time
+	Starred         bool
+	StarredAt       time.Time
 	Snippet         string
 	rowID           int64
 }
