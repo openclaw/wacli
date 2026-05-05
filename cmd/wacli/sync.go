@@ -32,7 +32,7 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			ctx, stop := signalContext()
+			ctx, stop := signalContextWithEvents(out.NewEventWriter(os.Stderr, flags.events))
 			defer stop()
 
 			a, lk, err := newApp(ctx, flags, true, false)
