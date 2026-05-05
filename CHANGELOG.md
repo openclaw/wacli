@@ -100,6 +100,7 @@
 ### Chore
 
 - CI: compile-test the Windows lock package to catch platform regressions. (#188 — thanks @dinakars777)
+- CLI: route `version` output through Cobra's configured output stream for easier command tests. (#78 — thanks @nikolasdehor)
 - Dependencies: update Go modules including `whatsmeow`, `go-sqlite3`, `x/*`, and related runtime libs.
 - Refactor: split WhatsApp message parsing into focused text, media, business, and context helpers.
 - Refactor: inject clocks in app/store paths for deterministic tests.
