@@ -38,8 +38,17 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 		defer func() {
 			if r := recover(); r != nil {
 				n := panicCount.Add(1)
-				fmt.Fprintf(os.Stderr, "\nevent handler panic (recovered, total=%d) event=%T: %v\n%s\n",
-					n, evt, r, debug.Stack())
+				if a.eventsEnabled() {
+					a.emitEvent("event_handler_panic", map[string]any{
+						"total": n,
+						"event": fmt.Sprintf("%T", evt),
+						"panic": fmt.Sprint(r),
+						"stack": string(debug.Stack()),
+					})
+				} else {
+					fmt.Fprintf(os.Stderr, "\nevent handler panic (recovered, total=%d) event=%T: %v\n%s\n",
+						n, evt, r, debug.Stack())
+				}
 			}
 		}()
 		switch v := evt.(type) {
@@ -50,9 +59,9 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 			lastEvent.Store(nowUTC().UnixNano())
 			a.handleHistorySync(ctx, opts, v, messagesStored, lastEvent, enqueueMedia, limits)
 		case *events.Connected:
-			fmt.Fprintln(os.Stderr, "\nConnected.")
+			a.emitOrPrint("connected", nil, "\nConnected.\n")
 		case *events.Disconnected:
-			fmt.Fprintln(os.Stderr, "\nDisconnected.")
+			a.emitOrPrint("disconnected", nil, "\nDisconnected.\n")
 			select {
 			case disconnected <- struct{}{}:
 			default:
@@ -78,16 +87,28 @@ func (a *App) handleAppStateSyncError(ctx context.Context, evt *events.AppStateS
 		return
 	}
 
-	fmt.Fprintf(os.Stderr, "\rwarning: app state %s hit an LTHash mismatch; requesting recovery snapshot\n", name)
+	a.emitWarning(
+		"app_state_lthash_mismatch",
+		fmt.Sprintf("warning: app state %s hit an LTHash mismatch; requesting recovery snapshot", name),
+		map[string]any{"name": name},
+	)
 	go func() {
 		reqCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		reqID, err := a.wa.RequestAppStateRecovery(reqCtx, name)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "\rwarning: app state %s recovery request failed: %v\n", name, err)
+			a.emitWarning(
+				"app_state_recovery_failed",
+				fmt.Sprintf("warning: app state %s recovery request failed: %v", name, err),
+				map[string]any{"name": name, "error": err.Error()},
+			)
 			return
 		}
-		fmt.Fprintf(os.Stderr, "\rRequested app state %s recovery (id %s)\n", name, reqID)
+		if a.eventsEnabled() {
+			a.emitEvent("app_state_recovery_requested", map[string]any{"name": name, "id": string(reqID)})
+		} else {
+			fmt.Fprintf(os.Stderr, "\rRequested app state %s recovery (id %s)\n", name, reqID)
+		}
 	}()
 }
 
@@ -100,13 +121,10 @@ func (a *App) handleLiveSyncMessage(ctx context.Context, opts SyncOptions, v *ev
 		a.decryptEncryptedReaction(ctx, &pm, v)
 	}
 	if err := a.storeParsedMessageForSync(ctx, pm, limits...); err == nil {
-		messagesStored.Add(1)
+		a.emitSyncProgress(messagesStored.Add(1))
 	}
 	if opts.DownloadMedia && pm.Media != nil && pm.ID != "" {
 		enqueueMedia(pm.Chat.String(), pm.ID)
-	}
-	if messagesStored.Load()%25 == 0 {
-		fmt.Fprintf(os.Stderr, "\rSynced %d messages...", messagesStored.Load())
 	}
 }
 
@@ -118,7 +136,7 @@ func historySyncNotificationFromMessage(v *events.Message) *waE2E.HistorySyncNot
 }
 
 func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events.HistorySync, messagesStored, lastEvent *atomic.Int64, enqueueMedia func(string, string), limits ...*syncStorageLimits) {
-	fmt.Fprintf(os.Stderr, "\nProcessing history sync (%d conversations)...\n", len(v.Data.Conversations))
+	a.emitOrPrint("history_sync", map[string]any{"conversations": len(v.Data.Conversations)}, "\nProcessing history sync (%d conversations)...\n", len(v.Data.Conversations))
 	for _, conv := range v.Data.Conversations {
 		lastEvent.Store(nowUTC().UnixNano())
 		chatID := strings.TrimSpace(conv.GetID())
@@ -137,13 +155,17 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 			if pm.ReactionToID != "" && pm.ReactionEmoji == "" && m.Message.GetMessage().GetEncReactionMessage() != nil {
 				evt, err := a.wa.ParseWebMessage(pm.Chat, m.Message)
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "\rwarning: failed to parse encrypted reaction message %s: %v\n", pm.ID, err)
+					a.emitWarning(
+						"encrypted_reaction_parse_failed",
+						fmt.Sprintf("warning: failed to parse encrypted reaction message %s: %v", pm.ID, err),
+						map[string]any{"message_id": pm.ID, "error": err.Error()},
+					)
 				} else {
 					a.decryptEncryptedReaction(ctx, &pm, evt)
 				}
 			}
 			if err := a.storeParsedMessageForSync(ctx, pm, limits...); err == nil {
-				messagesStored.Add(1)
+				a.emitSyncProgress(messagesStored.Add(1))
 			} else if ctx.Err() != nil {
 				return
 			}
@@ -152,7 +174,16 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 			}
 		}
 	}
-	fmt.Fprintf(os.Stderr, "\rSynced %d messages...", messagesStored.Load())
+	if !a.eventsEnabled() {
+		fmt.Fprintf(os.Stderr, "\rSynced %d messages...", messagesStored.Load())
+	}
+}
+
+func (a *App) emitSyncProgress(total int64) {
+	if total <= 0 || total%25 != 0 {
+		return
+	}
+	a.emitOrPrint("progress", map[string]any{"messages_synced": total}, "\rSynced %d messages...", total)
 }
 
 func (a *App) storeParsedMessageForSync(ctx context.Context, pm wa.ParsedMessage, limits ...*syncStorageLimits) error {
@@ -165,7 +196,11 @@ func (a *App) storeParsedMessageForSync(ctx context.Context, pm wa.ParsedMessage
 func (a *App) decryptEncryptedReaction(ctx context.Context, pm *wa.ParsedMessage, msg *events.Message) {
 	reaction, err := a.wa.DecryptReaction(ctx, msg)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "\rwarning: failed to decrypt reaction message %s: %v\n", pm.ID, err)
+		a.emitWarning(
+			"encrypted_reaction_decrypt_failed",
+			fmt.Sprintf("warning: failed to decrypt reaction message %s: %v", pm.ID, err),
+			map[string]any{"message_id": pm.ID, "error": err.Error()},
+		)
 		return
 	}
 	if reaction == nil {

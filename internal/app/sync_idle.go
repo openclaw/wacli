@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"fmt"
-	"os"
 	"sync/atomic"
 	"time"
 )
@@ -12,10 +11,10 @@ func (a *App) runSyncFollow(ctx context.Context, maxReconnect time.Duration, mes
 	for {
 		select {
 		case <-ctx.Done():
-			fmt.Fprintln(os.Stderr, "\nStopping sync.")
+			a.emitOrPrint("stopping", map[string]any{"messages_synced": messagesStored.Load()}, "\nStopping sync.\n")
 			return SyncResult{MessagesStored: messagesStored.Load()}, nil
 		case <-disconnected:
-			fmt.Fprintln(os.Stderr, "Reconnecting...")
+			a.emitOrPrint("reconnecting", nil, "Reconnecting...\n")
 			if err := a.reconnect(ctx, maxReconnect); err != nil {
 				return SyncResult{MessagesStored: messagesStored.Load()}, err
 			}
@@ -33,17 +32,20 @@ func (a *App) runSyncUntilIdle(ctx context.Context, idleExit, maxReconnect time.
 	for {
 		select {
 		case <-ctx.Done():
-			fmt.Fprintln(os.Stderr, "\nStopping sync.")
+			a.emitOrPrint("stopping", map[string]any{"messages_synced": messagesStored.Load()}, "\nStopping sync.\n")
 			return SyncResult{MessagesStored: messagesStored.Load()}, nil
 		case <-disconnected:
-			fmt.Fprintln(os.Stderr, "Reconnecting...")
+			a.emitOrPrint("reconnecting", nil, "Reconnecting...\n")
 			if err := a.reconnect(ctx, maxReconnect); err != nil {
 				return SyncResult{MessagesStored: messagesStored.Load()}, err
 			}
 		case <-ticker.C:
 			last := time.Unix(0, lastEvent.Load())
 			if time.Since(last) >= idleExit {
-				fmt.Fprintf(os.Stderr, "\nIdle for %s, exiting.\n", idleExit)
+				a.emitOrPrint("idle_exit", map[string]any{
+					"idle_duration":   idleExit.String(),
+					"messages_synced": messagesStored.Load(),
+				}, "\nIdle for %s, exiting.\n", idleExit)
 				return SyncResult{MessagesStored: messagesStored.Load()}, nil
 			}
 		}

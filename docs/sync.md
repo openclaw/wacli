@@ -7,7 +7,7 @@ Read when: running continuous capture, one-shot sync, contact/group refresh, or 
 ## Command
 
 ```bash
-wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--max-messages N] [--max-db-size SIZE] [--download-media] [--refresh-contacts] [--refresh-groups]
+wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--max-messages N] [--max-db-size SIZE] [--download-media] [--refresh-contacts] [--refresh-groups] [--events]
 ```
 
 ## Modes
@@ -25,6 +25,7 @@ wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--max-mes
 - `WACLI_SYNC_MAX_MESSAGES` and `WACLI_SYNC_MAX_DB_SIZE` apply the same caps to `auth` bootstrap sync and `sync`.
 - While `sync --follow` is running, `send text`, `send file`, `send voice`, and `send react` commands for the same store are delegated to the running sync process so they do not fail on the store lock.
 - If whatsmeow reports an app-state LTHash mismatch, sync asks the primary device for the official recovery snapshot once for that app-state collection. If recovery also fails, the warning is printed and sync keeps handling normal message/history events.
+- `--events` emits one NDJSON lifecycle event per stderr line for machine consumers. Routine human progress/status lines are suppressed while events are enabled.
 
 ## Examples
 
@@ -34,4 +35,5 @@ wacli sync --follow --max-reconnect 10m
 wacli sync --follow --max-messages 250000 --max-db-size 2GB
 wacli sync --once --refresh-contacts --refresh-groups
 wacli sync --follow --download-media
+wacli sync --once --events 2>events.ndjson
 ```

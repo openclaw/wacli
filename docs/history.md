@@ -7,7 +7,7 @@ Read when: trying to fetch older messages for a known chat.
 ## Command
 
 ```bash
-wacli history backfill --chat JID [--count 50] [--requests N] [--wait 1m] [--idle-exit 5s]
+wacli history backfill --chat JID [--count 50] [--requests N] [--wait 1m] [--idle-exit 5s] [--events]
 ```
 
 ## Limits
@@ -17,6 +17,7 @@ wacli history backfill --chat JID [--count 50] [--requests N] [--wait 1m] [--idl
 - Requests are per chat.
 - The anchor is the oldest locally stored message in that chat.
 - Automatic initial history-sync blob downloads are disabled during backfill; only on-demand responses are processed.
+- `--events` emits NDJSON request/response/stop lifecycle events on stderr.
 
 ## Examples
 

@@ -22,6 +22,7 @@ type rootFlags struct {
 	storeDir   string
 	asJSON     bool
 	fullOutput bool
+	events     bool
 	timeout    time.Duration
 	readOnly   bool
 	lockWait   time.Duration
@@ -41,6 +42,7 @@ func execute(args []string) error {
 	rootCmd.PersistentFlags().StringVar(&flags.storeDir, "store", "", "store directory (default: $WACLI_STORE_DIR, XDG state dir on Linux, or ~/.wacli)")
 	rootCmd.PersistentFlags().BoolVar(&flags.asJSON, "json", false, "output JSON instead of human-readable text")
 	rootCmd.PersistentFlags().BoolVar(&flags.fullOutput, "full", false, "disable truncation in table output")
+	rootCmd.PersistentFlags().BoolVar(&flags.events, "events", false, "emit machine-readable NDJSON lifecycle events on stderr")
 	rootCmd.PersistentFlags().DurationVar(&flags.timeout, "timeout", 5*time.Minute, "command timeout (non-sync commands)")
 	rootCmd.PersistentFlags().DurationVar(&flags.lockWait, "lock-wait", 0, "wait for the store lock before failing (write commands)")
 	rootCmd.PersistentFlags().BoolVar(&flags.readOnly, "read-only", false, "reject commands that intentionally write WhatsApp or the local store (or set WACLI_READONLY=1)")
@@ -83,6 +85,7 @@ func newApp(ctx context.Context, flags *rootFlags, needLock bool, allowUnauthed 
 		StoreDir:      storeDir,
 		Version:       version,
 		JSON:          flags.asJSON,
+		Events:        out.NewEventWriter(os.Stderr, flags.events),
 		AllowUnauthed: allowUnauthed,
 	})
 	if err != nil {

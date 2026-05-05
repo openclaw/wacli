@@ -7,7 +7,7 @@ Read when: pairing a store, checking auth state, logging out, or choosing QR vs 
 ## Commands
 
 ```bash
-wacli auth [--follow] [--idle-exit 30s] [--download-media] [--qr-format terminal|text] [--phone PHONE]
+wacli auth [--follow] [--idle-exit 30s] [--download-media] [--qr-format terminal|text] [--phone PHONE] [--events]
 wacli auth status
 wacli auth logout
 ```
@@ -20,6 +20,7 @@ wacli auth logout
 - Transient websocket drops before pairing completes are retried with a fresh QR/code.
 - After pairing, auth runs bootstrap sync until idle unless `--follow` is set.
 - Bootstrap sync honors `WACLI_SYNC_MAX_MESSAGES` and `WACLI_SYNC_MAX_DB_SIZE` to cap local history growth.
+- `--events` emits NDJSON lifecycle events on stderr, including raw QR and phone-pairing codes for external renderers.
 - `auth status` reports whether the local store is authenticated.
 - `auth logout` invalidates the linked-device session and requires writable mode.
 

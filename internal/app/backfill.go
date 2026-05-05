@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -114,7 +113,11 @@ func (a *App) BackfillHistory(ctx context.Context, opts BackfillOptions) (Backfi
 			}
 			data, err := a.wa.DownloadHistorySync(ctx, notif)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "\rwarning: failed to download on-demand history sync: %v\n", err)
+				a.emitWarning(
+					"on_demand_history_download_failed",
+					fmt.Sprintf("warning: failed to download on-demand history sync: %v", err),
+					map[string]any{"error": err.Error()},
+				)
 				return
 			}
 			if data.GetSyncType() != waHistorySync.HistorySync_ON_DEMAND {
@@ -159,7 +162,11 @@ func (a *App) BackfillHistory(ctx context.Context, opts BackfillOptions) (Backfi
 				mu.Unlock()
 
 				requestsSent++
-				fmt.Fprintf(os.Stderr, "Requesting %d older messages for %s...\n", opts.Count, chatStr)
+				a.emitOrPrint("backfill_requesting", map[string]any{
+					"chat_jid": chatStr,
+					"count":    opts.Count,
+					"request":  requestsSent,
+				}, "Requesting %d older messages for %s...\n", opts.Count, chatStr)
 				if _, err := a.wa.RequestHistorySyncOnDemand(ctx, reqInfo, opts.Count); err != nil {
 					return err
 				}
@@ -180,19 +187,33 @@ func (a *App) BackfillHistory(ctx context.Context, opts BackfillOptions) (Backfi
 				}
 				mu.Unlock()
 
-				fmt.Fprintf(os.Stderr, "On-demand history sync: %d conversations, %d messages.\n", resp.conversations, resp.messages)
+				a.emitOrPrint("backfill_response", map[string]any{
+					"chat_jid":       chatStr,
+					"conversations":  resp.conversations,
+					"messages":       resp.messages,
+					"responses_seen": responsesSeen,
+				}, "On-demand history sync: %d conversations, %d messages.\n", resp.conversations, resp.messages)
 
 				newOldest, err := a.db.GetOldestMessageInfo(chatStr)
 				if err == nil && newOldest.MsgID == oldest.MsgID {
-					fmt.Fprintln(os.Stderr, "No older messages were added (stopping).")
+					a.emitOrPrint("backfill_stopped", map[string]any{
+						"chat_jid": chatStr,
+						"reason":   "no_older_messages_added",
+					}, "No older messages were added (stopping).\n")
 					return nil
 				}
 				if resp.messages <= 0 {
-					fmt.Fprintln(os.Stderr, "No messages returned (stopping).")
+					a.emitOrPrint("backfill_stopped", map[string]any{
+						"chat_jid": chatStr,
+						"reason":   "no_messages_returned",
+					}, "No messages returned (stopping).\n")
 					return nil
 				}
 				if resp.endType == waHistorySync.Conversation_COMPLETE_AND_NO_MORE_MESSAGE_REMAIN_ON_PRIMARY {
-					fmt.Fprintln(os.Stderr, "Reached start of chat history (stopping).")
+					a.emitOrPrint("backfill_stopped", map[string]any{
+						"chat_jid": chatStr,
+						"reason":   "start_of_history_reached",
+					}, "Reached start of chat history (stopping).\n")
 					return nil
 				}
 			}

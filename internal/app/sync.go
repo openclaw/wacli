@@ -55,7 +55,11 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 		opts.IdleExit = 30 * time.Second
 	}
 	if opts.WarnNoLimits && opts.MaxMessages <= 0 && opts.MaxDBSizeBytes <= 0 {
-		fmt.Fprintln(os.Stderr, "warning: sync storage is uncapped; use --max-messages or --max-db-size to bound local history growth")
+		a.emitWarning(
+			"sync_storage_uncapped",
+			"warning: sync storage is uncapped; use --max-messages or --max-db-size to bound local history growth",
+			nil,
+		)
 	}
 	if err := a.checkSyncStorageLimits(opts); err != nil {
 		return SyncResult{}, err
@@ -151,7 +155,11 @@ func (a *App) connectForSync(ctx context.Context, opts SyncOptions) error {
 		if attempt == attempts || ctx.Err() != nil || !isRetryableAuthConnectError(err) {
 			return err
 		}
-		fmt.Fprintf(os.Stderr, "warning: auth connection dropped before pairing completed; retrying (%d/%d)\n", attempt+1, attempts)
+		a.emitWarning(
+			"auth_connect_retry",
+			fmt.Sprintf("warning: auth connection dropped before pairing completed; retrying (%d/%d)", attempt+1, attempts),
+			map[string]any{"attempt": attempt + 1, "attempts": attempts},
+		)
 		select {
 		case <-time.After(authConnectRetryDelay(attempt)):
 		case <-ctx.Done():

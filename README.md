@@ -205,6 +205,7 @@ Global flags:
 
 - `--store DIR`: store directory.
 - `--json`: JSON output.
+- `--events`: emit machine-readable NDJSON lifecycle events on stderr for long-running commands.
 - `--full`: disable table truncation.
 - `--timeout DURATION`: timeout for non-sync commands.
 - `--lock-wait DURATION`: wait for the store lock before failing write commands.

@@ -104,12 +104,25 @@ func (a *App) runMediaWorkers(ctx context.Context, jobs <-chan mediaJob, workers
 					func() {
 						defer func() {
 							if r := recover(); r != nil {
-								fmt.Fprintf(os.Stderr, "media worker panic (recovered) for %s/%s: %v\n%s\n",
-									job.chatJID, job.msgID, r, debug.Stack())
+								if a.eventsEnabled() {
+									a.emitEvent("media_worker_panic", map[string]any{
+										"chat_jid": job.chatJID,
+										"msg_id":   job.msgID,
+										"panic":    fmt.Sprint(r),
+										"stack":    string(debug.Stack()),
+									})
+								} else {
+									fmt.Fprintf(os.Stderr, "media worker panic (recovered) for %s/%s: %v\n%s\n",
+										job.chatJID, job.msgID, r, debug.Stack())
+								}
 							}
 						}()
 						if err := a.downloadMediaJob(ctx, job); err != nil {
-							fmt.Fprintf(os.Stderr, "media download failed for %s/%s: %v\n", job.chatJID, job.msgID, err)
+							a.emitWarning(
+								"media_download_failed",
+								fmt.Sprintf("media download failed for %s/%s: %v", job.chatJID, job.msgID, err),
+								map[string]any{"chat_jid": job.chatJID, "msg_id": job.msgID, "error": err.Error()},
+							)
 						}
 					}()
 				}

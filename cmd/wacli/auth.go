@@ -59,7 +59,11 @@ func newAuthCmd(flags *rootFlags) *cobra.Command {
 				mode = appPkg.SyncModeFollow
 			}
 
-			fmt.Fprintln(os.Stderr, "Starting authentication…")
+			if a.Events().Enabled() {
+				_ = a.Events().Emit("auth_starting", nil)
+			} else {
+				fmt.Fprintln(os.Stderr, "Starting authentication…")
+			}
 			res, err := a.Sync(ctx, appPkg.SyncOptions{
 				Mode:            mode,
 				AllowQR:         true,
@@ -67,9 +71,9 @@ func newAuthCmd(flags *rootFlags) *cobra.Command {
 				RefreshContacts: true,
 				RefreshGroups:   true,
 				IdleExit:        idleExit,
-				OnQRCode:        authQRWriter(qrFormat, os.Stdout, os.Stderr),
+				OnQRCode:        authQRWriter(qrFormat, os.Stdout, os.Stderr, a.Events()),
 				PairPhoneNumber: pairPhone,
-				OnPairCode:      authPairCodeWriter(pairPhone, os.Stderr),
+				OnPairCode:      authPairCodeWriter(pairPhone, os.Stderr, a.Events()),
 				MaxMessages:     maxMessages,
 				MaxDBSizeBytes:  maxDBSize,
 				WarnNoLimits:    true,
@@ -130,24 +134,35 @@ func normalizeAuthQRFormat(format string) (string, error) {
 	}
 }
 
-func authQRWriter(format string, stdout, stderr io.Writer) func(string) {
+func authQRWriter(format string, stdout, stderr io.Writer, events *out.EventWriter) func(string) {
 	if format == "text" {
 		return func(code string) {
+			if events.Enabled() {
+				_ = events.Emit("qr_code", map[string]any{"code": code})
+			}
 			fmt.Fprintln(stdout, code)
 		}
 	}
 	return func(code string) {
+		if events.Enabled() {
+			_ = events.Emit("qr_code", map[string]any{"code": code})
+			return
+		}
 		fmt.Fprintln(stderr, "\nScan this QR code with WhatsApp (Linked Devices):")
 		qrterminal.GenerateHalfBlock(code, qrterminal.M, stderr)
 		fmt.Fprintln(stderr)
 	}
 }
 
-func authPairCodeWriter(phone string, stderr io.Writer) func(string) {
+func authPairCodeWriter(phone string, stderr io.Writer, events *out.EventWriter) func(string) {
 	if phone == "" {
 		return nil
 	}
 	return func(code string) {
+		if events.Enabled() {
+			_ = events.Emit("pair_code", map[string]any{"phone": phone, "code": code})
+			return
+		}
 		fmt.Fprintf(stderr, "\nPairing code for +%s: %s\n", phone, code)
 		fmt.Fprintln(stderr, "On your phone: WhatsApp > Linked Devices > Link a Device > Link with phone number.")
 		fmt.Fprintln(stderr, "Enter the code above and keep this command running until authentication completes.")

@@ -81,7 +81,7 @@ func TestNormalizeAuthQRFormat(t *testing.T) {
 
 func TestAuthQRWriterText(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	authQRWriter("text", &stdout, &stderr)("2@test-code")
+	authQRWriter("text", &stdout, &stderr, nil)("2@test-code")
 	if got := strings.TrimSpace(stdout.String()); got != "2@test-code" {
 		t.Fatalf("stdout = %q", got)
 	}
@@ -121,7 +121,7 @@ func TestNormalizePairPhone(t *testing.T) {
 
 func TestAuthPairCodeWriter(t *testing.T) {
 	var stderr bytes.Buffer
-	writer := authPairCodeWriter("15551234567", &stderr)
+	writer := authPairCodeWriter("15551234567", &stderr, nil)
 	if writer == nil {
 		t.Fatal("expected writer")
 	}
@@ -130,7 +130,7 @@ func TestAuthPairCodeWriter(t *testing.T) {
 	if !strings.Contains(got, "Pairing code for +15551234567: ABCD-1234") {
 		t.Fatalf("stderr = %q", got)
 	}
-	if authPairCodeWriter("", &stderr) != nil {
+	if authPairCodeWriter("", &stderr, nil) != nil {
 		t.Fatal("expected nil writer without phone")
 	}
 }
