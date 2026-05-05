@@ -6,7 +6,7 @@
 
 - CLI: add `--read-only`/`WACLI_READONLY` to reject commands that write WhatsApp or the local store.
 - CLI: add `--lock-wait` to wait for transient store locks before failing write commands.
-- CLI: add `--events` to emit machine-readable NDJSON lifecycle events for `auth`, `sync`, and `history backfill`.
+- CLI: add `--events` to emit machine-readable NDJSON lifecycle events for `auth`, `sync`, and `history backfill`. (#204 — thanks @dinakars777 and @0xatrilla)
 - CLI: add `--full` to disable table truncation; piped output now keeps full message IDs. (#13 — thanks @rickhallett)
 - CLI: add `presence typing` and `presence paused` commands for WhatsApp composing indicators. (#76 — thanks @redemerco)
 - Diagnostics: show linked JID and local store counts in `auth status` and `doctor`. (#149 — thanks @draix)
