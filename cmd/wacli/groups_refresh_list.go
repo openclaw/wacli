@@ -88,13 +88,17 @@ func newGroupsListCmd(flags *rootFlags) *cobra.Command {
 
 			fullOutput := fullTableOutput(flags.fullOutput)
 			w := newTableWriter(os.Stdout)
-			fmt.Fprintln(w, "NAME\tJID\tCREATED")
+			fmt.Fprintln(w, "NAME\tJID\tTYPE\tPARENT\tCREATED")
 			for _, g := range gs {
 				name := g.Name
 				if name == "" {
 					name = g.JID
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\n", tableCell(name, 40, fullOutput), g.JID, g.CreatedAt.Local().Format("2006-01-02"))
+				parent := g.LinkedParentJID
+				if parent == "" {
+					parent = "-"
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", tableCell(name, 40, fullOutput), g.JID, groupKindLabel(g.IsParent, g.LinkedParentJID), parent, g.CreatedAt.Local().Format("2006-01-02"))
 			}
 			_ = w.Flush()
 			return nil

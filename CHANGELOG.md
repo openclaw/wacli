@@ -23,6 +23,7 @@
 - Auth: auto-detect a readable linked-device label and default linked-device platform to desktop. (#100 — thanks @pmatheus)
 - Chats: add archive/unarchive, pin/unpin, mute/unmute, and mark-read/mark-unread commands, plus list/show state fields. (#46 — thanks @decodiver22)
 - Profile: add `profile set-picture` to update the authenticated account profile picture from JPEG or PNG input. (#198 — thanks @gado-ships-it)
+- Groups: persist WhatsApp Community parent/subgroup metadata from group refresh/info. (#39 — thanks @TheMazzle)
 - Sync: add signed live-message webhooks with `--webhook` and `--webhook-secret`. (#203 — thanks @dinakars777 and @Melostack)
 - Send: add `send react` to add or clear reactions, with group sender validation. (#151 — thanks @draix)
 - Send: add opt-in `send text --message-escapes` for `\n`, `\r`, `\t`, `\\`, and `\"` in `--message`. (#206 — thanks @slaveofcode)

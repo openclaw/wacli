@@ -20,6 +20,23 @@ func (d *DB) UpsertGroup(jid, name, ownerJID string, created time.Time) error {
 	return err
 }
 
+func (d *DB) UpsertGroupWithHierarchy(jid, name, ownerJID string, created time.Time, isParent bool, linkedParentJID string) error {
+	now := nowUTC().Unix()
+	_, err := d.sql.Exec(`
+		INSERT INTO groups(jid, name, owner_jid, created_ts, is_parent, linked_parent_jid, left_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, NULL, ?)
+		ON CONFLICT(jid) DO UPDATE SET
+			name=COALESCE(NULLIF(excluded.name,''), groups.name),
+			owner_jid=COALESCE(NULLIF(excluded.owner_jid,''), groups.owner_jid),
+			created_ts=COALESCE(NULLIF(excluded.created_ts,0), groups.created_ts),
+			is_parent=excluded.is_parent,
+			linked_parent_jid=excluded.linked_parent_jid,
+			left_at=NULL,
+			updated_at=excluded.updated_at
+	`, jid, name, ownerJID, unix(created), boolToInt(isParent), nullIfEmpty(linkedParentJID), now)
+	return err
+}
+
 func (d *DB) MarkGroupLeft(jid string, leftAt time.Time) error {
 	now := nowUTC().Unix()
 	if leftAt.IsZero() {
@@ -101,7 +118,7 @@ func (d *DB) ListGroups(query string, limit int) ([]Group, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	q := `SELECT jid, COALESCE(name,''), COALESCE(owner_jid,''), COALESCE(created_ts,0), COALESCE(left_at,0), updated_at FROM groups WHERE left_at IS NULL`
+	q := `SELECT jid, COALESCE(name,''), COALESCE(owner_jid,''), COALESCE(created_ts,0), is_parent, COALESCE(linked_parent_jid,''), COALESCE(left_at,0), updated_at FROM groups WHERE left_at IS NULL`
 	var args []interface{}
 	if strings.TrimSpace(query) != "" {
 		needle := likeContains(query)
@@ -121,10 +138,12 @@ func (d *DB) ListGroups(query string, limit int) ([]Group, error) {
 	for rows.Next() {
 		var g Group
 		var created, left, updated int64
-		if err := rows.Scan(&g.JID, &g.Name, &g.OwnerJID, &created, &left, &updated); err != nil {
+		var isParent int
+		if err := rows.Scan(&g.JID, &g.Name, &g.OwnerJID, &created, &isParent, &g.LinkedParentJID, &left, &updated); err != nil {
 			return nil, err
 		}
 		g.CreatedAt = fromUnix(created)
+		g.IsParent = isParent != 0
 		g.LeftAt = fromUnix(left)
 		g.UpdatedAt = fromUnix(updated)
 		out = append(out, g)

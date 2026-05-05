@@ -56,13 +56,17 @@ func newGroupsInfoCmd(flags *rootFlags) *cobra.Command {
 				return out.WriteJSON(os.Stdout, info)
 			}
 
-			fmt.Fprintf(os.Stdout, "JID: %s\nName: %s\nOwner: %s\nCreated: %s\nParticipants: %d\n",
+			fmt.Fprintf(os.Stdout, "JID: %s\nName: %s\nOwner: %s\nCreated: %s\nType: %s\n",
 				info.JID.String(),
 				info.GroupName.Name,
 				info.OwnerJID.String(),
 				info.GroupCreated.Local().Format(time.RFC3339),
-				len(info.Participants),
+				groupKindLabel(info.IsParent, info.LinkedParentJID.String()),
 			)
+			if !info.LinkedParentJID.IsEmpty() {
+				fmt.Fprintf(os.Stdout, "Parent: %s\n", info.LinkedParentJID.String())
+			}
+			fmt.Fprintf(os.Stdout, "Participants: %d\n", len(info.Participants))
 			return nil
 		},
 	}

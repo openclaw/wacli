@@ -231,6 +231,8 @@ or writing unexpectedly large payloads in one command.
 - `wacli groups join --code INVITE_CODE`
 - `wacli groups leave --jid GROUP_JID`
 
+Group refresh/info persists WhatsApp Community metadata when whatsmeow reports it. Community rows have `IsParent=true`; subgroups expose `LinkedParentJID` in JSON output.
+
 ## Output formats
 
 Default: human-readable text (tables / aligned columns; TTY-aware wrapping).

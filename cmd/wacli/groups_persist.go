@@ -16,7 +16,7 @@ func persistGroupInfo(db *store.DB, info *types.GroupInfo) error {
 	if info == nil {
 		return nil
 	}
-	if err := db.UpsertGroup(info.JID.String(), info.GroupName.Name, info.OwnerJID.String(), info.GroupCreated); err != nil {
+	if err := db.UpsertGroupWithHierarchy(info.JID.String(), info.GroupName.Name, info.OwnerJID.String(), info.GroupCreated, info.IsParent, info.LinkedParentJID.String()); err != nil {
 		return err
 	}
 	var ps []store.GroupParticipant
@@ -34,4 +34,14 @@ func persistGroupInfo(db *store.DB, info *types.GroupInfo) error {
 		})
 	}
 	return db.ReplaceGroupParticipants(info.JID.String(), ps)
+}
+
+func groupKindLabel(isParent bool, linkedParentJID string) string {
+	if isParent {
+		return "community"
+	}
+	if linkedParentJID != "" {
+		return "subgroup"
+	}
+	return "group"
 }

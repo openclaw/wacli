@@ -24,6 +24,7 @@ var schemaMigrations = []migration{
 	{version: 8, name: "messages revoked column", up: migrateMessagesRevokedColumn},
 	{version: 9, name: "messages deleted_for_me column", up: migrateMessagesDeletedForMeColumn},
 	{version: 10, name: "chat state columns", up: migrateChatStateColumns},
+	{version: 11, name: "groups community hierarchy columns", up: migrateGroupsCommunityHierarchyColumns},
 }
 
 func (d *DB) ensureSchema() error {
@@ -85,6 +86,33 @@ func migrateGroupsLeftAt(d *DB) error {
 	}
 	if _, err := d.sql.Exec(`ALTER TABLE groups ADD COLUMN left_at INTEGER`); err != nil {
 		return fmt.Errorf("add groups.left_at column: %w", err)
+	}
+	return nil
+}
+
+func migrateGroupsCommunityHierarchyColumns(d *DB) error {
+	hasIsParent, err := d.tableHasColumn("groups", "is_parent")
+	if err != nil {
+		return err
+	}
+	if !hasIsParent {
+		if _, err := d.sql.Exec(`ALTER TABLE groups ADD COLUMN is_parent INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("add groups.is_parent column: %w", err)
+		}
+	}
+
+	hasLinkedParent, err := d.tableHasColumn("groups", "linked_parent_jid")
+	if err != nil {
+		return err
+	}
+	if !hasLinkedParent {
+		if _, err := d.sql.Exec(`ALTER TABLE groups ADD COLUMN linked_parent_jid TEXT`); err != nil {
+			return fmt.Errorf("add groups.linked_parent_jid column: %w", err)
+		}
+	}
+
+	if _, err := d.sql.Exec(`CREATE INDEX IF NOT EXISTS idx_groups_linked_parent_jid ON groups(linked_parent_jid)`); err != nil {
+		return fmt.Errorf("create groups linked parent index: %w", err)
 	}
 	return nil
 }

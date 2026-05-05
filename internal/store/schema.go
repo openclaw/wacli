@@ -29,9 +29,13 @@ const coreSchemaSQL = `
 		name TEXT,
 		owner_jid TEXT,
 		created_ts INTEGER,
+		is_parent INTEGER NOT NULL DEFAULT 0,
+		linked_parent_jid TEXT,
 		left_at INTEGER,
 		updated_at INTEGER NOT NULL
 	);
+
+	CREATE INDEX IF NOT EXISTS idx_groups_linked_parent_jid ON groups(linked_parent_jid);
 
 	CREATE TABLE IF NOT EXISTS group_participants (
 		group_jid TEXT NOT NULL,
