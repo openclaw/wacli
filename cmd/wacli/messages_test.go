@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -175,6 +177,74 @@ func TestMessagesListCommandExposesForwardedFilter(t *testing.T) {
 	}
 }
 
+func TestMessagesExportCommandExposesDateFilters(t *testing.T) {
+	cmd := newMessagesExportCmd(&rootFlags{})
+	for _, name := range []string{"after", "before", "output"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Fatalf("expected --%s flag", name)
+		}
+	}
+}
+
+func TestMessagesExportCommandAppliesDateFilters(t *testing.T) {
+	storeDir := t.TempDir()
+	db, err := store.Open(filepath.Join(storeDir, "wacli.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	chat := "chat@s.whatsapp.net"
+	base := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+	if err := db.UpsertChat(chat, "dm", "Alice", base); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	for _, row := range []store.UpsertMessageParams{
+		{ChatJID: chat, MsgID: "before", SenderJID: chat, Timestamp: base, Text: "before"},
+		{ChatJID: chat, MsgID: "inside-1", SenderJID: chat, Timestamp: base.Add(time.Second), Text: "inside 1"},
+		{ChatJID: chat, MsgID: "inside-2", SenderJID: chat, Timestamp: base.Add(2 * time.Second), Text: "inside 2"},
+		{ChatJID: chat, MsgID: "after", SenderJID: chat, Timestamp: base.Add(3 * time.Second), Text: "after"},
+	} {
+		if err := db.UpsertMessage(row); err != nil {
+			t.Fatalf("UpsertMessage %s: %v", row.MsgID, err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	output := filepath.Join(storeDir, "export.json")
+	cmd := newMessagesExportCmd(&rootFlags{storeDir: storeDir, timeout: time.Minute})
+	cmd.SetArgs([]string{
+		"--chat", chat,
+		"--after", base.Format(time.RFC3339),
+		"--before", base.Add(3 * time.Second).Format(time.RFC3339),
+		"--output", output,
+		"--limit", "10",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("messages export: %v", err)
+	}
+
+	raw, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	var got struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Messages []store.Message `json:"messages"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("Unmarshal export: %v\n%s", err, string(raw))
+	}
+	if !got.Success {
+		t.Fatalf("success = false")
+	}
+	if gotIDs := messageIDs(got.Data.Messages); gotIDs != "inside-1,inside-2" {
+		t.Fatalf("exported ids = %s", gotIDs)
+	}
+}
+
 func TestWriteMessageShowIncludesForwardedMetadata(t *testing.T) {
 	msg := store.Message{
 		ChatJID:         "chat@s.whatsapp.net",
@@ -289,4 +359,12 @@ func mustParseJID(t *testing.T, s string) types.JID {
 		t.Fatalf("ParseJID(%q): %v", s, err)
 	}
 	return jid
+}
+
+func messageIDs(msgs []store.Message) string {
+	ids := make([]string, 0, len(msgs))
+	for _, msg := range msgs {
+		ids = append(ids, msg.MsgID)
+	}
+	return strings.Join(ids, ",")
 }

@@ -101,6 +101,9 @@ pnpm wacli messages list --chat 1234567890@s.whatsapp.net --asc
 # Show context around a message
 pnpm wacli messages context --chat 1234567890@s.whatsapp.net --id <message-id>
 
+# Export messages to JSON with a time window
+pnpm wacli messages export --chat 1234567890@s.whatsapp.net --after 2024-01-01 --before 2024-02-01 --output messages.json
+
 # Backfill older messages for a chat (best-effort; requires your primary device online)
 pnpm wacli history backfill --chat 1234567890@s.whatsapp.net --requests 10 --count 50
 
@@ -158,6 +161,7 @@ Full command docs live under [docs/overview.md](docs/overview.md). Quick referen
 - `wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--max-messages N] [--max-db-size SIZE] [--download-media] [--refresh-contacts] [--refresh-groups]`
 - `wacli messages list [--chat JID] [--sender JID] [--from-me|--from-them] [--asc] [--limit N] [--after DATE] [--before DATE] [--forwarded]`
 - `wacli messages search <query> [--chat JID] [--from JID] [--has-media] [--type text|image|video|audio|document] [--forwarded]`
+- `wacli messages export [--chat JID] [--limit N] [--after DATE] [--before DATE] [--output PATH]`
 - `wacli messages show --chat JID --id MSG_ID`
 - `wacli messages context --chat JID --id MSG_ID [--before N] [--after N]`
 - `wacli send text --to RECIPIENT --message TEXT [--pick N] [--no-preview] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]`

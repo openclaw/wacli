@@ -27,6 +27,7 @@ func newMessagesCmd(flags *rootFlags) *cobra.Command {
 	cmd.AddCommand(newMessagesSearchCmd(flags))
 	cmd.AddCommand(newMessagesShowCmd(flags))
 	cmd.AddCommand(newMessagesContextCmd(flags))
+	cmd.AddCommand(newMessagesExportCmd(flags))
 	return cmd
 }
 
@@ -433,6 +434,85 @@ func newMessagesContextCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().StringVar(&id, "id", "", "message ID")
 	cmd.Flags().IntVar(&before, "before", 5, "messages before")
 	cmd.Flags().IntVar(&after, "after", 5, "messages after")
+	return cmd
+}
+
+func newMessagesExportCmd(flags *rootFlags) *cobra.Command {
+	var chat string
+	var limit int
+	var afterStr string
+	var beforeStr string
+	var output string
+
+	cmd := &cobra.Command{
+		Use:   "export",
+		Short: "Export messages as JSON",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx, cancel := withTimeout(context.Background(), flags)
+			defer cancel()
+
+			a, lk, err := newApp(ctx, flags, false, false)
+			if err != nil {
+				return err
+			}
+			defer closeApp(a, lk)
+
+			var after *time.Time
+			var before *time.Time
+			if afterStr != "" {
+				t, err := parseTime(afterStr)
+				if err != nil {
+					return err
+				}
+				after = &t
+			}
+			if beforeStr != "" {
+				t, err := parseTime(beforeStr)
+				if err != nil {
+					return err
+				}
+				before = &t
+			}
+
+			chatJIDs, err := messageChatJIDFilter(ctx, a, chat)
+			if err != nil {
+				return err
+			}
+
+			msgs, err := a.DB().ListMessages(store.ListMessagesParams{
+				ChatJIDs: chatJIDs,
+				Limit:    limit,
+				After:    after,
+				Before:   before,
+				Asc:      true,
+			})
+			if err != nil {
+				return err
+			}
+			msgs = resolveMessageSenderNames(ctx, a, msgs)
+
+			dst := os.Stdout
+			if output != "" {
+				f, err := os.Create(output)
+				if err != nil {
+					return err
+				}
+				defer f.Close()
+				dst = f
+			}
+
+			return out.WriteJSON(dst, map[string]any{
+				"messages": msgs,
+				"fts":      a.DB().HasFTS(),
+			})
+		},
+	}
+
+	cmd.Flags().StringVar(&chat, "chat", "", "filter by chat JID")
+	cmd.Flags().IntVar(&limit, "limit", 1000, "max number of messages to export")
+	cmd.Flags().StringVar(&afterStr, "after", "", "only messages after time (RFC3339 or YYYY-MM-DD)")
+	cmd.Flags().StringVar(&beforeStr, "before", "", "only messages before time (RFC3339 or YYYY-MM-DD)")
+	cmd.Flags().StringVar(&output, "output", "", "write JSON export to file instead of stdout")
 	return cmd
 }
 
