@@ -116,6 +116,8 @@ type sendTextApp interface {
 }
 
 func sendTextMessage(ctx context.Context, a sendTextApp, to types.JID, text, replyTo, replyToSender string) (types.MessageID, error) {
+	// Unescape common escape sequences so \n, \r, \t work in --message
+	text = unescapeMessage(text)
 	replyTo = strings.TrimSpace(replyTo)
 	if replyTo == "" {
 		return a.WA().SendText(ctx, to, text)
@@ -166,4 +168,13 @@ func resolveReplySender(db *store.DB, chat types.JID, replyTo, override string) 
 		return types.JID{}, fmt.Errorf("--reply-to-sender is required for unsynced group replies")
 	}
 	return types.JID{}, nil
+}
+
+// unescapeMessage replaces common escape sequences in text.
+// Used so that --message "line1\\nline2" becomes "line1\nline2".
+func unescapeMessage(s string) string {
+	s = strings.ReplaceAll(s, "\\n", "\n")
+	s = strings.ReplaceAll(s, "\\r", "\r")
+	s = strings.ReplaceAll(s, "\\t", "\t")
+	return s
 }

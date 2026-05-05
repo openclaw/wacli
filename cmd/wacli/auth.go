@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -41,6 +42,7 @@ func newAuthCmd(flags *rootFlags) *cobra.Command {
 			}
 
 			fmt.Fprintln(os.Stderr, "Starting authentication…")
+			enc := json.NewEncoder(os.Stdout)
 			res, err := a.Sync(ctx, appPkg.SyncOptions{
 				Mode:            mode,
 				AllowQR:         true,
@@ -49,9 +51,16 @@ func newAuthCmd(flags *rootFlags) *cobra.Command {
 				RefreshGroups:   true,
 				IdleExit:        idleExit,
 				OnQRCode: func(code string) {
-					fmt.Fprintln(os.Stderr, "\nScan this QR code with WhatsApp (Linked Devices):")
-					qrterminal.GenerateHalfBlock(code, qrterminal.M, os.Stderr)
-					fmt.Fprintln(os.Stderr)
+					if flags.asJSON {
+						enc.Encode(map[string]interface{}{
+							"event":   "qr",
+							"qr_code": code,
+						})
+					} else {
+						fmt.Fprintln(os.Stderr, "\nScan this QR code with WhatsApp (Linked Devices):")
+						qrterminal.GenerateHalfBlock(code, qrterminal.M, os.Stderr)
+						fmt.Fprintln(os.Stderr)
+					}
 				},
 			})
 			if err != nil {
