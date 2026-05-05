@@ -17,6 +17,7 @@ func newSendFileCmd(flags *rootFlags) *cobra.Command {
 	var filename string
 	var caption string
 	var mimeOverride string
+	var ptt bool
 	var replyTo string
 	var replyToSender string
 
@@ -60,7 +61,7 @@ func newSendFileCmd(flags *rootFlags) *cobra.Command {
 				meta map[string]string
 			}
 			res, err := runSendOperation(ctx, reconnectForSend(a), func(ctx context.Context) (sendFileResult, error) {
-				msgID, meta, err := sendFile(ctx, a, toJID, filePath, filename, caption, mimeOverride, replyTo, replyToSender)
+				msgID, meta, err := sendFile(ctx, a, toJID, filePath, filename, caption, mimeOverride, ptt, replyTo, replyToSender)
 				if err != nil {
 					return sendFileResult{}, err
 				}
@@ -90,6 +91,7 @@ func newSendFileCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().StringVar(&filename, "filename", "", "display name for the file (defaults to basename of --file)")
 	cmd.Flags().StringVar(&caption, "caption", "", "caption (images/videos/documents)")
 	cmd.Flags().StringVar(&mimeOverride, "mime", "", "override detected mime type")
+	cmd.Flags().BoolVar(&ptt, "ptt", false, "send audio as a WhatsApp voice note")
 	cmd.Flags().StringVar(&replyTo, "reply-to", "", "message ID to quote/reply to")
 	cmd.Flags().StringVar(&replyToSender, "reply-to-sender", "", "sender JID of the quoted message (required for unsynced group replies)")
 	return cmd

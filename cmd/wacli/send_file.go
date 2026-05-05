@@ -13,6 +13,7 @@ import (
 	"github.com/steipete/wacli/internal/app"
 	"github.com/steipete/wacli/internal/store"
 	"github.com/steipete/wacli/internal/wa"
+	"go.mau.fi/whatsmeow"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow/types"
 	"google.golang.org/protobuf/proto"
@@ -23,7 +24,7 @@ const maxSendFileSize = 100 * 1024 * 1024
 func sendFile(ctx context.Context, a interface {
 	WA() app.WAClient
 	DB() *store.DB
-}, to types.JID, filePath, filename, caption, mimeOverride, replyTo, replyToSender string) (string, map[string]string, error) {
+}, to types.JID, filePath, filename, caption, mimeOverride string, ptt bool, replyTo, replyToSender string) (string, map[string]string, error) {
 	data, err := readSendFileData(filePath)
 	if err != nil {
 		return "", nil, err
@@ -54,61 +55,13 @@ func sendFile(ctx context.Context, a interface {
 		return "", nil, err
 	}
 
-	now := time.Now().UTC()
-	msg := &waProto.Message{}
 	replyContext, err := buildReplyContextInfo(a.DB(), to, replyTo, replyToSender)
 	if err != nil {
 		return "", nil, err
 	}
 
-	switch mediaType {
-	case "image":
-		msg.ImageMessage = &waProto.ImageMessage{
-			URL:           proto.String(up.URL),
-			DirectPath:    proto.String(up.DirectPath),
-			MediaKey:      up.MediaKey,
-			FileEncSHA256: up.FileEncSHA256,
-			FileSHA256:    up.FileSHA256,
-			FileLength:    proto.Uint64(up.FileLength),
-			Mimetype:      proto.String(mimeType),
-			Caption:       proto.String(caption),
-		}
-	case "video":
-		msg.VideoMessage = &waProto.VideoMessage{
-			URL:           proto.String(up.URL),
-			DirectPath:    proto.String(up.DirectPath),
-			MediaKey:      up.MediaKey,
-			FileEncSHA256: up.FileEncSHA256,
-			FileSHA256:    up.FileSHA256,
-			FileLength:    proto.Uint64(up.FileLength),
-			Mimetype:      proto.String(mimeType),
-			Caption:       proto.String(caption),
-		}
-	case "audio":
-		msg.AudioMessage = &waProto.AudioMessage{
-			URL:           proto.String(up.URL),
-			DirectPath:    proto.String(up.DirectPath),
-			MediaKey:      up.MediaKey,
-			FileEncSHA256: up.FileEncSHA256,
-			FileSHA256:    up.FileSHA256,
-			FileLength:    proto.Uint64(up.FileLength),
-			Mimetype:      proto.String(mimeType),
-			PTT:           proto.Bool(false),
-		}
-	default:
-		msg.DocumentMessage = &waProto.DocumentMessage{
-			URL:           proto.String(up.URL),
-			DirectPath:    proto.String(up.DirectPath),
-			MediaKey:      up.MediaKey,
-			FileEncSHA256: up.FileEncSHA256,
-			FileSHA256:    up.FileSHA256,
-			FileLength:    proto.Uint64(up.FileLength),
-			Mimetype:      proto.String(mimeType),
-			FileName:      proto.String(name),
-			Caption:       proto.String(caption),
-			Title:         proto.String(name),
-		}
-	}
+	now := time.Now().UTC()
+	msg := buildSendFileMessage(mediaType, up, mimeType, name, caption, ptt)
 	attachSendFileReplyContext(msg, replyContext)
 
 	id, err := a.WA().SendProtoMessage(ctx, to, msg)
@@ -144,6 +97,60 @@ func sendFile(ctx context.Context, a interface {
 		"mime_type": mimeType,
 		"media":     mediaType,
 	}, nil
+}
+
+func buildSendFileMessage(mediaType string, up whatsmeow.UploadResponse, mimeType, name, caption string, ptt bool) *waProto.Message {
+	msg := &waProto.Message{}
+
+	switch mediaType {
+	case "image":
+		msg.ImageMessage = &waProto.ImageMessage{
+			URL:           proto.String(up.URL),
+			DirectPath:    proto.String(up.DirectPath),
+			MediaKey:      up.MediaKey,
+			FileEncSHA256: up.FileEncSHA256,
+			FileSHA256:    up.FileSHA256,
+			FileLength:    proto.Uint64(up.FileLength),
+			Mimetype:      proto.String(mimeType),
+			Caption:       proto.String(caption),
+		}
+	case "video":
+		msg.VideoMessage = &waProto.VideoMessage{
+			URL:           proto.String(up.URL),
+			DirectPath:    proto.String(up.DirectPath),
+			MediaKey:      up.MediaKey,
+			FileEncSHA256: up.FileEncSHA256,
+			FileSHA256:    up.FileSHA256,
+			FileLength:    proto.Uint64(up.FileLength),
+			Mimetype:      proto.String(mimeType),
+			Caption:       proto.String(caption),
+		}
+	case "audio":
+		msg.AudioMessage = &waProto.AudioMessage{
+			URL:           proto.String(up.URL),
+			DirectPath:    proto.String(up.DirectPath),
+			MediaKey:      up.MediaKey,
+			FileEncSHA256: up.FileEncSHA256,
+			FileSHA256:    up.FileSHA256,
+			FileLength:    proto.Uint64(up.FileLength),
+			Mimetype:      proto.String(mimeType),
+			PTT:           proto.Bool(ptt),
+		}
+	default:
+		msg.DocumentMessage = &waProto.DocumentMessage{
+			URL:           proto.String(up.URL),
+			DirectPath:    proto.String(up.DirectPath),
+			MediaKey:      up.MediaKey,
+			FileEncSHA256: up.FileEncSHA256,
+			FileSHA256:    up.FileSHA256,
+			FileLength:    proto.Uint64(up.FileLength),
+			Mimetype:      proto.String(mimeType),
+			FileName:      proto.String(name),
+			Caption:       proto.String(caption),
+			Title:         proto.String(name),
+		}
+	}
+	return msg
 }
 
 func readSendFileData(filePath string) ([]byte, error) {
