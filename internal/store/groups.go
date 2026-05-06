@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"strings"
 	"time"
 )
@@ -153,4 +154,62 @@ func (d *DB) ListGroups(query string, limit int) ([]Group, error) {
 		out = append(out, g)
 	}
 	return out, rows.Err()
+}
+
+func (d *DB) DeleteGroup(jid string) error {
+	jid = strings.TrimSpace(jid)
+	if jid == "" {
+		return fmt.Errorf("group JID is required")
+	}
+	_, err := d.sql.Exec(`DELETE FROM groups WHERE jid = ?`, jid)
+	return err
+}
+
+func (d *DB) ListLeftGroups() ([]Group, error) {
+	rows, err := d.sql.Query(`
+		SELECT jid, COALESCE(name,''), COALESCE(owner_jid,''), is_parent, COALESCE(linked_parent_jid,''), COALESCE(created_ts,0), COALESCE(left_at,0), updated_at
+		FROM groups
+		WHERE left_at IS NOT NULL
+		ORDER BY left_at DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Group
+	for rows.Next() {
+		var g Group
+		var isParent int
+		var created, left, updated int64
+		if err := rows.Scan(&g.JID, &g.Name, &g.OwnerJID, &isParent, &g.LinkedParentJID, &created, &left, &updated); err != nil {
+			return nil, err
+		}
+		g.IsParent = isParent != 0
+		g.CreatedAt = fromUnix(created)
+		g.LeftAt = fromUnix(left)
+		g.UpdatedAt = fromUnix(updated)
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
+func (d *DB) DeleteLeftGroups() (int64, error) {
+	res, err := d.sql.Exec(`DELETE FROM groups WHERE left_at IS NOT NULL`)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+func (d *DB) DeleteLeftGroupsOlderThan(days int) (int64, error) {
+	if days <= 0 {
+		return 0, fmt.Errorf("days must be positive")
+	}
+	cutoff := nowUTC().AddDate(0, 0, -days)
+	res, err := d.sql.Exec(`DELETE FROM groups WHERE left_at IS NOT NULL AND left_at < ?`, unix(cutoff))
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }

@@ -66,6 +66,7 @@ func execute(args []string) error {
 	rootCmd.AddCommand(newPresenceCmd(&flags))
 	rootCmd.AddCommand(newProfileCmd(&flags))
 	rootCmd.AddCommand(newDocsCmd(&flags))
+	rootCmd.AddCommand(newStoreCmd(&flags))
 
 	rootCmd.SetArgs(args)
 	if err := rootCmd.Execute(); err != nil {

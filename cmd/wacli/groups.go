@@ -15,5 +15,6 @@ func newGroupsCmd(flags *rootFlags) *cobra.Command {
 	cmd.AddCommand(newGroupsInviteCmd(flags))
 	cmd.AddCommand(newGroupsJoinCmd(flags))
 	cmd.AddCommand(newGroupsLeaveCmd(flags))
+	cmd.AddCommand(newGroupsPruneCmd(flags))
 	return cmd
 }

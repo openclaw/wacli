@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"strings"
 	"time"
 )
@@ -141,4 +142,81 @@ func (d *DB) SetChatUnread(jid string, unread bool) error {
 		ON CONFLICT(jid) DO UPDATE SET unread=excluded.unread
 	`, jid, boolToInt(unread))
 	return err
+}
+
+func (d *DB) DeleteChat(jid string) error {
+	jid = strings.TrimSpace(jid)
+	if jid == "" {
+		return fmt.Errorf("chat JID is required")
+	}
+	_, err := d.sql.Exec(`DELETE FROM chats WHERE jid = ?`, jid)
+	return err
+}
+
+func (d *DB) DeleteChatsOlderThan(days int) (int64, error) {
+	if days <= 0 {
+		return 0, fmt.Errorf("days must be positive")
+	}
+	cutoff := nowUTC().AddDate(0, 0, -days)
+	res, err := d.sql.Exec(`
+		DELETE FROM chats
+		WHERE jid IN (
+			SELECT c.jid FROM chats c
+			LEFT JOIN messages m ON m.chat_jid = c.jid
+			GROUP BY c.jid
+			HAVING COALESCE(MAX(m.ts), 0) < ? AND COALESCE(c.last_message_ts, 0) < ?
+		)
+	`, unix(cutoff), unix(cutoff))
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+func (d *DB) ListChatsOlderThan(days int) ([]Chat, error) {
+	if days <= 0 {
+		return nil, fmt.Errorf("days must be positive")
+	}
+	cutoff := nowUTC().AddDate(0, 0, -days)
+	rows, err := d.sql.Query(`
+		SELECT c.jid, c.kind, COALESCE(c.name,''), COALESCE(c.last_message_ts,0), COALESCE(c.archived,0), COALESCE(c.pinned,0), COALESCE(c.muted_until,0), COALESCE(c.unread,0)
+		FROM chats c
+		LEFT JOIN messages m ON m.chat_jid = c.jid
+		GROUP BY c.jid
+		HAVING COALESCE(MAX(m.ts), 0) < ? AND COALESCE(c.last_message_ts, 0) < ?
+		ORDER BY COALESCE(MAX(m.ts), 0) ASC
+	`, unix(cutoff), unix(cutoff))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Chat
+	for rows.Next() {
+		var c Chat
+		var ts int64
+		var archived, pinned, unread int
+		if err := rows.Scan(&c.JID, &c.Kind, &c.Name, &ts, &archived, &pinned, &c.MutedUntil, &unread); err != nil {
+			return nil, err
+		}
+		c.LastMessageTS = fromUnix(ts)
+		c.Archived = archived != 0
+		c.Pinned = pinned != 0
+		c.Unread = unread != 0
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func (d *DB) CountChatMessages(jid string) (int64, error) {
+	jid = strings.TrimSpace(jid)
+	if jid == "" {
+		return 0, fmt.Errorf("chat JID is required")
+	}
+	row := d.sql.QueryRow(`SELECT COUNT(1) FROM messages WHERE chat_jid = ?`, jid)
+	var n int64
+	if err := row.Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
 }

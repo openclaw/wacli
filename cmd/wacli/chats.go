@@ -33,6 +33,7 @@ func newChatsCmd(flags *rootFlags) *cobra.Command {
 	cmd.AddCommand(newChatsUnmuteCmd(flags))
 	cmd.AddCommand(newChatsMarkReadCmd(flags, true))
 	cmd.AddCommand(newChatsMarkReadCmd(flags, false))
+	cmd.AddCommand(newChatsCleanupCmd(flags))
 	return cmd
 }
 
