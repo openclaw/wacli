@@ -4,12 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
 
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/steipete/wacli/internal/sqliteutil"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store/sqlstore"
-	waLog "go.mau.fi/whatsmeow/util/log"
 )
 
 func (c *Client) init() error {
@@ -17,7 +17,7 @@ func (c *Client) init() error {
 	defer c.mu.Unlock()
 
 	ctx := context.Background()
-	dbLog := waLog.Stdout("Database", "ERROR", true)
+	dbLog := newWhatsmeowLogger("Database", "ERROR", os.Stderr)
 	if err := sqliteutil.ChmodFiles(c.opts.StorePath, 0o600); err != nil {
 		return err
 	}
@@ -38,7 +38,7 @@ func (c *Client) init() error {
 		}
 	}
 
-	logger := waLog.Stdout("Client", "ERROR", true)
+	logger := newWhatsmeowLogger("Client", "ERROR", os.Stderr)
 	c.client = whatsmeow.NewClient(deviceStore, logger)
 	c.client.EmitAppStateEventsOnFullSync = true
 	// Persist recently-sent messages so whatsmeow can answer retry-receipts
