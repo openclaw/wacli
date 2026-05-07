@@ -89,6 +89,44 @@ func TestListHistoryCoverage(t *testing.T) {
 	}
 }
 
+func TestListHistoryCoverageAppliesBlockedFilterBeforeLimit(t *testing.T) {
+	db := openTestDB(t)
+	base := time.Date(2024, 5, 3, 0, 0, 0, 0, time.UTC)
+
+	blocked := "blocked@s.whatsapp.net"
+	ready := "ready@s.whatsapp.net"
+	if err := db.UpsertChat(blocked, "dm", "Blocked", base.Add(2*time.Minute)); err != nil {
+		t.Fatalf("UpsertChat blocked: %v", err)
+	}
+	if err := db.UpsertChat(ready, "dm", "Ready", base.Add(time.Minute)); err != nil {
+		t.Fatalf("UpsertChat ready: %v", err)
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID:   ready,
+		MsgID:     "m1",
+		Timestamp: base.Add(time.Second),
+		Text:      "ready",
+	}); err != nil {
+		t.Fatalf("UpsertMessage ready: %v", err)
+	}
+
+	coverage, err := db.ListHistoryCoverage(ListHistoryCoverageParams{Limit: 1})
+	if err != nil {
+		t.Fatalf("ListHistoryCoverage: %v", err)
+	}
+	if len(coverage) != 1 || coverage[0].ChatJID != ready {
+		t.Fatalf("coverage = %+v, want ready chat despite newer blocked row", coverage)
+	}
+
+	withBlocked, err := db.ListHistoryCoverage(ListHistoryCoverageParams{Limit: 1, IncludeBlocked: true})
+	if err != nil {
+		t.Fatalf("ListHistoryCoverage IncludeBlocked: %v", err)
+	}
+	if len(withBlocked) != 1 || withBlocked[0].ChatJID != blocked {
+		t.Fatalf("withBlocked = %+v, want newer blocked chat when requested", withBlocked)
+	}
+}
+
 func TestListHistoryCoverageEscapesQueryWildcards(t *testing.T) {
 	db := openTestDB(t)
 	when := time.Date(2024, 5, 2, 0, 0, 0, 0, time.UTC)
