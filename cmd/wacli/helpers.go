@@ -38,13 +38,17 @@ func sanitize(s string) string {
 
 func truncate(s string, max int) string {
 	s = sanitize(s)
-	if max <= 0 || len(s) <= max {
+	if max <= 0 {
+		return s
+	}
+	runes := []rune(s)
+	if len(runes) <= max {
 		return s
 	}
 	if max <= 1 {
-		return s[:max]
+		return string(runes[:max])
 	}
-	return s[:max-1] + "…"
+	return string(runes[:max-1]) + "…"
 }
 
 func fullTableOutput(forceFull bool) bool {

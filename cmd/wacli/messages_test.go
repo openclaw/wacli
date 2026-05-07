@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 	"github.com/steipete/wacli/internal/store"
@@ -32,6 +33,16 @@ func TestTruncate(t *testing.T) {
 		if got := truncate(tc.input, tc.max); got != tc.want {
 			t.Fatalf("truncate(%q, %d) = %q, want %q", tc.input, tc.max, got, tc.want)
 		}
+	}
+}
+
+func TestTruncatePreservesUTF8(t *testing.T) {
+	got := truncate("🙂🙂🙂", 2)
+	if got != "🙂…" {
+		t.Fatalf("truncate emoji = %q, want first rune plus ellipsis", got)
+	}
+	if !utf8.ValidString(got) {
+		t.Fatalf("truncate produced invalid UTF-8: %q", got)
 	}
 }
 
