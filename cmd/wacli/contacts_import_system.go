@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/openclaw/wacli/internal/out"
+	"github.com/openclaw/wacli/internal/store"
+	"github.com/openclaw/wacli/internal/syscontacts"
 	"github.com/spf13/cobra"
-	"github.com/steipete/wacli/internal/out"
-	"github.com/steipete/wacli/internal/store"
-	"github.com/steipete/wacli/internal/syscontacts"
 )
 
 type systemContactMatch struct {

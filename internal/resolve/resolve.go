@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/steipete/wacli/internal/store"
+	"github.com/openclaw/wacli/internal/store"
 )
 
 type Kind string

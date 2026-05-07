@@ -34,7 +34,17 @@ If a Linux install reports `Binary was compiled with 'CGO_ENABLED=0'`, run `brew
 - Debian/Ubuntu: `sudo apt install build-essential`.
 
 ```bash
-CGO_ENABLED=1 go build -tags sqlite_fts5 -o ./dist/wacli ./cmd/wacli
+CGO_ENABLED=1 CGO_CFLAGS="-Wno-error=missing-braces" \
+  go install -tags sqlite_fts5 github.com/openclaw/wacli/cmd/wacli@latest
+```
+
+For local development:
+
+```bash
+git clone https://github.com/openclaw/wacli.git
+cd wacli
+CGO_ENABLED=1 CGO_CFLAGS="-Wno-error=missing-braces" \
+  go build -tags sqlite_fts5 -o ./dist/wacli ./cmd/wacli
 ./dist/wacli --help
 ```
 

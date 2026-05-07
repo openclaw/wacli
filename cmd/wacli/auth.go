@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/mdp/qrterminal/v3"
+	appPkg "github.com/openclaw/wacli/internal/app"
+	"github.com/openclaw/wacli/internal/out"
+	"github.com/openclaw/wacli/internal/wa"
 	"github.com/spf13/cobra"
-	appPkg "github.com/steipete/wacli/internal/app"
-	"github.com/steipete/wacli/internal/out"
-	"github.com/steipete/wacli/internal/wa"
 	"go.mau.fi/whatsmeow/types"
 )
 

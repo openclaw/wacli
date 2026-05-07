@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/openclaw/wacli/internal/out"
 	"github.com/spf13/cobra"
-	"github.com/steipete/wacli/internal/out"
 )
 
 func newDocsCmd(flags *rootFlags) *cobra.Command {

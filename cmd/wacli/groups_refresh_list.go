@@ -6,8 +6,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/openclaw/wacli/internal/out"
 	"github.com/spf13/cobra"
-	"github.com/steipete/wacli/internal/out"
 )
 
 func newGroupsRefreshCmd(flags *rootFlags) *cobra.Command {

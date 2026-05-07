@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/steipete/wacli/internal/wa"
+	"github.com/openclaw/wacli/internal/wa"
 )
 
 var syncWebhookHTTPClient = &http.Client{Timeout: 10 * time.Second}

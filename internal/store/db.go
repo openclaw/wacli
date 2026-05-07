@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
-	"github.com/steipete/wacli/internal/fsutil"
-	"github.com/steipete/wacli/internal/sqliteutil"
+	"github.com/openclaw/wacli/internal/fsutil"
+	"github.com/openclaw/wacli/internal/sqliteutil"
 )
 
 type DB struct {

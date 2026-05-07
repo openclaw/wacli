@@ -21,9 +21,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/steipete/wacli/internal/app"
-	"github.com/steipete/wacli/internal/store"
-	"github.com/steipete/wacli/internal/wa"
+	"github.com/openclaw/wacli/internal/app"
+	"github.com/openclaw/wacli/internal/store"
+	"github.com/openclaw/wacli/internal/wa"
 	"go.mau.fi/whatsmeow"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow/types"

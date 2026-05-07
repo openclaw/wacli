@@ -11,8 +11,8 @@ import (
 	_ "image/png"
 	"os"
 
+	"github.com/openclaw/wacli/internal/out"
 	"github.com/spf13/cobra"
-	"github.com/steipete/wacli/internal/out"
 )
 
 // profileMaxPx is the max dimension WhatsApp accepts for profile pictures.

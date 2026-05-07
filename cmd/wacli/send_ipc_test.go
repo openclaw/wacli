@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/steipete/wacli/internal/lock"
+	"github.com/openclaw/wacli/internal/lock"
 )
 
 func TestTryDelegateSendFallsBackWhenSocketUnavailable(t *testing.T) {

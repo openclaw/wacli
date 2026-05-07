@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/steipete/wacli/internal/store"
+	"github.com/openclaw/wacli/internal/store"
 )
 
 func TestHistoryCoverageCommandListsReadyAndBlockedChats(t *testing.T) {

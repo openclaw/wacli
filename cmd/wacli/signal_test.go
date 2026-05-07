@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/steipete/wacli/internal/out"
+	"github.com/openclaw/wacli/internal/out"
 )
 
 func TestSignalContextWithEventsKeepsStderrNDJSON(t *testing.T) {

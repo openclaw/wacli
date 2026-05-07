@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/steipete/wacli/internal/fsutil"
+	"github.com/openclaw/wacli/internal/fsutil"
 	"go.mau.fi/whatsmeow"
 )
 

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/steipete/wacli/internal/out"
+	"github.com/openclaw/wacli/internal/out"
 	"go.mau.fi/whatsmeow/types"
 )
 

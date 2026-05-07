@@ -7,9 +7,9 @@ import (
 	"os"
 	"strings"
 
+	"github.com/openclaw/wacli/internal/app"
+	"github.com/openclaw/wacli/internal/out"
 	"github.com/spf13/cobra"
-	"github.com/steipete/wacli/internal/app"
-	"github.com/steipete/wacli/internal/out"
 )
 
 func newChatsCleanupCmd(flags *rootFlags) *cobra.Command {

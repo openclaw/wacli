@@ -6,9 +6,9 @@ import (
 	"os"
 	"time"
 
+	appPkg "github.com/openclaw/wacli/internal/app"
+	"github.com/openclaw/wacli/internal/out"
 	"github.com/spf13/cobra"
-	appPkg "github.com/steipete/wacli/internal/app"
-	"github.com/steipete/wacli/internal/out"
 )
 
 func newSyncCmd(flags *rootFlags) *cobra.Command {

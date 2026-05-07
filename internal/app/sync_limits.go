@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/steipete/wacli/internal/wa"
+	"github.com/openclaw/wacli/internal/wa"
 )
 
 type syncStorageLimits struct {

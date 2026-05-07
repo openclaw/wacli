@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/openclaw/wacli/internal/out"
 	"github.com/spf13/cobra"
-	"github.com/steipete/wacli/internal/out"
 )
 
 func newStoreCleanupCmd(flags *rootFlags) *cobra.Command {

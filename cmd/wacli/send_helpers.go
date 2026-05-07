@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/steipete/wacli/internal/app"
+	"github.com/openclaw/wacli/internal/app"
 	"go.mau.fi/whatsmeow"
 )
 

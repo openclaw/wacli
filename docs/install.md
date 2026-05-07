@@ -36,6 +36,13 @@ Download the matching archive from the [latest release](https://github.com/openc
 Then:
 
 ```bash
+CGO_ENABLED=1 CGO_CFLAGS="-Wno-error=missing-braces" \
+  go install -tags sqlite_fts5 github.com/openclaw/wacli/cmd/wacli@latest
+```
+
+For local development:
+
+```bash
 git clone https://github.com/openclaw/wacli.git
 cd wacli
 CGO_ENABLED=1 CGO_CFLAGS="-Wno-error=missing-braces" \

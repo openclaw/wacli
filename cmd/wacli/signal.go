@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/steipete/wacli/internal/out"
+	"github.com/openclaw/wacli/internal/out"
 )
 
 // signalContext returns a context that is cancelled on the first SIGINT/SIGTERM.

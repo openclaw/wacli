@@ -3,7 +3,7 @@ package app
 import (
 	"context"
 
-	"github.com/steipete/wacli/internal/wa"
+	"github.com/openclaw/wacli/internal/wa"
 )
 
 func (a *App) refreshContacts(ctx context.Context) error {

@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/steipete/wacli/internal/store"
+	"github.com/openclaw/wacli/internal/store"
 	"go.mau.fi/whatsmeow/types"
 )
 

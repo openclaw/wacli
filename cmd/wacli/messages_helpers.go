@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/steipete/wacli/internal/app"
-	"github.com/steipete/wacli/internal/store"
-	"github.com/steipete/wacli/internal/wa"
+	"github.com/openclaw/wacli/internal/app"
+	"github.com/openclaw/wacli/internal/store"
+	"github.com/openclaw/wacli/internal/wa"
 	"go.mau.fi/whatsmeow/types"
 )
 

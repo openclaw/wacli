@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	_ "github.com/mattn/go-sqlite3"
-	"github.com/steipete/wacli/internal/sqliteutil"
+	"github.com/openclaw/wacli/internal/sqliteutil"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	waLog "go.mau.fi/whatsmeow/util/log"

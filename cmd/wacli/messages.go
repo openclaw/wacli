@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openclaw/wacli/internal/app"
+	"github.com/openclaw/wacli/internal/out"
+	"github.com/openclaw/wacli/internal/store"
+	"github.com/openclaw/wacli/internal/wa"
 	"github.com/spf13/cobra"
-	"github.com/steipete/wacli/internal/app"
-	"github.com/steipete/wacli/internal/out"
-	"github.com/steipete/wacli/internal/store"
-	"github.com/steipete/wacli/internal/wa"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/types"
 )

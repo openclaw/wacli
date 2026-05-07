@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/steipete/wacli/internal/wa"
+	"github.com/openclaw/wacli/internal/wa"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"

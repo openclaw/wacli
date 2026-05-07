@@ -1,4 +1,4 @@
-module github.com/steipete/wacli
+module github.com/openclaw/wacli
 
 go 1.25.0
 

@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openclaw/wacli/internal/app"
+	"github.com/openclaw/wacli/internal/config"
+	"github.com/openclaw/wacli/internal/lock"
+	"github.com/openclaw/wacli/internal/out"
 	"github.com/spf13/cobra"
-	"github.com/steipete/wacli/internal/app"
-	"github.com/steipete/wacli/internal/config"
-	"github.com/steipete/wacli/internal/lock"
-	"github.com/steipete/wacli/internal/out"
 )
 
 var version = "0.8.0"

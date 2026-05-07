@@ -11,10 +11,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/steipete/wacli/internal/app"
-	"github.com/steipete/wacli/internal/lock"
-	"github.com/steipete/wacli/internal/out"
-	"github.com/steipete/wacli/internal/store"
+	"github.com/openclaw/wacli/internal/app"
+	"github.com/openclaw/wacli/internal/lock"
+	"github.com/openclaw/wacli/internal/out"
+	"github.com/openclaw/wacli/internal/store"
 	"go.mau.fi/whatsmeow/types"
 )
 
