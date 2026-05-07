@@ -31,6 +31,7 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 			if err := flags.requireWritable(); err != nil {
 				return err
 			}
+			storage.maxMessagesSet = cmd.Flags().Changed("max-messages")
 			maxMessages, maxDBSize, err := resolveSyncStorageLimits(storage)
 			if err != nil {
 				return err

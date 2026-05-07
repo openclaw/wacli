@@ -13,13 +13,14 @@ const (
 )
 
 type syncStorageLimitFlags struct {
-	maxMessages int64
-	maxDBSize   string
+	maxMessages    int64
+	maxMessagesSet bool
+	maxDBSize      string
 }
 
 func resolveSyncStorageLimits(flags syncStorageLimitFlags) (int64, int64, error) {
 	maxMessages := flags.maxMessages
-	if maxMessages <= 0 {
+	if !flags.maxMessagesSet && maxMessages <= 0 {
 		raw := strings.TrimSpace(os.Getenv(envSyncMaxMessages))
 		if raw != "" {
 			n, err := strconv.ParseInt(raw, 10, 64)

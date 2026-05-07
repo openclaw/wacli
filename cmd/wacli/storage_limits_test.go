@@ -64,3 +64,18 @@ func TestResolveSyncStorageLimitsFlagsOverrideEnv(t *testing.T) {
 		t.Fatalf("maxDBSize = %d, want 4MiB", maxDBSize)
 	}
 }
+
+func TestResolveSyncStorageLimitsExplicitZeroMaxMessagesOverridesEnv(t *testing.T) {
+	t.Setenv(envSyncMaxMessages, "123")
+
+	maxMessages, _, err := resolveSyncStorageLimits(syncStorageLimitFlags{
+		maxMessages:    0,
+		maxMessagesSet: true,
+	})
+	if err != nil {
+		t.Fatalf("resolveSyncStorageLimits: %v", err)
+	}
+	if maxMessages != 0 {
+		t.Fatalf("maxMessages = %d, want explicit unlimited", maxMessages)
+	}
+}
