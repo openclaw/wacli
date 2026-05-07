@@ -64,8 +64,8 @@ jobs:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           if [ -z "$GH_TOKEN" ]; then
-            echo "::error::Set HOMEBREW_TAP_TOKEN with workflow access to steipete/homebrew-tap"
-            exit 1
+            echo "::warning::Skipping Homebrew tap update because HOMEBREW_TAP_TOKEN is not configured with workflow access to steipete/homebrew-tap"
+            exit 0
           fi
 
           request_id="wacli-${RELEASE_TAG}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
@@ -76,7 +76,7 @@ jobs:
             --ref main \
             -f formula=wacli \
             -f tag="$RELEASE_TAG" \
-            -f repository=steipete/wacli \
+            -f repository=openclaw/wacli \
             -f macos_artifact=wacli-macos-universal.tar.gz \
             -f request_id="$request_id"
 

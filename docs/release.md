@@ -30,10 +30,12 @@ early if someone tries to compile it with `CGO_ENABLED=0`.
 
 ## Homebrew Tap
 
-The release workflow dispatches the `Update Formula` workflow in `steipete/homebrew-tap` after the macOS artifact is published. The tap workflow owns the formula-editing logic and updates both the macOS artifact SHA256 and the Linux source archive SHA256 in `Formula/wacli.rb`.
+The release workflow dispatches the `Update Formula` workflow in `steipete/homebrew-tap` after the macOS artifact is published when the tap token is configured. The tap workflow owns the formula-editing logic and updates both the macOS artifact SHA256 and the Linux source archive SHA256 in `Formula/wacli.rb`.
 
-Required repository secret:
+Optional repository secret:
 
 - `HOMEBREW_TAP_TOKEN`: token with permission to run workflows in `steipete/homebrew-tap`
+
+If `HOMEBREW_TAP_TOKEN` is missing, release artifacts are still published and the tap update is skipped with a workflow warning.
 
 To backfill an existing release, rerun the `release` workflow manually with `tag: vX.Y.Z`.
