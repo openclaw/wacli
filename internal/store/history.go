@@ -68,6 +68,9 @@ func (d *DB) ListHistoryCoverage(p ListHistoryCoverageParams) ([]HistoryCoverage
 	if len(p.ChatJIDs) > 0 {
 		query, args = appendStringFilter(query, args, "c.jid", "", p.ChatJIDs)
 	}
+	if !p.IncludeBlocked || p.OnlyActionable {
+		query += ` AND COALESCE(ms.message_count, 0) > 0`
+	}
 
 	query += ` ORDER BY COALESCE(c.last_message_ts, 0) DESC, c.jid LIMIT ?`
 	args = append(args, p.Limit)
