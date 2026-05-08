@@ -120,6 +120,7 @@ func (d *DB) MarkMessageRevoked(chatJID, msgID string) error {
 		SET revoked = 1,
 		    text = NULL,
 		    display_text = ?,
+		    buttons = NULL,
 		    media_type = NULL,
 		    media_caption = NULL,
 		    filename = NULL,
@@ -159,6 +160,7 @@ func (d *DB) MarkMessageDeletedForMe(chatJID, msgID, senderJID string, fromMe bo
 		SET deleted_for_me = 1,
 		    text = NULL,
 		    display_text = ?,
+		    buttons = NULL,
 		    media_type = NULL,
 		    media_caption = NULL,
 		    filename = NULL,
@@ -193,6 +195,7 @@ func (d *DB) UpdateMessageText(chatJID, msgID, text string) error {
 		UPDATE messages
 		SET text = ?,
 		    display_text = ?,
+		    buttons = NULL,
 		    media_type = NULL,
 		    media_caption = NULL,
 		    filename = NULL,
