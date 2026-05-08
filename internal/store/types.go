@@ -75,7 +75,7 @@ type Message struct {
 	FromMe          bool
 	Text            string
 	DisplayText     string
-	Buttons         []Button  `json:",omitempty"`
+	Buttons         []Button `json:",omitempty"`
 	IsForwarded     bool
 	ForwardingScore uint32
 	ReactionToID    string
