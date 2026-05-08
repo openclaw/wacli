@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Messages: new `messages download` command — fetches the encrypted media payload of an image/video/audio/document/sticker message from WhatsApp's CDN and decrypts it to disk. Auto-derives the output filename from the stored filename or msg ID + mime/media-type extension when `--output` isn't given.
+
 ## 0.8.1 - 2026-05-08
 
 ### Changed
