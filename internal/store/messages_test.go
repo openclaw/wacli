@@ -582,6 +582,195 @@ func TestMessageDeletedForMeTombstoneIsHiddenFromListAndSearch(t *testing.T) {
 	}
 }
 
+func TestMessageButtonsRoundTrip(t *testing.T) {
+	db := openTestDB(t)
+
+	chat := "biz@s.whatsapp.net"
+	now := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
+	if err := db.UpsertChat(chat, "dm", "Biz", now); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+
+	buttons := []Button{
+		{Type: "url", DisplayText: "Buy flights", URL: "https://example.com/flights"},
+		{Type: "url", DisplayText: "Buy packages", URL: "https://example.com/packages"},
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID:   chat,
+		MsgID:     "tmpl1",
+		SenderJID: chat,
+		Timestamp: now,
+		Text:      "Check our deals",
+		Buttons:   buttons,
+	}); err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+
+	msg, err := db.GetMessage(chat, "tmpl1")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if len(msg.Buttons) != 2 {
+		t.Fatalf("GetMessage: expected 2 buttons, got %d", len(msg.Buttons))
+	}
+	if msg.Buttons[0].Type != "url" || msg.Buttons[0].DisplayText != "Buy flights" || msg.Buttons[0].URL != "https://example.com/flights" {
+		t.Fatalf("GetMessage: unexpected button[0]: %+v", msg.Buttons[0])
+	}
+	if msg.Buttons[1].DisplayText != "Buy packages" {
+		t.Fatalf("GetMessage: unexpected button[1]: %+v", msg.Buttons[1])
+	}
+
+	msgs, err := db.ListMessages(ListMessagesParams{ChatJID: chat, Limit: 10})
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(msgs) != 1 || len(msgs[0].Buttons) != 2 {
+		t.Fatalf("ListMessages: expected 1 message with 2 buttons, got %+v", msgs)
+	}
+}
+
+func TestMessageButtonsListRowRoundTrip(t *testing.T) {
+	db := openTestDB(t)
+
+	chat := "biz@s.whatsapp.net"
+	now := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
+	if err := db.UpsertChat(chat, "dm", "Biz", now); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+
+	buttons := []Button{
+		{Type: "list", DisplayText: "Options"},
+		{Type: "list_row", DisplayText: "Alice", ID: "alice", Description: "Send to Alice"},
+		{Type: "list_row", DisplayText: "Bob", ID: "bob"},
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID:   chat,
+		MsgID:     "list1",
+		SenderJID: chat,
+		Timestamp: now,
+		Text:      "Who do you want to send money to?",
+		Buttons:   buttons,
+	}); err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+
+	msg, err := db.GetMessage(chat, "list1")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if len(msg.Buttons) != 3 {
+		t.Fatalf("expected 3 buttons, got %d: %+v", len(msg.Buttons), msg.Buttons)
+	}
+	if msg.Buttons[0].Type != "list" || msg.Buttons[0].DisplayText != "Options" {
+		t.Fatalf("unexpected list button: %+v", msg.Buttons[0])
+	}
+	if msg.Buttons[1].ID != "alice" || msg.Buttons[1].Description != "Send to Alice" {
+		t.Fatalf("unexpected row[0]: %+v", msg.Buttons[1])
+	}
+	if msg.Buttons[2].ID != "bob" || msg.Buttons[2].Description != "" {
+		t.Fatalf("unexpected row[1]: %+v", msg.Buttons[2])
+	}
+}
+
+func TestMessageButtonsClearedOnRevoke(t *testing.T) {
+	db := openTestDB(t)
+
+	chat := "biz@s.whatsapp.net"
+	now := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
+	if err := db.UpsertChat(chat, "dm", "Biz", now); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID:   chat,
+		MsgID:     "m1",
+		SenderJID: chat,
+		Timestamp: now,
+		Text:      "hello",
+		Buttons:   []Button{{Type: "url", DisplayText: "Click", URL: "https://example.com"}},
+	}); err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+
+	if err := db.MarkMessageRevoked(chat, "m1"); err != nil {
+		t.Fatalf("MarkMessageRevoked: %v", err)
+	}
+
+	msg, err := db.GetMessage(chat, "m1")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if len(msg.Buttons) != 0 {
+		t.Fatalf("expected buttons cleared after revoke, got %+v", msg.Buttons)
+	}
+}
+
+func TestMessageButtonsClearedOnDeletedForMe(t *testing.T) {
+	db := openTestDB(t)
+
+	chat := "biz@s.whatsapp.net"
+	now := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
+	if err := db.UpsertChat(chat, "dm", "Biz", now); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID:   chat,
+		MsgID:     "m1",
+		SenderJID: chat,
+		Timestamp: now,
+		Text:      "hello",
+		Buttons:   []Button{{Type: "quick_reply", DisplayText: "Yes", ID: "yes"}},
+	}); err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+
+	if err := db.MarkMessageDeletedForMe(chat, "m1", chat, false, now.Add(time.Second)); err != nil {
+		t.Fatalf("MarkMessageDeletedForMe: %v", err)
+	}
+
+	msg, err := db.GetMessage(chat, "m1")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if len(msg.Buttons) != 0 {
+		t.Fatalf("expected buttons cleared after deleted-for-me, got %+v", msg.Buttons)
+	}
+}
+
+func TestMessageButtonsClearedOnUpdateText(t *testing.T) {
+	db := openTestDB(t)
+
+	chat := "biz@s.whatsapp.net"
+	now := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
+	if err := db.UpsertChat(chat, "dm", "Biz", now); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID:   chat,
+		MsgID:     "m1",
+		SenderJID: chat,
+		Timestamp: now,
+		Text:      "original",
+		Buttons:   []Button{{Type: "url", DisplayText: "Click", URL: "https://example.com"}},
+	}); err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+
+	if err := db.UpdateMessageText(chat, "m1", "edited"); err != nil {
+		t.Fatalf("UpdateMessageText: %v", err)
+	}
+
+	msg, err := db.GetMessage(chat, "m1")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if msg.Text != "edited" {
+		t.Fatalf("expected text=edited, got %q", msg.Text)
+	}
+	if len(msg.Buttons) != 0 {
+		t.Fatalf("expected buttons cleared after text edit, got %+v", msg.Buttons)
+	}
+}
+
 func TestUpdateMessageTextClearsMediaState(t *testing.T) {
 	db := openTestDB(t)
 
