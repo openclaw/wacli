@@ -56,6 +56,15 @@ type MediaDownloadInfo struct {
 	DownloadedAt  time.Time
 }
 
+type Button struct {
+	Type        string `json:"type"`
+	DisplayText string `json:"display_text"`
+	ID          string `json:"id,omitempty"`
+	URL         string `json:"url,omitempty"`
+	PhoneNumber string `json:"phone_number,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
 type Message struct {
 	ChatJID         string
 	ChatName        string
@@ -66,6 +75,7 @@ type Message struct {
 	FromMe          bool
 	Text            string
 	DisplayText     string
+	Buttons         []Button  `json:",omitempty"`
 	IsForwarded     bool
 	ForwardingScore uint32
 	ReactionToID    string

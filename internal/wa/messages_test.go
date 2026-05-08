@@ -326,6 +326,115 @@ func TestParseTemplateMessage(t *testing.T) {
 	if pm.Text != "Your appointment is confirmed\n[Reply STOP to opt out]" {
 		t.Fatalf("unexpected template text: %q", pm.Text)
 	}
+	if len(pm.Buttons) != 0 {
+		t.Fatalf("expected no buttons, got %d", len(pm.Buttons))
+	}
+}
+
+func TestParseTemplateMessageWithURLButtons(t *testing.T) {
+	chat, _ := types.ParseJID("123@s.whatsapp.net")
+	sender, _ := types.ParseJID("biz@s.whatsapp.net")
+
+	ev := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat: chat, Sender: sender, IsFromMe: false,
+			},
+			ID:        "tmpl2",
+			Timestamp: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+		},
+		Message: &waProto.Message{
+			TemplateMessage: &waProto.TemplateMessage{
+				HydratedTemplate: &waProto.TemplateMessage_HydratedFourRowTemplate{
+					HydratedContentText: proto.String("Check out our deals"),
+					HydratedFooterText:  proto.String("Terms apply"),
+					HydratedButtons: []*waProto.HydratedTemplateButton{
+						{
+							HydratedButton: &waProto.HydratedTemplateButton_UrlButton{
+								UrlButton: &waProto.HydratedTemplateButton_HydratedURLButton{
+									DisplayText: proto.String("Buy flights"),
+									URL:         proto.String("https://example.com/flights"),
+								},
+							},
+						},
+						{
+							HydratedButton: &waProto.HydratedTemplateButton_UrlButton{
+								UrlButton: &waProto.HydratedTemplateButton_HydratedURLButton{
+									DisplayText: proto.String("Buy packages"),
+									URL:         proto.String("https://example.com/packages"),
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	pm := ParseLiveMessage(ev)
+	if pm.Text != "Check out our deals\n[Terms apply]" {
+		t.Fatalf("unexpected template text: %q", pm.Text)
+	}
+	if len(pm.Buttons) != 2 {
+		t.Fatalf("expected 2 buttons, got %d", len(pm.Buttons))
+	}
+	if pm.Buttons[0].Type != "url" || pm.Buttons[0].DisplayText != "Buy flights" || pm.Buttons[0].URL != "https://example.com/flights" {
+		t.Fatalf("unexpected button[0]: %+v", pm.Buttons[0])
+	}
+	if pm.Buttons[1].Type != "url" || pm.Buttons[1].DisplayText != "Buy packages" || pm.Buttons[1].URL != "https://example.com/packages" {
+		t.Fatalf("unexpected button[1]: %+v", pm.Buttons[1])
+	}
+}
+
+func TestParseTemplateMessageWithMixedButtons(t *testing.T) {
+	chat, _ := types.ParseJID("123@s.whatsapp.net")
+	sender, _ := types.ParseJID("biz@s.whatsapp.net")
+
+	ev := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat: chat, Sender: sender, IsFromMe: false,
+			},
+			ID:        "tmpl3",
+			Timestamp: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+		},
+		Message: &waProto.Message{
+			TemplateMessage: &waProto.TemplateMessage{
+				HydratedTemplate: &waProto.TemplateMessage_HydratedFourRowTemplate{
+					HydratedContentText: proto.String("Contact us"),
+					HydratedButtons: []*waProto.HydratedTemplateButton{
+						{
+							HydratedButton: &waProto.HydratedTemplateButton_QuickReplyButton{
+								QuickReplyButton: &waProto.HydratedTemplateButton_HydratedQuickReplyButton{
+									DisplayText: proto.String("Yes"),
+									ID:          proto.String("yes_id"),
+								},
+							},
+						},
+						{
+							HydratedButton: &waProto.HydratedTemplateButton_CallButton{
+								CallButton: &waProto.HydratedTemplateButton_HydratedCallButton{
+									DisplayText: proto.String("Call us"),
+									PhoneNumber: proto.String("+1234567890"),
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	pm := ParseLiveMessage(ev)
+	if len(pm.Buttons) != 2 {
+		t.Fatalf("expected 2 buttons, got %d", len(pm.Buttons))
+	}
+	if pm.Buttons[0].Type != "quick_reply" || pm.Buttons[0].DisplayText != "Yes" || pm.Buttons[0].ID != "yes_id" {
+		t.Fatalf("unexpected quick_reply button: %+v", pm.Buttons[0])
+	}
+	if pm.Buttons[1].Type != "call" || pm.Buttons[1].DisplayText != "Call us" || pm.Buttons[1].PhoneNumber != "+1234567890" {
+		t.Fatalf("unexpected call button: %+v", pm.Buttons[1])
+	}
 }
 
 func TestParseButtonsMessage(t *testing.T) {
@@ -344,6 +453,20 @@ func TestParseButtonsMessage(t *testing.T) {
 			ButtonsMessage: &waProto.ButtonsMessage{
 				ContentText: proto.String("Pick an option"),
 				FooterText:  proto.String("Powered by Biz"),
+				Buttons: []*waProto.ButtonsMessage_Button{
+					{
+						ButtonID: proto.String("btn_a"),
+						ButtonText: &waProto.ButtonsMessage_Button_ButtonText{
+							DisplayText: proto.String("Option A"),
+						},
+					},
+					{
+						ButtonID: proto.String("btn_b"),
+						ButtonText: &waProto.ButtonsMessage_Button_ButtonText{
+							DisplayText: proto.String("Option B"),
+						},
+					},
+				},
 			},
 		},
 	}
@@ -351,6 +474,15 @@ func TestParseButtonsMessage(t *testing.T) {
 	pm := ParseLiveMessage(ev)
 	if pm.Text != "Pick an option\n[Powered by Biz]" {
 		t.Fatalf("unexpected buttons text: %q", pm.Text)
+	}
+	if len(pm.Buttons) != 2 {
+		t.Fatalf("expected 2 buttons, got %d", len(pm.Buttons))
+	}
+	if pm.Buttons[0].Type != "quick_reply" || pm.Buttons[0].DisplayText != "Option A" || pm.Buttons[0].ID != "btn_a" {
+		t.Fatalf("unexpected button[0]: %+v", pm.Buttons[0])
+	}
+	if pm.Buttons[1].Type != "quick_reply" || pm.Buttons[1].DisplayText != "Option B" || pm.Buttons[1].ID != "btn_b" {
+		t.Fatalf("unexpected button[1]: %+v", pm.Buttons[1])
 	}
 }
 
@@ -431,6 +563,16 @@ func TestParseListMessage(t *testing.T) {
 			ListMessage: &waProto.ListMessage{
 				Title:       proto.String("Menu"),
 				Description: proto.String("Choose an item"),
+				ButtonText:  proto.String("Options"),
+				Sections: []*waProto.ListMessage_Section{
+					{
+						Title: proto.String("Section 1"),
+						Rows: []*waProto.ListMessage_Row{
+							{Title: proto.String("Alice"), RowID: proto.String("alice"), Description: proto.String("Send to Alice")},
+							{Title: proto.String("Bob"), RowID: proto.String("bob")},
+						},
+					},
+				},
 			},
 		},
 	}
@@ -438,6 +580,18 @@ func TestParseListMessage(t *testing.T) {
 	pm := ParseLiveMessage(ev)
 	if pm.Text != "Menu\nChoose an item" {
 		t.Fatalf("unexpected list text: %q", pm.Text)
+	}
+	if len(pm.Buttons) != 3 {
+		t.Fatalf("expected 3 buttons (1 list + 2 rows), got %d", len(pm.Buttons))
+	}
+	if pm.Buttons[0].Type != "list" || pm.Buttons[0].DisplayText != "Options" {
+		t.Fatalf("unexpected list button: %+v", pm.Buttons[0])
+	}
+	if pm.Buttons[1].Type != "list_row" || pm.Buttons[1].DisplayText != "Alice" || pm.Buttons[1].ID != "alice" || pm.Buttons[1].Description != "Send to Alice" {
+		t.Fatalf("unexpected row[0]: %+v", pm.Buttons[1])
+	}
+	if pm.Buttons[2].Type != "list_row" || pm.Buttons[2].DisplayText != "Bob" || pm.Buttons[2].ID != "bob" {
+		t.Fatalf("unexpected row[1]: %+v", pm.Buttons[2])
 	}
 }
 

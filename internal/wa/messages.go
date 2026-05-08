@@ -21,6 +21,15 @@ type Media struct {
 	FileLength    uint64
 }
 
+type Button struct {
+	Type        string `json:"type"`
+	DisplayText string `json:"display_text"`
+	ID          string `json:"id,omitempty"`
+	URL         string `json:"url,omitempty"`
+	PhoneNumber string `json:"phone_number,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
 type ParsedMessage struct {
 	Chat            types.JID
 	ID              string
@@ -28,6 +37,7 @@ type ParsedMessage struct {
 	Timestamp       time.Time
 	FromMe          bool
 	Text            string
+	Buttons         []Button
 	Media           *Media
 	PushName        string
 	ReplyToID       string

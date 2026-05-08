@@ -26,6 +26,7 @@ var schemaMigrations = []migration{
 	{version: 10, name: "chat state columns", up: migrateChatStateColumns},
 	{version: 11, name: "group hierarchy columns", up: migrateGroupHierarchyColumns},
 	{version: 12, name: "contacts system_name column", up: migrateContactsSystemNameColumn},
+	{version: 13, name: "messages buttons column", up: migrateMessagesButtonsColumn},
 }
 
 func (d *DB) ensureSchema() error {
@@ -234,6 +235,27 @@ func migrateGroupHierarchyColumns(d *DB) error {
 	}
 	if _, err := d.sql.Exec(`CREATE INDEX IF NOT EXISTS idx_groups_linked_parent_jid ON groups(linked_parent_jid)`); err != nil {
 		return fmt.Errorf("create groups linked-parent index: %w", err)
+	}
+	return nil
+}
+
+func migrateMessagesButtonsColumn(d *DB) error {
+	hasTable, err := d.tableExists("messages")
+	if err != nil {
+		return err
+	}
+	if !hasTable {
+		return nil
+	}
+	has, err := d.tableHasColumn("messages", "buttons")
+	if err != nil {
+		return err
+	}
+	if has {
+		return nil
+	}
+	if _, err := d.sql.Exec(`ALTER TABLE messages ADD COLUMN buttons TEXT`); err != nil {
+		return fmt.Errorf("add messages.buttons column: %w", err)
 	}
 	return nil
 }

@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ type UpsertMessageParams struct {
 	FromMe          bool
 	Text            string
 	DisplayText     string
+	Buttons         []Button
 	IsForwarded     bool
 	ForwardingScore uint32
 	ReactionToID    string
@@ -35,7 +37,7 @@ type UpsertMessageParams struct {
 }
 
 func messageSelectColumns(snippet string) string {
-	return fmt.Sprintf(`m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), m.is_forwarded, m.forwarding_score, COALESCE(m.reaction_to_id,''), COALESCE(m.reaction_emoji,''), COALESCE(m.media_type,''), COALESCE(m.media_caption,''), COALESCE(m.filename,''), COALESCE(m.mime_type,''), COALESCE(m.direct_path,''), COALESCE(m.local_path,''), COALESCE(m.downloaded_at,0), CASE WHEN s.msg_id IS NULL THEN 0 ELSE 1 END, COALESCE(s.starred_at,0), m.revoked, m.deleted_for_me, %s`, snippetSQL(snippet))
+	return fmt.Sprintf(`m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), m.is_forwarded, m.forwarding_score, COALESCE(m.reaction_to_id,''), COALESCE(m.reaction_emoji,''), COALESCE(m.media_type,''), COALESCE(m.media_caption,''), COALESCE(m.filename,''), COALESCE(m.mime_type,''), COALESCE(m.direct_path,''), COALESCE(m.local_path,''), COALESCE(m.downloaded_at,0), CASE WHEN s.msg_id IS NULL THEN 0 ELSE 1 END, COALESCE(s.starred_at,0), m.revoked, m.deleted_for_me, COALESCE(m.buttons,''), %s`, snippetSQL(snippet))
 }
 
 func snippetSQL(snippet string) string {
@@ -48,6 +50,7 @@ func snippetSQL(snippet string) string {
 func (d *DB) UpsertMessage(p UpsertMessageParams) error {
 	if p.Revoked || p.DeletedForMe {
 		p.Text = ""
+		p.Buttons = nil
 		if p.DeletedForMe {
 			p.DisplayText = DeletedForMeMessageDisplayText
 		} else {
@@ -63,13 +66,19 @@ func (d *DB) UpsertMessage(p UpsertMessageParams) error {
 		p.FileEncSHA256 = nil
 		p.FileLength = 0
 	}
+	var buttonsJSON interface{}
+	if len(p.Buttons) > 0 {
+		if b, err := json.Marshal(p.Buttons); err == nil {
+			buttonsJSON = string(b)
+		}
+	}
 	_, err := d.sql.Exec(`
 		INSERT INTO messages(
 			chat_jid, chat_name, msg_id, sender_jid, sender_name, ts, from_me, text, display_text,
 			is_forwarded, forwarding_score, reaction_to_id, reaction_emoji,
 			media_type, media_caption, filename, mime_type, direct_path,
-			media_key, file_sha256, file_enc_sha256, file_length, revoked, deleted_for_me
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			media_key, file_sha256, file_enc_sha256, file_length, revoked, deleted_for_me, buttons
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(chat_jid, msg_id) DO UPDATE SET
 			chat_name=COALESCE(NULLIF(excluded.chat_name,''), messages.chat_name),
 			sender_jid=excluded.sender_jid,
@@ -94,11 +103,13 @@ func (d *DB) UpsertMessage(p UpsertMessageParams) error {
 			local_path=CASE WHEN messages.revoked != 0 OR messages.deleted_for_me != 0 OR excluded.revoked != 0 OR excluded.deleted_for_me != 0 THEN NULL ELSE messages.local_path END,
 			downloaded_at=CASE WHEN messages.revoked != 0 OR messages.deleted_for_me != 0 OR excluded.revoked != 0 OR excluded.deleted_for_me != 0 THEN NULL ELSE messages.downloaded_at END,
 			revoked=CASE WHEN excluded.revoked != 0 THEN 1 ELSE messages.revoked END,
-			deleted_for_me=CASE WHEN excluded.deleted_for_me != 0 THEN 1 ELSE messages.deleted_for_me END
+			deleted_for_me=CASE WHEN excluded.deleted_for_me != 0 THEN 1 ELSE messages.deleted_for_me END,
+			buttons=CASE WHEN messages.revoked != 0 OR messages.deleted_for_me != 0 OR excluded.revoked != 0 OR excluded.deleted_for_me != 0 THEN NULL ELSE excluded.buttons END
 	`, p.ChatJID, nullIfEmpty(p.ChatName), p.MsgID, nullIfEmpty(p.SenderJID), nullIfEmpty(p.SenderName), unix(p.Timestamp), boolToInt(p.FromMe), nullIfEmpty(p.Text), nullIfEmpty(p.DisplayText),
 		boolToInt(p.IsForwarded), int64(p.ForwardingScore), nullIfEmpty(p.ReactionToID), nullIfEmpty(p.ReactionEmoji),
 		nullIfEmpty(p.MediaType), nullIfEmpty(p.MediaCaption), nullIfEmpty(p.Filename), nullIfEmpty(p.MimeType), nullIfEmpty(p.DirectPath),
-		p.MediaKey, p.FileSHA256, p.FileEncSHA256, int64(p.FileLength), boolToInt(p.Revoked), boolToInt(p.DeletedForMe), DeletedForMeMessageDisplayText, DeletedMessageDisplayText,
+		p.MediaKey, p.FileSHA256, p.FileEncSHA256, int64(p.FileLength), boolToInt(p.Revoked), boolToInt(p.DeletedForMe), buttonsJSON,
+		DeletedForMeMessageDisplayText, DeletedMessageDisplayText,
 	)
 	return err
 }
@@ -315,7 +326,8 @@ func (d *DB) GetMessage(chatJID, msgID string) (Message, error) {
 	var starredAt int64
 	var revoked int
 	var deletedForMe int
-	if err := row.Scan(&m.rowID, &m.ChatJID, &m.ChatName, &m.MsgID, &m.SenderJID, &m.SenderName, &ts, &fromMe, &m.Text, &m.DisplayText, &forwarded, &forwardingScore, &m.ReactionToID, &m.ReactionEmoji, &m.MediaType, &m.MediaCaption, &m.Filename, &m.MimeType, &m.DirectPath, &m.LocalPath, &downloadedAt, &starred, &starredAt, &revoked, &deletedForMe, &m.Snippet); err != nil {
+	var buttonsJSON string
+	if err := row.Scan(&m.rowID, &m.ChatJID, &m.ChatName, &m.MsgID, &m.SenderJID, &m.SenderName, &ts, &fromMe, &m.Text, &m.DisplayText, &forwarded, &forwardingScore, &m.ReactionToID, &m.ReactionEmoji, &m.MediaType, &m.MediaCaption, &m.Filename, &m.MimeType, &m.DirectPath, &m.LocalPath, &downloadedAt, &starred, &starredAt, &revoked, &deletedForMe, &buttonsJSON, &m.Snippet); err != nil {
 		return Message{}, err
 	}
 	m.Timestamp = fromUnix(ts)
@@ -327,6 +339,9 @@ func (d *DB) GetMessage(chatJID, msgID string) (Message, error) {
 	m.StarredAt = fromUnix(starredAt)
 	m.Revoked = revoked != 0
 	m.DeletedForMe = deletedForMe != 0
+	if buttonsJSON != "" {
+		_ = json.Unmarshal([]byte(buttonsJSON), &m.Buttons)
+	}
 	return m, nil
 }
 
@@ -454,7 +469,8 @@ func (d *DB) scanMessages(query string, args ...interface{}) ([]Message, error) 
 		var starredAt int64
 		var revoked int
 		var deletedForMe int
-		if err := rows.Scan(&m.rowID, &m.ChatJID, &m.ChatName, &m.MsgID, &m.SenderJID, &m.SenderName, &ts, &fromMe, &m.Text, &m.DisplayText, &forwarded, &forwardingScore, &m.ReactionToID, &m.ReactionEmoji, &m.MediaType, &m.MediaCaption, &m.Filename, &m.MimeType, &m.DirectPath, &m.LocalPath, &downloadedAt, &starred, &starredAt, &revoked, &deletedForMe, &m.Snippet); err != nil {
+		var buttonsJSON string
+		if err := rows.Scan(&m.rowID, &m.ChatJID, &m.ChatName, &m.MsgID, &m.SenderJID, &m.SenderName, &ts, &fromMe, &m.Text, &m.DisplayText, &forwarded, &forwardingScore, &m.ReactionToID, &m.ReactionEmoji, &m.MediaType, &m.MediaCaption, &m.Filename, &m.MimeType, &m.DirectPath, &m.LocalPath, &downloadedAt, &starred, &starredAt, &revoked, &deletedForMe, &buttonsJSON, &m.Snippet); err != nil {
 			return nil, err
 		}
 		m.Timestamp = fromUnix(ts)
@@ -466,6 +482,9 @@ func (d *DB) scanMessages(query string, args ...interface{}) ([]Message, error) 
 		m.StarredAt = fromUnix(starredAt)
 		m.Revoked = revoked != 0
 		m.DeletedForMe = deletedForMe != 0
+		if buttonsJSON != "" {
+			_ = json.Unmarshal([]byte(buttonsJSON), &m.Buttons)
+		}
 		out = append(out, m)
 	}
 	return out, rows.Err()

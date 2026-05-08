@@ -151,7 +151,7 @@ func migrateLIDMessagesToPN(tx *sql.Tx, lidJID, pnJID string) error {
 			is_forwarded, forwarding_score, reaction_to_id, reaction_emoji,
 			media_type, media_caption, filename, mime_type, direct_path,
 			media_key, file_sha256, file_enc_sha256, file_length, local_path, downloaded_at,
-			revoked, deleted_for_me
+			revoked, deleted_for_me, buttons
 		)
 		SELECT
 			?,
@@ -179,7 +179,8 @@ func migrateLIDMessagesToPN(tx *sql.Tx, lidJID, pnJID string) error {
 			local_path,
 			downloaded_at,
 			revoked,
-			deleted_for_me
+			deleted_for_me,
+			buttons
 		FROM messages
 		WHERE chat_jid = ?
 		ON CONFLICT(chat_jid, msg_id) DO UPDATE SET
@@ -206,7 +207,8 @@ func migrateLIDMessagesToPN(tx *sql.Tx, lidJID, pnJID string) error {
 			local_path = CASE WHEN messages.revoked != 0 OR messages.deleted_for_me != 0 OR excluded.revoked != 0 OR excluded.deleted_for_me != 0 THEN NULL ELSE COALESCE(NULLIF(messages.local_path, ''), excluded.local_path) END,
 			downloaded_at = CASE WHEN messages.revoked != 0 OR messages.deleted_for_me != 0 OR excluded.revoked != 0 OR excluded.deleted_for_me != 0 THEN NULL WHEN messages.downloaded_at IS NOT NULL AND messages.downloaded_at > 0 THEN messages.downloaded_at ELSE excluded.downloaded_at END,
 			revoked = CASE WHEN messages.revoked != 0 OR excluded.revoked != 0 THEN 1 ELSE 0 END,
-			deleted_for_me = CASE WHEN messages.deleted_for_me != 0 OR excluded.deleted_for_me != 0 THEN 1 ELSE 0 END
+			deleted_for_me = CASE WHEN messages.deleted_for_me != 0 OR excluded.deleted_for_me != 0 THEN 1 ELSE 0 END,
+			buttons = CASE WHEN messages.revoked != 0 OR messages.deleted_for_me != 0 OR excluded.revoked != 0 OR excluded.deleted_for_me != 0 THEN NULL ELSE COALESCE(messages.buttons, excluded.buttons) END
 	`, pnJID, lidJID, pnJID, lidJID, DeletedForMeMessageDisplayText, DeletedMessageDisplayText); err != nil {
 		return fmt.Errorf("merge lid messages into pn chat: %w", err)
 	}

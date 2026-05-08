@@ -7,36 +7,75 @@ import (
 )
 
 func extractBusinessText(m *waProto.Message, pm *ParsedMessage) {
-	if tmpl := m.GetTemplateMessage(); tmpl != nil && pm.Text == "" {
+	if tmpl := m.GetTemplateMessage(); tmpl != nil {
 		if hydrated := hydratedTemplate(tmpl); hydrated != nil {
-			var parts []string
-			if t := strings.TrimSpace(hydrated.GetHydratedTitleText()); t != "" {
-				parts = append(parts, t)
+			if pm.Text == "" {
+				var parts []string
+				if t := strings.TrimSpace(hydrated.GetHydratedTitleText()); t != "" {
+					parts = append(parts, t)
+				}
+				if b := strings.TrimSpace(hydrated.GetHydratedContentText()); b != "" {
+					parts = append(parts, b)
+				}
+				if f := strings.TrimSpace(hydrated.GetHydratedFooterText()); f != "" {
+					parts = append(parts, "["+f+"]")
+				}
+				pm.Text = strings.Join(parts, "\n")
 			}
-			if b := strings.TrimSpace(hydrated.GetHydratedContentText()); b != "" {
-				parts = append(parts, b)
+			for _, hb := range hydrated.GetHydratedButtons() {
+				if btn := hb.GetUrlButton(); btn != nil {
+					pm.Buttons = append(pm.Buttons, Button{
+						Type:        "url",
+						DisplayText: strings.TrimSpace(btn.GetDisplayText()),
+						URL:         strings.TrimSpace(btn.GetURL()),
+					})
+				} else if btn := hb.GetQuickReplyButton(); btn != nil {
+					pm.Buttons = append(pm.Buttons, Button{
+						Type:        "quick_reply",
+						DisplayText: strings.TrimSpace(btn.GetDisplayText()),
+						ID:          strings.TrimSpace(btn.GetID()),
+					})
+				} else if btn := hb.GetCallButton(); btn != nil {
+					pm.Buttons = append(pm.Buttons, Button{
+						Type:        "call",
+						DisplayText: strings.TrimSpace(btn.GetDisplayText()),
+						PhoneNumber: strings.TrimSpace(btn.GetPhoneNumber()),
+					})
+				}
 			}
-			if f := strings.TrimSpace(hydrated.GetHydratedFooterText()); f != "" {
-				parts = append(parts, "["+f+"]")
-			}
-			pm.Text = strings.Join(parts, "\n")
 		} else if im := tmpl.GetInteractiveMessageTemplate(); im != nil {
-			pm.Text = interactiveText(im)
+			if pm.Text == "" {
+				pm.Text = interactiveText(im)
+			}
 		}
 	}
 
-	if btn := m.GetButtonsMessage(); btn != nil && pm.Text == "" {
-		var parts []string
-		if t := strings.TrimSpace(btn.GetText()); t != "" {
-			parts = append(parts, t)
+	if btn := m.GetButtonsMessage(); btn != nil {
+		if pm.Text == "" {
+			var parts []string
+			if t := strings.TrimSpace(btn.GetText()); t != "" {
+				parts = append(parts, t)
+			}
+			if b := strings.TrimSpace(btn.GetContentText()); b != "" {
+				parts = append(parts, b)
+			}
+			if f := strings.TrimSpace(btn.GetFooterText()); f != "" {
+				parts = append(parts, "["+f+"]")
+			}
+			pm.Text = strings.Join(parts, "\n")
 		}
-		if b := strings.TrimSpace(btn.GetContentText()); b != "" {
-			parts = append(parts, b)
+		for _, b := range btn.GetButtons() {
+			if bt := b.GetButtonText(); bt != nil {
+				dt := strings.TrimSpace(bt.GetDisplayText())
+				if dt != "" {
+					pm.Buttons = append(pm.Buttons, Button{
+						Type:        "quick_reply",
+						DisplayText: dt,
+						ID:          strings.TrimSpace(b.GetButtonID()),
+					})
+				}
+			}
 		}
-		if f := strings.TrimSpace(btn.GetFooterText()); f != "" {
-			parts = append(parts, "["+f+"]")
-		}
-		pm.Text = strings.Join(parts, "\n")
 	}
 
 	if resp := m.GetButtonsResponseMessage(); resp != nil && pm.Text == "" {
@@ -53,15 +92,34 @@ func extractBusinessText(m *waProto.Message, pm *ParsedMessage) {
 		}
 	}
 
-	if list := m.GetListMessage(); list != nil && pm.Text == "" {
-		var parts []string
-		if t := strings.TrimSpace(list.GetTitle()); t != "" {
-			parts = append(parts, t)
+	if list := m.GetListMessage(); list != nil {
+		if pm.Text == "" {
+			var parts []string
+			if t := strings.TrimSpace(list.GetTitle()); t != "" {
+				parts = append(parts, t)
+			}
+			if d := strings.TrimSpace(list.GetDescription()); d != "" {
+				parts = append(parts, d)
+			}
+			pm.Text = strings.Join(parts, "\n")
 		}
-		if d := strings.TrimSpace(list.GetDescription()); d != "" {
-			parts = append(parts, d)
+		if bt := strings.TrimSpace(list.GetButtonText()); bt != "" {
+			pm.Buttons = append(pm.Buttons, Button{Type: "list", DisplayText: bt})
 		}
-		pm.Text = strings.Join(parts, "\n")
+		for _, sec := range list.GetSections() {
+			for _, row := range sec.GetRows() {
+				dt := strings.TrimSpace(row.GetTitle())
+				if dt == "" {
+					continue
+				}
+				pm.Buttons = append(pm.Buttons, Button{
+					Type:        "list_row",
+					DisplayText: dt,
+					ID:          strings.TrimSpace(row.GetRowID()),
+					Description: strings.TrimSpace(row.GetDescription()),
+				})
+			}
+		}
 	}
 
 	if lr := m.GetListResponseMessage(); lr != nil && pm.Text == "" {

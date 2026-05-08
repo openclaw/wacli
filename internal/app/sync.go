@@ -393,6 +393,7 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 		FromMe:          pm.FromMe,
 		Text:            pm.Text,
 		DisplayText:     displayText,
+		Buttons:         waButtonsToStore(pm.Buttons),
 		IsForwarded:     pm.IsForwarded,
 		ForwardingScore: pm.ForwardingScore,
 		ReactionToID:    pm.ReactionToID,
@@ -421,6 +422,24 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 		})
 	}
 	return nil
+}
+
+func waButtonsToStore(buttons []wa.Button) []store.Button {
+	if len(buttons) == 0 {
+		return nil
+	}
+	out := make([]store.Button, len(buttons))
+	for i, b := range buttons {
+		out[i] = store.Button{
+			Type:        b.Type,
+			DisplayText: b.DisplayText,
+			ID:          b.ID,
+			URL:         b.URL,
+			PhoneNumber: b.PhoneNumber,
+			Description: b.Description,
+		}
+	}
+	return out
 }
 
 func (a *App) buildDisplayText(ctx context.Context, pm wa.ParsedMessage) string {
