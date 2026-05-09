@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -45,6 +46,29 @@ func TestExecuteDelegatedSendRejectsBadVersionBeforeAppUse(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "unsupported send delegate version") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestSendDelegateRequestPreservesEphemeralInJSON(t *testing.T) {
+	raw, err := json.Marshal(sendDelegateRequest{
+		Version:   sendDelegateVersion,
+		Kind:      "text",
+		Message:   "hello",
+		Ephemeral: true,
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), `"ephemeral":true`) {
+		t.Fatalf("encoded request missing ephemeral flag: %s", raw)
+	}
+
+	var got sendDelegateRequest
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if !got.Ephemeral {
+		t.Fatalf("Ephemeral = false, want true")
 	}
 }
 

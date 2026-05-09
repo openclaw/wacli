@@ -165,13 +165,22 @@ type sendTextApp interface {
 	DB() *store.DB
 }
 
+type textMessageSender interface {
+	SendText(ctx context.Context, to types.JID, text string) (types.MessageID, error)
+	SendProtoMessage(ctx context.Context, to types.JID, msg *waProto.Message) (types.MessageID, error)
+}
+
 func sendTextMessage(ctx context.Context, a sendTextApp, to types.JID, text, replyTo, replyToSender string, preview *linkpreview.Preview, mentionedJIDs []string, ephemeral bool) (types.MessageID, error) {
-	msg, plainText, err := buildTextMessage(a.DB(), to, text, replyTo, replyToSender, preview, mentionedJIDs)
+	return sendTextMessageWithSender(ctx, a.WA(), a.DB(), to, text, replyTo, replyToSender, preview, mentionedJIDs, ephemeral)
+}
+
+func sendTextMessageWithSender(ctx context.Context, sender textMessageSender, db *store.DB, to types.JID, text, replyTo, replyToSender string, preview *linkpreview.Preview, mentionedJIDs []string, ephemeral bool) (types.MessageID, error) {
+	msg, plainText, err := buildTextMessage(db, to, text, replyTo, replyToSender, preview, mentionedJIDs)
 	if err != nil {
 		return "", err
 	}
 	if plainText && !ephemeral {
-		return a.WA().SendText(ctx, to, text)
+		return sender.SendText(ctx, to, text)
 	}
 	if plainText {
 		msg = &waProto.Message{Conversation: proto.String(text)}
@@ -179,7 +188,7 @@ func sendTextMessage(ctx context.Context, a sendTextApp, to types.JID, text, rep
 	if ephemeral {
 		msg = wrapEphemeralMessage(msg)
 	}
-	return a.WA().SendProtoMessage(ctx, to, msg)
+	return sender.SendProtoMessage(ctx, to, msg)
 }
 
 func wrapEphemeralMessage(msg *waProto.Message) *waProto.Message {

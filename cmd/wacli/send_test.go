@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -27,6 +28,37 @@ type recipientTestApp struct {
 
 func (a recipientTestApp) DB() *store.DB {
 	return a.db
+}
+
+type recordingTextSender struct {
+	textCalls      int
+	text           string
+	protoCalls     int
+	protoMsg       *waProto.Message
+	protoRecipient types.JID
+	textRecipient  types.JID
+	nextTextID     types.MessageID
+	nextProtoMsgID types.MessageID
+}
+
+func (s *recordingTextSender) SendText(_ context.Context, to types.JID, text string) (types.MessageID, error) {
+	s.textCalls++
+	s.textRecipient = to
+	s.text = text
+	if s.nextTextID != "" {
+		return s.nextTextID, nil
+	}
+	return "text-id", nil
+}
+
+func (s *recordingTextSender) SendProtoMessage(_ context.Context, to types.JID, msg *waProto.Message) (types.MessageID, error) {
+	s.protoCalls++
+	s.protoRecipient = to
+	s.protoMsg = msg
+	if s.nextProtoMsgID != "" {
+		return s.nextProtoMsgID, nil
+	}
+	return "proto-id", nil
 }
 
 func TestResolveRecipientFallsBackToFormattedPhone(t *testing.T) {
@@ -354,11 +386,47 @@ func TestBuildTextMessageAttachesMentions(t *testing.T) {
 	}
 }
 
+func TestSendTextMessageKeepsPlainTextFastPathWithoutEphemeral(t *testing.T) {
+	db := openSendTestDB(t)
+	chat := types.JID{User: "15551234567", Server: types.DefaultUserServer}
+	sender := &recordingTextSender{}
+
+	id, err := sendTextMessageWithSender(context.Background(), sender, db, chat, "hello", "", "", nil, nil, false)
+	if err != nil {
+		t.Fatalf("sendTextMessageWithSender: %v", err)
+	}
+	if id != "text-id" {
+		t.Fatalf("id = %q, want text-id", id)
+	}
+	if sender.textCalls != 1 || sender.protoCalls != 0 {
+		t.Fatalf("calls: SendText=%d SendProtoMessage=%d, want 1/0", sender.textCalls, sender.protoCalls)
+	}
+	if sender.textRecipient != chat || sender.text != "hello" {
+		t.Fatalf("plain send = (%s, %q), want (%s, hello)", sender.textRecipient, sender.text, chat)
+	}
+}
+
 func TestSendTextMessageWrapsPlainTextAsEphemeralWhenRequested(t *testing.T) {
-	protoMsg := &waProto.Message{Conversation: strPtr("hello")}
-	wrapped := wrapEphemeralMessage(protoMsg)
-	if wrapped.GetEphemeralMessage().GetMessage().GetConversation() != "hello" {
-		t.Fatalf("ephemeral plain conversation not preserved")
+	db := openSendTestDB(t)
+	chat := types.JID{User: "15551234567", Server: types.DefaultUserServer}
+	sender := &recordingTextSender{}
+
+	id, err := sendTextMessageWithSender(context.Background(), sender, db, chat, "hello", "", "", nil, nil, true)
+	if err != nil {
+		t.Fatalf("sendTextMessageWithSender: %v", err)
+	}
+	if id != "proto-id" {
+		t.Fatalf("id = %q, want proto-id", id)
+	}
+	if sender.textCalls != 0 || sender.protoCalls != 1 {
+		t.Fatalf("calls: SendText=%d SendProtoMessage=%d, want 0/1", sender.textCalls, sender.protoCalls)
+	}
+	if sender.protoRecipient != chat {
+		t.Fatalf("proto recipient = %s, want %s", sender.protoRecipient, chat)
+	}
+	inner := sender.protoMsg.GetEphemeralMessage().GetMessage()
+	if inner.GetConversation() != "hello" {
+		t.Fatalf("ephemeral conversation = %q, want hello", inner.GetConversation())
 	}
 }
 
@@ -366,22 +434,26 @@ func TestSendTextMessageWrapsExtendedTextAsEphemeralWhenRequested(t *testing.T) 
 	db := openSendTestDB(t)
 	chat := types.JID{User: "15551234567", Server: types.DefaultUserServer}
 	preview := &linkpreview.Preview{URL: "https://example.com", Title: "Example"}
+	sender := &recordingTextSender{}
 
-	msg, plain, err := buildTextMessage(db, chat, "hello https://example.com", "", "", preview, nil)
+	_, err := sendTextMessageWithSender(context.Background(), sender, db, chat, "hello https://example.com", "", "", preview, nil, true)
 	if err != nil {
-		t.Fatalf("buildTextMessage: %v", err)
+		t.Fatalf("sendTextMessageWithSender: %v", err)
 	}
-	if plain || msg == nil || msg.GetExtendedTextMessage() == nil {
-		t.Fatalf("expected extended text path")
+	if sender.textCalls != 0 || sender.protoCalls != 1 {
+		t.Fatalf("calls: SendText=%d SendProtoMessage=%d, want 0/1", sender.textCalls, sender.protoCalls)
 	}
-
-	wrapped := wrapEphemeralMessage(msg)
-	if wrapped.GetEphemeralMessage().GetMessage().GetExtendedTextMessage() == nil {
-		t.Fatalf("extended text not preserved in ephemeral wrapper")
+	ext := sender.protoMsg.GetEphemeralMessage().GetMessage().GetExtendedTextMessage()
+	if ext == nil {
+		t.Fatalf("ephemeral message did not preserve extended text")
+	}
+	if ext.GetText() != "hello https://example.com" {
+		t.Fatalf("extended text = %q", ext.GetText())
+	}
+	if ext.GetMatchedText() != preview.URL || ext.GetTitle() != preview.Title {
+		t.Fatalf("preview fields = (%q, %q), want (%q, %q)", ext.GetMatchedText(), ext.GetTitle(), preview.URL, preview.Title)
 	}
 }
-
-func strPtr(v string) *string { return &v }
 
 func TestBuildTextMessageCombinesReplyAndMentions(t *testing.T) {
 	db := openSendTestDB(t)
