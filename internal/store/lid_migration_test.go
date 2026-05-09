@@ -164,3 +164,47 @@ func TestMigrateLIDToPNMergesChatsAndMessages(t *testing.T) {
 		t.Fatalf("HistoricalLIDJIDs after migrate = %#v, want none", lids)
 	}
 }
+
+func TestMigrateLIDToPNPreservesButtons(t *testing.T) {
+	db := openTestDB(t)
+	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	pn := "15551234567@s.whatsapp.net"
+	lid := "999123456789@lid"
+	if err := db.UpsertChat(lid, "dm", "Alice", base); err != nil {
+		t.Fatalf("UpsertChat lid: %v", err)
+	}
+
+	want := []Button{
+		{Type: "url", DisplayText: "Buy flights", URL: "https://example.com/flights"},
+		{Type: "quick_reply", DisplayText: "No thanks", ID: "no"},
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID:   lid,
+		MsgID:     "tmpl1",
+		SenderJID: lid,
+		Timestamp: base,
+		Text:      "Check our deals",
+		Buttons:   want,
+	}); err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+
+	if err := db.MigrateLIDToPN(lid, pn); err != nil {
+		t.Fatalf("MigrateLIDToPN: %v", err)
+	}
+
+	msg, err := db.GetMessage(pn, "tmpl1")
+	if err != nil {
+		t.Fatalf("GetMessage after migration: %v", err)
+	}
+	if len(msg.Buttons) != len(want) {
+		t.Fatalf("expected %d buttons after migration, got %d: %+v", len(want), len(msg.Buttons), msg.Buttons)
+	}
+	for i, b := range want {
+		got := msg.Buttons[i]
+		if got.Type != b.Type || got.DisplayText != b.DisplayText || got.ID != b.ID || got.URL != b.URL {
+			t.Fatalf("button[%d]: got %+v, want %+v", i, got, b)
+		}
+	}
+}
