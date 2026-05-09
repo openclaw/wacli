@@ -6,6 +6,10 @@
 
 - Send: add opt-in `send text --ephemeral` wrapping for disappearing-message chats. (#227 - thanks @AndroidPoet)
 
+### Fixed
+
+- Messages: preserve WhatsApp Business buttons and list options in JSON output. (#226 - thanks @ignaciovarela)
+
 ## 0.8.1 - 2026-05-08
 
 ### Changed
