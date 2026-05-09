@@ -35,6 +35,7 @@ type sendDelegateRequest struct {
 	ReplyTo        string   `json:"reply_to,omitempty"`
 	ReplyToSender  string   `json:"reply_to_sender,omitempty"`
 	NoPreview      bool     `json:"no_preview,omitempty"`
+	Ephemeral      bool     `json:"ephemeral,omitempty"`
 	File           string   `json:"file,omitempty"`
 	Filename       string   `json:"filename,omitempty"`
 	Caption        string   `json:"caption,omitempty"`
@@ -210,7 +211,7 @@ func executeDelegatedText(ctx context.Context, a *app.App, req sendDelegateReque
 	}
 	preview := fetchLinkPreview(ctx, req.Message, req.NoPreview)
 	msgID, err := runSendOperation(ctx, reconnectForSend(a), func(ctx context.Context) (types.MessageID, error) {
-		return sendTextMessage(ctx, a, toJID, req.Message, req.ReplyTo, req.ReplyToSender, preview, mentionedJIDs)
+		return sendTextMessage(ctx, a, toJID, req.Message, req.ReplyTo, req.ReplyToSender, preview, mentionedJIDs, req.Ephemeral)
 	})
 	if err != nil {
 		return sendDelegateResponse{}, err

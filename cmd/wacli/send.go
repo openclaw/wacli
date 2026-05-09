@@ -41,6 +41,7 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 	var replyTo string
 	var replyToSender string
 	var noPreview bool
+	var ephemeral bool
 	var messageEscapes bool
 	postSendWait := postSendRetryReceiptWait
 
@@ -76,6 +77,7 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 					ReplyTo:        replyTo,
 					ReplyToSender:  replyToSender,
 					NoPreview:      noPreview,
+					Ephemeral:      ephemeral,
 					PostSendWaitMS: durationMillis(postSendWait),
 				})
 				if delegated {
@@ -109,7 +111,7 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 
 			preview := fetchLinkPreview(ctx, message, noPreview)
 			msgID, err := runSendOperation(ctx, reconnectForSend(a), func(ctx context.Context) (types.MessageID, error) {
-				return sendTextMessage(ctx, a, toJID, message, replyTo, replyToSender, preview, mentionedJIDs)
+				return sendTextMessage(ctx, a, toJID, message, replyTo, replyToSender, preview, mentionedJIDs, ephemeral)
 			})
 			if err != nil {
 				return err
@@ -152,6 +154,7 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().StringVar(&replyTo, "reply-to", "", "message ID to quote/reply to")
 	cmd.Flags().StringVar(&replyToSender, "reply-to-sender", "", "sender JID of the quoted message (required for unsynced group replies)")
 	cmd.Flags().BoolVar(&noPreview, "no-preview", false, "disable automatic link previews for the first URL in text")
+	cmd.Flags().BoolVar(&ephemeral, "ephemeral", false, "wrap outgoing text in EphemeralMessage for disappearing-message chats")
 	cmd.Flags().BoolVar(&messageEscapes, "message-escapes", false, `interpret backslash escapes in --message (\n, \r, \t, \\, \")`)
 	cmd.Flags().DurationVar(&postSendWait, "post-send-wait", postSendRetryReceiptWait, "keep the connection alive after send so retry receipts can be handled (0 disables)")
 	return cmd
@@ -162,15 +165,29 @@ type sendTextApp interface {
 	DB() *store.DB
 }
 
-func sendTextMessage(ctx context.Context, a sendTextApp, to types.JID, text, replyTo, replyToSender string, preview *linkpreview.Preview, mentionedJIDs []string) (types.MessageID, error) {
+func sendTextMessage(ctx context.Context, a sendTextApp, to types.JID, text, replyTo, replyToSender string, preview *linkpreview.Preview, mentionedJIDs []string, ephemeral bool) (types.MessageID, error) {
 	msg, plainText, err := buildTextMessage(a.DB(), to, text, replyTo, replyToSender, preview, mentionedJIDs)
 	if err != nil {
 		return "", err
 	}
-	if plainText {
+	if plainText && !ephemeral {
 		return a.WA().SendText(ctx, to, text)
 	}
+	if plainText {
+		msg = &waProto.Message{Conversation: proto.String(text)}
+	}
+	if ephemeral {
+		msg = wrapEphemeralMessage(msg)
+	}
 	return a.WA().SendProtoMessage(ctx, to, msg)
+}
+
+func wrapEphemeralMessage(msg *waProto.Message) *waProto.Message {
+	return &waProto.Message{
+		EphemeralMessage: &waProto.FutureProofMessage{
+			Message: msg,
+		},
+	}
 }
 
 func fetchLinkPreview(ctx context.Context, text string, disabled bool) *linkpreview.Preview {

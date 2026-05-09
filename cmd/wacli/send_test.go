@@ -284,6 +284,13 @@ func TestSendTextCommandExposesMessageEscapesFlag(t *testing.T) {
 	}
 }
 
+func TestSendTextCommandExposesEphemeralFlag(t *testing.T) {
+	cmd := newSendTextCmd(&rootFlags{})
+	if cmd.Flags().Lookup("ephemeral") == nil {
+		t.Fatalf("missing --ephemeral flag")
+	}
+}
+
 func TestSendTextCommandExposesMentionFlag(t *testing.T) {
 	cmd := newSendTextCmd(&rootFlags{})
 	if cmd.Flags().Lookup("mention") == nil {
@@ -346,6 +353,35 @@ func TestBuildTextMessageAttachesMentions(t *testing.T) {
 		t.Fatalf("mentioned JIDs = %v, want %v", got, mentions)
 	}
 }
+
+func TestSendTextMessageWrapsPlainTextAsEphemeralWhenRequested(t *testing.T) {
+	protoMsg := &waProto.Message{Conversation: strPtr("hello")}
+	wrapped := wrapEphemeralMessage(protoMsg)
+	if wrapped.GetEphemeralMessage().GetMessage().GetConversation() != "hello" {
+		t.Fatalf("ephemeral plain conversation not preserved")
+	}
+}
+
+func TestSendTextMessageWrapsExtendedTextAsEphemeralWhenRequested(t *testing.T) {
+	db := openSendTestDB(t)
+	chat := types.JID{User: "15551234567", Server: types.DefaultUserServer}
+	preview := &linkpreview.Preview{URL: "https://example.com", Title: "Example"}
+
+	msg, plain, err := buildTextMessage(db, chat, "hello https://example.com", "", "", preview, nil)
+	if err != nil {
+		t.Fatalf("buildTextMessage: %v", err)
+	}
+	if plain || msg == nil || msg.GetExtendedTextMessage() == nil {
+		t.Fatalf("expected extended text path")
+	}
+
+	wrapped := wrapEphemeralMessage(msg)
+	if wrapped.GetEphemeralMessage().GetMessage().GetExtendedTextMessage() == nil {
+		t.Fatalf("extended text not preserved in ephemeral wrapper")
+	}
+}
+
+func strPtr(v string) *string { return &v }
 
 func TestBuildTextMessageCombinesReplyAndMentions(t *testing.T) {
 	db := openSendTestDB(t)
