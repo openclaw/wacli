@@ -1,6 +1,6 @@
 ---
 name: wacli
-description: "Use when explicitly working with wacli: linked-device WhatsApp accounts, local stores, sync/auth/send behavior, and wacli repo/release work."
+description: "wacli: WhatsApp linked devices, stores, sync/auth/send, repo/release work."
 ---
 
 # Wacli
