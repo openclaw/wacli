@@ -42,6 +42,9 @@ type fakeWA struct {
 
 	decryptedReaction   *waProto.ReactionMessage
 	decryptReactionErr  error
+	sendPollCalls       []fakeSendPollCall
+	sendPollVoteCalls   []fakeSendPollVoteCall
+	decryptPollVoteFunc func(evt *events.Message) (*waE2E.PollVoteMessage, error)
 	onDemandHistory     func(lastKnown types.MessageInfo, count int) *events.HistorySync
 	onDemandEvent       func(lastKnown types.MessageInfo, count int) interface{}
 	downloadHistory     func(notif *waE2E.HistorySyncNotification) (*waHistorySync.HistorySync, error)
@@ -81,6 +84,19 @@ type fakeMarkReadCall struct {
 	read       bool
 	lastMsgTS  time.Time
 	lastMsgKey *waCommon.MessageKey
+}
+
+type fakeSendPollCall struct {
+	to         types.JID
+	name       string
+	options    []string
+	selectable int
+	ephemeral  bool
+}
+
+type fakeSendPollVoteCall struct {
+	pollInfo types.MessageInfo
+	options  []string
 }
 
 type fakeAppStateFetch struct {
@@ -359,6 +375,42 @@ func (f *fakeWA) SendProtoMessageWithExtra(ctx context.Context, to types.JID, ms
 
 func (f *fakeWA) SendReaction(ctx context.Context, chat, sender types.JID, targetID types.MessageID, reaction string) (types.MessageID, error) {
 	return types.MessageID("reactionid"), nil
+}
+
+func (f *fakeWA) SendPoll(ctx context.Context, to types.JID, name string, options []string, selectable int, ephemeral bool) (types.MessageID, error) {
+	f.mu.Lock()
+	f.sendPollCalls = append(f.sendPollCalls, fakeSendPollCall{
+		to:         to,
+		name:       name,
+		options:    append([]string(nil), options...),
+		selectable: selectable,
+		ephemeral:  ephemeral,
+	})
+	f.mu.Unlock()
+	return types.MessageID("pollid"), nil
+}
+
+func (f *fakeWA) SendPollVote(ctx context.Context, pollInfo *types.MessageInfo, options []string) (types.MessageID, error) {
+	if pollInfo == nil {
+		return "", fmt.Errorf("poll info required")
+	}
+	f.mu.Lock()
+	f.sendPollVoteCalls = append(f.sendPollVoteCalls, fakeSendPollVoteCall{
+		pollInfo: *pollInfo,
+		options:  append([]string(nil), options...),
+	})
+	f.mu.Unlock()
+	return types.MessageID("pollvoteid"), nil
+}
+
+func (f *fakeWA) DecryptPollVote(ctx context.Context, evt *events.Message) (*waE2E.PollVoteMessage, error) {
+	f.mu.Lock()
+	cb := f.decryptPollVoteFunc
+	f.mu.Unlock()
+	if cb != nil {
+		return cb(evt)
+	}
+	return nil, fmt.Errorf("not supported")
 }
 
 func (f *fakeWA) RevokeMessage(ctx context.Context, chat types.JID, targetID types.MessageID) (types.MessageID, error) {

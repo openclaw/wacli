@@ -96,6 +96,15 @@ func displayTextForProto(m *waProto.Message) string {
 	if contacts := m.GetContactsArrayMessage(); contacts != nil {
 		return contactsArrayDisplayText(contacts)
 	}
+	if creation := pickPollCreation(m); creation != nil {
+		if q := strings.TrimSpace(creation.GetName()); q != "" {
+			return "Poll: " + q
+		}
+		return "Poll"
+	}
+	if m.GetPollUpdateMessage() != nil {
+		return "Poll vote"
+	}
 
 	if text := strings.TrimSpace(m.GetConversation()); text != "" {
 		return text

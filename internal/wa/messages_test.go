@@ -740,3 +740,105 @@ func TestDisplayTextForProtoBusinessTypes(t *testing.T) {
 		})
 	}
 }
+
+func TestParseLiveMessagePollCreationV3(t *testing.T) {
+	chat, _ := types.ParseJID("15551112222@s.whatsapp.net")
+	evt := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{Chat: chat, Sender: chat},
+			ID:            "POLL-1",
+			Timestamp:     time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC),
+		},
+		Message: &waProto.Message{
+			PollCreationMessageV3: &waProto.PollCreationMessage{
+				Name: proto.String("Pizza?"),
+				Options: []*waProto.PollCreationMessage_Option{
+					{OptionName: proto.String("Yes")},
+					{OptionName: proto.String("No")},
+					{OptionName: proto.String("Maybe")},
+				},
+				SelectableOptionsCount: proto.Uint32(2),
+			},
+		},
+	}
+	pm := ParseLiveMessage(evt)
+	if pm.Poll == nil {
+		t.Fatalf("expected Poll set, got nil; pm=%+v", pm)
+	}
+	if pm.Poll.Question != "Pizza?" {
+		t.Fatalf("question = %q", pm.Poll.Question)
+	}
+	if got, want := pm.Poll.Options, []string{"Yes", "No", "Maybe"}; !equalStrings(got, want) {
+		t.Fatalf("options = %v want %v", got, want)
+	}
+	if pm.Poll.SelectableCount != 2 {
+		t.Fatalf("selectable = %d", pm.Poll.SelectableCount)
+	}
+	if pm.Text != "Poll: Pizza?" {
+		t.Fatalf("text = %q", pm.Text)
+	}
+}
+
+func TestParseLiveMessagePollCreationV1(t *testing.T) {
+	chat, _ := types.ParseJID("15551112222@s.whatsapp.net")
+	evt := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{Chat: chat, Sender: chat},
+			ID:            "POLL-V1",
+			Timestamp:     time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC),
+		},
+		Message: &waProto.Message{
+			PollCreationMessage: &waProto.PollCreationMessage{
+				Name:    proto.String("Hello?"),
+				Options: []*waProto.PollCreationMessage_Option{{OptionName: proto.String("a")}, {OptionName: proto.String("b")}},
+			},
+		},
+	}
+	pm := ParseLiveMessage(evt)
+	if pm.Poll == nil || pm.Poll.Question != "Hello?" {
+		t.Fatalf("v1 poll not parsed: %+v", pm)
+	}
+}
+
+func TestParseLiveMessagePollUpdateRefersToCreation(t *testing.T) {
+	chat, _ := types.ParseJID("15551112222@s.whatsapp.net")
+	evt := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{Chat: chat, Sender: chat},
+			ID:            "VOTE-1",
+			Timestamp:     time.Date(2026, 5, 9, 12, 5, 0, 0, time.UTC),
+		},
+		Message: &waProto.Message{
+			PollUpdateMessage: &waProto.PollUpdateMessage{
+				PollCreationMessageKey: &waProto.MessageKey{
+					ID:          proto.String("POLL-1"),
+					RemoteJID:   proto.String("15551112222@s.whatsapp.net"),
+					FromMe:      proto.Bool(true),
+					Participant: proto.String("15551112222@s.whatsapp.net"),
+				},
+			},
+		},
+	}
+	pm := ParseLiveMessage(evt)
+	if pm.PollVote == nil {
+		t.Fatalf("expected PollVote set, got nil; pm=%+v", pm)
+	}
+	if pm.PollVote.PollMessageID != "POLL-1" {
+		t.Fatalf("poll msg id = %q", pm.PollVote.PollMessageID)
+	}
+	if pm.PollVote.PollChatJID != "15551112222@s.whatsapp.net" {
+		t.Fatalf("poll chat jid = %q", pm.PollVote.PollChatJID)
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}

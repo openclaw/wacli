@@ -27,6 +27,7 @@ var schemaMigrations = []migration{
 	{version: 11, name: "group hierarchy columns", up: migrateGroupHierarchyColumns},
 	{version: 12, name: "contacts system_name column", up: migrateContactsSystemNameColumn},
 	{version: 13, name: "messages buttons column", up: migrateMessagesButtonsColumn},
+	{version: 14, name: "polls and poll_votes", up: migratePolls},
 }
 
 func (d *DB) ensureSchema() error {
@@ -256,6 +257,36 @@ func migrateMessagesButtonsColumn(d *DB) error {
 	}
 	if _, err := d.sql.Exec(`ALTER TABLE messages ADD COLUMN buttons TEXT`); err != nil {
 		return fmt.Errorf("add messages.buttons column: %w", err)
+	}
+	return nil
+}
+
+func migratePolls(d *DB) error {
+	if _, err := d.sql.Exec(`
+		CREATE TABLE IF NOT EXISTS polls (
+			chat_jid          TEXT NOT NULL,
+			msg_id            TEXT NOT NULL,
+			sender_jid        TEXT,
+			question          TEXT NOT NULL,
+			options_json      TEXT NOT NULL,
+			selectable_count  INTEGER NOT NULL DEFAULT 1,
+			created_ts        INTEGER NOT NULL,
+			PRIMARY KEY (chat_jid, msg_id)
+		);
+		CREATE INDEX IF NOT EXISTS idx_polls_chat_ts ON polls(chat_jid, created_ts);
+
+		CREATE TABLE IF NOT EXISTS poll_votes (
+			chat_jid              TEXT NOT NULL,
+			poll_msg_id           TEXT NOT NULL,
+			voter_jid             TEXT NOT NULL,
+			vote_msg_id           TEXT NOT NULL,
+			selected_options_json TEXT NOT NULL,
+			ts                    INTEGER NOT NULL,
+			PRIMARY KEY (chat_jid, poll_msg_id, voter_jid)
+		);
+		CREATE INDEX IF NOT EXISTS idx_poll_votes_poll ON poll_votes(chat_jid, poll_msg_id);
+	`); err != nil {
+		return fmt.Errorf("create polls tables: %w", err)
 	}
 	return nil
 }

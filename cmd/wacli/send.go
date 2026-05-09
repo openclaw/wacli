@@ -30,6 +30,7 @@ func newSendCmd(flags *rootFlags) *cobra.Command {
 	cmd.AddCommand(newSendStickerCmd(flags))
 	cmd.AddCommand(newSendVoiceCmd(flags))
 	cmd.AddCommand(newSendReactCmd(flags))
+	cmd.AddCommand(newSendPollCmd(flags))
 	return cmd
 }
 

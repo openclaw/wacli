@@ -193,6 +193,7 @@ func (a *App) handleLiveSyncMessage(ctx context.Context, opts SyncOptions, v *ev
 		if enqueueWebhook != nil {
 			enqueueWebhook(pm)
 		}
+		a.handlePollSideEffects(ctx, pm, v)
 	}
 	if opts.DownloadMedia && pm.Media != nil && pm.ID != "" {
 		enqueueMedia(pm.Chat.String(), pm.ID)
@@ -237,6 +238,7 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 			}
 			if err := a.storeParsedMessageForSync(ctx, pm, limits...); err == nil {
 				a.emitSyncProgress(messagesStored.Add(1))
+				a.handleHistoryPollSideEffects(ctx, pm, m.Message)
 			} else if ctx.Err() != nil {
 				return
 			}

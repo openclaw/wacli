@@ -238,6 +238,97 @@ func (c *Client) SendProtoMessageWithExtra(ctx context.Context, to types.JID, ms
 	return resp.ID, nil
 }
 
+// SendPoll builds a PollCreationMessage and sends it. selectable is the
+// maximum number of options a voter may pick (1 = single-select). The poll
+// can optionally be wrapped in an EphemeralMessage for disappearing chats.
+func (c *Client) SendPoll(ctx context.Context, to types.JID, name string, options []string, selectable int, ephemeral bool) (types.MessageID, error) {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || !cli.IsConnected() {
+		return "", fmt.Errorf("not connected")
+	}
+	msg := cli.BuildPollCreation(name, options, selectable)
+	if ephemeral {
+		msg = &waE2E.Message{
+			EphemeralMessage: &waE2E.FutureProofMessage{Message: msg},
+		}
+	}
+	resp, err := cli.SendMessage(ctx, to, msg)
+	if err != nil {
+		return "", err
+	}
+	return resp.ID, nil
+}
+
+// SendPollVote builds and sends a poll vote for the poll identified by
+// pollInfo (Chat, Sender, ID of the original PollCreationMessage). The
+// option names must match exactly the strings used in the poll.
+//
+// On accounts that have migrated to LID addressing, whatsmeow's SendMessage
+// auto-rewrites the destination from a phone-number JID to the corresponding
+// LID. We pre-translate here so the PollCreationMessageKey embedded by
+// BuildPollVote matches the chat/sender on the wire — otherwise the receiver
+// can't link the vote to the poll it references.
+func (c *Client) SendPollVote(ctx context.Context, pollInfo *types.MessageInfo, options []string) (types.MessageID, error) {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || !cli.IsConnected() {
+		return "", fmt.Errorf("not connected")
+	}
+	if pollInfo == nil {
+		return "", fmt.Errorf("poll info is required")
+	}
+
+	info := *pollInfo
+	if cli.Store != nil && cli.Store.LIDMigrationTimestamp > 0 {
+		if info.Chat.Server == types.DefaultUserServer {
+			info.Chat = c.resolvePNToLIDLocked(ctx, cli, info.Chat)
+		}
+		if info.Sender.Server == types.DefaultUserServer {
+			info.Sender = c.resolvePNToLIDLocked(ctx, cli, info.Sender)
+		}
+	}
+
+	msg, err := cli.BuildPollVote(ctx, &info, options)
+	if err != nil {
+		return "", fmt.Errorf("build poll vote: %w", err)
+	}
+	resp, err := cli.SendMessage(ctx, info.Chat, msg)
+	if err != nil {
+		return "", err
+	}
+	return resp.ID, nil
+}
+
+// resolvePNToLIDLocked translates a phone-number JID to its LID counterpart
+// using the active session store; falls back to the input JID if no mapping
+// exists. Caller already holds (or doesn't need) c.mu.
+func (c *Client) resolvePNToLIDLocked(ctx context.Context, cli *whatsmeow.Client, jid types.JID) types.JID {
+	if cli == nil || cli.Store == nil || cli.Store.LIDs == nil {
+		return jid
+	}
+	lid, err := cli.Store.LIDs.GetLIDForPN(ctx, jid.ToNonAD())
+	if err != nil || lid.IsEmpty() {
+		return jid
+	}
+	return lid
+}
+
+// DecryptPollVote decrypts an incoming PollUpdateMessage event and returns
+// the SHA-256 hashes of the selected options. The caller is responsible for
+// matching those hashes back to option names.
+func (c *Client) DecryptPollVote(ctx context.Context, evt *events.Message) (*waE2E.PollVoteMessage, error) {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil {
+		return nil, fmt.Errorf("whatsapp client is not initialized")
+	}
+	return cli.DecryptPollVote(ctx, evt)
+}
+
 func (c *Client) SendReaction(ctx context.Context, chat, sender types.JID, targetID types.MessageID, reaction string) (types.MessageID, error) {
 	c.mu.Lock()
 	cli := c.client
