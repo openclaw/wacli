@@ -547,6 +547,56 @@ func TestParseInteractiveMessage(t *testing.T) {
 	}
 }
 
+func TestParseInteractiveMessageWithNativeFlowButtons(t *testing.T) {
+	chat, _ := types.ParseJID("123@s.whatsapp.net")
+	sender, _ := types.ParseJID("biz@s.whatsapp.net")
+
+	ev := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat: chat, Sender: sender, IsFromMe: false,
+			},
+			ID:        "native1",
+			Timestamp: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+		},
+		Message: &waProto.Message{
+			InteractiveMessage: &waProto.InteractiveMessage{
+				Body: &waProto.InteractiveMessage_Body{
+					Text: proto.String("Complete your payment"),
+				},
+				InteractiveMessage: &waProto.InteractiveMessage_NativeFlowMessage_{
+					NativeFlowMessage: &waProto.InteractiveMessage_NativeFlowMessage{
+						Buttons: []*waProto.InteractiveMessage_NativeFlowMessage_NativeFlowButton{
+							{
+								Name:             proto.String("cta_url"),
+								ButtonParamsJSON: proto.String(`{"display_text":"Pay now","url":"https://pay.example.com"}`),
+							},
+							{
+								Name:             proto.String("quick_reply"),
+								ButtonParamsJSON: proto.String(`{"display_text":"Cancel","id":"cancel"}`),
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	pm := ParseLiveMessage(ev)
+	if pm.Text != "Complete your payment" {
+		t.Fatalf("unexpected text: %q", pm.Text)
+	}
+	if len(pm.Buttons) != 2 {
+		t.Fatalf("expected 2 buttons, got %d: %+v", len(pm.Buttons), pm.Buttons)
+	}
+	if pm.Buttons[0].Type != "url" || pm.Buttons[0].DisplayText != "Pay now" || pm.Buttons[0].URL != "https://pay.example.com" {
+		t.Fatalf("unexpected button[0]: %+v", pm.Buttons[0])
+	}
+	if pm.Buttons[1].Type != "quick_reply" || pm.Buttons[1].DisplayText != "Cancel" || pm.Buttons[1].ID != "cancel" {
+		t.Fatalf("unexpected button[1]: %+v", pm.Buttons[1])
+	}
+}
+
 func TestParseListMessage(t *testing.T) {
 	chat, _ := types.ParseJID("123@s.whatsapp.net")
 	sender, _ := types.ParseJID("biz@s.whatsapp.net")
