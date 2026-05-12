@@ -12,6 +12,7 @@ import (
 
 	"github.com/openclaw/wacli/internal/app"
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/types"
 )
 
 const sendAttemptTimeout = 45 * time.Second
@@ -128,4 +129,28 @@ func warnRapidSendIfNeeded(storeDir string, now time.Time, stderr io.Writer) err
 		return fmt.Errorf("chmod last send marker: %w", err)
 	}
 	return nil
+}
+
+// warmupRecipient resolves the recipient's user info before sending to
+// establish contact state with WhatsApp's servers. Without this, the
+// privacy token (tctoken) IQ may fail with 400: bad-request for new or
+// unknown contacts, causing messages to be silently dropped despite
+// returning sent:true.
+//
+// The warmup is best-effort: failures are logged to stderr but never
+// block the send.
+//
+// userInfoResolver is satisfied by app.WAClient.
+type userInfoResolver interface {
+	GetUserInfo(ctx context.Context, jids []types.JID) (map[types.JID]types.UserInfo, error)
+}
+
+func warmupRecipient(ctx context.Context, wa userInfoResolver, jid types.JID, stderr io.Writer) {
+	if jid.Server != types.DefaultUserServer && jid.Server != types.HiddenUserServer {
+		return
+	}
+	_, err := wa.GetUserInfo(ctx, []types.JID{jid})
+	if err != nil {
+		fmt.Fprintf(stderr, "warn: send warmup for %s failed (send will proceed): %v\n", jid, err)
+	}
 }

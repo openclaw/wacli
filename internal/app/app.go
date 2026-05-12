@@ -34,6 +34,7 @@ type WAClient interface {
 	ResolveChatName(ctx context.Context, chat types.JID, pushName string) string
 	ResolveLIDToPN(ctx context.Context, jid types.JID) types.JID
 	ResolvePNToLID(ctx context.Context, jid types.JID) types.JID
+	GetUserInfo(ctx context.Context, jids []types.JID) (map[types.JID]types.UserInfo, error)
 	GetContact(ctx context.Context, jid types.JID) (types.ContactInfo, error)
 	GetAllContacts(ctx context.Context) (map[types.JID]types.ContactInfo, error)
 

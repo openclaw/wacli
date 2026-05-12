@@ -226,6 +226,10 @@ func (f *fakeWA) ResolvePNToLID(ctx context.Context, jid types.JID) types.JID {
 	return jid
 }
 
+func (f *fakeWA) GetUserInfo(ctx context.Context, jids []types.JID) (map[types.JID]types.UserInfo, error) {
+	return map[types.JID]types.UserInfo{}, nil
+}
+
 func (f *fakeWA) GetContact(ctx context.Context, jid types.JID) (types.ContactInfo, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -429,6 +429,16 @@ func (c *Client) FetchAppState(ctx context.Context, name string, fullSync, onlyI
 	return cli.FetchAppState(ctx, appstate.WAPatchName(name), fullSync, onlyIfNotSynced)
 }
 
+func (c *Client) GetUserInfo(ctx context.Context, jids []types.JID) (map[types.JID]types.UserInfo, error) {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || !cli.IsConnected() {
+		return nil, fmt.Errorf("not connected")
+	}
+	return cli.GetUserInfo(ctx, jids)
+}
+
 func (c *Client) GetContact(ctx context.Context, jid types.JID) (types.ContactInfo, error) {
 	c.mu.Lock()
 	cli := c.client

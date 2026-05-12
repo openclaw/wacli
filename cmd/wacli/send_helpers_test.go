@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/types"
 )
 
 func TestRunSendOperationRetriesRetryableError(t *testing.T) {
@@ -155,5 +156,80 @@ func TestWarnRapidSendIfNeededSkipsOldOrInvalidMarker(t *testing.T) {
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("invalid marker warned: %q", stderr.String())
+	}
+}
+
+type mockUserInfoClient struct {
+	getUserInfo func(ctx context.Context, jids []types.JID) (map[types.JID]types.UserInfo, error)
+}
+
+func (m *mockUserInfoClient) GetUserInfo(ctx context.Context, jids []types.JID) (map[types.JID]types.UserInfo, error) {
+	if m.getUserInfo == nil {
+		return nil, nil
+	}
+	return m.getUserInfo(ctx, jids)
+}
+
+func TestWarmupRecipientSkipNonUserServer(t *testing.T) {
+	called := false
+	mock := &mockUserInfoClient{
+		getUserInfo: func(ctx context.Context, jids []types.JID) (map[types.JID]types.UserInfo, error) {
+			called = true
+			return nil, nil
+		},
+	}
+
+	var stderr bytes.Buffer
+	groupJID := types.NewJID("12345", types.GroupServer)
+	warmupRecipient(context.Background(), mock, groupJID, &stderr)
+	if called {
+		t.Fatal("GetUserInfo should not be called for group JIDs")
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected stderr: %q", stderr.String())
+	}
+}
+
+func TestWarmupRecipientCallsGetUserInfoForUserServer(t *testing.T) {
+	called := false
+	mock := &mockUserInfoClient{
+		getUserInfo: func(ctx context.Context, jids []types.JID) (map[types.JID]types.UserInfo, error) {
+			called = true
+			if len(jids) != 1 {
+				t.Fatalf("expected 1 JID, got %d", len(jids))
+			}
+			if jids[0].String() != "15551234567@s.whatsapp.net" {
+				t.Fatalf("unexpected JID: %s", jids[0].String())
+			}
+			return nil, nil
+		},
+	}
+
+	var stderr bytes.Buffer
+	userJID := types.NewJID("15551234567", types.DefaultUserServer)
+	warmupRecipient(context.Background(), mock, userJID, &stderr)
+	if !called {
+		t.Fatal("GetUserInfo should be called for user JIDs")
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected stderr: %q", stderr.String())
+	}
+}
+
+func TestWarmupRecipientLogsErrorToStderr(t *testing.T) {
+	mock := &mockUserInfoClient{
+		getUserInfo: func(ctx context.Context, jids []types.JID) (map[types.JID]types.UserInfo, error) {
+			return nil, errors.New("simulated failure")
+		},
+	}
+
+	var stderr bytes.Buffer
+	userJID := types.NewJID("15551234567", types.DefaultUserServer)
+	warmupRecipient(context.Background(), mock, userJID, &stderr)
+	if stderr.Len() == 0 {
+		t.Fatal("expected stderr output on error")
+	}
+	if !strings.Contains(stderr.String(), "warn: send warmup for") {
+		t.Fatalf("expected warning in stderr, got: %q", stderr.String())
 	}
 }
