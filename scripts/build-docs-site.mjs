@@ -21,10 +21,10 @@ const brewInstall = "brew install steipete/tap/wacli";
 
 const sections = [
   ["Start", ["index.md", "install.md", "quickstart.md", "overview.md"]],
-  ["Auth & Sync", ["auth.md", "sync.md", "history.md", "doctor.md"]],
-  ["Messages", ["messages.md", "send.md", "media.md", "presence.md"]],
+  ["Auth & Sync", ["auth.md", "accounts.md", "sync.md", "history.md", "doctor.md"]],
+  ["Messages", ["messages.md", "send.md", "media.md", "presence.md", "channels.md"]],
   ["Contacts & Groups", ["contacts.md", "contacts-import-system.md", "chats.md", "groups.md", "profile.md"]],
-  ["Reference", ["spec.md", "docs.md", "completion.md", "version.md", "help.md", "release.md"]],
+  ["Reference", ["spec.md", "docs.md", "store.md", "integrations.md", "completion.md", "version.md", "help.md", "release.md"]],
 ];
 
 const buildExcludes = [];

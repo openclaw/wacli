@@ -101,7 +101,25 @@ wacli history backfill --chat 1234567890@s.whatsapp.net --requests 10 --count 50
 
 The phone must be online for `backfill`. WhatsApp may not return full history. See [History](history.md) for coverage planning, limits, and patterns.
 
-## 7. Diagnostics and safety
+## 7. Named accounts (optional)
+
+If you run more than one WhatsApp number, named accounts give each an isolated store, session, and lock:
+
+```bash
+# Add a second account and pair it immediately
+wacli accounts add work
+
+# List all configured accounts
+wacli accounts list
+
+# Use a named account with any command
+wacli --account work sync --follow
+wacli --account personal send text --to mom --message "hi"
+```
+
+Use `--no-auth` to create the account entry without pairing immediately. Two accounts can sync concurrently — their locks are independent. See [Accounts](accounts.md) for YAML config and migration from manual `--store` paths.
+
+## 8. Diagnostics and safety
 
 ```bash
 wacli doctor
@@ -114,7 +132,7 @@ WACLI_READONLY=1 wacli send text --to mom --message "hi"   # exits with a clear 
 
 `doctor` checks the store, schema, FTS5 availability, and (with `--connect`) live connectivity. See [Doctor](doctor.md).
 
-## 8. Shell completion (optional)
+## 9. Shell completion (optional)
 
 ```bash
 wacli completion bash    >> ~/.bash_completion
@@ -125,7 +143,9 @@ wacli completion fish    >  ~/.config/fish/completions/wacli.fish
 ## Where next
 
 - [Overview](overview.md) — global flags, store model, full command map.
+- [Accounts](accounts.md) — named accounts, isolated stores, YAML config.
 - [Send](send.md) — every recipient form, replies, reactions, mentions, link previews.
+- [Channels](channels.md) — read and follow WhatsApp Channels.
 - [Groups](groups.md) — list, refresh, info, rename, participants, invite links.
 - [Spec](spec.md) — design notes, storage layout, locking model, non-goals.
 - [Doctor](doctor.md) — self-checks and connectivity probe.
