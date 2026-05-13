@@ -1,6 +1,7 @@
 package wa
 
 import (
+	"encoding/json"
 	"strings"
 
 	waProto "go.mau.fi/whatsmeow/binary/proto"
@@ -82,8 +83,39 @@ func extractBusinessText(m *waProto.Message, pm *ParsedMessage) {
 		pm.Text = resp.GetSelectedDisplayText()
 	}
 
-	if im := m.GetInteractiveMessage(); im != nil && pm.Text == "" {
-		pm.Text = interactiveText(im)
+	if im := m.GetInteractiveMessage(); im != nil {
+		if pm.Text == "" {
+			pm.Text = interactiveText(im)
+		}
+		if nf := im.GetNativeFlowMessage(); nf != nil {
+			for _, nb := range nf.GetButtons() {
+				name := strings.TrimSpace(nb.GetName())
+				params := strings.TrimSpace(nb.GetButtonParamsJSON())
+				var data map[string]string
+				if err := json.Unmarshal([]byte(params), &data); err == nil {
+					switch name {
+					case "cta_url":
+						pm.Buttons = append(pm.Buttons, Button{
+							Type: "url",
+							DisplayText: data["display_text"],
+							URL: data["url"],
+						})
+					case "quick_reply":
+						pm.Buttons = append(pm.Buttons, Button{
+							Type: "quick_reply",
+							DisplayText: data["display_text"],
+							ID: data["id"],
+						})
+					case "cta_call":
+						pm.Buttons = append(pm.Buttons, Button{
+							Type: "call",
+							DisplayText: data["display_text"],
+							PhoneNumber: data["phone_number"],
+						})
+					}
+				}
+			}
+		}
 	}
 
 	if resp := m.GetInteractiveResponseMessage(); resp != nil && pm.Text == "" {
