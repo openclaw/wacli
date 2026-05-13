@@ -26,26 +26,28 @@ const (
 var errSendDelegateUnavailable = errors.New("send delegate unavailable")
 
 type sendDelegateRequest struct {
-	Version        int      `json:"version"`
-	Kind           string   `json:"kind"`
-	To             string   `json:"to,omitempty"`
-	Pick           int      `json:"pick,omitempty"`
-	Message        string   `json:"message,omitempty"`
-	Mentions       []string `json:"mentions,omitempty"`
-	ReplyTo        string   `json:"reply_to,omitempty"`
-	ReplyToSender  string   `json:"reply_to_sender,omitempty"`
-	NoPreview      bool     `json:"no_preview,omitempty"`
-	Ephemeral      bool     `json:"ephemeral,omitempty"`
-	File           string   `json:"file,omitempty"`
-	Filename       string   `json:"filename,omitempty"`
-	Caption        string   `json:"caption,omitempty"`
-	MIME           string   `json:"mime,omitempty"`
-	PTT            bool     `json:"ptt,omitempty"`
-	ID             string   `json:"id,omitempty"`
-	Reaction       string   `json:"reaction,omitempty"`
-	Sender         string   `json:"sender,omitempty"`
-	PostSendWaitMS int64    `json:"post_send_wait_ms,omitempty"`
-	TimeoutMS      int64    `json:"timeout_ms,omitempty"`
+	Version              int      `json:"version"`
+	Kind                 string   `json:"kind"`
+	To                   string   `json:"to,omitempty"`
+	Pick                 int      `json:"pick,omitempty"`
+	Message              string   `json:"message,omitempty"`
+	Mentions             []string `json:"mentions,omitempty"`
+	ReplyTo              string   `json:"reply_to,omitempty"`
+	ReplyToSender        string   `json:"reply_to_sender,omitempty"`
+	NoPreview            bool     `json:"no_preview,omitempty"`
+	Ephemeral            bool     `json:"ephemeral,omitempty"`
+	EphemeralDuration    string   `json:"ephemeral_duration,omitempty"`
+	EphemeralDurationSet bool     `json:"ephemeral_duration_set,omitempty"`
+	File                 string   `json:"file,omitempty"`
+	Filename             string   `json:"filename,omitempty"`
+	Caption              string   `json:"caption,omitempty"`
+	MIME                 string   `json:"mime,omitempty"`
+	PTT                  bool     `json:"ptt,omitempty"`
+	ID                   string   `json:"id,omitempty"`
+	Reaction             string   `json:"reaction,omitempty"`
+	Sender               string   `json:"sender,omitempty"`
+	PostSendWaitMS       int64    `json:"post_send_wait_ms,omitempty"`
+	TimeoutMS            int64    `json:"timeout_ms,omitempty"`
 }
 
 type sendDelegateResponse struct {
@@ -198,6 +200,14 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 }
 
 func executeDelegatedText(ctx context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {
+	ephemeral := textEphemeralOptions{
+		Enabled:     req.Ephemeral,
+		Duration:    req.EphemeralDuration,
+		DurationSet: req.EphemeralDurationSet,
+	}
+	if err := validateTextEphemeralOptions(ephemeral); err != nil {
+		return sendDelegateResponse{}, err
+	}
 	toJID, err := resolveRecipient(a, req.To, recipientOptions{pick: req.Pick, asJSON: true})
 	if err != nil {
 		return sendDelegateResponse{}, err
@@ -212,7 +222,7 @@ func executeDelegatedText(ctx context.Context, a *app.App, req sendDelegateReque
 	}
 	preview := fetchLinkPreview(ctx, req.Message, req.NoPreview)
 	msgID, err := runSendOperation(ctx, reconnectForSend(a), func(ctx context.Context) (types.MessageID, error) {
-		return sendTextMessage(ctx, a, toJID, req.Message, req.ReplyTo, req.ReplyToSender, preview, mentionedJIDs, req.Ephemeral)
+		return sendTextMessage(ctx, a, toJID, req.Message, req.ReplyTo, req.ReplyToSender, preview, mentionedJIDs, ephemeral)
 	})
 	if err != nil {
 		return sendDelegateResponse{}, err

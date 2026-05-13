@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -42,6 +43,7 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 	var replyToSender string
 	var noPreview bool
 	var ephemeral bool
+	var ephemeralDuration string
 	var messageEscapes bool
 	postSendWait := postSendRetryReceiptWait
 
@@ -62,6 +64,14 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 				}
 				message = decoded
 			}
+			ephemeralOpts := textEphemeralOptions{
+				Enabled:     ephemeral,
+				Duration:    ephemeralDuration,
+				DurationSet: cmd.Flags().Changed("ephemeral-duration"),
+			}
+			if err := validateTextEphemeralOptions(ephemeralOpts); err != nil {
+				return err
+			}
 
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
@@ -69,16 +79,18 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 			a, lk, err := newApp(ctx, flags, true, false)
 			if err != nil {
 				resp, delegated, delegateErr := tryDelegateSend(ctx, flags, err, sendDelegateRequest{
-					Kind:           "text",
-					To:             to,
-					Pick:           pick,
-					Message:        message,
-					Mentions:       mentions,
-					ReplyTo:        replyTo,
-					ReplyToSender:  replyToSender,
-					NoPreview:      noPreview,
-					Ephemeral:      ephemeral,
-					PostSendWaitMS: durationMillis(postSendWait),
+					Kind:                 "text",
+					To:                   to,
+					Pick:                 pick,
+					Message:              message,
+					Mentions:             mentions,
+					ReplyTo:              replyTo,
+					ReplyToSender:        replyToSender,
+					NoPreview:            noPreview,
+					Ephemeral:            ephemeralOpts.Enabled,
+					EphemeralDuration:    ephemeralOpts.Duration,
+					EphemeralDurationSet: ephemeralOpts.DurationSet,
+					PostSendWaitMS:       durationMillis(postSendWait),
 				})
 				if delegated {
 					if delegateErr != nil {
@@ -112,7 +124,7 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 
 			preview := fetchLinkPreview(ctx, message, noPreview)
 			msgID, err := runSendOperation(ctx, reconnectForSend(a), func(ctx context.Context) (types.MessageID, error) {
-				return sendTextMessage(ctx, a, toJID, message, replyTo, replyToSender, preview, mentionedJIDs, ephemeral)
+				return sendTextMessage(ctx, a, toJID, message, replyTo, replyToSender, preview, mentionedJIDs, ephemeralOpts)
 			})
 			if err != nil {
 				return err
@@ -155,7 +167,8 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().StringVar(&replyTo, "reply-to", "", "message ID to quote/reply to")
 	cmd.Flags().StringVar(&replyToSender, "reply-to-sender", "", "sender JID of the quoted message (required for unsynced group replies)")
 	cmd.Flags().BoolVar(&noPreview, "no-preview", false, "disable automatic link previews for the first URL in text")
-	cmd.Flags().BoolVar(&ephemeral, "ephemeral", false, "wrap outgoing text in EphemeralMessage for disappearing-message chats")
+	cmd.Flags().BoolVar(&ephemeral, "ephemeral", false, "send with the disappearing-message timer for this chat")
+	cmd.Flags().StringVar(&ephemeralDuration, "ephemeral-duration", "", "disappearing-message timer override (for example 24h, 7d, 90d, 168h)")
 	cmd.Flags().BoolVar(&messageEscapes, "message-escapes", false, `interpret backslash escapes in --message (\n, \r, \t, \\, \")`)
 	cmd.Flags().DurationVar(&postSendWait, "post-send-wait", postSendRetryReceiptWait, "keep the connection alive after send so retry receipts can be handled (0 disables)")
 	return cmd
@@ -169,34 +182,135 @@ type sendTextApp interface {
 type textMessageSender interface {
 	SendText(ctx context.Context, to types.JID, text string) (types.MessageID, error)
 	SendProtoMessage(ctx context.Context, to types.JID, msg *waProto.Message) (types.MessageID, error)
+	GetGroupInfo(ctx context.Context, jid types.JID) (*types.GroupInfo, error)
 }
 
-func sendTextMessage(ctx context.Context, a sendTextApp, to types.JID, text, replyTo, replyToSender string, preview *linkpreview.Preview, mentionedJIDs []string, ephemeral bool) (types.MessageID, error) {
+type textEphemeralOptions struct {
+	Enabled     bool
+	Duration    string
+	DurationSet bool
+}
+
+type resolvedTextEphemeral struct {
+	enabled       bool
+	hasExpiration bool
+	expiration    uint32
+}
+
+const defaultEphemeralExpiration uint32 = 7 * 24 * 60 * 60
+
+func sendTextMessage(ctx context.Context, a sendTextApp, to types.JID, text, replyTo, replyToSender string, preview *linkpreview.Preview, mentionedJIDs []string, ephemeral textEphemeralOptions) (types.MessageID, error) {
 	return sendTextMessageWithSender(ctx, a.WA(), a.DB(), to, text, replyTo, replyToSender, preview, mentionedJIDs, ephemeral)
 }
 
-func sendTextMessageWithSender(ctx context.Context, sender textMessageSender, db *store.DB, to types.JID, text, replyTo, replyToSender string, preview *linkpreview.Preview, mentionedJIDs []string, ephemeral bool) (types.MessageID, error) {
+func sendTextMessageWithSender(ctx context.Context, sender textMessageSender, db *store.DB, to types.JID, text, replyTo, replyToSender string, preview *linkpreview.Preview, mentionedJIDs []string, ephemeral textEphemeralOptions) (types.MessageID, error) {
 	msg, plainText, err := buildTextMessage(db, to, text, replyTo, replyToSender, preview, mentionedJIDs)
 	if err != nil {
 		return "", err
 	}
-	if plainText && !ephemeral {
+	resolved, err := resolveTextEphemeral(ctx, sender, to, ephemeral)
+	if err != nil {
+		return "", err
+	}
+	if plainText && !resolved.enabled {
 		return sender.SendText(ctx, to, text)
 	}
 	if plainText {
-		msg = &waProto.Message{Conversation: proto.String(text)}
+		msg = &waProto.Message{
+			ExtendedTextMessage: &waProto.ExtendedTextMessage{
+				Text: proto.String(text),
+			},
+		}
 	}
-	if ephemeral {
-		msg = wrapEphemeralMessage(msg)
+	if resolved.hasExpiration {
+		applyEphemeralContext(msg, resolved.expiration)
 	}
 	return sender.SendProtoMessage(ctx, to, msg)
 }
 
-func wrapEphemeralMessage(msg *waProto.Message) *waProto.Message {
-	return &waProto.Message{
-		EphemeralMessage: &waProto.FutureProofMessage{
-			Message: msg,
-		},
+func resolveTextEphemeral(ctx context.Context, sender textMessageSender, to types.JID, opts textEphemeralOptions) (resolvedTextEphemeral, error) {
+	if err := validateTextEphemeralOptions(opts); err != nil {
+		return resolvedTextEphemeral{}, err
+	}
+	duration := strings.TrimSpace(opts.Duration)
+	if duration != "" {
+		expiration, err := parseEphemeralExpiration(duration)
+		if err != nil {
+			return resolvedTextEphemeral{}, err
+		}
+		return resolvedTextEphemeral{enabled: true, hasExpiration: true, expiration: expiration}, nil
+	}
+	if !opts.Enabled {
+		return resolvedTextEphemeral{}, nil
+	}
+	if to.Server == types.GroupServer {
+		info, _ := sender.GetGroupInfo(ctx, to)
+		if info != nil && info.IsEphemeral && info.DisappearingTimer > 0 {
+			return resolvedTextEphemeral{enabled: true, hasExpiration: true, expiration: info.DisappearingTimer}, nil
+		}
+	}
+	return resolvedTextEphemeral{enabled: true, hasExpiration: true, expiration: defaultEphemeralExpiration}, nil
+}
+
+func validateTextEphemeralOptions(opts textEphemeralOptions) error {
+	duration := strings.TrimSpace(opts.Duration)
+	if !opts.DurationSet && duration == "" {
+		return nil
+	}
+	if duration == "" {
+		return fmt.Errorf("--ephemeral-duration must be a positive duration such as 24h, 7d, 90d, or 168h")
+	}
+	_, err := parseEphemeralExpiration(duration)
+	return err
+}
+
+func parseEphemeralExpiration(s string) (uint32, error) {
+	d, err := parseEphemeralDuration(s)
+	if err != nil {
+		return 0, err
+	}
+	seconds := int64(d / time.Second)
+	if seconds <= 0 || seconds > int64(^uint32(0)) {
+		return 0, fmt.Errorf("--ephemeral-duration must fit in uint32 seconds")
+	}
+	return uint32(seconds), nil
+}
+
+func parseEphemeralDuration(s string) (time.Duration, error) {
+	s = strings.TrimSpace(strings.ToLower(s))
+	if s == "" {
+		return 0, fmt.Errorf("--ephemeral-duration is required")
+	}
+	switch strings.ReplaceAll(s, " ", "") {
+	case "1d", "1day", "day":
+		return 24 * time.Hour, nil
+	case "7d", "7day", "7days", "1w", "1week", "week":
+		return 7 * 24 * time.Hour, nil
+	case "90d", "90day", "90days":
+		return 90 * 24 * time.Hour, nil
+	}
+	if strings.HasSuffix(s, "d") {
+		days, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(s, "d")), 64)
+		if err == nil && days > 0 {
+			return time.Duration(days * float64(24*time.Hour)), nil
+		}
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil || d <= 0 {
+		return 0, fmt.Errorf("--ephemeral-duration must be a positive duration such as 24h, 7d, 90d, or 168h")
+	}
+	return d, nil
+}
+
+func applyEphemeralContext(msg *waProto.Message, expiration uint32) {
+	if msg == nil || expiration == 0 {
+		return
+	}
+	if ext := msg.GetExtendedTextMessage(); ext != nil {
+		if ext.ContextInfo == nil {
+			ext.ContextInfo = &waProto.ContextInfo{}
+		}
+		ext.ContextInfo.Expiration = proto.Uint32(expiration)
 	}
 }
 

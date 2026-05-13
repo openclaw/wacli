@@ -51,16 +51,24 @@ func TestExecuteDelegatedSendRejectsBadVersionBeforeAppUse(t *testing.T) {
 
 func TestSendDelegateRequestPreservesEphemeralInJSON(t *testing.T) {
 	raw, err := json.Marshal(sendDelegateRequest{
-		Version:   sendDelegateVersion,
-		Kind:      "text",
-		Message:   "hello",
-		Ephemeral: true,
+		Version:              sendDelegateVersion,
+		Kind:                 "text",
+		Message:              "hello",
+		Ephemeral:            true,
+		EphemeralDuration:    "7d",
+		EphemeralDurationSet: true,
 	})
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
 	if !strings.Contains(string(raw), `"ephemeral":true`) {
 		t.Fatalf("encoded request missing ephemeral flag: %s", raw)
+	}
+	if !strings.Contains(string(raw), `"ephemeral_duration":"7d"`) {
+		t.Fatalf("encoded request missing ephemeral duration: %s", raw)
+	}
+	if !strings.Contains(string(raw), `"ephemeral_duration_set":true`) {
+		t.Fatalf("encoded request missing ephemeral duration set flag: %s", raw)
 	}
 
 	var got sendDelegateRequest
@@ -69,6 +77,12 @@ func TestSendDelegateRequestPreservesEphemeralInJSON(t *testing.T) {
 	}
 	if !got.Ephemeral {
 		t.Fatalf("Ephemeral = false, want true")
+	}
+	if got.EphemeralDuration != "7d" {
+		t.Fatalf("EphemeralDuration = %q, want 7d", got.EphemeralDuration)
+	}
+	if !got.EphemeralDurationSet {
+		t.Fatalf("EphemeralDurationSet = false, want true")
 	}
 }
 
