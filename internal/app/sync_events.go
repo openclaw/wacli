@@ -268,6 +268,7 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 					pendingPolls = append(pendingPolls, historyPollSideEffect{pm: pm, evt: pollEvt, hist: m.Message})
 				}
 			} else if ctx.Err() != nil {
+				a.handleHistoryPollSideEffectsBatch(context.WithoutCancel(ctx), pendingPolls)
 				return
 			}
 			if opts.DownloadMedia && pm.Media != nil && pm.ID != "" {
