@@ -45,11 +45,65 @@ func TestEnsurePrivateDirFixesExistingPerms(t *testing.T) {
 
 func TestEnsurePrivateDirRejectsFiles(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "file")
-	if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+	if err := WritePrivateFile(path, []byte("x")); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	if err := EnsurePrivateDir(path); err == nil {
 		t.Fatalf("expected error for file path")
+	}
+}
+
+func TestWritePrivateFileCreatesOwnerOnlyFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "file")
+	if err := WritePrivateFile(path, []byte("secret")); err != nil {
+		t.Fatalf("WritePrivateFile: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(data) != "secret" {
+		t.Fatalf("data = %q", data)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("mode = %04o, want 0600", got)
+	}
+}
+
+func TestWritePrivateFileNarrowsExistingPermsBeforeRewrite(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "file")
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		t.Fatalf("OpenFile: %v", err)
+	}
+	if _, err := f.Write([]byte("old-secret")); err != nil {
+		_ = f.Close()
+		t.Fatalf("Write: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	if err := WritePrivateFile(path, []byte("new-secret")); err != nil {
+		t.Fatalf("WritePrivateFile: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(data) != "new-secret" {
+		t.Fatalf("data = %q", data)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("mode = %04o, want 0600", got)
 	}
 }
 

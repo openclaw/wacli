@@ -3,11 +3,11 @@ package main
 import (
 	"context"
 	"encoding/binary"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/openclaw/wacli/internal/fsutil"
 	"go.mau.fi/whatsmeow"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow/types"
@@ -84,7 +84,7 @@ func TestValidateWebPSticker(t *testing.T) {
 
 func TestSendStickerRejectsNonWebPBeforeUpload(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sticker.png")
-	if err := os.WriteFile(path, []byte("not-webp"), 0o600); err != nil {
+	if err := fsutil.WritePrivateFile(path, []byte("not-webp")); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 

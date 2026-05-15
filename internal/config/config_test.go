@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/openclaw/wacli/internal/fsutil"
 )
 
 func TestDefaultStoreDir(t *testing.T) {
@@ -114,7 +116,7 @@ func TestAccountsConfigRoundTrip(t *testing.T) {
 
 func TestAccountsConfigKnownFields(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte("unknown: true\n"), 0o600); err != nil {
+	if err := fsutil.WritePrivateFile(path, []byte("unknown: true\n")); err != nil {
 		t.Fatal(err)
 	}
 

@@ -48,6 +48,16 @@ CGO_ENABLED=1 CGO_CFLAGS="-Wno-error=missing-braces" \
 ./dist/wacli --help
 ```
 
+### Docker
+
+```bash
+docker build -t wacli .
+docker run --rm -it -v "$PWD/.wacli:/data" wacli auth
+docker run --rm -v "$PWD/.wacli:/data" wacli sync --follow
+```
+
+The image keeps WhatsApp auth, SQLite, config, and cache under `/data`; it also includes `ffmpeg` for media helpers.
+
 ## Quick start
 
 ```bash

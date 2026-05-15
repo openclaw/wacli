@@ -10,6 +10,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	"github.com/openclaw/wacli/internal/fsutil"
 )
 
 //go:embed contacts_export.swift
@@ -23,7 +25,7 @@ func ReadSystem(ctx context.Context) ([]Contact, error) {
 	defer os.RemoveAll(dir)
 
 	script := filepath.Join(dir, "contacts-export.swift")
-	if err := os.WriteFile(script, []byte(contactsExportSwift), 0o600); err != nil {
+	if err := fsutil.WritePrivateFile(script, []byte(contactsExportSwift)); err != nil {
 		return nil, err
 	}
 

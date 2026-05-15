@@ -66,6 +66,7 @@ func newSendReactCmd(flags *rootFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			chat = warmupRecipient(ctx, a.WA(), chat, os.Stderr)
 			if err := warnRapidSendIfNeeded(a.StoreDir(), time.Now().UTC(), os.Stderr); err != nil {
 				return err
 			}

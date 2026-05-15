@@ -39,6 +39,8 @@ type recordingTextSender struct {
 	textRecipient  types.JID
 	nextTextID     types.MessageID
 	nextProtoMsgID types.MessageID
+	groupInfo      *types.GroupInfo
+	groupInfoCalls int
 }
 
 func (s *recordingTextSender) SendText(_ context.Context, to types.JID, text string) (types.MessageID, error) {
@@ -59,6 +61,23 @@ func (s *recordingTextSender) SendProtoMessage(_ context.Context, to types.JID, 
 		return s.nextProtoMsgID, nil
 	}
 	return "proto-id", nil
+}
+
+func (s *recordingTextSender) GetGroupInfo(_ context.Context, _ types.JID) (*types.GroupInfo, error) {
+	s.groupInfoCalls++
+	return s.groupInfo, nil
+}
+
+func requireExtendedText(t *testing.T, msg *waProto.Message) *waProto.ExtendedTextMessage {
+	t.Helper()
+	if msg.GetEphemeralMessage() != nil {
+		t.Fatalf("unexpected EphemeralMessage wrapper")
+	}
+	ext := msg.GetExtendedTextMessage()
+	if ext == nil {
+		t.Fatalf("missing ExtendedTextMessage")
+	}
+	return ext
 }
 
 func TestResolveRecipientFallsBackToFormattedPhone(t *testing.T) {
@@ -321,6 +340,12 @@ func TestSendTextCommandExposesEphemeralFlag(t *testing.T) {
 	if cmd.Flags().Lookup("ephemeral") == nil {
 		t.Fatalf("missing --ephemeral flag")
 	}
+	if cmd.Flags().Lookup("ephemeral-duration") == nil {
+		t.Fatalf("missing --ephemeral-duration flag")
+	}
+	if got := cmd.Flags().Lookup("ephemeral-duration").DefValue; got != "" {
+		t.Fatalf("ephemeral-duration default = %q, want empty", got)
+	}
 }
 
 func TestSendTextCommandExposesMentionFlag(t *testing.T) {
@@ -391,7 +416,7 @@ func TestSendTextMessageKeepsPlainTextFastPathWithoutEphemeral(t *testing.T) {
 	chat := types.JID{User: "15551234567", Server: types.DefaultUserServer}
 	sender := &recordingTextSender{}
 
-	id, err := sendTextMessageWithSender(context.Background(), sender, db, chat, "hello", "", "", nil, nil, false)
+	id, err := sendTextMessageWithSender(context.Background(), sender, db, chat, "hello", "", "", nil, nil, textEphemeralOptions{})
 	if err != nil {
 		t.Fatalf("sendTextMessageWithSender: %v", err)
 	}
@@ -406,52 +431,156 @@ func TestSendTextMessageKeepsPlainTextFastPathWithoutEphemeral(t *testing.T) {
 	}
 }
 
-func TestSendTextMessageWrapsPlainTextAsEphemeralWhenRequested(t *testing.T) {
+func TestSendTextMessageUsesDefaultEphemeralExpirationForPrivateEphemeralWithoutDuration(t *testing.T) {
 	db := openSendTestDB(t)
 	chat := types.JID{User: "15551234567", Server: types.DefaultUserServer}
 	sender := &recordingTextSender{}
 
-	id, err := sendTextMessageWithSender(context.Background(), sender, db, chat, "hello", "", "", nil, nil, true)
+	_, err := sendTextMessageWithSender(context.Background(), sender, db, chat, "hello", "", "", nil, nil, textEphemeralOptions{Enabled: true})
 	if err != nil {
 		t.Fatalf("sendTextMessageWithSender: %v", err)
-	}
-	if id != "proto-id" {
-		t.Fatalf("id = %q, want proto-id", id)
 	}
 	if sender.textCalls != 0 || sender.protoCalls != 1 {
 		t.Fatalf("calls: SendText=%d SendProtoMessage=%d, want 0/1", sender.textCalls, sender.protoCalls)
 	}
-	if sender.protoRecipient != chat {
-		t.Fatalf("proto recipient = %s, want %s", sender.protoRecipient, chat)
+	ext := requireExtendedText(t, sender.protoMsg)
+	if ext.GetText() != "hello" {
+		t.Fatalf("extended text = %q, want hello", ext.GetText())
 	}
-	inner := sender.protoMsg.GetEphemeralMessage().GetMessage()
-	if inner.GetConversation() != "hello" {
-		t.Fatalf("ephemeral conversation = %q, want hello", inner.GetConversation())
+	if got := ext.GetContextInfo().GetExpiration(); got != defaultEphemeralExpiration {
+		t.Fatalf("expiration = %d, want %d", got, defaultEphemeralExpiration)
+	}
+	if sender.groupInfoCalls != 0 {
+		t.Fatalf("GetGroupInfo calls = %d, want 0", sender.groupInfoCalls)
 	}
 }
 
-func TestSendTextMessageWrapsExtendedTextAsEphemeralWhenRequested(t *testing.T) {
+func TestSendTextMessageRejectsExplicitZeroDuration(t *testing.T) {
+	db := openSendTestDB(t)
+	chat := types.JID{User: "15551234567", Server: types.DefaultUserServer}
+	sender := &recordingTextSender{}
+
+	_, err := sendTextMessageWithSender(context.Background(), sender, db, chat, "hello", "", "", nil, nil, textEphemeralOptions{Duration: "0", DurationSet: true})
+	if err == nil || !strings.Contains(err.Error(), "positive duration") {
+		t.Fatalf("sendTextMessageWithSender error = %v", err)
+	}
+	if sender.textCalls != 0 || sender.protoCalls != 0 {
+		t.Fatalf("calls: SendText=%d SendProtoMessage=%d, want 0/0", sender.textCalls, sender.protoCalls)
+	}
+	if sender.groupInfoCalls != 0 {
+		t.Fatalf("GetGroupInfo calls = %d, want 0", sender.groupInfoCalls)
+	}
+}
+
+func TestSendTextMessageAppliesEphemeralDuration(t *testing.T) {
+	db := openSendTestDB(t)
+	chat := types.JID{User: "15551234567", Server: types.DefaultUserServer}
+	sender := &recordingTextSender{}
+
+	_, err := sendTextMessageWithSender(context.Background(), sender, db, chat, "hello", "", "", nil, nil, textEphemeralOptions{Enabled: true, Duration: "7d"})
+	if err != nil {
+		t.Fatalf("sendTextMessageWithSender: %v", err)
+	}
+	if sender.textCalls != 0 || sender.protoCalls != 1 {
+		t.Fatalf("calls: SendText=%d SendProtoMessage=%d, want 0/1", sender.textCalls, sender.protoCalls)
+	}
+	ext := requireExtendedText(t, sender.protoMsg)
+	if ext.GetText() != "hello" {
+		t.Fatalf("extended text = %q, want hello", ext.GetText())
+	}
+	if got := ext.GetContextInfo().GetExpiration(); got != 604800 {
+		t.Fatalf("expiration = %d, want 604800", got)
+	}
+	if sender.groupInfoCalls != 0 {
+		t.Fatalf("GetGroupInfo calls = %d, want 0", sender.groupInfoCalls)
+	}
+}
+
+func TestSendTextMessagePreservesExtendedTextWithEphemeralExpiration(t *testing.T) {
 	db := openSendTestDB(t)
 	chat := types.JID{User: "15551234567", Server: types.DefaultUserServer}
 	preview := &linkpreview.Preview{URL: "https://example.com", Title: "Example"}
 	sender := &recordingTextSender{}
 
-	_, err := sendTextMessageWithSender(context.Background(), sender, db, chat, "hello https://example.com", "", "", preview, nil, true)
+	_, err := sendTextMessageWithSender(context.Background(), sender, db, chat, "hello https://example.com", "", "", preview, nil, textEphemeralOptions{Enabled: true, Duration: "7d"})
 	if err != nil {
 		t.Fatalf("sendTextMessageWithSender: %v", err)
 	}
 	if sender.textCalls != 0 || sender.protoCalls != 1 {
 		t.Fatalf("calls: SendText=%d SendProtoMessage=%d, want 0/1", sender.textCalls, sender.protoCalls)
 	}
-	ext := sender.protoMsg.GetEphemeralMessage().GetMessage().GetExtendedTextMessage()
-	if ext == nil {
-		t.Fatalf("ephemeral message did not preserve extended text")
-	}
+	ext := requireExtendedText(t, sender.protoMsg)
 	if ext.GetText() != "hello https://example.com" {
 		t.Fatalf("extended text = %q", ext.GetText())
 	}
 	if ext.GetMatchedText() != preview.URL || ext.GetTitle() != preview.Title {
 		t.Fatalf("preview fields = (%q, %q), want (%q, %q)", ext.GetMatchedText(), ext.GetTitle(), preview.URL, preview.Title)
+	}
+	if got := ext.GetContextInfo().GetExpiration(); got != 604800 {
+		t.Fatalf("expiration = %d, want 604800", got)
+	}
+	if sender.groupInfoCalls != 0 {
+		t.Fatalf("GetGroupInfo calls = %d, want 0", sender.groupInfoCalls)
+	}
+}
+
+func TestSendTextMessageUsesGroupEphemeralTimer(t *testing.T) {
+	db := openSendTestDB(t)
+	chat := types.JID{User: "12345", Server: types.GroupServer}
+	sender := &recordingTextSender{
+		groupInfo: &types.GroupInfo{
+			GroupEphemeral: types.GroupEphemeral{
+				IsEphemeral:       true,
+				DisappearingTimer: 604800,
+			},
+		},
+	}
+
+	_, err := sendTextMessageWithSender(context.Background(), sender, db, chat, "hello", "", "", nil, nil, textEphemeralOptions{Enabled: true})
+	if err != nil {
+		t.Fatalf("sendTextMessageWithSender: %v", err)
+	}
+	ext := requireExtendedText(t, sender.protoMsg)
+	if got := ext.GetContextInfo().GetExpiration(); got != 604800 {
+		t.Fatalf("expiration = %d, want 604800", got)
+	}
+	if sender.groupInfoCalls != 1 {
+		t.Fatalf("GetGroupInfo calls = %d, want 1", sender.groupInfoCalls)
+	}
+}
+
+func TestSendTextMessageUsesDefaultEphemeralExpirationWhenGroupTimerUnavailable(t *testing.T) {
+	db := openSendTestDB(t)
+	chat := types.JID{User: "12345", Server: types.GroupServer}
+	sender := &recordingTextSender{}
+
+	_, err := sendTextMessageWithSender(context.Background(), sender, db, chat, "hello", "", "", nil, nil, textEphemeralOptions{Enabled: true})
+	if err != nil {
+		t.Fatalf("sendTextMessageWithSender: %v", err)
+	}
+	if sender.textCalls != 0 || sender.protoCalls != 1 {
+		t.Fatalf("calls: SendText=%d SendProtoMessage=%d, want 0/1", sender.textCalls, sender.protoCalls)
+	}
+	ext := requireExtendedText(t, sender.protoMsg)
+	if got := ext.GetContextInfo().GetExpiration(); got != defaultEphemeralExpiration {
+		t.Fatalf("expiration = %d, want %d", got, defaultEphemeralExpiration)
+	}
+	if sender.groupInfoCalls != 1 {
+		t.Fatalf("GetGroupInfo calls = %d, want 1", sender.groupInfoCalls)
+	}
+}
+
+func TestValidateTextEphemeralOptionsRejectsInvalidDuration(t *testing.T) {
+	err := validateTextEphemeralOptions(textEphemeralOptions{Duration: "forever", DurationSet: true})
+	if err == nil || !strings.Contains(err.Error(), "--ephemeral-duration") {
+		t.Fatalf("validateTextEphemeralOptions error = %v", err)
+	}
+}
+
+func TestValidateTextEphemeralOptionsRejectsZeroDuration(t *testing.T) {
+	err := validateTextEphemeralOptions(textEphemeralOptions{Duration: "0", DurationSet: true})
+	if err == nil || !strings.Contains(err.Error(), "positive duration") {
+		t.Fatalf("validateTextEphemeralOptions error = %v", err)
 	}
 }
 

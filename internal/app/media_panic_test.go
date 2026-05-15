@@ -70,10 +70,15 @@ func TestMediaWorkerSurvivesPanic(t *testing.T) {
 	jobs <- mediaJob{chatJID: chat, msgID: "boom"}
 	jobs <- mediaJob{chatJID: chat, msgID: "ok"}
 
-	// Poll until the benign job is downloaded.
+	// Poll until the benign job is persisted. DownloadMediaToFile returning only
+	// proves the worker reached the second job; MarkMediaDownloaded can still be
+	// a few scheduler ticks behind on a busy test runner.
 	deadline := time.Now().Add(2 * time.Second)
+	var localPath string
 	for time.Now().Before(deadline) {
-		if pf.allowed.Load() >= 1 {
+		info, err := a.db.GetMediaDownloadInfo(chat, "ok")
+		if err == nil && info.LocalPath != "" {
+			localPath = info.LocalPath
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -88,12 +93,7 @@ func TestMediaWorkerSurvivesPanic(t *testing.T) {
 		t.Fatalf("benign job was not processed after panic: allowed=%d", pf.allowed.Load())
 	}
 
-	// Verify the benign job actually persisted a local path.
-	info, err := a.db.GetMediaDownloadInfo(chat, "ok")
-	if err != nil {
-		t.Fatalf("GetMediaDownloadInfo: %v", err)
-	}
-	if info.LocalPath == "" {
+	if localPath == "" {
 		t.Fatalf("expected LocalPath for benign job to be set after panic survival")
 	}
 

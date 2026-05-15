@@ -2,11 +2,11 @@ package main
 
 import (
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/openclaw/wacli/internal/fsutil"
 	"github.com/openclaw/wacli/internal/store"
 )
 
@@ -83,7 +83,7 @@ func seedSystemImportStore(t *testing.T) (string, string) {
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
-	if err := os.WriteFile(input, raw, 0o600); err != nil {
+	if err := fsutil.WritePrivateFile(input, raw); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	return storeDir, input

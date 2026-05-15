@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/openclaw/wacli/internal/fsutil"
 	"go.mau.fi/whatsmeow"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"google.golang.org/protobuf/proto"
@@ -42,7 +43,7 @@ func TestDetectSendFileMIMEAddsOpusCodecForOgg(t *testing.T) {
 
 func TestReadSendFileDataRejectsOversizedFile(t *testing.T) {
 	path := t.TempDir() + "/huge.bin"
-	if err := os.WriteFile(path, nil, 0o600); err != nil {
+	if err := fsutil.WritePrivateFile(path, nil); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	if err := os.Truncate(path, maxSendFileSize+1); err != nil {

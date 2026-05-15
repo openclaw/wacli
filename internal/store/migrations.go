@@ -131,17 +131,25 @@ func migrateMessagesForwardedColumns(d *DB) error {
 }
 
 func migrateMessagesReactionColumns(d *DB) error {
-	for _, col := range []string{"reaction_to_id", "reaction_emoji"} {
-		has, err := d.tableHasColumn("messages", col)
-		if err != nil {
-			return err
-		}
-		if has {
-			continue
-		}
-		if _, err := d.sql.Exec(fmt.Sprintf("ALTER TABLE messages ADD COLUMN %s TEXT", col)); err != nil {
-			return fmt.Errorf("add messages.%s column: %w", col, err)
-		}
+	if err := addTextColumnIfMissing(d, "reaction_to_id", `ALTER TABLE messages ADD COLUMN reaction_to_id TEXT`); err != nil {
+		return err
+	}
+	if err := addTextColumnIfMissing(d, "reaction_emoji", `ALTER TABLE messages ADD COLUMN reaction_emoji TEXT`); err != nil {
+		return err
+	}
+	return nil
+}
+
+func addTextColumnIfMissing(d *DB, col, stmt string) error {
+	has, err := d.tableHasColumn("messages", col)
+	if err != nil {
+		return err
+	}
+	if has {
+		return nil
+	}
+	if _, err := d.sql.Exec(stmt); err != nil {
+		return fmt.Errorf("add messages.%s column: %w", col, err)
 	}
 	return nil
 }

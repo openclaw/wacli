@@ -4,11 +4,23 @@
 
 ### Added
 
+- Docker: add a local image with `/data` persistence, bundled `ffmpeg`, and Docker CI smoke coverage.
 - Send: add opt-in `send text --ephemeral` wrapping for disappearing-message chats. (#227 - thanks @AndroidPoet)
+
+### Security
+
+- Store: harden private-file writes and use static SQL for message reaction migrations. (#241 - thanks @cy701)
 
 ### Fixed
 
 - Messages: preserve WhatsApp Business buttons and list options in JSON output. (#226 - thanks @ignaciovarela)
+- Messages: extract WhatsApp NativeFlow interactive buttons from business messages. (#233 - thanks @ignaciovarela and @mturac)
+- Send: canonicalize direct phone-number recipients before sending so WhatsApp accepts regional number rewrites. (#212, #240 - thanks @ceifa)
+- Send: warm up recipients before send to reduce privacy-token failures. (#234 - thanks @AndroidPoet)
+
+### Docs
+
+- Docs: document named accounts in the quickstart and surface accounts, channels, store, and integrations pages in the docs navigation. (#235 - thanks @mamarchk)
 
 ## 0.8.1 - 2026-05-08
 

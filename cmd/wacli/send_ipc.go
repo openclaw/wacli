@@ -26,29 +26,31 @@ const (
 var errSendDelegateUnavailable = errors.New("send delegate unavailable")
 
 type sendDelegateRequest struct {
-	Version        int      `json:"version"`
-	Kind           string   `json:"kind"`
-	To             string   `json:"to,omitempty"`
-	Pick           int      `json:"pick,omitempty"`
-	Message        string   `json:"message,omitempty"`
-	Mentions       []string `json:"mentions,omitempty"`
-	ReplyTo        string   `json:"reply_to,omitempty"`
-	ReplyToSender  string   `json:"reply_to_sender,omitempty"`
-	NoPreview      bool     `json:"no_preview,omitempty"`
-	Ephemeral      bool     `json:"ephemeral,omitempty"`
-	File           string   `json:"file,omitempty"`
-	Filename       string   `json:"filename,omitempty"`
-	Caption        string   `json:"caption,omitempty"`
-	MIME           string   `json:"mime,omitempty"`
-	PTT            bool     `json:"ptt,omitempty"`
-	ID             string   `json:"id,omitempty"`
-	Reaction       string   `json:"reaction,omitempty"`
-	Sender         string   `json:"sender,omitempty"`
-	Question       string   `json:"question,omitempty"`
-	Options        []string `json:"options,omitempty"`
-	Selectable     int      `json:"selectable,omitempty"`
-	PostSendWaitMS int64    `json:"post_send_wait_ms,omitempty"`
-	TimeoutMS      int64    `json:"timeout_ms,omitempty"`
+	Version              int      `json:"version"`
+	Kind                 string   `json:"kind"`
+	To                   string   `json:"to,omitempty"`
+	Pick                 int      `json:"pick,omitempty"`
+	Message              string   `json:"message,omitempty"`
+	Mentions             []string `json:"mentions,omitempty"`
+	ReplyTo              string   `json:"reply_to,omitempty"`
+	ReplyToSender        string   `json:"reply_to_sender,omitempty"`
+	NoPreview            bool     `json:"no_preview,omitempty"`
+	Ephemeral            bool     `json:"ephemeral,omitempty"`
+	EphemeralDuration    string   `json:"ephemeral_duration,omitempty"`
+	EphemeralDurationSet bool     `json:"ephemeral_duration_set,omitempty"`
+	File                 string   `json:"file,omitempty"`
+	Filename             string   `json:"filename,omitempty"`
+	Caption              string   `json:"caption,omitempty"`
+	MIME                 string   `json:"mime,omitempty"`
+	PTT                  bool     `json:"ptt,omitempty"`
+	ID                   string   `json:"id,omitempty"`
+	Reaction             string   `json:"reaction,omitempty"`
+	Sender               string   `json:"sender,omitempty"`
+	Question             string   `json:"question,omitempty"`
+	Options              []string `json:"options,omitempty"`
+	Selectable           int      `json:"selectable,omitempty"`
+	PostSendWaitMS       int64    `json:"post_send_wait_ms,omitempty"`
+	TimeoutMS            int64    `json:"timeout_ms,omitempty"`
 }
 
 type sendDelegateResponse struct {
@@ -208,10 +210,19 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 }
 
 func executeDelegatedText(ctx context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {
+	ephemeral := textEphemeralOptions{
+		Enabled:     req.Ephemeral,
+		Duration:    req.EphemeralDuration,
+		DurationSet: req.EphemeralDurationSet,
+	}
+	if err := validateTextEphemeralOptions(ephemeral); err != nil {
+		return sendDelegateResponse{}, err
+	}
 	toJID, err := resolveRecipient(a, req.To, recipientOptions{pick: req.Pick, asJSON: true})
 	if err != nil {
 		return sendDelegateResponse{}, err
 	}
+	toJID = warmupDelegatedRecipient(ctx, a, toJID)
 	mentionedJIDs, err := parseMentionedJIDs(req.Mentions)
 	if err != nil {
 		return sendDelegateResponse{}, err
@@ -221,7 +232,7 @@ func executeDelegatedText(ctx context.Context, a *app.App, req sendDelegateReque
 	}
 	preview := fetchLinkPreview(ctx, req.Message, req.NoPreview)
 	msgID, err := runSendOperation(ctx, reconnectForSend(a), func(ctx context.Context) (types.MessageID, error) {
-		return sendTextMessage(ctx, a, toJID, req.Message, req.ReplyTo, req.ReplyToSender, preview, mentionedJIDs, req.Ephemeral)
+		return sendTextMessage(ctx, a, toJID, req.Message, req.ReplyTo, req.ReplyToSender, preview, mentionedJIDs, ephemeral)
 	})
 	if err != nil {
 		return sendDelegateResponse{}, err
@@ -247,6 +258,7 @@ func executeDelegatedFile(ctx context.Context, a *app.App, req sendDelegateReque
 	if err != nil {
 		return sendDelegateResponse{}, err
 	}
+	toJID = warmupDelegatedRecipient(ctx, a, toJID)
 	if err := warnRapidSendIfNeeded(a.StoreDir(), time.Now().UTC(), os.Stderr); err != nil {
 		return sendDelegateResponse{}, err
 	}
@@ -276,6 +288,7 @@ func executeDelegatedSticker(ctx context.Context, a *app.App, req sendDelegateRe
 	if err != nil {
 		return sendDelegateResponse{}, err
 	}
+	toJID = warmupDelegatedRecipient(ctx, a, toJID)
 	if err := warnRapidSendIfNeeded(a.StoreDir(), time.Now().UTC(), os.Stderr); err != nil {
 		return sendDelegateResponse{}, err
 	}
@@ -301,6 +314,7 @@ func executeDelegatedReact(ctx context.Context, a *app.App, req sendDelegateRequ
 	if err != nil {
 		return sendDelegateResponse{}, err
 	}
+	chat = warmupDelegatedRecipient(ctx, a, chat)
 	if err := warnRapidSendIfNeeded(a.StoreDir(), time.Now().UTC(), os.Stderr); err != nil {
 		return sendDelegateResponse{}, err
 	}
@@ -358,6 +372,10 @@ func writeDelegatedSendOutput(flags *rootFlags, kind string, resp sendDelegateRe
 		fmt.Fprintf(os.Stdout, "Sent to %s (id %s)\n", resp.To, resp.ID)
 	}
 	return nil
+}
+
+func warmupDelegatedRecipient(ctx context.Context, a *app.App, jid types.JID) types.JID {
+	return warmupRecipient(ctx, a.WA(), jid, os.Stderr)
 }
 
 func durationMillis(d time.Duration) int64 {

@@ -11,7 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openclaw/wacli/internal/fsutil"
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/types"
 )
 
 func TestRunSendOperationRetriesRetryableError(t *testing.T) {
@@ -136,7 +138,7 @@ func TestWarnRapidSendIfNeededSkipsOldOrInvalidMarker(t *testing.T) {
 	now := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
 	path := filepath.Join(dir, lastSendAttemptFile)
 
-	if err := os.WriteFile(path, []byte(now.Add(-rapidSendWarningThreshold).Format(time.RFC3339Nano)), 0o600); err != nil {
+	if err := fsutil.WritePrivateFile(path, []byte(now.Add(-rapidSendWarningThreshold).Format(time.RFC3339Nano))); err != nil {
 		t.Fatalf("write old marker: %v", err)
 	}
 	var stderr bytes.Buffer
@@ -147,7 +149,7 @@ func TestWarnRapidSendIfNeededSkipsOldOrInvalidMarker(t *testing.T) {
 		t.Fatalf("old marker warned: %q", stderr.String())
 	}
 
-	if err := os.WriteFile(path, []byte("not a timestamp"), 0o600); err != nil {
+	if err := fsutil.WritePrivateFile(path, []byte("not a timestamp")); err != nil {
 		t.Fatalf("write invalid marker: %v", err)
 	}
 	if err := warnRapidSendIfNeeded(dir, now.Add(time.Second), &stderr); err != nil {
@@ -155,5 +157,152 @@ func TestWarnRapidSendIfNeededSkipsOldOrInvalidMarker(t *testing.T) {
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("invalid marker warned: %q", stderr.String())
+	}
+}
+
+type mockUserInfoClient struct {
+	getUserInfo  func(ctx context.Context, jids []types.JID) (map[types.JID]types.UserInfo, error)
+	isOnWhatsApp func(ctx context.Context, phones []string) ([]types.IsOnWhatsAppResponse, error)
+}
+
+func (m *mockUserInfoClient) GetUserInfo(ctx context.Context, jids []types.JID) (map[types.JID]types.UserInfo, error) {
+	if m.getUserInfo == nil {
+		return nil, nil
+	}
+	return m.getUserInfo(ctx, jids)
+}
+
+func (m *mockUserInfoClient) IsOnWhatsApp(ctx context.Context, phones []string) ([]types.IsOnWhatsAppResponse, error) {
+	if m.isOnWhatsApp == nil {
+		return nil, nil
+	}
+	return m.isOnWhatsApp(ctx, phones)
+}
+
+func TestWarmupRecipientSkipNonUserServer(t *testing.T) {
+	called := false
+	mock := &mockUserInfoClient{
+		getUserInfo: func(ctx context.Context, jids []types.JID) (map[types.JID]types.UserInfo, error) {
+			called = true
+			return nil, nil
+		},
+	}
+
+	var stderr bytes.Buffer
+	groupJID := types.NewJID("12345", types.GroupServer)
+	got := warmupRecipient(context.Background(), mock, groupJID, &stderr)
+	if got != groupJID {
+		t.Fatalf("warmupRecipient returned %s, want %s", got, groupJID)
+	}
+	if called {
+		t.Fatal("GetUserInfo should not be called for group JIDs")
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected stderr: %q", stderr.String())
+	}
+}
+
+func TestWarmupRecipientCallsGetUserInfoForUserServer(t *testing.T) {
+	called := false
+	mock := &mockUserInfoClient{
+		getUserInfo: func(ctx context.Context, jids []types.JID) (map[types.JID]types.UserInfo, error) {
+			called = true
+			if len(jids) != 1 {
+				t.Fatalf("expected 1 JID, got %d", len(jids))
+			}
+			if jids[0].String() != "15551234567@s.whatsapp.net" {
+				t.Fatalf("unexpected JID: %s", jids[0].String())
+			}
+			return nil, nil
+		},
+	}
+
+	var stderr bytes.Buffer
+	userJID := types.NewJID("15551234567", types.DefaultUserServer)
+	got := warmupRecipient(context.Background(), mock, userJID, &stderr)
+	if got != userJID {
+		t.Fatalf("warmupRecipient returned %s, want %s", got, userJID)
+	}
+	if !called {
+		t.Fatal("GetUserInfo should be called for user JIDs")
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected stderr: %q", stderr.String())
+	}
+}
+
+func TestWarmupRecipientCanonicalizesRegisteredPhone(t *testing.T) {
+	input := types.NewJID("15559991234567", types.DefaultUserServer)
+	canonical := types.NewJID("15551234567", types.DefaultUserServer)
+	mock := &mockUserInfoClient{
+		isOnWhatsApp: func(ctx context.Context, phones []string) ([]types.IsOnWhatsAppResponse, error) {
+			if len(phones) != 1 || phones[0] != "+15559991234567" {
+				t.Fatalf("unexpected phone query: %v", phones)
+			}
+			return []types.IsOnWhatsAppResponse{{
+				JID:  canonical,
+				IsIn: true,
+			}}, nil
+		},
+		getUserInfo: func(ctx context.Context, jids []types.JID) (map[types.JID]types.UserInfo, error) {
+			if len(jids) != 1 || jids[0] != canonical {
+				t.Fatalf("expected canonical JID %s, got %v", canonical, jids)
+			}
+			return nil, nil
+		},
+	}
+
+	var stderr bytes.Buffer
+	got := warmupRecipient(context.Background(), mock, input, &stderr)
+	if got != canonical {
+		t.Fatalf("warmupRecipient returned %s, want %s", got, canonical)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected stderr: %q", stderr.String())
+	}
+}
+
+func TestWarmupRecipientKeepsOriginalOnRegistrationError(t *testing.T) {
+	input := types.NewJID("15559991234567", types.DefaultUserServer)
+	mock := &mockUserInfoClient{
+		isOnWhatsApp: func(ctx context.Context, phones []string) ([]types.IsOnWhatsAppResponse, error) {
+			return nil, errors.New("registration failed")
+		},
+		getUserInfo: func(ctx context.Context, jids []types.JID) (map[types.JID]types.UserInfo, error) {
+			if len(jids) != 1 || jids[0] != input {
+				t.Fatalf("expected original JID %s, got %v", input, jids)
+			}
+			return nil, nil
+		},
+	}
+
+	var stderr bytes.Buffer
+	got := warmupRecipient(context.Background(), mock, input, &stderr)
+	if got != input {
+		t.Fatalf("warmupRecipient returned %s, want %s", got, input)
+	}
+	if !strings.Contains(stderr.String(), "warn: send registration warmup for") {
+		t.Fatalf("expected registration warning, got %q", stderr.String())
+	}
+}
+
+func TestWarmupRecipientLogsErrorToStderr(t *testing.T) {
+	mock := &mockUserInfoClient{
+		getUserInfo: func(ctx context.Context, jids []types.JID) (map[types.JID]types.UserInfo, error) {
+			return nil, errors.New("simulated failure")
+		},
+	}
+
+	var stderr bytes.Buffer
+	userJID := types.NewJID("15551234567", types.DefaultUserServer)
+	got := warmupRecipient(context.Background(), mock, userJID, &stderr)
+	if got != userJID {
+		t.Fatalf("warmupRecipient returned %s, want %s", got, userJID)
+	}
+	if stderr.Len() == 0 {
+		t.Fatal("expected stderr output on error")
+	}
+	if !strings.Contains(stderr.String(), "warn: send warmup for") {
+		t.Fatalf("expected warning in stderr, got: %q", stderr.String())
 	}
 }

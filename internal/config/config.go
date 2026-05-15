@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/openclaw/wacli/internal/fsutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -150,7 +151,7 @@ func SaveAccountsConfig(path string, cfg *AccountsConfig) error {
 		return fmt.Errorf("encode account config: %w", err)
 	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	if err := fsutil.WritePrivateFile(tmp, data); err != nil {
 		return fmt.Errorf("write account config: %w", err)
 	}
 	if err := os.Rename(tmp, path); err != nil {

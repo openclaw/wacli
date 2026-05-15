@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/openclaw/wacli/internal/fsutil"
 	"github.com/openclaw/wacli/internal/wa"
 	"go.mau.fi/whatsmeow"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
@@ -240,6 +241,14 @@ func (f *fakeWA) ResolvePNToLID(ctx context.Context, jid types.JID) types.JID {
 		}
 	}
 	return jid
+}
+
+func (f *fakeWA) GetUserInfo(ctx context.Context, jids []types.JID) (map[types.JID]types.UserInfo, error) {
+	return map[types.JID]types.UserInfo{}, nil
+}
+
+func (f *fakeWA) IsOnWhatsApp(ctx context.Context, phones []string) ([]types.IsOnWhatsAppResponse, error) {
+	return nil, nil
 }
 
 func (f *fakeWA) GetContact(ctx context.Context, jid types.JID) (types.ContactInfo, error) {
@@ -501,7 +510,7 @@ func (f *fakeWA) DownloadMediaToFile(ctx context.Context, directPath string, enc
 	if err := os.MkdirAll(filepath.Dir(targetPath), 0o700); err != nil {
 		return 0, err
 	}
-	if err := os.WriteFile(targetPath, []byte("test"), 0o600); err != nil {
+	if err := fsutil.WritePrivateFile(targetPath, []byte("test")); err != nil {
 		return 0, err
 	}
 	st, err := os.Stat(targetPath)

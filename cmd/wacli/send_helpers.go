@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/openclaw/wacli/internal/app"
+	"github.com/openclaw/wacli/internal/fsutil"
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/types"
 )
 
 const sendAttemptTimeout = 45 * time.Second
@@ -121,11 +123,48 @@ func warnRapidSendIfNeeded(storeDir string, now time.Time, stderr io.Writer) err
 			}
 		}
 	}
-	if err := os.WriteFile(path, []byte(now.Format(time.RFC3339Nano)+"\n"), 0o600); err != nil {
+	if err := fsutil.WritePrivateFile(path, []byte(now.Format(time.RFC3339Nano)+"\n")); err != nil {
 		return fmt.Errorf("write last send marker: %w", err)
 	}
-	if err := os.Chmod(path, 0o600); err != nil {
-		return fmt.Errorf("chmod last send marker: %w", err)
-	}
 	return nil
+}
+
+// warmupRecipient canonicalizes direct phone-number recipients and resolves
+// user info before sending to establish contact state with WhatsApp's servers.
+// Without this, the privacy token (tctoken) IQ may fail with 400: bad-request
+// for new or unknown contacts, causing messages to be silently dropped despite
+// returning sent:true.
+//
+// The warmup is best-effort: failures are logged to stderr but never
+// block the send. The returned JID is the canonical send target when WhatsApp
+// registration lookup resolves one.
+//
+// userInfoResolver is satisfied by app.WAClient.
+type userInfoResolver interface {
+	GetUserInfo(ctx context.Context, jids []types.JID) (map[types.JID]types.UserInfo, error)
+}
+
+type whatsappRegistrationResolver interface {
+	IsOnWhatsApp(ctx context.Context, phones []string) ([]types.IsOnWhatsAppResponse, error)
+}
+
+func warmupRecipient(ctx context.Context, wa userInfoResolver, jid types.JID, stderr io.Writer) types.JID {
+	if jid.Server != types.DefaultUserServer && jid.Server != types.HiddenUserServer {
+		return jid
+	}
+	if jid.Server == types.DefaultUserServer {
+		if resolver, ok := any(wa).(whatsappRegistrationResolver); ok {
+			registrations, regErr := resolver.IsOnWhatsApp(ctx, []string{"+" + jid.User})
+			if regErr != nil {
+				fmt.Fprintf(stderr, "warn: send registration warmup for %s failed (send will proceed): %v\n", jid, regErr)
+			} else if len(registrations) > 0 && registrations[0].IsIn && !registrations[0].JID.IsEmpty() {
+				jid = registrations[0].JID.ToNonAD()
+			}
+		}
+	}
+	_, err := wa.GetUserInfo(ctx, []types.JID{jid})
+	if err != nil {
+		fmt.Fprintf(stderr, "warn: send warmup for %s failed (send will proceed): %v\n", jid, err)
+	}
+	return jid
 }

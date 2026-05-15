@@ -1,6 +1,7 @@
 package wa
 
 import (
+	"encoding/json"
 	"strings"
 
 	waProto "go.mau.fi/whatsmeow/binary/proto"
@@ -47,6 +48,7 @@ func extractBusinessText(m *waProto.Message, pm *ParsedMessage) {
 			if pm.Text == "" {
 				pm.Text = interactiveText(im)
 			}
+			appendNativeFlowButtons(pm, im)
 		}
 	}
 
@@ -82,8 +84,11 @@ func extractBusinessText(m *waProto.Message, pm *ParsedMessage) {
 		pm.Text = resp.GetSelectedDisplayText()
 	}
 
-	if im := m.GetInteractiveMessage(); im != nil && pm.Text == "" {
-		pm.Text = interactiveText(im)
+	if im := m.GetInteractiveMessage(); im != nil {
+		if pm.Text == "" {
+			pm.Text = interactiveText(im)
+		}
+		appendNativeFlowButtons(pm, im)
 	}
 
 	if resp := m.GetInteractiveResponseMessage(); resp != nil && pm.Text == "" {
@@ -141,6 +146,49 @@ func hydratedTemplate(tmpl *waProto.TemplateMessage) *waProto.TemplateMessage_Hy
 		return h
 	}
 	return tmpl.GetHydratedTemplate()
+}
+
+func appendNativeFlowButtons(pm *ParsedMessage, im *waProto.InteractiveMessage) {
+	if nf := im.GetNativeFlowMessage(); nf != nil {
+		for _, btn := range nf.GetButtons() {
+			pm.Buttons = append(pm.Buttons, nativeFlowButton(btn)...)
+		}
+	}
+}
+
+func nativeFlowButton(btn *waProto.InteractiveMessage_NativeFlowMessage_NativeFlowButton) []Button {
+	name := strings.TrimSpace(btn.GetName())
+	raw := strings.TrimSpace(btn.GetButtonParamsJSON())
+	if raw == "" {
+		return nil
+	}
+	switch name {
+	case "cta_url":
+		var p struct {
+			DisplayText string `json:"display_text"`
+			URL         string `json:"url"`
+		}
+		if json.Unmarshal([]byte(raw), &p) == nil && (p.DisplayText != "" || p.URL != "") {
+			return []Button{{Type: "url", DisplayText: strings.TrimSpace(p.DisplayText), URL: strings.TrimSpace(p.URL)}}
+		}
+	case "quick_reply":
+		var p struct {
+			DisplayText string `json:"display_text"`
+			ID          string `json:"id"`
+		}
+		if json.Unmarshal([]byte(raw), &p) == nil && p.DisplayText != "" {
+			return []Button{{Type: "quick_reply", DisplayText: strings.TrimSpace(p.DisplayText), ID: strings.TrimSpace(p.ID)}}
+		}
+	case "cta_call":
+		var p struct {
+			DisplayText string `json:"display_text"`
+			PhoneNumber string `json:"phone_number"`
+		}
+		if json.Unmarshal([]byte(raw), &p) == nil && p.DisplayText != "" {
+			return []Button{{Type: "call", DisplayText: strings.TrimSpace(p.DisplayText), PhoneNumber: strings.TrimSpace(p.PhoneNumber)}}
+		}
+	}
+	return nil
 }
 
 func interactiveText(im *waProto.InteractiveMessage) string {

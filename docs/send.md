@@ -9,7 +9,7 @@ When `sync --follow` is already running for the same store, send commands delega
 ## Commands
 
 ```bash
-wacli send text --to RECIPIENT --message TEXT [--message-escapes] [--pick N] [--mention USER] [--no-preview] [--ephemeral] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
+wacli send text --to RECIPIENT --message TEXT [--message-escapes] [--pick N] [--mention USER] [--no-preview] [--ephemeral] [--ephemeral-duration DURATION] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
 wacli send file --to RECIPIENT --file PATH [--pick N] [--caption TEXT] [--filename NAME] [--mime TYPE] [--ptt] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
 wacli send sticker --to RECIPIENT --file PATH [--pick N] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
 wacli send voice --to RECIPIENT --file PATH [--pick N] [--mime TYPE] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
@@ -29,7 +29,7 @@ wacli send react --to PHONE_OR_JID --id MSG_ID [--reaction TEXT] [--sender JID] 
 - `send text` fetches Open Graph metadata for the first `http://` or `https://` URL and sends it as a WhatsApp link preview.
 - Preview metadata fetches time out after 10 seconds and fall back to plain text.
 - Pass `--no-preview` to disable link-preview fetching.
-- Pass `--ephemeral` to wrap outgoing text in `EphemeralMessage` for disappearing-message chats.
+- `--ephemeral` sends text with `ContextInfo.Expiration`, matching the disappearing-send path. For groups, wacli uses the live group timer when available; otherwise it falls back to a 7-day default. Set `--ephemeral-duration` to choose an explicit expiration.
 - `--message` is literal by default. Pass `--message-escapes` to interpret `\n`, `\r`, `\t`, `\\`, and `\"` before sending.
 - Use repeatable `--mention USER` with a phone number or user JID to add WhatsApp mentions to `send text`.
 - `--reply-to` quotes a stored message ID.
@@ -58,6 +58,8 @@ wacli send react --to PHONE_OR_JID --id MSG_ID [--reaction TEXT] [--sender JID] 
 ```bash
 wacli send text --to mom --message "landed"
 wacli send text --to mom --message "auto delete this" --ephemeral
+wacli send text --to mom --message "auto delete this in 7 days" --ephemeral-duration 7d
+wacli send text --to "Family" --message "auto delete this" --ephemeral
 wacli send text --to mom --message "line1\nline2" --message-escapes
 wacli send text --to "Family" --pick 2 --message "on my way"
 wacli send text --to "Family" --message "hey @15551234567" --mention +15551234567
