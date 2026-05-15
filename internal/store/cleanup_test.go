@@ -21,6 +21,15 @@ func TestDeleteChat(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpsertMessage: %v", err)
 	}
+	if err := db.SetStarred(SetStarredParams{
+		ChatJID:   "123@s.whatsapp.net",
+		MsgID:     "msg1",
+		SenderJID: "123@s.whatsapp.net",
+		Starred:   true,
+		StarredAt: now,
+	}); err != nil {
+		t.Fatalf("SetStarred: %v", err)
+	}
 	if err := db.UpsertPoll(Poll{
 		ChatJID:   "123@s.whatsapp.net",
 		MsgID:     "poll1",
@@ -71,6 +80,9 @@ func TestDeleteChat(t *testing.T) {
 	if got := countRows(t, db.sql, "SELECT COUNT(*) FROM poll_votes WHERE chat_jid = ?", "123@s.whatsapp.net"); got != 0 {
 		t.Fatalf("expected poll votes deleted, got %d", got)
 	}
+	if got := countRows(t, db.sql, "SELECT COUNT(*) FROM starred WHERE chat_jid = ?", "123@s.whatsapp.net"); got != 0 {
+		t.Fatalf("expected starred rows deleted, got %d", got)
+	}
 }
 
 func TestDeleteChatsOlderThan(t *testing.T) {
@@ -102,6 +114,24 @@ func TestDeleteChatsOlderThan(t *testing.T) {
 		Text:      "recent message",
 	}); err != nil {
 		t.Fatalf("UpsertMessage recent: %v", err)
+	}
+	if err := db.SetStarred(SetStarredParams{
+		ChatJID:   "old@s.whatsapp.net",
+		MsgID:     "msg1",
+		SenderJID: "old@s.whatsapp.net",
+		Starred:   true,
+		StarredAt: old,
+	}); err != nil {
+		t.Fatalf("SetStarred old: %v", err)
+	}
+	if err := db.SetStarred(SetStarredParams{
+		ChatJID:   "recent@s.whatsapp.net",
+		MsgID:     "msg2",
+		SenderJID: "recent@s.whatsapp.net",
+		Starred:   true,
+		StarredAt: recent,
+	}); err != nil {
+		t.Fatalf("SetStarred recent: %v", err)
 	}
 	if err := db.UpsertPoll(Poll{
 		ChatJID:   "old@s.whatsapp.net",
@@ -160,6 +190,12 @@ func TestDeleteChatsOlderThan(t *testing.T) {
 	}
 	if got := countRows(t, db.sql, "SELECT COUNT(*) FROM polls WHERE chat_jid = ?", "recent@s.whatsapp.net"); got != 1 {
 		t.Fatalf("expected recent poll to survive, got %d", got)
+	}
+	if got := countRows(t, db.sql, "SELECT COUNT(*) FROM starred WHERE chat_jid = ?", "old@s.whatsapp.net"); got != 0 {
+		t.Fatalf("expected old starred rows deleted, got %d", got)
+	}
+	if got := countRows(t, db.sql, "SELECT COUNT(*) FROM starred WHERE chat_jid = ?", "recent@s.whatsapp.net"); got != 1 {
+		t.Fatalf("expected recent starred row to survive, got %d", got)
 	}
 }
 
@@ -269,6 +305,15 @@ func TestDeleteGroupLocalDataDeletesGroupChatAndMessages(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpsertMessage: %v", err)
 	}
+	if err := db.SetStarred(SetStarredParams{
+		ChatJID:   "12345@g.us",
+		MsgID:     "msg1",
+		SenderJID: "sender@s.whatsapp.net",
+		Starred:   true,
+		StarredAt: now,
+	}); err != nil {
+		t.Fatalf("SetStarred: %v", err)
+	}
 	if err := db.UpsertPoll(Poll{
 		ChatJID:   "12345@g.us",
 		MsgID:     "poll1",
@@ -308,6 +353,9 @@ func TestDeleteGroupLocalDataDeletesGroupChatAndMessages(t *testing.T) {
 	}
 	if got := countRows(t, db.sql, `SELECT COUNT(1) FROM poll_votes WHERE chat_jid = ?`, "12345@g.us"); got != 0 {
 		t.Fatalf("expected poll votes deleted, got %d", got)
+	}
+	if got := countRows(t, db.sql, `SELECT COUNT(1) FROM starred WHERE chat_jid = ?`, "12345@g.us"); got != 0 {
+		t.Fatalf("expected starred rows deleted, got %d", got)
 	}
 }
 

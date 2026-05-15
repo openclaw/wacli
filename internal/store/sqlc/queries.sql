@@ -42,6 +42,9 @@ DELETE FROM poll_votes WHERE chat_jid = ?;
 -- name: DeletePollsForChat :exec
 DELETE FROM polls WHERE chat_jid = ?;
 
+-- name: DeleteStarredForChat :exec
+DELETE FROM starred WHERE chat_jid = ?;
+
 -- name: DeleteChat :exec
 DELETE FROM chats WHERE jid = ?;
 

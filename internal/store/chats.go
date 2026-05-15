@@ -141,6 +141,9 @@ func (d *DB) DeleteChat(jid string) error {
 	if err := q.DeletePollsForChat(ctx, jid); err != nil {
 		return err
 	}
+	if err := q.DeleteStarredForChat(ctx, jid); err != nil {
+		return err
+	}
 	if err := q.DeleteChat(ctx, jid); err != nil {
 		return err
 	}
@@ -185,6 +188,9 @@ func (d *DB) DeleteChatsOlderThan(days int) (int64, error) {
 		return 0, err
 	}
 	if _, err := tx.Exec(`DELETE FROM polls WHERE chat_jid IN (`+staleChatJIDsSQL+`)`, cutoffUnix); err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(`DELETE FROM starred WHERE chat_jid IN (`+staleChatJIDsSQL+`)`, cutoffUnix); err != nil {
 		return 0, err
 	}
 	res, err := tx.Exec(`DELETE FROM chats WHERE jid IN (`+staleChatJIDsSQL+`)`, cutoffUnix)

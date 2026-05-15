@@ -12,6 +12,7 @@ var replacer = strings.NewReplacer(
 	":", "_",
 	"@", "_",
 	"?", "_",
+	"#", "_",
 	"*", "_",
 	"<", "_",
 	">", "_",
@@ -30,25 +31,31 @@ func stripControlChars(s string) string {
 }
 
 func SanitizeSegment(seg string) string {
-	seg = strings.TrimSpace(seg)
 	seg = stripControlChars(seg)
+	seg = strings.TrimSpace(seg)
 	if seg == "" {
 		return "unknown"
 	}
 	seg = replacer.Replace(seg)
 	seg = strings.ReplaceAll(seg, "..", "_")
 	seg = strings.ReplaceAll(seg, string(filepath.Separator), "_")
+	if seg == "." {
+		return "unknown"
+	}
 	return seg
 }
 
 func SanitizeFilename(name string) string {
-	name = strings.TrimSpace(name)
 	name = stripControlChars(name)
+	name = strings.TrimSpace(name)
 	if name == "" {
 		return "file"
 	}
 	name = replacer.Replace(name)
 	name = strings.ReplaceAll(name, "..", "_")
 	name = strings.ReplaceAll(name, string(filepath.Separator), "_")
+	if name == "." {
+		return "file"
+	}
 	return name
 }

@@ -191,6 +191,15 @@ func (q *Queries) DeletePollsForChat(ctx context.Context, chatJid string) error 
 	return err
 }
 
+const deleteStarredForChat = `-- name: DeleteStarredForChat :exec
+DELETE FROM starred WHERE chat_jid = ?
+`
+
+func (q *Queries) DeleteStarredForChat(ctx context.Context, chatJid string) error {
+	_, err := q.db.ExecContext(ctx, deleteStarredForChat, chatJid)
+	return err
+}
+
 const findPollByMsgID = `-- name: FindPollByMsgID :one
 SELECT p.chat_jid, p.msg_id, COALESCE(p.sender_jid,''), p.question, p.options_json, p.selectable_count, p.created_ts
 FROM polls p
