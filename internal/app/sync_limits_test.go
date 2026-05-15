@@ -117,6 +117,51 @@ func TestSyncFlushesFinalHistoryPollVoteAtMaxMessages(t *testing.T) {
 	}
 }
 
+func TestSyncFlushesFinalLivePollVoteAtMaxMessages(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	chat := types.JID{User: "123", Server: types.DefaultUserServer}
+	voter := types.JID{User: "777", Server: types.DefaultUserServer}
+	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	pollMsgID := "poll-live-limit"
+	if err := a.db.UpsertPoll(store.Poll{
+		ChatJID:         chat.String(),
+		MsgID:           pollMsgID,
+		SenderJID:       chat.String(),
+		Question:        "Live limit?",
+		Options:         []string{"Yes", "No"},
+		SelectableCount: 1,
+		CreatedAt:       base,
+	}); err != nil {
+		t.Fatalf("UpsertPoll: %v", err)
+	}
+	f.decryptPollVoteFunc = func(_ *events.Message) (*waE2E.PollVoteMessage, error) {
+		return &waE2E.PollVoteMessage{SelectedOptions: whatsmeow.HashPollOptions([]string{"Yes"})}, nil
+	}
+	f.connectEvents = []interface{}{livePollVote(chat, voter, base, pollMsgID, "vote-live-limit")}
+
+	res, err := a.Sync(context.Background(), SyncOptions{
+		Mode:        SyncModeFollow,
+		AllowQR:     false,
+		MaxMessages: 1,
+	})
+	if err == nil || !strings.Contains(err.Error(), "sync storage limit reached: message is 1, limit is 1") {
+		t.Fatalf("Sync error = %v", err)
+	}
+	if res.MessagesStored != 1 {
+		t.Fatalf("MessagesStored = %d, want 1", res.MessagesStored)
+	}
+	votes, err := a.db.ListPollVotes(chat.String(), pollMsgID)
+	if err != nil {
+		t.Fatalf("ListPollVotes: %v", err)
+	}
+	if len(votes) != 1 || votes[0].VoterJID != voter.String() || votes[0].VoteMsgID != "vote-live-limit" {
+		t.Fatalf("votes = %+v", votes)
+	}
+}
+
 func TestSyncRejectsExistingDBOverSizeLimit(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
@@ -195,6 +240,27 @@ func historySyncWithPollAndText(chat types.JID, start time.Time, pollID, textID 
 					},
 				},
 			}},
+		},
+	}
+}
+
+func livePollVote(chat, voter types.JID, ts time.Time, pollID, voteID string) *events.Message {
+	return &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:   chat,
+				Sender: voter,
+			},
+			ID:        voteID,
+			Timestamp: ts,
+		},
+		Message: &waProto.Message{
+			PollUpdateMessage: &waProto.PollUpdateMessage{
+				PollCreationMessageKey: &waCommon.MessageKey{
+					ID:        proto.String(pollID),
+					RemoteJID: proto.String(chat.String()),
+				},
+			},
 		},
 	}
 }

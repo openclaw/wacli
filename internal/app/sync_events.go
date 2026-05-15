@@ -200,7 +200,11 @@ func (a *App) handleLiveSyncMessage(ctx context.Context, opts SyncOptions, v *ev
 		if enqueueWebhook != nil {
 			enqueueWebhook(pm)
 		}
-		a.handlePollSideEffects(ctx, pm, v)
+		sideEffectCtx := ctx
+		if ctx.Err() != nil {
+			sideEffectCtx = context.WithoutCancel(ctx)
+		}
+		a.handlePollSideEffects(sideEffectCtx, pm, v)
 	}
 	if opts.DownloadMedia && pm.Media != nil && pm.ID != "" {
 		enqueueMedia(pm.Chat.String(), pm.ID)
