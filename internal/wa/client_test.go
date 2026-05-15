@@ -144,6 +144,17 @@ func TestResolvePNToLIDUsesOwnLIDWithoutCache(t *testing.T) {
 	}
 }
 
+func TestResolvePNToLIDPublicUsesOwnLIDWithoutCache(t *testing.T) {
+	pn := types.NewJID("15551234567", types.DefaultUserServer)
+	lid := types.NewJID("999123456789", types.HiddenUserServer)
+	c := &Client{client: &whatsmeow.Client{Store: &waStore.Device{ID: &pn, LID: lid, LIDMigrationTimestamp: 1}}}
+
+	got := c.ResolvePNToLID(context.Background(), pn)
+	if got != lid {
+		t.Fatalf("resolved = %s, want %s", got, lid)
+	}
+}
+
 func TestParseUserOrJID(t *testing.T) {
 	tests := []struct {
 		name       string

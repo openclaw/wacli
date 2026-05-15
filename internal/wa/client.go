@@ -642,14 +642,7 @@ func (c *Client) ResolvePNToLID(ctx context.Context, jid types.JID) types.JID {
 	c.mu.Lock()
 	cli := c.client
 	c.mu.Unlock()
-	if cli == nil || cli.Store == nil || cli.Store.LIDs == nil {
-		return jid
-	}
-	lid, err := cli.Store.LIDs.GetLIDForPN(ctx, jid.ToNonAD())
-	if err != nil || lid.IsEmpty() {
-		return jid
-	}
-	return lid
+	return c.resolvePNToLIDLocked(ctx, cli, jid)
 }
 
 func BestContactName(info types.ContactInfo) string {
