@@ -415,6 +415,9 @@ func (f *fakeWA) SendPollVote(ctx context.Context, pollInfo *types.MessageInfo, 
 }
 
 func (f *fakeWA) DecryptPollVote(ctx context.Context, evt *events.Message) (*waE2E.PollVoteMessage, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	f.mu.Lock()
 	cb := f.decryptPollVoteFunc
 	f.mu.Unlock()

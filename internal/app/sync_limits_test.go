@@ -6,8 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openclaw/wacli/internal/store"
+	"go.mau.fi/whatsmeow"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow/proto/waCommon"
+	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/proto/waWeb"
 	"go.mau.fi/whatsmeow/types"
@@ -66,6 +69,51 @@ func TestSyncFlushesHistoryPollsAtMaxMessages(t *testing.T) {
 	}
 	if poll.Question != "Limit poll?" {
 		t.Fatalf("poll question = %q", poll.Question)
+	}
+}
+
+func TestSyncFlushesFinalHistoryPollVoteAtMaxMessages(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	chat := types.JID{User: "123", Server: types.DefaultUserServer}
+	voter := types.JID{User: "777", Server: types.DefaultUserServer}
+	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	pollMsgID := "poll-final-limit"
+	if err := a.db.UpsertPoll(store.Poll{
+		ChatJID:         chat.String(),
+		MsgID:           pollMsgID,
+		SenderJID:       chat.String(),
+		Question:        "Final limit?",
+		Options:         []string{"Yes", "No"},
+		SelectableCount: 1,
+		CreatedAt:       base,
+	}); err != nil {
+		t.Fatalf("UpsertPoll: %v", err)
+	}
+	f.decryptPollVoteFunc = func(_ *events.Message) (*waE2E.PollVoteMessage, error) {
+		return &waE2E.PollVoteMessage{SelectedOptions: whatsmeow.HashPollOptions([]string{"Yes"})}, nil
+	}
+	f.connectEvents = []interface{}{historySyncWithPollVote(chat, voter, base, pollMsgID, "vote-final-limit")}
+
+	res, err := a.Sync(context.Background(), SyncOptions{
+		Mode:        SyncModeFollow,
+		AllowQR:     false,
+		MaxMessages: 1,
+	})
+	if err == nil || !strings.Contains(err.Error(), "sync storage limit reached: message is 1, limit is 1") {
+		t.Fatalf("Sync error = %v", err)
+	}
+	if res.MessagesStored != 1 {
+		t.Fatalf("MessagesStored = %d, want 1", res.MessagesStored)
+	}
+	votes, err := a.db.ListPollVotes(chat.String(), pollMsgID)
+	if err != nil {
+		t.Fatalf("ListPollVotes: %v", err)
+	}
+	if len(votes) != 1 || votes[0].VoterJID != voter.String() || votes[0].VoteMsgID != "vote-final-limit" {
+		t.Fatalf("votes = %+v", votes)
 	}
 }
 
@@ -146,6 +194,36 @@ func historySyncWithPollAndText(chat types.JID, start time.Time, pollID, textID 
 						},
 					},
 				},
+			}},
+		},
+	}
+}
+
+func historySyncWithPollVote(chat, voter types.JID, ts time.Time, pollID, voteID string) *events.HistorySync {
+	return &events.HistorySync{
+		Data: &waHistorySync.HistorySync{
+			SyncType: waHistorySync.HistorySync_FULL.Enum(),
+			Conversations: []*waHistorySync.Conversation{{
+				ID: proto.String(chat.String()),
+				Messages: []*waHistorySync.HistorySyncMsg{{
+					Message: &waWeb.WebMessageInfo{
+						Key: &waCommon.MessageKey{
+							RemoteJID: proto.String(chat.String()),
+							FromMe:    proto.Bool(false),
+							ID:        proto.String(voteID),
+						},
+						Participant:      proto.String(voter.String()),
+						MessageTimestamp: proto.Uint64(uint64(ts.Unix())),
+						Message: &waProto.Message{
+							PollUpdateMessage: &waProto.PollUpdateMessage{
+								PollCreationMessageKey: &waCommon.MessageKey{
+									ID:        proto.String(pollID),
+									RemoteJID: proto.String(chat.String()),
+								},
+							},
+						},
+					},
+				}},
 			}},
 		},
 	}

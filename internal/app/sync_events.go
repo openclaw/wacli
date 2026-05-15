@@ -282,7 +282,11 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 				enqueueMedia(pm.Chat.String(), pm.ID)
 			}
 		}
-		a.handleHistoryPollSideEffectsBatch(ctx, pendingPolls)
+		flushCtx := ctx
+		if ctx.Err() != nil {
+			flushCtx = context.WithoutCancel(ctx)
+		}
+		a.handleHistoryPollSideEffectsBatch(flushCtx, pendingPolls)
 	}
 	if !a.eventsEnabled() {
 		a.emitOrPrint("progress", map[string]any{"messages_synced": messagesStored.Load()}, "\rSynced %d messages...", messagesStored.Load())
