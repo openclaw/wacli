@@ -64,6 +64,25 @@ func (a *App) handleHistoryPollSideEffects(ctx context.Context, pm wa.ParsedMess
 	}
 }
 
+type historyPollSideEffect struct {
+	pm   wa.ParsedMessage
+	evt  *events.Message
+	hist *waProto.WebMessageInfo
+}
+
+func (a *App) handleHistoryPollSideEffectsBatch(ctx context.Context, pending []historyPollSideEffect) {
+	for _, item := range pending {
+		if item.pm.Poll != nil {
+			a.handleHistoryPollSideEffects(ctx, item.pm, item.evt, item.hist)
+		}
+	}
+	for _, item := range pending {
+		if item.pm.Poll == nil && item.pm.PollVote != nil {
+			a.handleHistoryPollSideEffects(ctx, item.pm, item.evt, item.hist)
+		}
+	}
+}
+
 func (a *App) normalizeHistoryPollMessage(pm wa.ParsedMessage, hist *waProto.WebMessageInfo) (wa.ParsedMessage, *events.Message, bool) {
 	if hist == nil || !historyPollNeedsEventParse(pm, hist) {
 		return pm, nil, false

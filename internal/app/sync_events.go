@@ -215,6 +215,7 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 		if chatID == "" {
 			continue
 		}
+		var pendingPolls []historyPollSideEffect
 		for _, m := range conv.Messages {
 			lastEvent.Store(nowUTC().UnixNano())
 			if m.Message == nil {
@@ -243,7 +244,9 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 			}
 			if err := a.storeParsedMessageForSync(ctx, pm, limits...); err == nil {
 				a.emitSyncProgress(messagesStored.Add(1))
-				a.handleHistoryPollSideEffects(ctx, pm, pollEvt, m.Message)
+				if pm.Poll != nil || pm.PollVote != nil {
+					pendingPolls = append(pendingPolls, historyPollSideEffect{pm: pm, evt: pollEvt, hist: m.Message})
+				}
 			} else if ctx.Err() != nil {
 				return
 			}
@@ -251,6 +254,7 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 				enqueueMedia(pm.Chat.String(), pm.ID)
 			}
 		}
+		a.handleHistoryPollSideEffectsBatch(ctx, pendingPolls)
 	}
 	if !a.eventsEnabled() {
 		a.emitOrPrint("progress", map[string]any{"messages_synced": messagesStored.Load()}, "\rSynced %d messages...", messagesStored.Load())

@@ -168,6 +168,80 @@ func TestHistorySyncStoresWrappedSelfPollWithLinkedSender(t *testing.T) {
 	}
 }
 
+func TestHistorySyncStoresPollVoteBeforeCreation(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	chat := types.JID{User: "555", Server: types.DefaultUserServer}
+	voter := types.JID{User: "777", Server: types.DefaultUserServer}
+	pollMsgID := "POLL-HIST-ORDER"
+	created := time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)
+	f.decryptPollVoteFunc = func(_ *events.Message) (*waE2E.PollVoteMessage, error) {
+		return &waE2E.PollVoteMessage{SelectedOptions: whatsmeow.HashPollOptions([]string{"Yes"})}, nil
+	}
+
+	vote := &waWeb.WebMessageInfo{
+		Key: &waCommon.MessageKey{
+			RemoteJID: proto.String(chat.String()),
+			FromMe:    proto.Bool(false),
+			ID:        proto.String("VOTE-HIST-ORDER"),
+		},
+		Participant:      proto.String(voter.String()),
+		MessageTimestamp: proto.Uint64(uint64(created.Add(time.Minute).Unix())),
+		Message: &waProto.Message{
+			PollUpdateMessage: &waProto.PollUpdateMessage{
+				PollCreationMessageKey: &waCommon.MessageKey{
+					ID:        proto.String(pollMsgID),
+					RemoteJID: proto.String(chat.String()),
+				},
+			},
+		},
+	}
+	creation := &waWeb.WebMessageInfo{
+		Key: &waCommon.MessageKey{
+			RemoteJID: proto.String(chat.String()),
+			FromMe:    proto.Bool(false),
+			ID:        proto.String(pollMsgID),
+		},
+		MessageTimestamp: proto.Uint64(uint64(created.Unix())),
+		Message: &waProto.Message{
+			PollCreationMessageV3: &waProto.PollCreationMessage{
+				Name: proto.String("Dinner?"),
+				Options: []*waProto.PollCreationMessage_Option{
+					{OptionName: proto.String("Yes")},
+					{OptionName: proto.String("No")},
+				},
+				SelectableOptionsCount: proto.Uint32(1),
+			},
+		},
+	}
+	history := &events.HistorySync{
+		Data: &waHistorySync.HistorySync{
+			SyncType: waHistorySync.HistorySync_FULL.Enum(),
+			Conversations: []*waHistorySync.Conversation{{
+				ID:       proto.String(chat.String()),
+				Messages: []*waHistorySync.HistorySyncMsg{{Message: vote}, {Message: creation}},
+			}},
+		},
+	}
+
+	var messagesStored atomic.Int64
+	var lastEvent atomic.Int64
+	a.handleHistorySync(context.Background(), SyncOptions{}, history, &messagesStored, &lastEvent, func(string, string) {})
+
+	votes, err := a.db.ListPollVotes(chat.String(), pollMsgID)
+	if err != nil {
+		t.Fatalf("ListPollVotes: %v", err)
+	}
+	if len(votes) != 1 {
+		t.Fatalf("vote count = %d", len(votes))
+	}
+	if votes[0].VoterJID != voter.String() || !sameStringSet(votes[0].Selected, []string{"Yes"}) {
+		t.Fatalf("vote = %+v", votes[0])
+	}
+}
+
 func TestLiveSyncDecryptsAndStoresPollVote(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()

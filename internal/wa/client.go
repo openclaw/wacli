@@ -273,11 +273,10 @@ func wrapEphemeralPollMessage(msg *waE2E.Message) *waE2E.Message {
 // pollInfo (Chat, Sender, ID of the original PollCreationMessage). The
 // option names must match exactly the strings used in the poll.
 //
-// On accounts that have migrated to LID addressing, whatsmeow's SendMessage
-// auto-rewrites the destination from a phone-number JID to the corresponding
-// LID. We pre-translate here so the PollCreationMessageKey embedded by
-// BuildPollVote matches the chat/sender on the wire — otherwise the receiver
-// can't link the vote to the poll it references.
+// On migrated DM accounts, whatsmeow's SendMessage auto-rewrites the
+// destination from a phone-number JID to the corresponding LID. Pre-translate
+// DMs so the PollCreationMessageKey embedded by BuildPollVote matches the
+// chat/sender on the wire.
 func (c *Client) SendPollVote(ctx context.Context, pollInfo *types.MessageInfo, options []string) (types.MessageID, error) {
 	c.mu.Lock()
 	cli := c.client
@@ -290,14 +289,7 @@ func (c *Client) SendPollVote(ctx context.Context, pollInfo *types.MessageInfo, 
 	}
 
 	info := *pollInfo
-	if cli.Store != nil && cli.Store.LIDMigrationTimestamp > 0 {
-		if info.Chat.Server == types.DefaultUserServer {
-			info.Chat = c.resolvePNToLIDLocked(ctx, cli, info.Chat)
-		}
-		if info.Sender.Server == types.DefaultUserServer {
-			info.Sender = c.resolvePNToLIDLocked(ctx, cli, info.Sender)
-		}
-	}
+	info = rewritePollVoteInfoForLID(ctx, cli, info, c.resolvePNToLIDLocked)
 
 	msg, err := cli.BuildPollVote(ctx, &info, options)
 	if err != nil {
@@ -308,6 +300,26 @@ func (c *Client) SendPollVote(ctx context.Context, pollInfo *types.MessageInfo, 
 		return "", err
 	}
 	return resp.ID, nil
+}
+
+type pollVoteLIDResolver func(context.Context, *whatsmeow.Client, types.JID) types.JID
+
+func rewritePollVoteInfoForLID(ctx context.Context, cli *whatsmeow.Client, info types.MessageInfo, resolve pollVoteLIDResolver) types.MessageInfo {
+	if cli == nil || cli.Store == nil || cli.Store.LIDMigrationTimestamp <= 0 || resolve == nil {
+		return info
+	}
+	switch info.Chat.Server {
+	case types.DefaultUserServer:
+		info.Chat = resolve(ctx, cli, info.Chat)
+		if info.Sender.Server == types.DefaultUserServer {
+			info.Sender = resolve(ctx, cli, info.Sender)
+		}
+	case types.HiddenUserServer:
+		if info.Sender.Server == types.DefaultUserServer {
+			info.Sender = resolve(ctx, cli, info.Sender)
+		}
+	}
+	return info
 }
 
 // resolvePNToLIDLocked translates a phone-number JID to its LID counterpart
