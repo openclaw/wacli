@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	waProto "go.mau.fi/whatsmeow/binary/proto"
+	"go.mau.fi/whatsmeow/proto/waE2E"
 )
 
 func contextInfoForMessage(m *waProto.Message) *waProto.ContextInfo {
@@ -104,6 +105,12 @@ func displayTextForProto(m *waProto.Message) string {
 	}
 	if m.GetPollUpdateMessage() != nil {
 		return "Poll vote"
+	}
+	if m.GetPollAddOptionMessage() != nil {
+		return "Poll option added"
+	}
+	if secret := m.GetSecretEncryptedMessage(); secret != nil && secret.GetSecretEncType() == waE2E.SecretEncryptedMessage_POLL_ADD_OPTION {
+		return "Poll option added"
 	}
 
 	if text := strings.TrimSpace(m.GetConversation()); text != "" {

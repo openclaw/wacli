@@ -244,7 +244,7 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 			}
 			if err := a.storeParsedMessageForSync(ctx, pm, limits...); err == nil {
 				a.emitSyncProgress(messagesStored.Add(1))
-				if pm.Poll != nil || pm.PollVote != nil {
+				if pm.Poll != nil || pm.PollAdd != nil || pm.PollVote != nil {
 					pendingPolls = append(pendingPolls, historyPollSideEffect{pm: pm, evt: pollEvt, hist: m.Message})
 				}
 			} else if ctx.Err() != nil {

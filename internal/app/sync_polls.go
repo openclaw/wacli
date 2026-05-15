@@ -20,6 +20,9 @@ func (a *App) handlePollSideEffects(ctx context.Context, pm wa.ParsedMessage, ev
 	if pm.Poll != nil {
 		a.upsertPollFromParsed(ctx, pm)
 	}
+	if pm.PollAdd != nil && evt != nil {
+		a.handlePollAddOption(ctx, pm, evt)
+	}
 	if pm.PollVote != nil && evt != nil {
 		a.handlePollVote(ctx, pm, evt)
 	}
@@ -38,6 +41,23 @@ func (a *App) handleHistoryPollSideEffects(ctx context.Context, pm wa.ParsedMess
 	}
 	if pm.Poll != nil {
 		a.upsertPollFromParsed(ctx, pm)
+	}
+	if pm.PollAdd != nil {
+		if evt == nil && hist != nil {
+			parsed, err := a.wa.ParseWebMessage(pm.Chat, hist)
+			if err != nil {
+				a.emitWarning(
+					"poll_add_parse_failed",
+					fmt.Sprintf("warning: failed to parse history poll option %s: %v", pm.ID, err),
+					map[string]any{"message_id": pm.ID, "error": err.Error()},
+				)
+				return
+			}
+			evt = parsed
+		}
+		if evt != nil {
+			a.handlePollAddOption(ctx, pm, evt)
+		}
 	}
 	if pm.PollVote != nil {
 		if evt == nil && hist != nil {
@@ -77,7 +97,12 @@ func (a *App) handleHistoryPollSideEffectsBatch(ctx context.Context, pending []h
 		}
 	}
 	for _, item := range pending {
-		if item.pm.Poll == nil && item.pm.PollVote != nil {
+		if item.pm.Poll == nil && item.pm.PollAdd != nil {
+			a.handleHistoryPollSideEffects(ctx, item.pm, item.evt, item.hist)
+		}
+	}
+	for _, item := range pending {
+		if item.pm.Poll == nil && item.pm.PollAdd == nil && item.pm.PollVote != nil {
 			a.handleHistoryPollSideEffects(ctx, item.pm, item.evt, item.hist)
 		}
 	}
@@ -97,7 +122,7 @@ func (a *App) normalizeHistoryPollMessage(pm wa.ParsedMessage, hist *waProto.Web
 		return pm, nil, false
 	}
 	normalized := wa.ParseLiveMessage(parsed)
-	if normalized.Poll == nil && normalized.PollVote == nil {
+	if normalized.Poll == nil && normalized.PollAdd == nil && normalized.PollVote == nil {
 		return pm, parsed, false
 	}
 	if pm.StarredKnown {
@@ -108,7 +133,7 @@ func (a *App) normalizeHistoryPollMessage(pm wa.ParsedMessage, hist *waProto.Web
 }
 
 func historyPollNeedsEventParse(pm wa.ParsedMessage, hist *waProto.WebMessageInfo) bool {
-	if pm.Poll != nil || pm.PollVote != nil {
+	if pm.Poll != nil || pm.PollAdd != nil || pm.PollVote != nil {
 		return true
 	}
 	if hist == nil {
@@ -123,6 +148,67 @@ func historyPollNeedsEventParse(pm wa.ParsedMessage, hist *waProto.WebMessageInf
 		msg.GetViewOnceMessage().GetMessage() != nil ||
 		msg.GetViewOnceMessageV2().GetMessage() != nil ||
 		msg.GetViewOnceMessageV2Extension().GetMessage() != nil
+}
+
+func (a *App) handlePollAddOption(ctx context.Context, pm wa.ParsedMessage, evt *events.Message) {
+	if a.db == nil || pm.PollAdd == nil {
+		return
+	}
+	add := pm.PollAdd
+	if strings.TrimSpace(add.Option) == "" && evt != nil && evt.Message.GetSecretEncryptedMessage() != nil {
+		decrypted, err := a.wa.DecryptSecretEncryptedMessage(ctx, evt)
+		if err != nil {
+			a.emitWarning(
+				"poll_add_decrypt_failed",
+				fmt.Sprintf("warning: failed to decrypt poll option %s: %v", pm.ID, err),
+				map[string]any{"message_id": pm.ID, "error": err.Error()},
+			)
+			return
+		}
+		parsed := wa.ParseLiveMessage(&events.Message{Info: evt.Info, Message: decrypted})
+		if parsed.PollAdd != nil {
+			add = parsed.PollAdd
+		}
+	}
+	option := strings.TrimSpace(add.Option)
+	if option == "" {
+		return
+	}
+	chatJID, pollMsgID, err := resolvePollAddKey(pm, add)
+	if err != nil {
+		a.emitWarning(
+			"poll_add_unknown_key",
+			fmt.Sprintf("warning: poll option %s has invalid key: %v", pm.ID, err),
+			map[string]any{"message_id": pm.ID, "error": err.Error()},
+		)
+		return
+	}
+	poll, err := a.db.GetPoll(chatJID, pollMsgID)
+	if err != nil {
+		if alt, altErr := a.db.FindPollByMsgID(pollMsgID); altErr == nil {
+			poll = alt
+		} else {
+			a.emitWarning(
+				"poll_add_unknown_poll",
+				fmt.Sprintf("warning: poll option %s references unknown poll %s/%s: %v", pm.ID, chatJID, pollMsgID, err),
+				map[string]any{"message_id": pm.ID, "poll_chat_jid": chatJID, "poll_msg_id": pollMsgID, "error": err.Error()},
+			)
+			return
+		}
+	}
+	for _, existing := range poll.Options {
+		if existing == option {
+			return
+		}
+	}
+	poll.Options = append(poll.Options, option)
+	if err := a.db.UpsertPoll(poll); err != nil {
+		a.emitWarning(
+			"poll_add_store_failed",
+			fmt.Sprintf("warning: failed to store poll option %s: %v", pm.ID, err),
+			map[string]any{"message_id": pm.ID, "error": err.Error()},
+		)
+	}
 }
 
 func (a *App) upsertPollFromParsed(ctx context.Context, pm wa.ParsedMessage) {
@@ -254,6 +340,27 @@ func resolvePollKey(pm wa.ParsedMessage) (string, string, error) {
 		chatJID = canonicalJIDString(pm.Chat)
 	}
 	pollMsgID := strings.TrimSpace(pm.PollVote.PollMessageID)
+	if chatJID == "" || pollMsgID == "" {
+		return "", "", fmt.Errorf("missing poll chat or id")
+	}
+	return chatJID, pollMsgID, nil
+}
+
+func resolvePollAddKey(pm wa.ParsedMessage, add *wa.PollAddOptionRef) (string, string, error) {
+	if add == nil {
+		return "", "", fmt.Errorf("not a poll option add")
+	}
+	rawChat := strings.TrimSpace(add.PollChatJID)
+	chatJID := ""
+	if rawChat != "" {
+		if jid, err := types.ParseJID(rawChat); err == nil {
+			chatJID = canonicalJIDString(jid)
+		}
+	}
+	if chatJID == "" {
+		chatJID = canonicalJIDString(pm.Chat)
+	}
+	pollMsgID := strings.TrimSpace(add.PollMessageID)
 	if chatJID == "" || pollMsgID == "" {
 		return "", "", fmt.Errorf("missing poll chat or id")
 	}

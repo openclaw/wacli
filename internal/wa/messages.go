@@ -5,6 +5,7 @@ import (
 	"time"
 
 	waProto "go.mau.fi/whatsmeow/binary/proto"
+	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 )
@@ -46,6 +47,16 @@ type PollVoteRef struct {
 	PollSenderJID string
 }
 
+// PollAddOptionRef references an added option for an existing poll. Encrypted
+// add-option messages initially carry only the poll key; the option is filled
+// after decryption in the sync layer.
+type PollAddOptionRef struct {
+	PollMessageID string
+	PollChatJID   string
+	PollSenderJID string
+	Option        string
+}
+
 type ParsedMessage struct {
 	Chat            types.JID
 	ID              string
@@ -57,6 +68,7 @@ type ParsedMessage struct {
 	Media           *Media
 	Poll            *Poll
 	PollVote        *PollVoteRef
+	PollAdd         *PollAddOptionRef
 	PushName        string
 	ReplyToID       string
 	ReplyToDisplay  string
@@ -131,6 +143,7 @@ func extractWAProto(m *waProto.Message, pm *ParsedMessage) {
 	extractContactText(m, pm)
 	extractBusinessText(m, pm)
 	extractPoll(m, pm)
+	extractPollAddOption(m, pm)
 	extractPollUpdate(m, pm)
 
 	if ctx := contextInfoForMessage(m); ctx != nil {
@@ -269,6 +282,39 @@ func extractPollUpdate(m *waProto.Message, pm *ParsedMessage) {
 	if pm.Text == "" {
 		pm.Text = "Poll vote"
 	}
+}
+
+func extractPollAddOption(m *waProto.Message, pm *ParsedMessage) {
+	add := m.GetPollAddOptionMessage()
+	if add != nil {
+		pm.PollAdd = pollAddOptionRef(add.GetPollCreationMessageKey(), add.GetAddOption().GetOptionName())
+		if pm.Text == "" {
+			pm.Text = "Poll option added"
+		}
+		return
+	}
+	secret := m.GetSecretEncryptedMessage()
+	if secret == nil || secret.GetSecretEncType() != waE2E.SecretEncryptedMessage_POLL_ADD_OPTION {
+		return
+	}
+	pm.PollAdd = pollAddOptionRef(secret.GetTargetMessageKey(), "")
+	if pm.Text == "" {
+		pm.Text = "Poll option added"
+	}
+}
+
+func pollAddOptionRef(key interface {
+	GetID() string
+	GetRemoteJID() string
+	GetParticipant() string
+}, option string) *PollAddOptionRef {
+	ref := &PollAddOptionRef{Option: strings.TrimSpace(option)}
+	if key != nil {
+		ref.PollMessageID = strings.TrimSpace(key.GetID())
+		ref.PollChatJID = strings.TrimSpace(key.GetRemoteJID())
+		ref.PollSenderJID = strings.TrimSpace(key.GetParticipant())
+	}
+	return ref
 }
 
 func extractPlainText(m *waProto.Message, pm *ParsedMessage) {

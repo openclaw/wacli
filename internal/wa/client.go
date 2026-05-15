@@ -349,6 +349,16 @@ func (c *Client) DecryptPollVote(ctx context.Context, evt *events.Message) (*waE
 	return cli.DecryptPollVote(ctx, evt)
 }
 
+func (c *Client) DecryptSecretEncryptedMessage(ctx context.Context, evt *events.Message) (*waE2E.Message, error) {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil {
+		return nil, fmt.Errorf("whatsapp client is not initialized")
+	}
+	return cli.DecryptSecretEncryptedMessage(ctx, evt)
+}
+
 func (c *Client) SendReaction(ctx context.Context, chat, sender types.JID, targetID types.MessageID, reaction string) (types.MessageID, error) {
 	c.mu.Lock()
 	cli := c.client

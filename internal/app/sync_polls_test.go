@@ -278,6 +278,99 @@ func TestHistorySyncStoresPollVoteBeforeCreation(t *testing.T) {
 	}
 }
 
+func TestLiveSyncDecryptsPollAddOptionBeforeVote(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	chat := types.JID{User: "555", Server: types.DefaultUserServer}
+	pollMsgID := "POLL-ADD"
+	created := time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)
+
+	creationEvt := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{Chat: chat, Sender: chat},
+			ID:            pollMsgID,
+			Timestamp:     created,
+		},
+		Message: &waProto.Message{
+			PollCreationMessageV3: &waProto.PollCreationMessage{
+				Name:                   proto.String("Dinner?"),
+				Options:                []*waProto.PollCreationMessage_Option{{OptionName: proto.String("Yes")}, {OptionName: proto.String("No")}},
+				SelectableOptionsCount: proto.Uint32(1),
+			},
+		},
+	}
+	var messagesStored atomic.Int64
+	a.handleLiveSyncMessage(context.Background(), SyncOptions{}, creationEvt, &messagesStored, func(string, string) {}, nil)
+
+	f.decryptSecretFunc = func(_ *events.Message) (*waE2E.Message, error) {
+		return &waE2E.Message{
+			PollAddOptionMessage: &waE2E.PollAddOptionMessage{
+				PollCreationMessageKey: &waCommon.MessageKey{
+					ID:        proto.String(pollMsgID),
+					RemoteJID: proto.String(chat.String()),
+				},
+				AddOption: &waE2E.PollCreationMessage_Option{OptionName: proto.String("Maybe")},
+			},
+		}, nil
+	}
+	addEvt := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{Chat: chat, Sender: chat},
+			ID:            "ADD-1",
+			Timestamp:     created.Add(time.Minute),
+		},
+		Message: &waProto.Message{
+			SecretEncryptedMessage: &waE2E.SecretEncryptedMessage{
+				TargetMessageKey: &waCommon.MessageKey{
+					ID:        proto.String(pollMsgID),
+					RemoteJID: proto.String(chat.String()),
+				},
+				SecretEncType: waE2E.SecretEncryptedMessage_POLL_ADD_OPTION.Enum(),
+			},
+		},
+	}
+	a.handleLiveSyncMessage(context.Background(), SyncOptions{}, addEvt, &messagesStored, func(string, string) {}, nil)
+
+	poll, err := a.db.GetPoll(chat.String(), pollMsgID)
+	if err != nil {
+		t.Fatalf("GetPoll: %v", err)
+	}
+	if !sameStringSet(poll.Options, []string{"Yes", "No", "Maybe"}) {
+		t.Fatalf("options = %v", poll.Options)
+	}
+
+	f.decryptPollVoteFunc = func(_ *events.Message) (*waE2E.PollVoteMessage, error) {
+		return &waE2E.PollVoteMessage{SelectedOptions: whatsmeow.HashPollOptions([]string{"Maybe"})}, nil
+	}
+	voter := types.JID{User: "777", Server: types.DefaultUserServer}
+	voteEvt := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{Chat: chat, Sender: voter},
+			ID:            "VOTE-ADD",
+			Timestamp:     created.Add(2 * time.Minute),
+		},
+		Message: &waProto.Message{
+			PollUpdateMessage: &waProto.PollUpdateMessage{
+				PollCreationMessageKey: &waCommon.MessageKey{
+					ID:        proto.String(pollMsgID),
+					RemoteJID: proto.String(chat.String()),
+				},
+			},
+		},
+	}
+	a.handleLiveSyncMessage(context.Background(), SyncOptions{}, voteEvt, &messagesStored, func(string, string) {}, nil)
+
+	votes, err := a.db.ListPollVotes(chat.String(), pollMsgID)
+	if err != nil {
+		t.Fatalf("ListPollVotes: %v", err)
+	}
+	if len(votes) != 1 || !sameStringSet(votes[0].Selected, []string{"Maybe"}) {
+		t.Fatalf("votes = %+v", votes)
+	}
+}
+
 func TestLiveSyncDecryptsAndStoresPollVote(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()

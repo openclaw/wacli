@@ -46,6 +46,7 @@ type fakeWA struct {
 	sendPollCalls       []fakeSendPollCall
 	sendPollVoteCalls   []fakeSendPollVoteCall
 	decryptPollVoteFunc func(evt *events.Message) (*waE2E.PollVoteMessage, error)
+	decryptSecretFunc   func(evt *events.Message) (*waE2E.Message, error)
 	onDemandHistory     func(lastKnown types.MessageInfo, count int) *events.HistorySync
 	onDemandEvent       func(lastKnown types.MessageInfo, count int) interface{}
 	downloadHistory     func(notif *waE2E.HistorySyncNotification) (*waHistorySync.HistorySync, error)
@@ -415,6 +416,16 @@ func (f *fakeWA) SendPollVote(ctx context.Context, pollInfo *types.MessageInfo, 
 func (f *fakeWA) DecryptPollVote(ctx context.Context, evt *events.Message) (*waE2E.PollVoteMessage, error) {
 	f.mu.Lock()
 	cb := f.decryptPollVoteFunc
+	f.mu.Unlock()
+	if cb != nil {
+		return cb(evt)
+	}
+	return nil, fmt.Errorf("not supported")
+}
+
+func (f *fakeWA) DecryptSecretEncryptedMessage(ctx context.Context, evt *events.Message) (*waE2E.Message, error) {
+	f.mu.Lock()
+	cb := f.decryptSecretFunc
 	f.mu.Unlock()
 	if cb != nil {
 		return cb(evt)

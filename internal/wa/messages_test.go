@@ -5,6 +5,7 @@ import (
 	"time"
 
 	waProto "go.mau.fi/whatsmeow/binary/proto"
+	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
@@ -964,6 +965,63 @@ func TestParseLiveMessagePollUpdateRefersToCreation(t *testing.T) {
 	}
 	if pm.PollVote.PollChatJID != "15551112222@s.whatsapp.net" {
 		t.Fatalf("poll chat jid = %q", pm.PollVote.PollChatJID)
+	}
+}
+
+func TestParseLiveMessagePollAddOption(t *testing.T) {
+	chat, _ := types.ParseJID("15551112222@s.whatsapp.net")
+	evt := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{Chat: chat, Sender: chat},
+			ID:            "ADD-1",
+			Timestamp:     time.Date(2026, 5, 9, 12, 6, 0, 0, time.UTC),
+		},
+		Message: &waProto.Message{
+			PollAddOptionMessage: &waE2E.PollAddOptionMessage{
+				PollCreationMessageKey: &waProto.MessageKey{
+					ID:        proto.String("POLL-1"),
+					RemoteJID: proto.String("15551112222@s.whatsapp.net"),
+				},
+				AddOption: &waProto.PollCreationMessage_Option{OptionName: proto.String("Maybe")},
+			},
+		},
+	}
+	pm := ParseLiveMessage(evt)
+	if pm.PollAdd == nil {
+		t.Fatalf("expected PollAdd set, got nil; pm=%+v", pm)
+	}
+	if pm.PollAdd.PollMessageID != "POLL-1" || pm.PollAdd.Option != "Maybe" {
+		t.Fatalf("poll add = %+v", pm.PollAdd)
+	}
+	if pm.Text != "Poll option added" {
+		t.Fatalf("text = %q", pm.Text)
+	}
+}
+
+func TestParseLiveMessageEncryptedPollAddOptionRef(t *testing.T) {
+	chat, _ := types.ParseJID("15551112222@s.whatsapp.net")
+	evt := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{Chat: chat, Sender: chat},
+			ID:            "ADD-ENC",
+			Timestamp:     time.Date(2026, 5, 9, 12, 6, 0, 0, time.UTC),
+		},
+		Message: &waProto.Message{
+			SecretEncryptedMessage: &waE2E.SecretEncryptedMessage{
+				TargetMessageKey: &waProto.MessageKey{
+					ID:        proto.String("POLL-1"),
+					RemoteJID: proto.String("15551112222@s.whatsapp.net"),
+				},
+				SecretEncType: waE2E.SecretEncryptedMessage_POLL_ADD_OPTION.Enum(),
+			},
+		},
+	}
+	pm := ParseLiveMessage(evt)
+	if pm.PollAdd == nil {
+		t.Fatalf("expected PollAdd set, got nil; pm=%+v", pm)
+	}
+	if pm.PollAdd.PollMessageID != "POLL-1" || pm.PollAdd.Option != "" {
+		t.Fatalf("poll add = %+v", pm.PollAdd)
 	}
 }
 
