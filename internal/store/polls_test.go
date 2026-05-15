@@ -216,6 +216,43 @@ func TestUpsertPollVoteKeepsNewerSameSecondVote(t *testing.T) {
 	}
 }
 
+func TestDeletePollVoteRemovesOnlyOlderRows(t *testing.T) {
+	db := openTestDB(t)
+
+	base := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+	vote := PollVote{
+		ChatJID:   "chat@s.whatsapp.net",
+		PollMsgID: "P1",
+		VoterJID:  "voter@s.whatsapp.net",
+		VoteMsgID: "V1",
+		Selected:  []string{"yes"},
+		VotedAt:   base,
+	}
+	if err := db.UpsertPollVote(vote); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DeletePollVote(vote.ChatJID, vote.PollMsgID, vote.VoterJID, base.Add(-time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	votes, err := db.ListPollVotes(vote.ChatJID, vote.PollMsgID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(votes) != 1 {
+		t.Fatalf("vote count after old delete = %d", len(votes))
+	}
+	if err := db.DeletePollVote(vote.ChatJID, vote.PollMsgID, vote.VoterJID, base.Add(time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	votes, err = db.ListPollVotes(vote.ChatJID, vote.PollMsgID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(votes) != 0 {
+		t.Fatalf("vote count after new delete = %d", len(votes))
+	}
+}
+
 func TestListPollsFilterAndOrder(t *testing.T) {
 	db := openTestDB(t)
 

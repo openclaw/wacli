@@ -551,6 +551,66 @@ func TestLiveSyncKeepsNewerSameSecondPollVote(t *testing.T) {
 	}
 }
 
+func TestLiveSyncDeletesRetractedPollVote(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	chat := types.JID{User: "555", Server: types.DefaultUserServer}
+	voter := types.JID{User: "777", Server: types.DefaultUserServer}
+	pollMsgID := "POLL-RETRACT"
+	base := time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)
+	var messagesStored atomic.Int64
+	a.handleLiveSyncMessage(context.Background(), SyncOptions{}, &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{Chat: chat, Sender: chat},
+			ID:            pollMsgID,
+			Timestamp:     base,
+		},
+		Message: &waProto.Message{
+			PollCreationMessageV3: &waProto.PollCreationMessage{
+				Name:    proto.String("Lunch?"),
+				Options: []*waProto.PollCreationMessage_Option{{OptionName: proto.String("Yes")}, {OptionName: proto.String("No")}},
+			},
+		},
+	}, &messagesStored, func(string, string) {}, nil)
+
+	f.decryptPollVoteFunc = func(evt *events.Message) (*waE2E.PollVoteMessage, error) {
+		if evt.Info.ID == "VOTE-CLEAR" {
+			return &waE2E.PollVoteMessage{}, nil
+		}
+		return &waE2E.PollVoteMessage{SelectedOptions: whatsmeow.HashPollOptions([]string{"Yes"})}, nil
+	}
+	makeVote := func(id string, ts time.Time) *events.Message {
+		return &events.Message{
+			Info: types.MessageInfo{
+				MessageSource: types.MessageSource{Chat: chat, Sender: voter},
+				ID:            id,
+				Timestamp:     ts,
+			},
+			Message: &waProto.Message{
+				PollUpdateMessage: &waProto.PollUpdateMessage{
+					PollCreationMessageKey: &waCommon.MessageKey{
+						ID:        proto.String(pollMsgID),
+						RemoteJID: proto.String(chat.String()),
+					},
+					SenderTimestampMS: proto.Int64(ts.UnixMilli()),
+				},
+			},
+		}
+	}
+	a.handleLiveSyncMessage(context.Background(), SyncOptions{}, makeVote("VOTE-YES", base.Add(time.Minute)), &messagesStored, func(string, string) {}, nil)
+	a.handleLiveSyncMessage(context.Background(), SyncOptions{}, makeVote("VOTE-CLEAR", base.Add(2*time.Minute)), &messagesStored, func(string, string) {}, nil)
+
+	votes, err := a.db.ListPollVotes(chat.String(), pollMsgID)
+	if err != nil {
+		t.Fatalf("ListPollVotes: %v", err)
+	}
+	if len(votes) != 0 {
+		t.Fatalf("votes after retraction = %+v", votes)
+	}
+}
+
 func TestLiveSyncWarnsWhenPollVoteRefersToUnknownPoll(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()

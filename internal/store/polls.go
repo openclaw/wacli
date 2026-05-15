@@ -282,6 +282,28 @@ func (d *DB) UpsertPollVote(v PollVote) error {
 	return nil
 }
 
+// DeletePollVote removes one voter's current vote if the deletion is not older
+// than the stored vote row.
+func (d *DB) DeletePollVote(chatJID, pollMsgID, voterJID string, votedAt time.Time) error {
+	if d == nil {
+		return fmt.Errorf("nil db")
+	}
+	if strings.TrimSpace(chatJID) == "" || strings.TrimSpace(pollMsgID) == "" || strings.TrimSpace(voterJID) == "" {
+		return fmt.Errorf("vote requires chat_jid, poll_msg_id, voter_jid")
+	}
+	ts := votedAt
+	if ts.IsZero() {
+		ts = nowUTC()
+	}
+	if _, err := d.sql.Exec(`
+		DELETE FROM poll_votes
+		WHERE chat_jid = ? AND poll_msg_id = ? AND voter_jid = ? AND ts <= ?
+	`, chatJID, pollMsgID, voterJID, ts.UTC().UnixMilli()); err != nil {
+		return fmt.Errorf("delete poll vote: %w", err)
+	}
+	return nil
+}
+
 // ListPollVotes returns the per-voter votes for a poll, ordered by ts ASC.
 func (d *DB) ListPollVotes(chatJID, pollMsgID string) ([]PollVote, error) {
 	if d == nil {

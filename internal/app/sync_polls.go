@@ -295,7 +295,8 @@ func (a *App) handlePollVote(ctx context.Context, pm wa.ParsedMessage, evt *even
 		return
 	}
 
-	selected := matchPollOptions(poll.Options, decrypted.GetSelectedOptions())
+	selectedHashes := decrypted.GetSelectedOptions()
+	selected := matchPollOptions(poll.Options, selectedHashes)
 
 	voterJID := strings.TrimSpace(pm.SenderJID)
 	if voterJID == "" && pm.FromMe {
@@ -313,13 +314,25 @@ func (a *App) handlePollVote(ctx context.Context, pm wa.ParsedMessage, evt *even
 		return
 	}
 
+	votedAt := pollVoteTimestamp(pm)
+	if len(selectedHashes) == 0 {
+		if err := a.db.DeletePollVote(chatJID, pollMsgID, voterJID, votedAt); err != nil {
+			a.emitWarning(
+				"poll_vote_delete_failed",
+				fmt.Sprintf("warning: failed to delete poll vote %s: %v", pm.ID, err),
+				map[string]any{"message_id": pm.ID, "error": err.Error()},
+			)
+		}
+		return
+	}
+
 	if err := a.db.UpsertPollVote(store.PollVote{
 		ChatJID:   chatJID,
 		PollMsgID: pollMsgID,
 		VoterJID:  voterJID,
 		VoteMsgID: pm.ID,
 		Selected:  selected,
-		VotedAt:   pollVoteTimestamp(pm),
+		VotedAt:   votedAt,
 	}); err != nil {
 		a.emitWarning(
 			"poll_vote_store_failed",
