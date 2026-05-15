@@ -269,6 +269,25 @@ func TestDeleteGroupLocalDataDeletesGroupChatAndMessages(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpsertMessage: %v", err)
 	}
+	if err := db.UpsertPoll(Poll{
+		ChatJID:   "12345@g.us",
+		MsgID:     "poll1",
+		Question:  "Lunch?",
+		Options:   []string{"yes", "no"},
+		CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("UpsertPoll: %v", err)
+	}
+	if err := db.UpsertPollVote(PollVote{
+		ChatJID:   "12345@g.us",
+		PollMsgID: "poll1",
+		VoterJID:  "voter@s.whatsapp.net",
+		VoteMsgID: "vote1",
+		Selected:  []string{"yes"},
+		VotedAt:   now,
+	}); err != nil {
+		t.Fatalf("UpsertPollVote: %v", err)
+	}
 
 	if err := db.DeleteGroupLocalData("12345@g.us"); err != nil {
 		t.Fatalf("DeleteGroupLocalData: %v", err)
@@ -283,6 +302,12 @@ func TestDeleteGroupLocalDataDeletesGroupChatAndMessages(t *testing.T) {
 	}
 	if got := countRows(t, db.sql, `SELECT COUNT(1) FROM messages WHERE chat_jid = ?`, "12345@g.us"); got != 0 {
 		t.Fatalf("expected messages deleted, got %d", got)
+	}
+	if got := countRows(t, db.sql, `SELECT COUNT(1) FROM polls WHERE chat_jid = ?`, "12345@g.us"); got != 0 {
+		t.Fatalf("expected polls deleted, got %d", got)
+	}
+	if got := countRows(t, db.sql, `SELECT COUNT(1) FROM poll_votes WHERE chat_jid = ?`, "12345@g.us"); got != 0 {
+		t.Fatalf("expected poll votes deleted, got %d", got)
 	}
 }
 

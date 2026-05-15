@@ -134,7 +134,7 @@ func (a *App) upsertPollFromParsed(ctx context.Context, pm wa.ParsedMessage) {
 		return
 	}
 	senderJID := strings.TrimSpace(pm.SenderJID)
-	if jid, err := types.ParseJID(senderJID); err == nil {
+	if jid, err := types.ParseJID(senderJID); err == nil && pm.Chat.Server != types.GroupServer {
 		senderJID = canonicalJIDString(a.canonicalStoreJID(ctx, jid))
 	}
 	if err := a.db.UpsertPoll(store.Poll{

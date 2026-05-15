@@ -199,6 +199,61 @@ func TestListPollsFilterAndOrder(t *testing.T) {
 	}
 }
 
+func TestPollQueriesHideDeletedMessages(t *testing.T) {
+	db := openTestDB(t)
+
+	now := time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)
+	if err := db.UpsertChat("chat@s.whatsapp.net", "dm", "Chat", now); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	for _, p := range []Poll{
+		{ChatJID: "chat@s.whatsapp.net", MsgID: "visible", Question: "visible", Options: []string{"a"}, CreatedAt: now},
+		{ChatJID: "chat@s.whatsapp.net", MsgID: "revoked", Question: "revoked", Options: []string{"a"}, CreatedAt: now.Add(time.Minute)},
+		{ChatJID: "chat@s.whatsapp.net", MsgID: "deleted", Question: "deleted", Options: []string{"a"}, CreatedAt: now.Add(2 * time.Minute)},
+		{ChatJID: "chat@s.whatsapp.net", MsgID: "legacy", Question: "legacy", Options: []string{"a"}, CreatedAt: now.Add(3 * time.Minute)},
+	} {
+		if err := db.UpsertPoll(p); err != nil {
+			t.Fatalf("UpsertPoll %s: %v", p.MsgID, err)
+		}
+		if p.MsgID == "legacy" {
+			continue
+		}
+		if err := db.UpsertMessage(UpsertMessageParams{
+			ChatJID:   p.ChatJID,
+			MsgID:     p.MsgID,
+			Timestamp: p.CreatedAt,
+			Text:      "Poll: " + p.Question,
+		}); err != nil {
+			t.Fatalf("UpsertMessage %s: %v", p.MsgID, err)
+		}
+	}
+	if err := db.MarkMessageRevoked("chat@s.whatsapp.net", "revoked"); err != nil {
+		t.Fatalf("MarkMessageRevoked: %v", err)
+	}
+	if err := db.MarkMessageDeletedForMe("chat@s.whatsapp.net", "deleted", "", false, now); err != nil {
+		t.Fatalf("MarkMessageDeletedForMe: %v", err)
+	}
+
+	if _, err := db.GetPoll("chat@s.whatsapp.net", "revoked"); !IsPollNotFound(err) {
+		t.Fatalf("GetPoll revoked err = %v, want not found", err)
+	}
+	if _, err := db.FindPollByMsgID("deleted"); !IsPollNotFound(err) {
+		t.Fatalf("FindPollByMsgID deleted err = %v, want not found", err)
+	}
+	polls, err := db.ListPolls(PollListFilter{ChatJID: "chat@s.whatsapp.net"})
+	if err != nil {
+		t.Fatalf("ListPolls: %v", err)
+	}
+	got := make([]string, 0, len(polls))
+	for _, p := range polls {
+		got = append(got, p.MsgID)
+	}
+	want := []string{"legacy", "visible"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("poll IDs = %v, want %v", got, want)
+	}
+}
+
 func TestDeletePollRemovesVotes(t *testing.T) {
 	db := openTestDB(t)
 

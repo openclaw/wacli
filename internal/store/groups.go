@@ -182,6 +182,12 @@ func (d *DB) DeleteGroupLocalData(jid string) (err error) {
 	if _, err = tx.Exec(`DELETE FROM groups WHERE jid = ?`, jid); err != nil {
 		return err
 	}
+	if _, err = tx.Exec(`DELETE FROM poll_votes WHERE chat_jid = ?`, jid); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(`DELETE FROM polls WHERE chat_jid = ?`, jid); err != nil {
+		return err
+	}
 	if _, err = tx.Exec(`DELETE FROM chats WHERE jid = ?`, jid); err != nil {
 		return err
 	}

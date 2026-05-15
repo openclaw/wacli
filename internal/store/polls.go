@@ -88,9 +88,11 @@ func (d *DB) GetPoll(chatJID, msgID string) (Poll, error) {
 		return Poll{}, fmt.Errorf("nil db")
 	}
 	row := d.sql.QueryRow(`
-		SELECT chat_jid, msg_id, COALESCE(sender_jid,''), question, options_json, selectable_count, created_ts
-		FROM polls
-		WHERE chat_jid = ? AND msg_id = ?
+		SELECT p.chat_jid, p.msg_id, COALESCE(p.sender_jid,''), p.question, p.options_json, p.selectable_count, p.created_ts
+		FROM polls p
+		LEFT JOIN messages m ON m.chat_jid = p.chat_jid AND m.msg_id = p.msg_id
+		WHERE p.chat_jid = ? AND p.msg_id = ?
+		  AND (m.msg_id IS NULL OR (m.revoked = 0 AND m.deleted_for_me = 0))
 	`, chatJID, msgID)
 
 	var (
@@ -122,10 +124,12 @@ func (d *DB) FindPollByMsgID(msgID string) (Poll, error) {
 		return Poll{}, fmt.Errorf("nil db")
 	}
 	row := d.sql.QueryRow(`
-		SELECT chat_jid, msg_id, COALESCE(sender_jid,''), question, options_json, selectable_count, created_ts
-		FROM polls
-		WHERE msg_id = ?
-		ORDER BY created_ts DESC
+		SELECT p.chat_jid, p.msg_id, COALESCE(p.sender_jid,''), p.question, p.options_json, p.selectable_count, p.created_ts
+		FROM polls p
+		LEFT JOIN messages m ON m.chat_jid = p.chat_jid AND m.msg_id = p.msg_id
+		WHERE p.msg_id = ?
+		  AND (m.msg_id IS NULL OR (m.revoked = 0 AND m.deleted_for_me = 0))
+		ORDER BY p.created_ts DESC
 		LIMIT 1
 	`, msgID)
 
@@ -153,21 +157,23 @@ func (d *DB) ListPolls(filter PollListFilter) ([]Poll, error) {
 	if d == nil {
 		return nil, fmt.Errorf("nil db")
 	}
-	q := `SELECT chat_jid, msg_id, COALESCE(sender_jid,''), question, options_json, selectable_count, created_ts
-	      FROM polls`
+	q := `SELECT p.chat_jid, p.msg_id, COALESCE(p.sender_jid,''), p.question, p.options_json, p.selectable_count, p.created_ts
+	      FROM polls p
+	      LEFT JOIN messages m ON m.chat_jid = p.chat_jid AND m.msg_id = p.msg_id
+	      WHERE (m.msg_id IS NULL OR (m.revoked = 0 AND m.deleted_for_me = 0))`
 	args := []any{}
 	chatJIDs := cleanPollFilterChatJIDs(filter)
 	switch {
 	case len(chatJIDs) == 1:
-		q += " WHERE chat_jid = ?"
+		q += " AND p.chat_jid = ?"
 		args = append(args, chatJIDs[0])
 	case len(chatJIDs) > 1:
-		q += " WHERE chat_jid IN (?" + strings.Repeat(",?", len(chatJIDs)-1) + ")"
+		q += " AND p.chat_jid IN (?" + strings.Repeat(",?", len(chatJIDs)-1) + ")"
 		for _, chatJID := range chatJIDs {
 			args = append(args, chatJID)
 		}
 	}
-	q += " ORDER BY created_ts DESC, msg_id DESC"
+	q += " ORDER BY p.created_ts DESC, p.msg_id DESC"
 	if filter.Limit > 0 {
 		q += " LIMIT ?"
 		args = append(args, filter.Limit)

@@ -106,6 +106,42 @@ func TestLiveSyncStoresPollCreationUnderCanonicalPN(t *testing.T) {
 	}
 }
 
+func TestLiveSyncPreservesRawGroupPollSender(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	chat := types.JID{User: "12345", Server: types.GroupServer}
+	senderLID := types.JID{User: "777", Server: types.HiddenUserServer}
+	senderPN := types.JID{User: "15557654321", Server: types.DefaultUserServer}
+	f.lids[senderLID] = senderPN
+
+	evt := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{Chat: chat, Sender: senderLID, IsGroup: true},
+			ID:            "POLL-GROUP-LID",
+			Timestamp:     time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC),
+		},
+		Message: &waProto.Message{
+			PollCreationMessageV3: &waProto.PollCreationMessage{
+				Name:    proto.String("Group?"),
+				Options: []*waProto.PollCreationMessage_Option{{OptionName: proto.String("Yes")}},
+			},
+		},
+	}
+
+	var messagesStored atomic.Int64
+	a.handleLiveSyncMessage(context.Background(), SyncOptions{}, evt, &messagesStored, func(string, string) {}, nil)
+
+	poll, err := a.db.GetPoll(chat.String(), "POLL-GROUP-LID")
+	if err != nil {
+		t.Fatalf("GetPoll: %v", err)
+	}
+	if poll.SenderJID != senderLID.String() {
+		t.Fatalf("SenderJID = %q, want raw %q", poll.SenderJID, senderLID.String())
+	}
+}
+
 func TestHistorySyncStoresWrappedSelfPollWithLinkedSender(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
