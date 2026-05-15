@@ -131,10 +131,10 @@ func warnRapidSendIfNeeded(storeDir string, now time.Time, stderr io.Writer) err
 	return nil
 }
 
-// warmupRecipient resolves the recipient's user info before sending to
-// establish contact state with WhatsApp's servers. Without this, the
-// privacy token (tctoken) IQ may fail with 400: bad-request for new or
-// unknown contacts, causing messages to be silently dropped despite
+// warmupRecipient canonicalizes direct phone-number recipients and resolves
+// user info before sending to establish contact state with WhatsApp's servers.
+// Without this, the privacy token (tctoken) IQ may fail with 400: bad-request
+// for new or unknown contacts, causing messages to be silently dropped despite
 // returning sent:true.
 //
 // The warmup is best-effort: failures are logged to stderr but never
@@ -145,12 +145,28 @@ type userInfoResolver interface {
 	GetUserInfo(ctx context.Context, jids []types.JID) (map[types.JID]types.UserInfo, error)
 }
 
-func warmupRecipient(ctx context.Context, wa userInfoResolver, jid types.JID, stderr io.Writer) {
+type whatsappRegistrationResolver interface {
+	IsOnWhatsApp(ctx context.Context, phones []string) ([]types.IsOnWhatsAppResponse, error)
+}
+
+func warmupRecipient(ctx context.Context, wa userInfoResolver, jid types.JID, stderr io.Writer) types.JID {
 	if jid.Server != types.DefaultUserServer && jid.Server != types.HiddenUserServer {
-		return
+		return jid
+	}
+	if jid.Server == types.DefaultUserServer {
+		if resolver, ok := any(wa).(whatsappRegistrationResolver); ok {
+			registrations, regErr := resolver.IsOnWhatsApp(ctx, []string{"+" + jid.User})
+			if regErr != nil {
+				fmt.Fprintf(stderr, "warn: send registration warmup for %s failed (send will proceed): %v\n", jid, regErr)
+			} else if len(registrations) > 0 && registrations[0].IsIn && !registrations[0].JID.IsEmpty() {
+				jid = registrations[0].JID.ToNonAD()
+			}
+		}
 	}
 	_, err := wa.GetUserInfo(ctx, []types.JID{jid})
 	if err != nil {
 		fmt.Fprintf(stderr, "warn: send warmup for %s failed (send will proceed): %v\n", jid, err)
+		return jid
 	}
+	return jid
 }

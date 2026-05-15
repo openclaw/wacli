@@ -160,7 +160,8 @@ func TestWarnRapidSendIfNeededSkipsOldOrInvalidMarker(t *testing.T) {
 }
 
 type mockUserInfoClient struct {
-	getUserInfo func(ctx context.Context, jids []types.JID) (map[types.JID]types.UserInfo, error)
+	getUserInfo  func(ctx context.Context, jids []types.JID) (map[types.JID]types.UserInfo, error)
+	isOnWhatsApp func(ctx context.Context, phones []string) ([]types.IsOnWhatsAppResponse, error)
 }
 
 func (m *mockUserInfoClient) GetUserInfo(ctx context.Context, jids []types.JID) (map[types.JID]types.UserInfo, error) {
@@ -168,6 +169,13 @@ func (m *mockUserInfoClient) GetUserInfo(ctx context.Context, jids []types.JID) 
 		return nil, nil
 	}
 	return m.getUserInfo(ctx, jids)
+}
+
+func (m *mockUserInfoClient) IsOnWhatsApp(ctx context.Context, phones []string) ([]types.IsOnWhatsAppResponse, error) {
+	if m.isOnWhatsApp == nil {
+		return nil, nil
+	}
+	return m.isOnWhatsApp(ctx, phones)
 }
 
 func TestWarmupRecipientSkipNonUserServer(t *testing.T) {
@@ -210,6 +218,37 @@ func TestWarmupRecipientCallsGetUserInfoForUserServer(t *testing.T) {
 	warmupRecipient(context.Background(), mock, userJID, &stderr)
 	if !called {
 		t.Fatal("GetUserInfo should be called for user JIDs")
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected stderr: %q", stderr.String())
+	}
+}
+
+func TestWarmupRecipientCanonicalizesRegisteredPhone(t *testing.T) {
+	canonical := types.NewJID("15551234567", types.DefaultUserServer)
+	mock := &mockUserInfoClient{
+		isOnWhatsApp: func(ctx context.Context, phones []string) ([]types.IsOnWhatsAppResponse, error) {
+			if len(phones) != 1 || phones[0] != "+15559991234567" {
+				t.Fatalf("unexpected phone query: %v", phones)
+			}
+			return []types.IsOnWhatsAppResponse{{
+				JID:  canonical,
+				IsIn: true,
+			}}, nil
+		},
+		getUserInfo: func(ctx context.Context, jids []types.JID) (map[types.JID]types.UserInfo, error) {
+			if len(jids) != 1 || jids[0] != canonical {
+				t.Fatalf("expected canonical JID %s, got %v", canonical, jids)
+			}
+			return nil, nil
+		},
+	}
+
+	var stderr bytes.Buffer
+	input := types.NewJID("15559991234567", types.DefaultUserServer)
+	got := warmupRecipient(context.Background(), mock, input, &stderr)
+	if got != canonical {
+		t.Fatalf("warmupRecipient returned %s, want %s", got, canonical)
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("unexpected stderr: %q", stderr.String())
