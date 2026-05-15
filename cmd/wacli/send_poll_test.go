@@ -118,6 +118,18 @@ func TestRequirePollOptionsExist(t *testing.T) {
 	}
 }
 
+func TestRequirePollSelectableCount(t *testing.T) {
+	if err := requirePollSelectableCount(1, []string{"Yes"}); err != nil {
+		t.Fatalf("expected ok: %v", err)
+	}
+	if err := requirePollSelectableCount(0, []string{"Yes", "No"}); err != nil {
+		t.Fatalf("expected zero count to be unbounded: %v", err)
+	}
+	if err := requirePollSelectableCount(1, []string{"Yes", "No"}); err == nil {
+		t.Fatal("expected error for over-selecting")
+	}
+}
+
 func TestCleanVoteOptionsDedupAndTrim(t *testing.T) {
 	cleaned, err := cleanVoteOptions([]string{"  A ", "B", "A", ""})
 	if err != nil {
@@ -140,7 +152,7 @@ func TestBuildPollVoteInfoMarksGroupMessages(t *testing.T) {
 
 	group := types.NewJID("120363001234567890", types.GroupServer)
 	sender := "15551234567@s.whatsapp.net"
-	info, _, err := buildPollVoteInfo(a, group, "poll-id", sender)
+	info, _, _, err := buildPollVoteInfo(a, group, "poll-id", sender)
 	if err != nil {
 		t.Fatalf("buildPollVoteInfo: %v", err)
 	}

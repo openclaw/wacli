@@ -31,7 +31,7 @@ type Button struct {
 }
 
 // Poll captures the question + option list extracted from an incoming
-// PollCreationMessage (any of V1/V2/V3/V4/V5).
+// PollCreationMessage (any of V1/V2/V3/V4/V5/V6).
 type Poll struct {
 	Question        string
 	Options         []string
@@ -211,7 +211,7 @@ func extractPoll(m *waProto.Message, pm *ParsedMessage) {
 }
 
 // pickPollCreation returns the inner PollCreationMessage from any of the
-// known V1/V2/V3/V4/V5 fields, including the FutureProofMessage wrappers.
+// known V1/V2/V3/V4/V5/V6 fields, including FutureProofMessage wrappers.
 func pickPollCreation(m *waProto.Message) *waProto.PollCreationMessage {
 	if m == nil {
 		return nil

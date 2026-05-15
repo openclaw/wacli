@@ -30,21 +30,64 @@ func (a *App) handlePollSideEffects(ctx context.Context, pm wa.ParsedMessage, ev
 // than an events.Message. Vote decryption requires an events.Message-shaped
 // input, which we reconstruct via ParseWebMessage.
 func (a *App) handleHistoryPollSideEffects(ctx context.Context, pm wa.ParsedMessage, hist *waProto.WebMessageInfo) {
+	var evt *events.Message
+	if hist != nil && historyPollNeedsEventParse(pm, hist) {
+		parsed, err := a.wa.ParseWebMessage(pm.Chat, hist)
+		if err != nil {
+			a.emitWarning(
+				"poll_history_parse_failed",
+				fmt.Sprintf("warning: failed to parse history poll message %s: %v", pm.ID, err),
+				map[string]any{"message_id": pm.ID, "error": err.Error()},
+			)
+			return
+		}
+		evt = parsed
+		pm = wa.ParseLiveMessage(parsed)
+	}
 	if pm.Poll != nil {
 		a.upsertPollFromParsed(ctx, pm)
 	}
-	if pm.PollVote != nil && hist != nil {
-		evt, err := a.wa.ParseWebMessage(pm.Chat, hist)
-		if err != nil {
+	if pm.PollVote != nil {
+		if evt == nil && hist != nil {
+			parsed, err := a.wa.ParseWebMessage(pm.Chat, hist)
+			if err != nil {
+				a.emitWarning(
+					"poll_vote_parse_failed",
+					fmt.Sprintf("warning: failed to parse history poll vote %s: %v", pm.ID, err),
+					map[string]any{"message_id": pm.ID, "error": err.Error()},
+				)
+				return
+			}
+			evt = parsed
+		}
+		if evt == nil {
 			a.emitWarning(
 				"poll_vote_parse_failed",
-				fmt.Sprintf("warning: failed to parse history poll vote %s: %v", pm.ID, err),
-				map[string]any{"message_id": pm.ID, "error": err.Error()},
+				fmt.Sprintf("warning: failed to parse history poll vote %s: missing history message", pm.ID),
+				map[string]any{"message_id": pm.ID, "error": "missing history message"},
 			)
 			return
 		}
 		a.handlePollVote(ctx, pm, evt)
 	}
+}
+
+func historyPollNeedsEventParse(pm wa.ParsedMessage, hist *waProto.WebMessageInfo) bool {
+	if pm.Poll != nil || pm.PollVote != nil {
+		return true
+	}
+	if hist == nil {
+		return false
+	}
+	msg := hist.GetMessage()
+	if msg == nil {
+		return false
+	}
+	return msg.GetDeviceSentMessage().GetMessage() != nil ||
+		msg.GetEphemeralMessage().GetMessage() != nil ||
+		msg.GetViewOnceMessage().GetMessage() != nil ||
+		msg.GetViewOnceMessageV2().GetMessage() != nil ||
+		msg.GetViewOnceMessageV2Extension().GetMessage() != nil
 }
 
 func (a *App) upsertPollFromParsed(ctx context.Context, pm wa.ParsedMessage) {

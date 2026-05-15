@@ -8,7 +8,10 @@ import (
 
 	"go.mau.fi/whatsmeow"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
+	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/proto/waHistorySync"
+	"go.mau.fi/whatsmeow/proto/waWeb"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
@@ -100,6 +103,61 @@ func TestLiveSyncStoresPollCreationUnderCanonicalPN(t *testing.T) {
 	}
 	if _, err := a.db.GetPoll(lid.String(), "POLL-LID"); err == nil {
 		t.Fatalf("poll was also stored under raw LID")
+	}
+}
+
+func TestHistorySyncStoresWrappedSelfPollWithLinkedSender(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	chat := types.JID{User: "555", Server: types.DefaultUserServer}
+	created := time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)
+	hist := &waWeb.WebMessageInfo{
+		Key: &waCommon.MessageKey{
+			RemoteJID: proto.String(chat.String()),
+			FromMe:    proto.Bool(true),
+			ID:        proto.String("POLL-HIST"),
+		},
+		MessageTimestamp: proto.Uint64(uint64(created.Unix())),
+		Message: &waProto.Message{
+			EphemeralMessage: &waProto.FutureProofMessage{
+				Message: &waProto.Message{
+					PollCreationMessageV3: &waProto.PollCreationMessage{
+						Name: proto.String("Wrapped?"),
+						Options: []*waProto.PollCreationMessage_Option{
+							{OptionName: proto.String("Yes")},
+							{OptionName: proto.String("No")},
+						},
+						SelectableOptionsCount: proto.Uint32(1),
+					},
+				},
+			},
+		},
+	}
+	history := &events.HistorySync{
+		Data: &waHistorySync.HistorySync{
+			SyncType: waHistorySync.HistorySync_FULL.Enum(),
+			Conversations: []*waHistorySync.Conversation{{
+				ID:       proto.String(chat.String()),
+				Messages: []*waHistorySync.HistorySyncMsg{{Message: hist}},
+			}},
+		},
+	}
+
+	var messagesStored atomic.Int64
+	var lastEvent atomic.Int64
+	a.handleHistorySync(context.Background(), SyncOptions{}, history, &messagesStored, &lastEvent, func(string, string) {})
+
+	poll, err := a.db.GetPoll(chat.String(), "POLL-HIST")
+	if err != nil {
+		t.Fatalf("GetPoll: %v", err)
+	}
+	if poll.Question != "Wrapped?" {
+		t.Fatalf("Question = %q", poll.Question)
+	}
+	if poll.SenderJID != f.LinkedJID() {
+		t.Fatalf("SenderJID = %q, want %q", poll.SenderJID, f.LinkedJID())
 	}
 }
 

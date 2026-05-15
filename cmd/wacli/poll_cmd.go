@@ -101,12 +101,15 @@ func newPollVoteCmd(flags *rootFlags) *cobra.Command {
 			}
 			toJID = warmupRecipient(ctx, a.WA(), toJID, os.Stderr)
 
-			info, knownOptions, err := buildPollVoteInfo(a, toJID, msgID, senderOverride)
+			info, knownOptions, selectableCount, err := buildPollVoteInfo(a, toJID, msgID, senderOverride)
 			if err != nil {
 				return err
 			}
 			if knownOptions != nil {
 				if err := requirePollOptionsExist(knownOptions, cleaned); err != nil {
+					return err
+				}
+				if err := requirePollSelectableCount(selectableCount, cleaned); err != nil {
 					return err
 				}
 			}
@@ -181,22 +184,30 @@ func requirePollOptionsExist(known, requested []string) error {
 	return nil
 }
 
+func requirePollSelectableCount(selectable uint32, requested []string) error {
+	if selectable == 0 || len(requested) <= int(selectable) {
+		return nil
+	}
+	return fmt.Errorf("poll allows at most %d option(s); got %d", selectable, len(requested))
+}
+
 // buildPollVoteInfo resolves the MessageInfo whatsmeow needs to encrypt the
 // vote. Looks up the poll in the local store first; falls back to manually
 // supplied --sender for unknown polls.
-func buildPollVoteInfo(a *app.App, chat types.JID, pollMsgID, senderOverride string) (*types.MessageInfo, []string, error) {
+func buildPollVoteInfo(a *app.App, chat types.JID, pollMsgID, senderOverride string) (*types.MessageInfo, []string, uint32, error) {
 	chatJID := chat.String()
 
 	var (
-		senderJID    types.JID
-		knownOptions []string
-		ts           time.Time
+		senderJID       types.JID
+		knownOptions    []string
+		selectableCount uint32
+		ts              time.Time
 	)
 	pollSenderRaw := strings.TrimSpace(senderOverride)
 	if pollSenderRaw != "" {
 		jid, err := wa.ParseUserOrJID(pollSenderRaw)
 		if err != nil {
-			return nil, nil, fmt.Errorf("invalid --sender: %w", err)
+			return nil, nil, 0, fmt.Errorf("invalid --sender: %w", err)
 		}
 		senderJID = jid
 	}
@@ -206,6 +217,7 @@ func buildPollVoteInfo(a *app.App, chat types.JID, pollMsgID, senderOverride str
 	switch {
 	case err == nil:
 		knownOptions = append([]string(nil), poll.Options...)
+		selectableCount = poll.SelectableCount
 		if senderJID.IsEmpty() && strings.TrimSpace(poll.SenderJID) != "" {
 			if jid, perr := types.ParseJID(poll.SenderJID); perr == nil {
 				senderJID = jid
@@ -215,7 +227,7 @@ func buildPollVoteInfo(a *app.App, chat types.JID, pollMsgID, senderOverride str
 	case errors.Is(err, sql.ErrNoRows):
 		// Fine if the user supplied --sender (and this is a DM, or a group with override).
 	default:
-		return nil, nil, fmt.Errorf("lookup poll: %w", err)
+		return nil, nil, 0, fmt.Errorf("lookup poll: %w", err)
 	}
 
 	// Look up the original poll message to recover IsFromMe (and fall back
@@ -231,7 +243,7 @@ func buildPollVoteInfo(a *app.App, chat types.JID, pollMsgID, senderOverride str
 			ts = msg.Timestamp
 		}
 	} else if !errors.Is(merr, sql.ErrNoRows) {
-		return nil, nil, fmt.Errorf("lookup poll message: %w", merr)
+		return nil, nil, 0, fmt.Errorf("lookup poll message: %w", merr)
 	}
 
 	// If we sent the poll, the encrypted secret was stored against our own
@@ -250,7 +262,7 @@ func buildPollVoteInfo(a *app.App, chat types.JID, pollMsgID, senderOverride str
 		if chat.Server == types.DefaultUserServer {
 			senderJID = chat
 		} else if chat.Server == types.GroupServer {
-			return nil, knownOptions, fmt.Errorf("poll %s is not in the local store; pass --sender <JID> to vote", pollMsgID)
+			return nil, knownOptions, selectableCount, fmt.Errorf("poll %s is not in the local store; pass --sender <JID> to vote", pollMsgID)
 		}
 	}
 
@@ -267,7 +279,7 @@ func buildPollVoteInfo(a *app.App, chat types.JID, pollMsgID, senderOverride str
 		ID:        pollMsgID,
 		Timestamp: ts,
 	}
-	return info, knownOptions, nil
+	return info, knownOptions, selectableCount, nil
 }
 
 func persistOutboundVote(ctx context.Context, a *app.App, chat types.JID, pollMsgID, voteMsgID string, options []string, now time.Time) {
@@ -309,12 +321,15 @@ func executeDelegatedPollVote(ctx context.Context, a *app.App, req sendDelegateR
 		return sendDelegateResponse{}, err
 	}
 	toJID = warmupDelegatedRecipient(ctx, a, toJID)
-	info, knownOptions, err := buildPollVoteInfo(a, toJID, req.ID, req.Sender)
+	info, knownOptions, selectableCount, err := buildPollVoteInfo(a, toJID, req.ID, req.Sender)
 	if err != nil {
 		return sendDelegateResponse{}, err
 	}
 	if knownOptions != nil {
 		if err := requirePollOptionsExist(knownOptions, cleaned); err != nil {
+			return sendDelegateResponse{}, err
+		}
+		if err := requirePollSelectableCount(selectableCount, cleaned); err != nil {
 			return sendDelegateResponse{}, err
 		}
 	}

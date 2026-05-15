@@ -477,14 +477,18 @@ func (f *fakeWA) ParseWebMessage(chatJID types.JID, webMsg *waWeb.WebMessageInfo
 		chatJID = parsed
 	}
 	sender := chatJID
-	if participant := webMsg.GetParticipant(); participant != "" {
+	if webMsg.GetKey().GetFromMe() {
+		if linked, err := types.ParseJID(f.LinkedJID()); err == nil {
+			sender = linked
+		}
+	} else if participant := webMsg.GetParticipant(); participant != "" {
 		parsed, err := types.ParseJID(participant)
 		if err != nil {
 			return nil, err
 		}
 		sender = parsed
 	}
-	return &events.Message{
+	evt := &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
 				Chat:     chatJID,
@@ -495,8 +499,10 @@ func (f *fakeWA) ParseWebMessage(chatJID types.JID, webMsg *waWeb.WebMessageInfo
 			ID:        webMsg.GetKey().GetID(),
 			Timestamp: time.Unix(int64(webMsg.GetMessageTimestamp()), 0).UTC(),
 		},
-		Message: webMsg.GetMessage(),
-	}, nil
+		RawMessage: webMsg.GetMessage(),
+	}
+	evt.UnwrapRaw()
+	return evt, nil
 }
 
 func (f *fakeWA) DownloadMediaToFile(ctx context.Context, directPath string, encFileHash, fileHash, mediaKey []byte, fileLength uint64, mediaType, mmsType string, targetPath string) (int64, error) {
