@@ -124,6 +124,42 @@ func TestCallEventsUpsertAndList(t *testing.T) {
 	}
 }
 
+func TestDeleteCallEventsRemovesCallLogsOnly(t *testing.T) {
+	db := openTestDB(t)
+	chat := "123@s.whatsapp.net"
+	base := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+	if err := db.UpsertChat(chat, "dm", "Alice", base); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	for _, event := range []UpsertCallEventParams{
+		{ChatJID: chat, CallID: "out-log", EventType: "call_log", Direction: "outbound", Timestamp: base},
+		{ChatJID: chat, CallID: "in-log", EventType: "call_log", Direction: "inbound", Timestamp: base.Add(time.Second)},
+		{ChatJID: chat, CallID: "live-offer", EventType: "offer", Direction: "outbound", Timestamp: base.Add(2 * time.Second)},
+	} {
+		if err := db.UpsertCallEvent(event); err != nil {
+			t.Fatalf("UpsertCallEvent %s: %v", event.CallID, err)
+		}
+	}
+
+	deleted, err := db.DeleteCallEvents(DeleteCallEventsParams{ChatJID: chat, Direction: "outbound"})
+	if err != nil {
+		t.Fatalf("DeleteCallEvents: %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("deleted = %d, want 1", deleted)
+	}
+	calls, err := db.ListCallEvents(ListCallEventsParams{ChatJID: chat, Limit: 10, Asc: true})
+	if err != nil {
+		t.Fatalf("ListCallEvents: %v", err)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("calls len = %d, want 2: %+v", len(calls), calls)
+	}
+	if calls[0].CallID != "in-log" || calls[1].CallID != "live-offer" {
+		t.Fatalf("remaining calls = %+v", calls)
+	}
+}
+
 func TestListMessagesFiltersAndOrdering(t *testing.T) {
 	db := openTestDB(t)
 	chat := "chat@s.whatsapp.net"

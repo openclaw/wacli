@@ -136,14 +136,26 @@ func (a *App) handleLiveCallEvent(ctx context.Context, evt interface{}) {
 		}
 	}
 	call, ok := wa.ParseLiveCallEvent(evt, self)
+	if ok {
+		if err := a.storeParsedCallEvent(ctx, call, "", ""); err != nil {
+			a.emitWarning(
+				"call_event_store_failed",
+				fmt.Sprintf("warning: failed to store call event %s: %v", call.EventType, err),
+				map[string]any{"event_type": call.EventType, "call_id": call.CallID, "error": err.Error()},
+			)
+		}
+		return
+	}
+
+	deleted, ok := wa.ParseCallLogDeleteEvent(evt)
 	if !ok {
 		return
 	}
-	if err := a.storeParsedCallEvent(ctx, call, "", ""); err != nil {
+	if err := a.deleteParsedCallEvents(ctx, deleted); err != nil {
 		a.emitWarning(
-			"call_event_store_failed",
-			fmt.Sprintf("warning: failed to store call event %s: %v", call.EventType, err),
-			map[string]any{"event_type": call.EventType, "call_id": call.CallID, "error": err.Error()},
+			"call_event_delete_failed",
+			fmt.Sprintf("warning: failed to delete call log events: %v", err),
+			map[string]any{"chat_jid": deleted.Chat.String(), "direction": deleted.Direction, "error": err.Error()},
 		)
 	}
 }

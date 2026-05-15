@@ -152,6 +152,44 @@ func TestLiveSyncStoresCallLogMessageAndCallEvent(t *testing.T) {
 	}
 }
 
+func TestAppStateCallLogDeleteRemovesStoredCallEvent(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	chat := types.NewJID("15551234567", types.DefaultUserServer)
+	when := time.Date(2024, 1, 3, 12, 0, 0, 0, time.UTC)
+	if err := a.db.UpsertChat(chat.String(), "dm", "Alice", when); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	if err := a.db.UpsertCallEvent(store.UpsertCallEventParams{
+		ChatJID:   chat.String(),
+		CallID:    "call-log-1",
+		EventType: "call_log",
+		Direction: "outbound",
+		Timestamp: when,
+	}); err != nil {
+		t.Fatalf("UpsertCallEvent: %v", err)
+	}
+
+	a.handleLiveCallEvent(context.Background(), &events.AppState{
+		SyncActionValue: &waSyncAction.SyncActionValue{
+			DeleteIndividualCallLog: &waSyncAction.DeleteIndividualCallLogAction{
+				PeerJID:    proto.String(chat.String()),
+				IsIncoming: proto.Bool(false),
+			},
+		},
+	})
+
+	calls, err := a.db.ListCallEvents(store.ListCallEventsParams{ChatJID: chat.String(), Limit: 10})
+	if err != nil {
+		t.Fatalf("ListCallEvents: %v", err)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("calls len = %d, want 0: %+v", len(calls), calls)
+	}
+}
+
 func TestAppStateLTHashMismatchRequestsRecoveryOnce(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()

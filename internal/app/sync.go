@@ -500,6 +500,19 @@ func (a *App) storeParsedCallEvent(ctx context.Context, call wa.ParsedCallEvent,
 	})
 }
 
+func (a *App) deleteParsedCallEvents(ctx context.Context, deleted wa.ParsedCallDelete) error {
+	chat := a.canonicalStoreJID(ctx, deleted.Chat)
+	chatJID := canonicalJIDString(chat)
+	if chatJID == "" {
+		return fmt.Errorf("call chat JID is required")
+	}
+	_, err := a.db.DeleteCallEvents(store.DeleteCallEventsParams{
+		ChatJID:   chatJID,
+		Direction: deleted.Direction,
+	})
+	return err
+}
+
 func waButtonsToStore(buttons []wa.Button) []store.Button {
 	if len(buttons) == 0 {
 		return nil

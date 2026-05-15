@@ -85,6 +85,29 @@ type ListCallEventsParams struct {
 	Asc      bool
 }
 
+type DeleteCallEventsParams struct {
+	ChatJID   string
+	Direction string
+}
+
+func (d *DB) DeleteCallEvents(p DeleteCallEventsParams) (int64, error) {
+	chatJID := strings.TrimSpace(p.ChatJID)
+	if chatJID == "" {
+		return 0, fmt.Errorf("chat JID is required")
+	}
+	query := "DELETE FROM call_events WHERE chat_jid = ? AND event_type = 'call_log'"
+	args := []interface{}{chatJID}
+	if direction := strings.TrimSpace(p.Direction); direction != "" {
+		query += " AND direction = ?"
+		args = append(args, direction)
+	}
+	res, err := d.sql.Exec(query, args...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 func (d *DB) ListCallEvents(p ListCallEventsParams) ([]CallEvent, error) {
 	if p.Limit <= 0 {
 		p.Limit = 50

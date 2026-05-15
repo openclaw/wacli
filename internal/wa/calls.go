@@ -33,6 +33,11 @@ type ParsedCallEvent struct {
 	Participants []ParsedCallParticipant
 }
 
+type ParsedCallDelete struct {
+	Chat      types.JID
+	Direction string
+}
+
 func extractCallLog(m *waProto.Message, pm *ParsedMessage) {
 	call := m.GetCallLogMesssage()
 	if call == nil {
@@ -77,6 +82,26 @@ func ParseLiveCallEvent(evt interface{}, self types.JID) (ParsedCallEvent, bool)
 	default:
 		return ParsedCallEvent{}, false
 	}
+}
+
+func ParseCallLogDeleteEvent(evt interface{}) (ParsedCallDelete, bool) {
+	v, ok := evt.(*events.AppState)
+	if !ok || v == nil || v.SyncActionValue == nil || v.GetDeleteIndividualCallLog() == nil {
+		return ParsedCallDelete{}, false
+	}
+	action := v.GetDeleteIndividualCallLog()
+	peer := strings.TrimSpace(action.GetPeerJID())
+	if peer == "" {
+		return ParsedCallDelete{}, false
+	}
+	chat, err := types.ParseJID(peer)
+	if err != nil || chat.IsEmpty() {
+		return ParsedCallDelete{}, false
+	}
+	return ParsedCallDelete{
+		Chat:      chat,
+		Direction: directionFromIncoming(action.GetIsIncoming()),
+	}, true
 }
 
 func callEventFromMeta(meta types.BasicCallMeta, self types.JID, eventType, outcome, reason, media, callType string) ParsedCallEvent {
