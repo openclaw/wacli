@@ -7,7 +7,7 @@ import (
 )
 
 // HistoricalLIDJIDs returns distinct hidden-user JIDs stored in chat and
-// message identity columns. The app layer resolves these through whatsmeow.
+// message/poll identity columns. The app layer resolves these through whatsmeow.
 func (d *DB) HistoricalLIDJIDs() ([]string, error) {
 	rows, err := d.sql.Query(`
 		SELECT jid FROM chats WHERE jid GLOB '*@lid'
@@ -15,6 +15,14 @@ func (d *DB) HistoricalLIDJIDs() ([]string, error) {
 		SELECT chat_jid FROM messages WHERE chat_jid GLOB '*@lid'
 		UNION
 		SELECT sender_jid FROM messages WHERE sender_jid GLOB '*@lid'
+		UNION
+		SELECT chat_jid FROM polls WHERE chat_jid GLOB '*@lid'
+		UNION
+		SELECT sender_jid FROM polls WHERE sender_jid GLOB '*@lid'
+		UNION
+		SELECT chat_jid FROM poll_votes WHERE chat_jid GLOB '*@lid'
+		UNION
+		SELECT voter_jid FROM poll_votes WHERE voter_jid GLOB '*@lid'
 		ORDER BY 1
 	`)
 	if err != nil {
@@ -67,6 +75,9 @@ func (d *DB) MigrateLIDToPN(lidJID, pnJID string) error {
 		return err
 	}
 	if err := migrateLIDSenderToPN(tx, lidJID, pnJID); err != nil {
+		return err
+	}
+	if err := migrateLIDPollsToPN(tx, lidJID, pnJID); err != nil {
 		return err
 	}
 	if err := deleteLIDChat(tx, lidJID); err != nil {
@@ -222,6 +233,57 @@ func migrateLIDMessagesToPN(tx *sql.Tx, lidJID, pnJID string) error {
 func migrateLIDSenderToPN(tx *sql.Tx, lidJID, pnJID string) error {
 	if _, err := tx.Exec(`UPDATE messages SET sender_jid = ? WHERE sender_jid = ?`, pnJID, lidJID); err != nil {
 		return fmt.Errorf("rewrite lid message senders: %w", err)
+	}
+	return nil
+}
+
+func migrateLIDPollsToPN(tx *sql.Tx, lidJID, pnJID string) error {
+	if _, err := tx.Exec(`
+		INSERT INTO polls(chat_jid, msg_id, sender_jid, question, options_json, selectable_count, created_ts)
+		SELECT
+			CASE WHEN chat_jid = ? THEN ? ELSE chat_jid END,
+			msg_id,
+			CASE WHEN sender_jid = ? THEN ? ELSE sender_jid END,
+			question,
+			options_json,
+			selectable_count,
+			created_ts
+		FROM polls
+		WHERE chat_jid = ? OR sender_jid = ?
+		ON CONFLICT(chat_jid, msg_id) DO UPDATE SET
+			sender_jid = COALESCE(NULLIF(excluded.sender_jid, ''), polls.sender_jid),
+			question = excluded.question,
+			options_json = excluded.options_json,
+			selectable_count = excluded.selectable_count,
+			created_ts = max(polls.created_ts, excluded.created_ts)
+	`, lidJID, pnJID, lidJID, pnJID, lidJID, lidJID); err != nil {
+		return fmt.Errorf("merge lid polls into pn rows: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM polls WHERE chat_jid = ? OR sender_jid = ?`, lidJID, lidJID); err != nil {
+		return fmt.Errorf("delete migrated lid polls: %w", err)
+	}
+
+	if _, err := tx.Exec(`
+		INSERT INTO poll_votes(chat_jid, poll_msg_id, voter_jid, vote_msg_id, selected_options_json, ts)
+		SELECT
+			CASE WHEN chat_jid = ? THEN ? ELSE chat_jid END,
+			poll_msg_id,
+			CASE WHEN voter_jid = ? THEN ? ELSE voter_jid END,
+			vote_msg_id,
+			selected_options_json,
+			ts
+		FROM poll_votes
+		WHERE chat_jid = ? OR voter_jid = ?
+		ON CONFLICT(chat_jid, poll_msg_id, voter_jid) DO UPDATE SET
+			vote_msg_id = excluded.vote_msg_id,
+			selected_options_json = excluded.selected_options_json,
+			ts = excluded.ts
+		WHERE excluded.ts >= poll_votes.ts
+	`, lidJID, pnJID, lidJID, pnJID, lidJID, lidJID); err != nil {
+		return fmt.Errorf("merge lid poll votes into pn rows: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM poll_votes WHERE chat_jid = ? OR voter_jid = ?`, lidJID, lidJID); err != nil {
+		return fmt.Errorf("delete migrated lid poll votes: %w", err)
 	}
 	return nil
 }

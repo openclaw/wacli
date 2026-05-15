@@ -36,6 +36,26 @@ func TestHistoricalLIDJIDsFindsChatAndMessageColumns(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpsertMessage group sender: %v", err)
 	}
+	if err := db.UpsertPoll(Poll{
+		ChatJID:   lid,
+		MsgID:     "lid-poll",
+		SenderJID: lid,
+		Question:  "LID?",
+		Options:   []string{"yes", "no"},
+		CreatedAt: base,
+	}); err != nil {
+		t.Fatalf("UpsertPoll lid: %v", err)
+	}
+	if err := db.UpsertPollVote(PollVote{
+		ChatJID:   group,
+		PollMsgID: "group-poll",
+		VoterJID:  lid,
+		VoteMsgID: "lid-vote",
+		Selected:  []string{"yes"},
+		VotedAt:   base,
+	}); err != nil {
+		t.Fatalf("UpsertPollVote lid: %v", err)
+	}
 
 	got, err := db.HistoricalLIDJIDs()
 	if err != nil {
@@ -102,6 +122,48 @@ func TestMigrateLIDToPNMergesChatsAndMessages(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpsertMessage group: %v", err)
 	}
+	if err := db.UpsertPoll(Poll{
+		ChatJID:         lid,
+		MsgID:           "poll",
+		SenderJID:       lid,
+		Question:        "Dinner?",
+		Options:         []string{"yes", "no"},
+		SelectableCount: 1,
+		CreatedAt:       base.Add(8 * time.Second),
+	}); err != nil {
+		t.Fatalf("UpsertPoll lid: %v", err)
+	}
+	if err := db.UpsertPoll(Poll{
+		ChatJID:         group,
+		MsgID:           "group-poll",
+		SenderJID:       lid,
+		Question:        "Group?",
+		Options:         []string{"yes", "no"},
+		SelectableCount: 1,
+		CreatedAt:       base.Add(8 * time.Second),
+	}); err != nil {
+		t.Fatalf("UpsertPoll group: %v", err)
+	}
+	if err := db.UpsertPollVote(PollVote{
+		ChatJID:   lid,
+		PollMsgID: "poll",
+		VoterJID:  lid,
+		VoteMsgID: "older-vote",
+		Selected:  []string{"yes"},
+		VotedAt:   base.Add(8 * time.Second),
+	}); err != nil {
+		t.Fatalf("UpsertPollVote lid: %v", err)
+	}
+	if err := db.UpsertPollVote(PollVote{
+		ChatJID:   pn,
+		PollMsgID: "poll",
+		VoterJID:  pn,
+		VoteMsgID: "newer-vote",
+		Selected:  []string{"no"},
+		VotedAt:   base.Add(9 * time.Second),
+	}); err != nil {
+		t.Fatalf("UpsertPollVote pn: %v", err)
+	}
 
 	if err := db.MigrateLIDToPN(lid, pn); err != nil {
 		t.Fatalf("MigrateLIDToPN: %v", err)
@@ -118,6 +180,12 @@ func TestMigrateLIDToPNMergesChatsAndMessages(t *testing.T) {
 	}
 	if got := countRows(t, db.sql, "SELECT COUNT(*) FROM messages WHERE sender_jid = ?", lid); got != 0 {
 		t.Fatalf("lid sender rows = %d, want 0", got)
+	}
+	if got := countRows(t, db.sql, "SELECT COUNT(*) FROM polls WHERE chat_jid = ? OR sender_jid = ?", lid, lid); got != 0 {
+		t.Fatalf("lid poll rows = %d, want 0", got)
+	}
+	if got := countRows(t, db.sql, "SELECT COUNT(*) FROM poll_votes WHERE chat_jid = ? OR voter_jid = ?", lid, lid); got != 0 {
+		t.Fatalf("lid poll vote rows = %d, want 0", got)
 	}
 	if got := countRows(t, db.sql, "SELECT COUNT(*) FROM messages WHERE chat_jid = ?", pn); got != 2 {
 		t.Fatalf("pn message rows = %d, want 2", got)
@@ -154,6 +222,28 @@ func TestMigrateLIDToPNMergesChatsAndMessages(t *testing.T) {
 	}
 	if groupMsg.SenderJID != pn {
 		t.Fatalf("group sender = %q, want %q", groupMsg.SenderJID, pn)
+	}
+
+	poll, err := db.GetPoll(pn, "poll")
+	if err != nil {
+		t.Fatalf("GetPoll migrated: %v", err)
+	}
+	if poll.SenderJID != pn {
+		t.Fatalf("migrated poll sender = %q, want %q", poll.SenderJID, pn)
+	}
+	groupPoll, err := db.GetPoll(group, "group-poll")
+	if err != nil {
+		t.Fatalf("GetPoll group: %v", err)
+	}
+	if groupPoll.SenderJID != pn {
+		t.Fatalf("group poll sender = %q, want %q", groupPoll.SenderJID, pn)
+	}
+	votes, err := db.ListPollVotes(pn, "poll")
+	if err != nil {
+		t.Fatalf("ListPollVotes migrated: %v", err)
+	}
+	if len(votes) != 1 || votes[0].VoterJID != pn || votes[0].VoteMsgID != "newer-vote" || !reflect.DeepEqual(votes[0].Selected, []string{"no"}) {
+		t.Fatalf("migrated votes = %+v", votes)
 	}
 
 	lids, err := db.HistoricalLIDJIDs()

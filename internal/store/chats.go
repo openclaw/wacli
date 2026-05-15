@@ -149,35 +149,75 @@ func (d *DB) DeleteChat(jid string) error {
 	if jid == "" {
 		return fmt.Errorf("chat JID is required")
 	}
-	_, err := d.sql.Exec(`DELETE FROM chats WHERE jid = ?`, jid)
-	return err
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if tx != nil {
+			_ = tx.Rollback()
+		}
+	}()
+	if _, err := tx.Exec(`DELETE FROM poll_votes WHERE chat_jid = ?`, jid); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM polls WHERE chat_jid = ?`, jid); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM chats WHERE jid = ?`, jid); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	tx = nil
+	return nil
 }
+
+const staleChatJIDsSQL = `
+	SELECT jid FROM (
+		SELECT
+			c.jid,
+			CASE
+				WHEN COALESCE(MAX(m.ts), 0) > COALESCE(c.last_message_ts, 0) THEN COALESCE(MAX(m.ts), 0)
+				ELSE COALESCE(c.last_message_ts, 0)
+			END AS activity_ts
+		FROM chats c
+		LEFT JOIN messages m ON m.chat_jid = c.jid
+		GROUP BY c.jid
+	)
+	WHERE activity_ts > 0 AND activity_ts < ?
+`
 
 func (d *DB) DeleteChatsOlderThan(days int) (int64, error) {
 	if days <= 0 {
 		return 0, fmt.Errorf("days must be positive")
 	}
 	cutoff := nowUTC().AddDate(0, 0, -days)
-	res, err := d.sql.Exec(`
-		DELETE FROM chats
-		WHERE jid IN (
-			SELECT jid FROM (
-				SELECT
-					c.jid,
-					CASE
-						WHEN COALESCE(MAX(m.ts), 0) > COALESCE(c.last_message_ts, 0) THEN COALESCE(MAX(m.ts), 0)
-						ELSE COALESCE(c.last_message_ts, 0)
-					END AS activity_ts
-				FROM chats c
-				LEFT JOIN messages m ON m.chat_jid = c.jid
-				GROUP BY c.jid
-			)
-			WHERE activity_ts > 0 AND activity_ts < ?
-		)
-	`, unix(cutoff))
+	cutoffUnix := unix(cutoff)
+	tx, err := d.sql.Begin()
 	if err != nil {
 		return 0, err
 	}
+	defer func() {
+		if tx != nil {
+			_ = tx.Rollback()
+		}
+	}()
+	if _, err := tx.Exec(`DELETE FROM poll_votes WHERE chat_jid IN (`+staleChatJIDsSQL+`)`, cutoffUnix); err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(`DELETE FROM polls WHERE chat_jid IN (`+staleChatJIDsSQL+`)`, cutoffUnix); err != nil {
+		return 0, err
+	}
+	res, err := tx.Exec(`DELETE FROM chats WHERE jid IN (`+staleChatJIDsSQL+`)`, cutoffUnix)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	tx = nil
 	return res.RowsAffected()
 }
 

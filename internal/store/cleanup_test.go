@@ -21,6 +21,25 @@ func TestDeleteChat(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpsertMessage: %v", err)
 	}
+	if err := db.UpsertPoll(Poll{
+		ChatJID:   "123@s.whatsapp.net",
+		MsgID:     "poll1",
+		Question:  "Q?",
+		Options:   []string{"yes", "no"},
+		CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("UpsertPoll: %v", err)
+	}
+	if err := db.UpsertPollVote(PollVote{
+		ChatJID:   "123@s.whatsapp.net",
+		PollMsgID: "poll1",
+		VoterJID:  "voter@s.whatsapp.net",
+		VoteMsgID: "vote1",
+		Selected:  []string{"yes"},
+		VotedAt:   now,
+	}); err != nil {
+		t.Fatalf("UpsertPollVote: %v", err)
+	}
 
 	msgCount, err := db.CountChatMessages("123@s.whatsapp.net")
 	if err != nil {
@@ -45,6 +64,12 @@ func TestDeleteChat(t *testing.T) {
 	}
 	if msgCount != 0 {
 		t.Fatalf("expected 0 messages after delete, got %d", msgCount)
+	}
+	if got := countRows(t, db.sql, "SELECT COUNT(*) FROM polls WHERE chat_jid = ?", "123@s.whatsapp.net"); got != 0 {
+		t.Fatalf("expected polls deleted, got %d", got)
+	}
+	if got := countRows(t, db.sql, "SELECT COUNT(*) FROM poll_votes WHERE chat_jid = ?", "123@s.whatsapp.net"); got != 0 {
+		t.Fatalf("expected poll votes deleted, got %d", got)
 	}
 }
 
@@ -78,6 +103,34 @@ func TestDeleteChatsOlderThan(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpsertMessage recent: %v", err)
 	}
+	if err := db.UpsertPoll(Poll{
+		ChatJID:   "old@s.whatsapp.net",
+		MsgID:     "old-poll",
+		Question:  "Old?",
+		Options:   []string{"yes", "no"},
+		CreatedAt: old,
+	}); err != nil {
+		t.Fatalf("UpsertPoll old: %v", err)
+	}
+	if err := db.UpsertPollVote(PollVote{
+		ChatJID:   "old@s.whatsapp.net",
+		PollMsgID: "old-poll",
+		VoterJID:  "voter@s.whatsapp.net",
+		VoteMsgID: "old-vote",
+		Selected:  []string{"yes"},
+		VotedAt:   old,
+	}); err != nil {
+		t.Fatalf("UpsertPollVote old: %v", err)
+	}
+	if err := db.UpsertPoll(Poll{
+		ChatJID:   "recent@s.whatsapp.net",
+		MsgID:     "recent-poll",
+		Question:  "Recent?",
+		Options:   []string{"yes", "no"},
+		CreatedAt: recent,
+	}); err != nil {
+		t.Fatalf("UpsertPoll recent: %v", err)
+	}
 
 	deleted, err := db.DeleteChatsOlderThan(180)
 	if err != nil {
@@ -98,6 +151,15 @@ func TestDeleteChatsOlderThan(t *testing.T) {
 	}
 	if c.JID != "recent@s.whatsapp.net" {
 		t.Fatalf("expected recent chat to survive, got %s", c.JID)
+	}
+	if got := countRows(t, db.sql, "SELECT COUNT(*) FROM polls WHERE chat_jid = ?", "old@s.whatsapp.net"); got != 0 {
+		t.Fatalf("expected old polls deleted, got %d", got)
+	}
+	if got := countRows(t, db.sql, "SELECT COUNT(*) FROM poll_votes WHERE chat_jid = ?", "old@s.whatsapp.net"); got != 0 {
+		t.Fatalf("expected old poll votes deleted, got %d", got)
+	}
+	if got := countRows(t, db.sql, "SELECT COUNT(*) FROM polls WHERE chat_jid = ?", "recent@s.whatsapp.net"); got != 1 {
+		t.Fatalf("expected recent poll to survive, got %d", got)
 	}
 }
 
