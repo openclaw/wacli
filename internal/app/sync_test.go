@@ -579,6 +579,9 @@ func TestSyncDownloadsHistoryNotificationBeforeProcessing(t *testing.T) {
 	if res.MessagesStored != 1 {
 		t.Fatalf("messages stored = %d, want 1", res.MessagesStored)
 	}
+	if got := f.deleteHistoryCalls; len(got) != 1 || got[0] != notif {
+		t.Fatalf("delete history calls = %v, want notification %p", got, notif)
+	}
 	if got := f.manualHistorySyncCalls; len(got) != 2 || !got[0] || got[1] {
 		t.Fatalf("manual history calls = %v", got)
 	}

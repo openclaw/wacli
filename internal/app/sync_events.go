@@ -218,6 +218,13 @@ func (a *App) downloadAndHandleHistorySync(ctx context.Context, opts SyncOptions
 		return
 	}
 	a.handleHistorySync(ctx, opts, &events.HistorySync{Data: data}, messagesStored, lastEvent, enqueueMedia, limits...)
+	if err := a.wa.DeleteHistorySyncMedia(ctx, notif); err != nil {
+		a.emitWarning(
+			"history_delete_failed",
+			fmt.Sprintf("warning: failed to delete history sync media: %v", err),
+			map[string]any{"error": err.Error()},
+		)
+	}
 }
 
 func historySyncNotificationFromMessage(v *events.Message) *waE2E.HistorySyncNotification {

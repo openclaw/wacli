@@ -133,6 +133,17 @@ func TestRewritePollVoteInfoForLIDLeavesGroupSenderPN(t *testing.T) {
 	}
 }
 
+func TestResolvePNToLIDUsesOwnLIDWithoutCache(t *testing.T) {
+	pn := types.NewJID("15551234567", types.DefaultUserServer)
+	lid := types.NewJID("999123456789", types.HiddenUserServer)
+	cli := &whatsmeow.Client{Store: &waStore.Device{ID: &pn, LID: lid, LIDMigrationTimestamp: 1}}
+
+	got := (&Client{}).resolvePNToLIDLocked(context.Background(), cli, pn)
+	if got != lid {
+		t.Fatalf("resolved = %s, want %s", got, lid)
+	}
+}
+
 func TestParseUserOrJID(t *testing.T) {
 	tests := []struct {
 		name       string

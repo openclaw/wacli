@@ -77,6 +77,7 @@ type WAClient interface {
 	DecryptReaction(ctx context.Context, reaction *events.Message) (*waProto.ReactionMessage, error)
 	SetManualHistorySyncDownload(enabled bool)
 	DownloadHistorySync(ctx context.Context, notif *waE2E.HistorySyncNotification) (*waHistorySync.HistorySync, error)
+	DeleteHistorySyncMedia(ctx context.Context, notif *waE2E.HistorySyncNotification) error
 	RequestHistorySyncOnDemand(ctx context.Context, lastKnown types.MessageInfo, count int) (types.MessageID, error)
 	FetchAppState(ctx context.Context, name string, fullSync, onlyIfNotSynced bool) error
 	RequestAppStateRecovery(ctx context.Context, name string) (types.MessageID, error)

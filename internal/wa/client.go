@@ -326,14 +326,29 @@ func rewritePollVoteInfoForLID(ctx context.Context, cli *whatsmeow.Client, info 
 // using the active session store; falls back to the input JID if no mapping
 // exists. Caller already holds (or doesn't need) c.mu.
 func (c *Client) resolvePNToLIDLocked(ctx context.Context, cli *whatsmeow.Client, jid types.JID) types.JID {
-	if cli == nil || cli.Store == nil || cli.Store.LIDs == nil {
+	if cli == nil || cli.Store == nil {
 		return jid
 	}
-	lid, err := cli.Store.LIDs.GetLIDForPN(ctx, jid.ToNonAD())
-	if err != nil || lid.IsEmpty() {
+	pn := jid.ToNonAD()
+	if ownPN := cli.Store.GetJID().ToNonAD(); pn == ownPN {
+		if ownLID := cli.Store.GetLID().ToNonAD(); !ownLID.IsEmpty() {
+			return ownLID
+		}
+	}
+	if cli.Store.LIDs == nil {
 		return jid
 	}
-	return lid
+	lid, err := cli.Store.LIDs.GetLIDForPN(ctx, pn)
+	if err == nil && !lid.IsEmpty() {
+		return lid
+	}
+	info, err := cli.GetUserInfo(ctx, []types.JID{pn})
+	if err == nil {
+		if resolved := info[pn].LID.ToNonAD(); !resolved.IsEmpty() {
+			return resolved
+		}
+	}
+	return jid
 }
 
 // DecryptPollVote decrypts an incoming PollUpdateMessage event and returns
@@ -357,6 +372,19 @@ func (c *Client) DecryptSecretEncryptedMessage(ctx context.Context, evt *events.
 		return nil, fmt.Errorf("whatsapp client is not initialized")
 	}
 	return cli.DecryptSecretEncryptedMessage(ctx, evt)
+}
+
+func (c *Client) DeleteHistorySyncMedia(ctx context.Context, notif *waE2E.HistorySyncNotification) error {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil {
+		return fmt.Errorf("whatsapp client is not initialized")
+	}
+	if notif == nil || notif.GetDirectPath() == "" {
+		return nil
+	}
+	return cli.DeleteMedia(ctx, whatsmeow.MediaHistory, notif.GetDirectPath(), notif.GetFileEncSHA256(), notif.GetEncHandle())
 }
 
 func (c *Client) SendReaction(ctx context.Context, chat, sender types.JID, targetID types.MessageID, reaction string) (types.MessageID, error) {

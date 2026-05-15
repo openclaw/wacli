@@ -50,6 +50,7 @@ type fakeWA struct {
 	onDemandHistory     func(lastKnown types.MessageInfo, count int) *events.HistorySync
 	onDemandEvent       func(lastKnown types.MessageInfo, count int) interface{}
 	downloadHistory     func(notif *waE2E.HistorySyncNotification) (*waHistorySync.HistorySync, error)
+	deleteHistoryCalls  []*waE2E.HistorySyncNotification
 	appStateRecoveryErr error
 	appStateFetchErr    error
 	appStateFetchEvent  func(name string, fullSync, onlyIfNotSynced bool) interface{}
@@ -477,6 +478,13 @@ func (f *fakeWA) DownloadHistorySync(ctx context.Context, notif *waE2E.HistorySy
 		return nil, fmt.Errorf("not supported")
 	}
 	return cb(notif)
+}
+
+func (f *fakeWA) DeleteHistorySyncMedia(ctx context.Context, notif *waE2E.HistorySyncNotification) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.deleteHistoryCalls = append(f.deleteHistoryCalls, notif)
+	return nil
 }
 
 func (f *fakeWA) ParseWebMessage(chatJID types.JID, webMsg *waWeb.WebMessageInfo) (*events.Message, error) {
