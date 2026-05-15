@@ -14,6 +14,7 @@ import (
 	"github.com/openclaw/wacli/internal/store"
 	"github.com/openclaw/wacli/internal/wa"
 	"go.mau.fi/whatsmeow/appstate"
+	waBinary "go.mau.fi/whatsmeow/binary"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waE2E"
@@ -67,6 +68,87 @@ func TestLiveSyncWarnsOnEncryptedReactionDecryptFailure(t *testing.T) {
 	}
 	if msg.DisplayText != "Reacted to message" {
 		t.Fatalf("expected fallback reaction display text, got %q", msg.DisplayText)
+	}
+}
+
+func TestLiveCallOfferStoresCallEvent(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	remote := types.NewJID("15551234567", types.DefaultUserServer)
+	when := time.Date(2024, 1, 3, 12, 0, 0, 0, time.UTC)
+	a.handleLiveCallEvent(context.Background(), &events.CallOffer{
+		BasicCallMeta: types.BasicCallMeta{
+			From:        remote,
+			CallCreator: remote,
+			CallID:      "call-live-1",
+			Timestamp:   when,
+		},
+		Data: &waBinary.Node{Attrs: waBinary.Attrs{"media": "video"}},
+	})
+
+	calls, err := a.db.ListCallEvents(store.ListCallEventsParams{ChatJID: remote.String(), Limit: 10})
+	if err != nil {
+		t.Fatalf("ListCallEvents: %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("calls len = %d, want 1", len(calls))
+	}
+	got := calls[0]
+	if got.CallID != "call-live-1" || got.EventType != "offer" || got.Direction != "inbound" || got.Media != "video" {
+		t.Fatalf("unexpected call event: %+v", got)
+	}
+}
+
+func TestLiveSyncStoresCallLogMessageAndCallEvent(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	chat := types.NewJID("15551234567", types.DefaultUserServer)
+	outcome := waProto.CallLogMessage_CONNECTED
+	callType := waProto.CallLogMessage_REGULAR
+	evt := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:     chat,
+				Sender:   chat,
+				IsFromMe: true,
+			},
+			ID:        "call-msg-1",
+			Timestamp: time.Date(2024, 1, 3, 12, 0, 0, 0, time.UTC),
+		},
+		Message: &waProto.Message{
+			CallLogMesssage: &waProto.CallLogMessage{
+				IsVideo:      proto.Bool(false),
+				CallOutcome:  &outcome,
+				DurationSecs: proto.Int64(61),
+				CallType:     &callType,
+			},
+		},
+	}
+
+	var messagesStored atomic.Int64
+	a.handleLiveSyncMessage(context.Background(), SyncOptions{}, evt, &messagesStored, func(string, string) {}, nil)
+
+	msg, err := a.db.GetMessage(chat.String(), "call-msg-1")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if msg.DisplayText != "WhatsApp audio call connected (1m01s)" {
+		t.Fatalf("display text = %q", msg.DisplayText)
+	}
+	calls, err := a.db.ListCallEvents(store.ListCallEventsParams{ChatJID: chat.String(), Limit: 10})
+	if err != nil {
+		t.Fatalf("ListCallEvents: %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("calls len = %d, want 1", len(calls))
+	}
+	got := calls[0]
+	if got.CallID != "call-msg-1" || got.MsgID != "call-msg-1" || got.EventType != "call_log" || got.Direction != "outbound" || got.Outcome != "connected" {
+		t.Fatalf("unexpected call log event: %+v", got)
 	}
 }
 

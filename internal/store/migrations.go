@@ -28,6 +28,7 @@ var schemaMigrations = []migration{
 	{version: 12, name: "contacts system_name column", up: migrateContactsSystemNameColumn},
 	{version: 13, name: "messages buttons column", up: migrateMessagesButtonsColumn},
 	{version: 14, name: "polls and poll_votes", up: migratePolls},
+	{version: 15, name: "call events", up: migrateCallEvents},
 }
 
 func (d *DB) ensureSchema() error {
@@ -76,6 +77,19 @@ func (d *DB) ensureSchema() error {
 		}
 	}
 
+	return d.ensureCurrentSchema()
+}
+
+func (d *DB) ensureCurrentSchema() error {
+	// Keep idempotent DDL guards here, not in query/write paths. This catches
+	// local stores from interrupted or pre-release migrations where a version
+	// row exists but the expected object does not.
+	if err := migratePolls(d); err != nil {
+		return fmt.Errorf("ensure current polls schema: %w", err)
+	}
+	if err := migrateCallEvents(d); err != nil {
+		return fmt.Errorf("ensure current call events schema: %w", err)
+	}
 	return nil
 }
 
@@ -295,6 +309,36 @@ func migratePolls(d *DB) error {
 		CREATE INDEX IF NOT EXISTS idx_poll_votes_poll ON poll_votes(chat_jid, poll_msg_id);
 	`); err != nil {
 		return fmt.Errorf("create polls tables: %w", err)
+	}
+	return nil
+}
+
+func migrateCallEvents(d *DB) error {
+	if _, err := d.sql.Exec(`
+		CREATE TABLE IF NOT EXISTS call_events (
+			rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+			chat_jid TEXT NOT NULL,
+			chat_name TEXT,
+			sender_jid TEXT,
+			sender_name TEXT,
+			call_id TEXT NOT NULL,
+			msg_id TEXT,
+			event_type TEXT NOT NULL,
+			direction TEXT,
+			media TEXT,
+			outcome TEXT,
+			reason TEXT,
+			call_type TEXT,
+			duration_secs INTEGER NOT NULL DEFAULT 0,
+			ts INTEGER NOT NULL,
+			participants TEXT,
+			UNIQUE(chat_jid, call_id, event_type, ts),
+			FOREIGN KEY (chat_jid) REFERENCES chats(jid) ON DELETE CASCADE
+		);
+		CREATE INDEX IF NOT EXISTS idx_call_events_chat_ts ON call_events(chat_jid, ts);
+		CREATE INDEX IF NOT EXISTS idx_call_events_ts ON call_events(ts);
+	`); err != nil {
+		return fmt.Errorf("create call_events table: %w", err)
 	}
 	return nil
 }

@@ -41,6 +41,19 @@ func TestOpenCreatesExpectedSchema(t *testing.T) {
 		}
 	}
 
+	callCols, err := tableColumns(db.sql, "call_events")
+	if err != nil {
+		t.Fatalf("call_events tableColumns: %v", err)
+	}
+	for _, want := range []string{"chat_jid", "call_id", "event_type", "direction", "media", "outcome", "duration_secs", "participants"} {
+		if !callCols[want] {
+			t.Fatalf("expected call_events column %q to exist", want)
+		}
+	}
+	if !indexExists(t, db.sql, "idx_call_events_chat_ts") {
+		t.Fatalf("expected call_events chat index to exist")
+	}
+
 	starredCols, err := tableColumns(db.sql, "starred")
 	if err != nil {
 		t.Fatalf("starred tableColumns: %v", err)
@@ -70,6 +83,50 @@ func TestOpenCreatesExpectedSchema(t *testing.T) {
 	}
 	if !contactCols["system_name"] {
 		t.Fatalf("expected contacts system_name column to exist")
+	}
+}
+
+func TestOpenRepairsRecordedCallEventsMigrationMissingTable(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "wacli.db")
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	raw, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	if _, err := raw.Exec(`
+		DROP TABLE call_events;
+		INSERT OR IGNORE INTO schema_migrations(version, name, applied_at) VALUES(14, 'call events', 1);
+	`); err != nil {
+		_ = raw.Close()
+		t.Fatalf("create inconsistent schema: %v", err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("raw close: %v", err)
+	}
+
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("Open repaired DB: %v", err)
+	}
+	defer db.Close()
+
+	if ok, err := db.tableExists("call_events"); err != nil || !ok {
+		t.Fatalf("call_events exists=%v err=%v", ok, err)
+	}
+	if !indexExists(t, db.sql, "idx_call_events_chat_ts") {
+		t.Fatalf("expected call_events chat index to be recreated")
+	}
+	if _, err := db.ListCallEvents(ListCallEventsParams{Limit: 1}); err != nil {
+		t.Fatalf("ListCallEvents after schema repair: %v", err)
 	}
 }
 

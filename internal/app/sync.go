@@ -413,6 +413,18 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 	}); err != nil {
 		return err
 	}
+	if pm.Call != nil {
+		pm.Call.Chat = pm.Chat
+		if pm.Call.SenderJID == "" {
+			pm.Call.SenderJID = senderJID
+		}
+		if pm.Call.Timestamp.IsZero() {
+			pm.Call.Timestamp = pm.Timestamp
+		}
+		if err := a.storeParsedCallEvent(ctx, *pm.Call, chatName, senderName); err != nil {
+			return err
+		}
+	}
 	if pm.StarredKnown {
 		return a.db.SetStarred(store.SetStarredParams{
 			ChatJID:   chatJID,
@@ -424,6 +436,68 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 		})
 	}
 	return nil
+}
+
+func (a *App) storeParsedCallEvent(ctx context.Context, call wa.ParsedCallEvent, chatName, senderName string) error {
+	call.Chat = a.canonicalStoreJID(ctx, call.Chat)
+	chatJID := canonicalJIDString(call.Chat)
+	if chatJID == "" {
+		return fmt.Errorf("call chat JID is required")
+	}
+	if chatName == "" {
+		chatName = a.wa.ResolveChatName(ctx, call.Chat, "")
+	}
+	if err := a.db.UpsertChat(chatJID, chatKind(call.Chat), chatName, call.Timestamp); err != nil {
+		return err
+	}
+
+	senderJID := strings.TrimSpace(call.SenderJID)
+	if senderJID != "" {
+		if jid, err := types.ParseJID(senderJID); err == nil {
+			contactJID := a.canonicalStoreJID(ctx, jid)
+			senderJID = contactJID.String()
+			if senderName == "" {
+				if info, err := a.wa.GetContact(ctx, contactJID); err == nil {
+					senderName = wa.BestContactName(info)
+				}
+			}
+		}
+	}
+
+	participants := make([]store.CallParticipant, 0, len(call.Participants))
+	for _, p := range call.Participants {
+		jid := strings.TrimSpace(p.JID)
+		if jid != "" {
+			if parsed, err := types.ParseJID(jid); err == nil {
+				jid = canonicalJIDString(a.canonicalStoreJID(ctx, parsed))
+			}
+		}
+		if jid == "" {
+			continue
+		}
+		participants = append(participants, store.CallParticipant{
+			JID:     jid,
+			Outcome: p.Outcome,
+		})
+	}
+
+	return a.db.UpsertCallEvent(store.UpsertCallEventParams{
+		ChatJID:      chatJID,
+		ChatName:     chatName,
+		SenderJID:    senderJID,
+		SenderName:   senderName,
+		CallID:       call.CallID,
+		MsgID:        call.MsgID,
+		EventType:    call.EventType,
+		Direction:    call.Direction,
+		Media:        call.Media,
+		Outcome:      call.Outcome,
+		Reason:       call.Reason,
+		CallType:     call.CallType,
+		DurationSecs: call.DurationSecs,
+		Timestamp:    call.Timestamp,
+		Participants: participants,
+	})
 }
 
 func waButtonsToStore(buttons []wa.Button) []store.Button {
@@ -484,6 +558,9 @@ func (a *App) buildDisplayText(ctx context.Context, pm wa.ParsedMessage) string 
 }
 
 func baseDisplayText(pm wa.ParsedMessage) string {
+	if pm.Call != nil {
+		return callDisplayText(*pm.Call)
+	}
 	if pm.Media != nil {
 		return "Sent " + mediaLabel(pm.Media.Type)
 	}
@@ -491,6 +568,38 @@ func baseDisplayText(pm wa.ParsedMessage) string {
 		return text
 	}
 	return ""
+}
+
+func callDisplayText(call wa.ParsedCallEvent) string {
+	parts := []string{"WhatsApp"}
+	if call.Media != "" {
+		parts = append(parts, call.Media)
+	}
+	parts = append(parts, "call")
+	if call.Outcome != "" {
+		parts = append(parts, call.Outcome)
+	} else if call.EventType != "" && call.EventType != "call_log" {
+		parts = append(parts, call.EventType)
+	}
+	if call.DurationSecs > 0 {
+		parts = append(parts, fmt.Sprintf("(%s)", formatCallDuration(call.DurationSecs)))
+	}
+	return strings.Join(parts, " ")
+}
+
+func formatCallDuration(seconds int64) string {
+	if seconds <= 0 {
+		return ""
+	}
+	minutes := seconds / 60
+	secs := seconds % 60
+	if minutes <= 0 {
+		return fmt.Sprintf("%ds", secs)
+	}
+	if secs == 0 {
+		return fmt.Sprintf("%dm", minutes)
+	}
+	return fmt.Sprintf("%dm%02ds", minutes, secs)
 }
 
 func (a *App) lookupMessageDisplayText(chatJID, msgID string) string {

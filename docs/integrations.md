@@ -6,7 +6,7 @@ Read when: building a local analytics, search, CRM, or agent-side companion tool
 
 ## Integration surfaces
 
-- Use `--json` for one-shot command output from `chats`, `contacts`, `groups`, `messages`, and `doctor`.
+- Use `--json` for one-shot command output from `chats`, `contacts`, `groups`, `messages`, `calls`, and `doctor`.
 - Use `--events` for line-delimited lifecycle events from long-running `auth`, `sync`, and `history backfill` commands.
 - Use `sync --webhook` for live-message delivery to another process or service.
 - Use a read-only SQLite connection to `<store>/wacli.db` for local analytics that need joins, cursors, or incremental scans.
@@ -25,7 +25,7 @@ Override with `--store DIR` or `WACLI_STORE_DIR`. Named accounts live in `config
 The store contains two SQLite databases:
 
 - `session.db`: owned by `whatsmeow`; contains linked-device identity and keys.
-- `wacli.db`: owned by `wacli`; contains chats, contacts, groups, messages, media metadata, and local state.
+- `wacli.db`: owned by `wacli`; contains chats, contacts, groups, messages, call events, media metadata, and local state.
 
 Companion tools should not read or write `session.db` unless they are explicitly working on WhatsApp session internals. Never write to `wacli.db` from a companion tool.
 
@@ -94,6 +94,15 @@ FROM messages
 WHERE rowid > ?
 ORDER BY rowid ASC
 LIMIT 1000;
+```
+
+Recent WhatsApp call events:
+
+```sql
+SELECT chat_jid, call_id, event_type, direction, media, outcome, duration_secs, ts
+FROM call_events
+ORDER BY ts DESC
+LIMIT 100;
 ```
 
 Known chats by newest activity:

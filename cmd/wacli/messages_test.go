@@ -133,6 +133,40 @@ func TestWriteMessagesListFullOutput(t *testing.T) {
 	}
 }
 
+func TestWriteCallsList(t *testing.T) {
+	call := store.CallEvent{
+		ChatJID:      "chat@s.whatsapp.net",
+		ChatName:     "Alice",
+		CallID:       "call-1234567890",
+		EventType:    "call_log",
+		Direction:    "outbound",
+		Media:        "audio",
+		Outcome:      "connected",
+		DurationSecs: 61,
+		Timestamp:    time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC),
+	}
+
+	var out bytes.Buffer
+	if err := writeCallsList(&out, []store.CallEvent{call}, true); err != nil {
+		t.Fatalf("writeCallsList: %v", err)
+	}
+	got := out.String()
+	for _, want := range []string{"Alice", "outbound", "audio", "call_log", "connected (1m01s)", "call-1234567890"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestCallsListCommandHasExpectedFlags(t *testing.T) {
+	cmd := newCallsListCmd(&rootFlags{})
+	for _, name := range []string{"chat", "limit", "after", "before", "asc"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Fatalf("expected --%s flag", name)
+		}
+	}
+}
+
 func TestWriteMessageShowPrefersDisplayTextAndMediaDetails(t *testing.T) {
 	msg := store.Message{
 		ChatJID:      "chat@s.whatsapp.net",

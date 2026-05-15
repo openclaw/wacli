@@ -33,6 +33,44 @@ func TestParseHistoryMessageTextAndSender(t *testing.T) {
 	}
 }
 
+func TestParseHistoryMessageCallLog(t *testing.T) {
+	outcome := waProto.CallLogMessage_CONNECTED
+	callType := waProto.CallLogMessage_REGULAR
+	h := &waProto.WebMessageInfo{
+		Key: &waProto.MessageKey{
+			ID:     proto.String("call-msg"),
+			FromMe: proto.Bool(true),
+		},
+		MessageTimestamp: proto.Uint64(uint64(time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC).Unix())),
+		Message: &waProto.Message{
+			CallLogMesssage: &waProto.CallLogMessage{
+				IsVideo:      proto.Bool(true),
+				CallOutcome:  &outcome,
+				DurationSecs: proto.Int64(125),
+				CallType:     &callType,
+				Participants: []*waProto.CallLogMessage_CallParticipant{{
+					JID:         proto.String("456@s.whatsapp.net"),
+					CallOutcome: &outcome,
+				}},
+			},
+		},
+	}
+
+	pm := ParseHistoryMessage("456@s.whatsapp.net", h)
+	if pm.Call == nil {
+		t.Fatal("expected call log metadata")
+	}
+	if pm.Call.EventType != "call_log" || pm.Call.CallID != "call-msg" || pm.Call.MsgID != "call-msg" {
+		t.Fatalf("unexpected call identity: %+v", pm.Call)
+	}
+	if pm.Call.Direction != "outbound" || pm.Call.Media != "video" || pm.Call.Outcome != "connected" || pm.Call.DurationSecs != 125 {
+		t.Fatalf("unexpected call details: %+v", pm.Call)
+	}
+	if len(pm.Call.Participants) != 1 || pm.Call.Participants[0].JID != "456@s.whatsapp.net" {
+		t.Fatalf("unexpected participants: %+v", pm.Call.Participants)
+	}
+}
+
 func TestParseHistoryMessageTopLevelParticipant(t *testing.T) {
 	groupJID := "120363001234567890@g.us"
 	senderLID := "12345:67@lid"

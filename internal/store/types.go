@@ -106,6 +106,30 @@ type MessageInfo struct {
 	SenderName string
 }
 
+type CallParticipant struct {
+	JID     string `json:"jid"`
+	Outcome string `json:"outcome,omitempty"`
+}
+
+type CallEvent struct {
+	ChatJID      string            `json:"chat_jid"`
+	ChatName     string            `json:"chat_name,omitempty"`
+	SenderJID    string            `json:"sender_jid,omitempty"`
+	SenderName   string            `json:"sender_name,omitempty"`
+	CallID       string            `json:"call_id"`
+	MsgID        string            `json:"msg_id,omitempty"`
+	EventType    string            `json:"event_type"`
+	Direction    string            `json:"direction,omitempty"`
+	Media        string            `json:"media,omitempty"`
+	Outcome      string            `json:"outcome,omitempty"`
+	Reason       string            `json:"reason,omitempty"`
+	CallType     string            `json:"call_type,omitempty"`
+	DurationSecs int64             `json:"duration_secs,omitempty"`
+	Timestamp    time.Time         `json:"timestamp"`
+	Participants []CallParticipant `json:"participants,omitempty"`
+	rowID        int64
+}
+
 type Contact struct {
 	JID        string    `json:"jid"`
 	Phone      string    `json:"phone"`

@@ -94,6 +94,29 @@ const coreSchemaSQL = `
 	CREATE INDEX IF NOT EXISTS idx_messages_chat_ts ON messages(chat_jid, ts);
 	CREATE INDEX IF NOT EXISTS idx_messages_ts ON messages(ts);
 
+	CREATE TABLE IF NOT EXISTS call_events (
+		rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+		chat_jid TEXT NOT NULL,
+		chat_name TEXT,
+		sender_jid TEXT,
+		sender_name TEXT,
+		call_id TEXT NOT NULL,
+		msg_id TEXT,
+		event_type TEXT NOT NULL,
+		direction TEXT,
+		media TEXT,
+		outcome TEXT,
+		reason TEXT,
+		call_type TEXT,
+		duration_secs INTEGER NOT NULL DEFAULT 0,
+		ts INTEGER NOT NULL,
+		participants TEXT,
+		UNIQUE(chat_jid, call_id, event_type, ts),
+		FOREIGN KEY (chat_jid) REFERENCES chats(jid) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_call_events_chat_ts ON call_events(chat_jid, ts);
+	CREATE INDEX IF NOT EXISTS idx_call_events_ts ON call_events(ts);
+
 	CREATE TABLE IF NOT EXISTS starred (
 		chat_jid TEXT NOT NULL,
 		msg_id TEXT NOT NULL,

@@ -2,6 +2,10 @@
 
 ## 0.9.1 - Unreleased
 
+### Added
+
+- Calls: persist WhatsApp call signaling and call-log metadata, and add `wacli calls list`.
+
 ## 0.9.0 - 2026-05-15
 
 ### Added

@@ -25,6 +25,7 @@ Read when: you need the user-facing command map, global flags, store model, or l
 - [accounts](accounts.md) - create and select named account stores.
 - [sync](sync.md) - sync messages, contacts, groups, channels, and optional media.
 - [messages](messages.md) - list, search, show, and contextualize stored messages.
+- [calls](calls.md) - list stored WhatsApp call events.
 - [send](send.md) - send text, files, stickers, replies, and reactions.
 - [media](media.md) - download media attached to stored messages.
 - [contacts](contacts.md) - search contacts and manage local aliases/tags.

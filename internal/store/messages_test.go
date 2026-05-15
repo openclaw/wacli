@@ -68,6 +68,62 @@ func TestMessageUpsertIdempotentAndContext(t *testing.T) {
 	}
 }
 
+func TestCallEventsUpsertAndList(t *testing.T) {
+	db := openTestDB(t)
+	chat := "123@s.whatsapp.net"
+	base := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+	if err := db.UpsertChat(chat, "dm", "Alice", base); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	if err := db.UpsertCallEvent(UpsertCallEventParams{
+		ChatJID:      chat,
+		ChatName:     "Alice",
+		SenderJID:    chat,
+		CallID:       "call-1",
+		MsgID:        "msg-1",
+		EventType:    "call_log",
+		Direction:    "outbound",
+		Media:        "audio",
+		Outcome:      "connected",
+		CallType:     "regular",
+		DurationSecs: 62,
+		Timestamp:    base,
+		Participants: []CallParticipant{{JID: chat, Outcome: "connected"}},
+	}); err != nil {
+		t.Fatalf("UpsertCallEvent: %v", err)
+	}
+	if err := db.UpsertCallEvent(UpsertCallEventParams{
+		ChatJID:      chat,
+		CallID:       "call-1",
+		EventType:    "call_log",
+		Direction:    "outbound",
+		Media:        "audio",
+		Outcome:      "connected",
+		DurationSecs: 70,
+		Timestamp:    base,
+	}); err != nil {
+		t.Fatalf("UpsertCallEvent duplicate: %v", err)
+	}
+
+	calls, err := db.ListCallEvents(ListCallEventsParams{ChatJID: chat, Limit: 10})
+	if err != nil {
+		t.Fatalf("ListCallEvents: %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("calls len = %d, want 1", len(calls))
+	}
+	got := calls[0]
+	if got.CallID != "call-1" || got.EventType != "call_log" || got.Direction != "outbound" || got.Outcome != "connected" {
+		t.Fatalf("unexpected call event: %+v", got)
+	}
+	if got.DurationSecs != 70 {
+		t.Fatalf("duration = %d, want updated 70", got.DurationSecs)
+	}
+	if len(got.Participants) != 1 || got.Participants[0].JID != chat {
+		t.Fatalf("participants = %+v", got.Participants)
+	}
+}
+
 func TestListMessagesFiltersAndOrdering(t *testing.T) {
 	db := openTestDB(t)
 	chat := "chat@s.whatsapp.net"

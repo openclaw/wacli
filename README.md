@@ -87,7 +87,7 @@ More recipes — replies, mentions, stickers, voice, reactions, channels, histor
 | Area | Pages |
 | --- | --- |
 | **Setup** | [overview](docs/overview.md) · [auth](docs/auth.md) · [accounts](docs/accounts.md) · [sync](docs/sync.md) · [doctor](docs/doctor.md) |
-| **Messaging** | [messages](docs/messages.md) · [send](docs/send.md) · [media](docs/media.md) · [presence](docs/presence.md) |
+| **Messaging** | [messages](docs/messages.md) · [calls](docs/calls.md) · [send](docs/send.md) · [media](docs/media.md) · [presence](docs/presence.md) |
 | **Address book** | [contacts](docs/contacts.md) · [chats](docs/chats.md) · [groups](docs/groups.md) · [channels](docs/channels.md) |
 | **History** | [history coverage / fill / backfill](docs/history.md) |
 | **Local store** | [store](docs/store.md) · [companion integrations](docs/integrations.md) |

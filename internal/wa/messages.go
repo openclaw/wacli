@@ -80,6 +80,7 @@ type ParsedMessage struct {
 	StarredKnown    bool
 	Starred         bool
 	Revoked         bool
+	Call            *ParsedCallEvent
 }
 
 func ParseLiveMessage(evt *events.Message) ParsedMessage {
@@ -146,6 +147,7 @@ func extractWAProto(m *waProto.Message, pm *ParsedMessage) {
 	extractPoll(m, pm)
 	extractPollAddOption(m, pm)
 	extractPollUpdate(m, pm)
+	extractCallLog(m, pm)
 
 	if ctx := contextInfoForMessage(m); ctx != nil {
 		if id := strings.TrimSpace(ctx.GetStanzaID()); id != "" {

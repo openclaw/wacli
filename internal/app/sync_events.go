@@ -64,6 +64,11 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 				return
 			}
 			a.handleLiveSyncMessage(ctx, opts, v, messagesStored, enqueueMedia, enqueueWebhook, limits)
+		case *events.CallOffer, *events.CallAccept, *events.CallPreAccept, *events.CallTransport,
+			*events.CallOfferNotice, *events.CallRelayLatency, *events.CallTerminate, *events.CallReject,
+			*events.AppState:
+			lastEvent.Store(nowUTC().UnixNano())
+			a.handleLiveCallEvent(ctx, v)
 		case *events.HistorySync:
 			lastEvent.Store(nowUTC().UnixNano())
 			a.handleHistorySync(ctx, opts, v, messagesStored, lastEvent, enqueueMedia, limits)
@@ -119,6 +124,26 @@ func (a *App) handleDeleteForMeEvent(ctx context.Context, evt *events.DeleteForM
 			"delete_for_me_store_failed",
 			fmt.Sprintf("warning: failed to store delete-for-me state for message %s: %v", evt.MessageID, err),
 			map[string]any{"message_id": evt.MessageID, "error": err.Error()},
+		)
+	}
+}
+
+func (a *App) handleLiveCallEvent(ctx context.Context, evt interface{}) {
+	self := types.JID{}
+	if linked := strings.TrimSpace(a.wa.LinkedJID()); linked != "" {
+		if jid, err := types.ParseJID(linked); err == nil {
+			self = jid
+		}
+	}
+	call, ok := wa.ParseLiveCallEvent(evt, self)
+	if !ok {
+		return
+	}
+	if err := a.storeParsedCallEvent(ctx, call, "", ""); err != nil {
+		a.emitWarning(
+			"call_event_store_failed",
+			fmt.Sprintf("warning: failed to store call event %s: %v", call.EventType, err),
+			map[string]any{"event_type": call.EventType, "call_id": call.CallID, "error": err.Error()},
 		)
 	}
 }
