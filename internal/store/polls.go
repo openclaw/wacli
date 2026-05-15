@@ -32,9 +32,10 @@ type PollVote struct {
 
 // PollListFilter narrows down polls returned by ListPolls.
 type PollListFilter struct {
-	ChatJID string
-	Limit   int
-	Offset  int
+	ChatJID  string
+	ChatJIDs []string
+	Limit    int
+	Offset   int
 }
 
 // UpsertPoll inserts or replaces a poll row keyed on (chat_jid, msg_id).
@@ -155,9 +156,16 @@ func (d *DB) ListPolls(filter PollListFilter) ([]Poll, error) {
 	q := `SELECT chat_jid, msg_id, COALESCE(sender_jid,''), question, options_json, selectable_count, created_ts
 	      FROM polls`
 	args := []any{}
-	if strings.TrimSpace(filter.ChatJID) != "" {
+	chatJIDs := cleanPollFilterChatJIDs(filter)
+	switch {
+	case len(chatJIDs) == 1:
 		q += " WHERE chat_jid = ?"
-		args = append(args, filter.ChatJID)
+		args = append(args, chatJIDs[0])
+	case len(chatJIDs) > 1:
+		q += " WHERE chat_jid IN (?" + strings.Repeat(",?", len(chatJIDs)-1) + ")"
+		for _, chatJID := range chatJIDs {
+			args = append(args, chatJID)
+		}
 	}
 	q += " ORDER BY created_ts DESC, msg_id DESC"
 	if filter.Limit > 0 {
@@ -198,6 +206,27 @@ func (d *DB) ListPolls(filter PollListFilter) ([]Poll, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+func cleanPollFilterChatJIDs(filter PollListFilter) []string {
+	candidates := filter.ChatJIDs
+	if len(candidates) == 0 && strings.TrimSpace(filter.ChatJID) != "" {
+		candidates = []string{filter.ChatJID}
+	}
+	out := make([]string, 0, len(candidates))
+	seen := make(map[string]struct{}, len(candidates))
+	for _, chatJID := range candidates {
+		chatJID = strings.TrimSpace(chatJID)
+		if chatJID == "" {
+			continue
+		}
+		if _, ok := seen[chatJID]; ok {
+			continue
+		}
+		seen[chatJID] = struct{}{}
+		out = append(out, chatJID)
+	}
+	return out
 }
 
 // UpsertPollVote replaces the vote row for (chat, poll, voter).

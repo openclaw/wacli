@@ -154,7 +154,7 @@ func TestBuildPollVoteInfoMarksGroupMessages(t *testing.T) {
 
 	group := types.NewJID("120363001234567890", types.GroupServer)
 	sender := "15551234567@s.whatsapp.net"
-	info, _, _, err := buildPollVoteInfo(context.Background(), a, group, "poll-id", sender)
+	info, _, _, _, err := buildPollVoteInfo(context.Background(), a, group, "poll-id", sender)
 	if err != nil {
 		t.Fatalf("buildPollVoteInfo: %v", err)
 	}
@@ -163,6 +163,53 @@ func TestBuildPollVoteInfoMarksGroupMessages(t *testing.T) {
 	}
 	if info.Chat != group {
 		t.Fatalf("Chat = %s, want %s", info.Chat, group)
+	}
+	if info.Sender.String() != sender {
+		t.Fatalf("Sender = %s, want %s", info.Sender, sender)
+	}
+}
+
+func TestBuildPollVoteInfoFindsAlternateChatKey(t *testing.T) {
+	a, err := app.New(app.Options{StoreDir: t.TempDir(), AllowUnauthed: true})
+	if err != nil {
+		t.Fatalf("app.New: %v", err)
+	}
+	defer a.Close()
+
+	pnChat := types.NewJID("15551234567", types.DefaultUserServer)
+	lidChat := types.NewJID("123456789", types.HiddenUserServer)
+	sender := "15557654321@s.whatsapp.net"
+	if err := a.DB().UpsertPoll(store.Poll{
+		ChatJID:         lidChat.String(),
+		MsgID:           "poll-id",
+		SenderJID:       sender,
+		Question:        "Dinner?",
+		Options:         []string{"Yes", "No"},
+		SelectableCount: 1,
+		CreatedAt:       time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("UpsertPoll: %v", err)
+	}
+
+	info, options, selectable, matchedChatJID, err := buildPollVoteInfoForChats(
+		context.Background(),
+		a,
+		pnChat,
+		[]string{pnChat.String(), lidChat.String()},
+		"poll-id",
+		"",
+	)
+	if err != nil {
+		t.Fatalf("buildPollVoteInfoForChats: %v", err)
+	}
+	if matchedChatJID != lidChat.String() {
+		t.Fatalf("matchedChatJID = %q, want %q", matchedChatJID, lidChat.String())
+	}
+	if !reflect.DeepEqual(options, []string{"Yes", "No"}) {
+		t.Fatalf("options = %v", options)
+	}
+	if selectable != 1 {
+		t.Fatalf("selectable = %d, want 1", selectable)
 	}
 	if info.Sender.String() != sender {
 		t.Fatalf("Sender = %s, want %s", info.Sender, sender)

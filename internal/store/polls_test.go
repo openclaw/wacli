@@ -186,6 +186,17 @@ func TestListPollsFilterAndOrder(t *testing.T) {
 	if len(onlyA) != 2 {
 		t.Fatalf("len(onlyA) = %d", len(onlyA))
 	}
+
+	combined, err := db.ListPolls(PollListFilter{ChatJIDs: []string{"b@s.whatsapp.net", "a@s.whatsapp.net", "a@s.whatsapp.net"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(combined) != 3 {
+		t.Fatalf("len(combined) = %d", len(combined))
+	}
+	if combined[0].MsgID != "P2" || combined[1].MsgID != "P3" || combined[2].MsgID != "P1" {
+		t.Fatalf("combined order = %s, %s, %s", combined[0].MsgID, combined[1].MsgID, combined[2].MsgID)
+	}
 }
 
 func TestDeletePollRemovesVotes(t *testing.T) {

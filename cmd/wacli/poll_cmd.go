@@ -102,7 +102,7 @@ func newPollVoteCmd(flags *rootFlags) *cobra.Command {
 			}
 			toJID = warmupRecipient(ctx, a.WA(), toJID, os.Stderr)
 
-			info, knownOptions, selectableCount, err := buildPollVoteInfo(ctx, a, toJID, msgID, senderOverride)
+			info, knownOptions, selectableCount, pollChatJID, err := buildPollVoteInfo(ctx, a, toJID, msgID, senderOverride)
 			if err != nil {
 				return err
 			}
@@ -126,7 +126,7 @@ func newPollVoteCmd(flags *rootFlags) *cobra.Command {
 			}
 
 			now := time.Now().UTC()
-			persistOutboundVote(ctx, a, toJID, msgID, string(sentID), cleaned, now)
+			persistOutboundVote(ctx, a, toJID, pollChatJID, msgID, string(sentID), cleaned, now)
 			waitForPostSendRetryReceipts(ctx, postSendWait)
 
 			if flags.asJSON {
@@ -195,8 +195,18 @@ func requirePollSelectableCount(selectable uint32, requested []string) error {
 // buildPollVoteInfo resolves the MessageInfo whatsmeow needs to encrypt the
 // vote. Looks up the poll in the local store first; falls back to manually
 // supplied --sender for unknown polls.
-func buildPollVoteInfo(ctx context.Context, a *app.App, chat types.JID, pollMsgID, senderOverride string) (*types.MessageInfo, []string, uint32, error) {
-	chatJID := pollStoreLookupJID(ctx, a, chat).String()
+func buildPollVoteInfo(ctx context.Context, a *app.App, chat types.JID, pollMsgID, senderOverride string) (*types.MessageInfo, []string, uint32, string, error) {
+	return buildPollVoteInfoForChats(ctx, a, chat, pollChatJIDCandidates(ctx, a, chat), pollMsgID, senderOverride)
+}
+
+func buildPollVoteInfoForChats(ctx context.Context, a *app.App, chat types.JID, chatJIDs []string, pollMsgID, senderOverride string) (*types.MessageInfo, []string, uint32, string, error) {
+	chatJID := ""
+	if len(chatJIDs) > 0 {
+		chatJID = chatJIDs[0]
+	}
+	if chatJID == "" {
+		chatJID = canonicalMessageFilterJID(chat).String()
+	}
 
 	var (
 		senderJID       types.JID
@@ -208,15 +218,31 @@ func buildPollVoteInfo(ctx context.Context, a *app.App, chat types.JID, pollMsgI
 	if pollSenderRaw != "" {
 		jid, err := wa.ParseUserOrJID(pollSenderRaw)
 		if err != nil {
-			return nil, nil, 0, fmt.Errorf("invalid --sender: %w", err)
+			return nil, nil, 0, "", fmt.Errorf("invalid --sender: %w", err)
 		}
 		senderJID = jid
 	}
 
 	fromMe := false
-	poll, err := a.DB().GetPoll(chatJID, pollMsgID)
-	switch {
-	case err == nil:
+	var poll store.Poll
+	pollFound := false
+	for _, candidate := range chatJIDs {
+		p, err := a.DB().GetPoll(candidate, pollMsgID)
+		switch {
+		case err == nil:
+			poll = p
+			pollFound = true
+			chatJID = poll.ChatJID
+		case errors.Is(err, sql.ErrNoRows):
+			continue
+		default:
+			return nil, nil, 0, "", fmt.Errorf("lookup poll: %w", err)
+		}
+		if pollFound {
+			break
+		}
+	}
+	if pollFound {
 		knownOptions = append([]string(nil), poll.Options...)
 		selectableCount = poll.SelectableCount
 		if senderJID.IsEmpty() && strings.TrimSpace(poll.SenderJID) != "" {
@@ -225,10 +251,6 @@ func buildPollVoteInfo(ctx context.Context, a *app.App, chat types.JID, pollMsgI
 			}
 		}
 		ts = poll.CreatedAt
-	case errors.Is(err, sql.ErrNoRows):
-		// Fine if the user supplied --sender (and this is a DM, or a group with override).
-	default:
-		return nil, nil, 0, fmt.Errorf("lookup poll: %w", err)
 	}
 
 	// Look up the original poll message to recover IsFromMe (and fall back
@@ -244,7 +266,7 @@ func buildPollVoteInfo(ctx context.Context, a *app.App, chat types.JID, pollMsgI
 			ts = msg.Timestamp
 		}
 	} else if !errors.Is(merr, sql.ErrNoRows) {
-		return nil, nil, 0, fmt.Errorf("lookup poll message: %w", merr)
+		return nil, nil, 0, "", fmt.Errorf("lookup poll message: %w", merr)
 	}
 
 	// If we sent the poll, the encrypted secret was stored against our own
@@ -263,7 +285,7 @@ func buildPollVoteInfo(ctx context.Context, a *app.App, chat types.JID, pollMsgI
 		if chat.Server == types.DefaultUserServer || chat.Server == types.HiddenUserServer {
 			senderJID = chat
 		} else if chat.Server == types.GroupServer {
-			return nil, knownOptions, selectableCount, fmt.Errorf("poll %s is not in the local store; pass --sender <JID> to vote", pollMsgID)
+			return nil, knownOptions, selectableCount, "", fmt.Errorf("poll %s is not in the local store; pass --sender <JID> to vote", pollMsgID)
 		}
 	}
 
@@ -280,17 +302,7 @@ func buildPollVoteInfo(ctx context.Context, a *app.App, chat types.JID, pollMsgI
 		ID:        pollMsgID,
 		Timestamp: ts,
 	}
-	return info, knownOptions, selectableCount, nil
-}
-
-func pollStoreLookupJID(ctx context.Context, a *app.App, jid types.JID) types.JID {
-	if a != nil && a.WA() != nil {
-		jid = a.WA().ResolveLIDToPN(ctx, jid)
-	}
-	if jid.Server == types.DefaultUserServer {
-		return jid.ToNonAD()
-	}
-	return jid
+	return info, knownOptions, selectableCount, chatJID, nil
 }
 
 func primaryPollChatJID(ctx context.Context, a *app.App, jid types.JID) string {
@@ -321,8 +333,10 @@ func pollChatJIDCandidates(ctx context.Context, a *app.App, jid types.JID) []str
 	return jidStrings(jids)
 }
 
-func persistOutboundVote(ctx context.Context, a *app.App, chat types.JID, pollMsgID, voteMsgID string, options []string, now time.Time) {
-	chatJID := primaryPollChatJID(ctx, a, chat)
+func persistOutboundVote(ctx context.Context, a *app.App, chat types.JID, chatJID, pollMsgID, voteMsgID string, options []string, now time.Time) {
+	if strings.TrimSpace(chatJID) == "" {
+		chatJID = primaryPollChatJID(ctx, a, chat)
+	}
 	chatName := a.WA().ResolveChatName(ctx, chat, "")
 	_ = a.DB().UpsertChat(chatJID, chatKindFromJID(chat), chatName, now)
 	_ = a.DB().UpsertMessage(store.UpsertMessageParams{
@@ -361,7 +375,7 @@ func executeDelegatedPollVote(ctx context.Context, a *app.App, req sendDelegateR
 		return sendDelegateResponse{}, err
 	}
 	toJID = warmupDelegatedRecipient(ctx, a, toJID)
-	info, knownOptions, selectableCount, err := buildPollVoteInfo(ctx, a, toJID, req.ID, req.Sender)
+	info, knownOptions, selectableCount, pollChatJID, err := buildPollVoteInfo(ctx, a, toJID, req.ID, req.Sender)
 	if err != nil {
 		return sendDelegateResponse{}, err
 	}
@@ -383,7 +397,7 @@ func executeDelegatedPollVote(ctx context.Context, a *app.App, req sendDelegateR
 		return sendDelegateResponse{}, err
 	}
 	now := time.Now().UTC()
-	persistOutboundVote(ctx, a, toJID, req.ID, string(sentID), cleaned, now)
+	persistOutboundVote(ctx, a, toJID, pollChatJID, req.ID, string(sentID), cleaned, now)
 	waitForPostSendRetryReceipts(ctx, millisDuration(req.PostSendWaitMS, 0))
 	return sendDelegateResponse{
 		OK:       true,
@@ -592,7 +606,7 @@ func newPollsListCmd(flags *rootFlags) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				filter.ChatJID = primaryPollChatJID(ctx, a, toJID)
+				filter.ChatJIDs = pollChatJIDCandidates(ctx, a, toJID)
 			}
 			polls, err := a.DB().ListPolls(filter)
 			if err != nil {
