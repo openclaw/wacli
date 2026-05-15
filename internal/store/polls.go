@@ -49,7 +49,13 @@ func (d *DB) UpsertPoll(p Poll) error {
 	if p.Options == nil {
 		p.Options = []string{}
 	}
-	optsJSON, err := json.Marshal(p.Options)
+	options := p.Options
+	if existing, err := d.pollOptions(p.ChatJID, p.MsgID); err == nil {
+		options = mergePollOptions(options, existing)
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	optsJSON, err := json.Marshal(options)
 	if err != nil {
 		return fmt.Errorf("marshal options: %w", err)
 	}
@@ -268,7 +274,7 @@ func (d *DB) UpsertPollVote(v PollVote) error {
 		v.VoterJID,
 		v.VoteMsgID,
 		string(selJSON),
-		ts.UTC().Unix(),
+		ts.UTC().UnixMilli(),
 	)
 	if err != nil {
 		return fmt.Errorf("upsert poll vote: %w", err)
@@ -302,7 +308,7 @@ func (d *DB) ListPollVotes(chatJID, pollMsgID string) ([]PollVote, error) {
 		if err := rows.Scan(&v.ChatJID, &v.PollMsgID, &v.VoterJID, &v.VoteMsgID, &selRaw, &tsEpoch); err != nil {
 			return nil, fmt.Errorf("scan poll vote: %w", err)
 		}
-		v.VotedAt = time.Unix(tsEpoch, 0).UTC()
+		v.VotedAt = time.UnixMilli(tsEpoch).UTC()
 		if selRaw != "" {
 			if err := json.Unmarshal([]byte(selRaw), &v.Selected); err != nil {
 				return nil, fmt.Errorf("unmarshal selected: %w", err)
@@ -314,6 +320,37 @@ func (d *DB) ListPollVotes(chatJID, pollMsgID string) ([]PollVote, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+func (d *DB) pollOptions(chatJID, msgID string) ([]string, error) {
+	row := d.sql.QueryRow(`SELECT options_json FROM polls WHERE chat_jid = ? AND msg_id = ?`, chatJID, msgID)
+	var raw string
+	if err := row.Scan(&raw); err != nil {
+		return nil, err
+	}
+	var options []string
+	if raw != "" {
+		if err := json.Unmarshal([]byte(raw), &options); err != nil {
+			return nil, fmt.Errorf("unmarshal existing options: %w", err)
+		}
+	}
+	return options, nil
+}
+
+func mergePollOptions(incoming, existing []string) []string {
+	out := append([]string(nil), incoming...)
+	seen := make(map[string]struct{}, len(out)+len(existing))
+	for _, option := range out {
+		seen[option] = struct{}{}
+	}
+	for _, option := range existing {
+		if _, ok := seen[option]; ok {
+			continue
+		}
+		out = append(out, option)
+		seen[option] = struct{}{}
+	}
+	return out
 }
 
 // DeletePoll removes a poll and all its votes (votes are cascaded by

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/openclaw/wacli/internal/store"
 	"github.com/openclaw/wacli/internal/wa"
@@ -312,7 +313,7 @@ func (a *App) handlePollVote(ctx context.Context, pm wa.ParsedMessage, evt *even
 		VoterJID:  voterJID,
 		VoteMsgID: pm.ID,
 		Selected:  selected,
-		VotedAt:   pm.Timestamp,
+		VotedAt:   pollVoteTimestamp(pm),
 	}); err != nil {
 		a.emitWarning(
 			"poll_vote_store_failed",
@@ -320,6 +321,13 @@ func (a *App) handlePollVote(ctx context.Context, pm wa.ParsedMessage, evt *even
 			map[string]any{"message_id": pm.ID, "error": err.Error()},
 		)
 	}
+}
+
+func pollVoteTimestamp(pm wa.ParsedMessage) time.Time {
+	if pm.PollVote != nil && pm.PollVote.SenderTsMS > 0 {
+		return time.UnixMilli(pm.PollVote.SenderTsMS).UTC()
+	}
+	return pm.Timestamp
 }
 
 // resolvePollKey returns the (chat, msg_id) for the poll referenced by a

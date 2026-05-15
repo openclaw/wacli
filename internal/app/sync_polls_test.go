@@ -441,6 +441,71 @@ func TestLiveSyncDecryptsAndStoresPollVote(t *testing.T) {
 	_ = options
 }
 
+func TestLiveSyncKeepsNewerSameSecondPollVote(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	chat := types.JID{User: "555", Server: types.DefaultUserServer}
+	voter := types.JID{User: "777", Server: types.DefaultUserServer}
+	pollMsgID := "POLL-1"
+	base := time.Date(2026, 5, 9, 12, 5, 0, 0, time.UTC)
+	var messagesStored atomic.Int64
+	a.handleLiveSyncMessage(context.Background(), SyncOptions{}, &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{Chat: chat, Sender: chat, IsFromMe: true},
+			ID:            pollMsgID,
+			Timestamp:     base.Add(-time.Minute),
+		},
+		Message: &waProto.Message{
+			PollCreationMessageV3: &waProto.PollCreationMessage{
+				Name: proto.String("Pizza?"),
+				Options: []*waProto.PollCreationMessage_Option{
+					{OptionName: proto.String("Old")},
+					{OptionName: proto.String("New")},
+				},
+				SelectableOptionsCount: proto.Uint32(1),
+			},
+		},
+	}, &messagesStored, func(string, string) {}, nil)
+
+	f.decryptPollVoteFunc = func(evt *events.Message) (*waE2E.PollVoteMessage, error) {
+		selected := []string{"Old"}
+		if evt.Info.ID == "VOTE-NEW" {
+			selected = []string{"New"}
+		}
+		return &waE2E.PollVoteMessage{SelectedOptions: whatsmeow.HashPollOptions(selected)}, nil
+	}
+	makeVote := func(id string, senderTs time.Time) *events.Message {
+		return &events.Message{
+			Info: types.MessageInfo{
+				MessageSource: types.MessageSource{Chat: chat, Sender: voter},
+				ID:            id,
+				Timestamp:     base,
+			},
+			Message: &waProto.Message{
+				PollUpdateMessage: &waProto.PollUpdateMessage{
+					PollCreationMessageKey: &waProto.MessageKey{
+						ID:        proto.String(pollMsgID),
+						RemoteJID: proto.String(chat.String()),
+					},
+					SenderTimestampMS: proto.Int64(senderTs.UnixMilli()),
+				},
+			},
+		}
+	}
+	a.handleLiveSyncMessage(context.Background(), SyncOptions{}, makeVote("VOTE-NEW", base.Add(900*time.Millisecond)), &messagesStored, func(string, string) {}, nil)
+	a.handleLiveSyncMessage(context.Background(), SyncOptions{}, makeVote("VOTE-OLD", base.Add(100*time.Millisecond)), &messagesStored, func(string, string) {}, nil)
+
+	votes, err := a.db.ListPollVotes(chat.String(), pollMsgID)
+	if err != nil {
+		t.Fatalf("ListPollVotes: %v", err)
+	}
+	if len(votes) != 1 || votes[0].VoteMsgID != "VOTE-NEW" || !sameStringSet(votes[0].Selected, []string{"New"}) {
+		t.Fatalf("votes = %+v", votes)
+	}
+}
+
 func TestLiveSyncWarnsWhenPollVoteRefersToUnknownPoll(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()

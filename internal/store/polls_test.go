@@ -74,6 +74,34 @@ func TestUpsertPollIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestUpsertPollPreservesAddedOptionsOnCreationReplay(t *testing.T) {
+	db := openTestDB(t)
+
+	p := Poll{
+		ChatJID:         "chat@s.whatsapp.net",
+		MsgID:           "P1",
+		Question:        "v1",
+		Options:         []string{"a", "b", "c"},
+		SelectableCount: 1,
+		CreatedAt:       time.Now().UTC(),
+	}
+	if err := db.UpsertPoll(p); err != nil {
+		t.Fatal(err)
+	}
+	p.Options = []string{"a", "b"}
+	if err := db.UpsertPoll(p); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := db.GetPoll(p.ChatJID, p.MsgID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got.Options, []string{"a", "b", "c"}) {
+		t.Fatalf("options = %v", got.Options)
+	}
+}
+
 func TestUpsertPollVoteReplacesPriorVote(t *testing.T) {
 	db := openTestDB(t)
 
@@ -149,6 +177,41 @@ func TestUpsertPollVoteKeepsNewerVote(t *testing.T) {
 		t.Fatalf("vote count = %d", len(votes))
 	}
 	if votes[0].VoteMsgID != "V2" || !reflect.DeepEqual(votes[0].Selected, []string{"new"}) {
+		t.Fatalf("vote = %+v", votes[0])
+	}
+}
+
+func TestUpsertPollVoteKeepsNewerSameSecondVote(t *testing.T) {
+	db := openTestDB(t)
+
+	base := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+	newer := PollVote{
+		ChatJID:   "chat@s.whatsapp.net",
+		PollMsgID: "P1",
+		VoterJID:  "voter@s.whatsapp.net",
+		VoteMsgID: "V2",
+		Selected:  []string{"new"},
+		VotedAt:   base.Add(900 * time.Millisecond),
+	}
+	if err := db.UpsertPollVote(newer); err != nil {
+		t.Fatal(err)
+	}
+	older := newer
+	older.VoteMsgID = "V1"
+	older.Selected = []string{"old"}
+	older.VotedAt = base.Add(100 * time.Millisecond)
+	if err := db.UpsertPollVote(older); err != nil {
+		t.Fatal(err)
+	}
+
+	votes, err := db.ListPollVotes(newer.ChatJID, newer.PollMsgID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(votes) != 1 {
+		t.Fatalf("vote count = %d", len(votes))
+	}
+	if votes[0].VoteMsgID != "V2" || !votes[0].VotedAt.Equal(newer.VotedAt) {
 		t.Fatalf("vote = %+v", votes[0])
 	}
 }

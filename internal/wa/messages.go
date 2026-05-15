@@ -45,6 +45,7 @@ type PollVoteRef struct {
 	PollMessageID string
 	PollChatJID   string
 	PollSenderJID string
+	SenderTsMS    int64
 }
 
 // PollAddOptionRef references an added option for an existing poll. Encrypted
@@ -278,6 +279,7 @@ func extractPollUpdate(m *waProto.Message, pm *ParsedMessage) {
 		ref.PollChatJID = strings.TrimSpace(key.GetRemoteJID())
 		ref.PollSenderJID = strings.TrimSpace(key.GetParticipant())
 	}
+	ref.SenderTsMS = update.GetSenderTimestampMS()
 	pm.PollVote = ref
 	if pm.Text == "" {
 		pm.Text = "Poll vote"
