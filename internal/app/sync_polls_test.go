@@ -356,10 +356,6 @@ func TestLiveSyncDecryptsPollAddOptionBeforeVote(t *testing.T) {
 	f.decryptSecretFunc = func(_ *events.Message) (*waE2E.Message, error) {
 		return &waE2E.Message{
 			PollAddOptionMessage: &waE2E.PollAddOptionMessage{
-				PollCreationMessageKey: &waCommon.MessageKey{
-					ID:        proto.String(pollMsgID),
-					RemoteJID: proto.String(chat.String()),
-				},
 				AddOption: &waE2E.PollCreationMessage_Option{OptionName: proto.String("Maybe")},
 			},
 		}, nil

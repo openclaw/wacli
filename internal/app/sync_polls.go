@@ -168,7 +168,7 @@ func (a *App) handlePollAddOption(ctx context.Context, pm wa.ParsedMessage, evt 
 		}
 		parsed := wa.ParseLiveMessage(&events.Message{Info: evt.Info, Message: decrypted})
 		if parsed.PollAdd != nil {
-			add = parsed.PollAdd
+			add = mergePollAddOption(add, parsed.PollAdd)
 		}
 	}
 	option := strings.TrimSpace(add.Option)
@@ -358,6 +358,29 @@ func resolvePollKey(pm wa.ParsedMessage) (string, string, error) {
 		return "", "", fmt.Errorf("missing poll chat or id")
 	}
 	return chatJID, pollMsgID, nil
+}
+
+func mergePollAddOption(wrapper, decrypted *wa.PollAddOptionRef) *wa.PollAddOptionRef {
+	if wrapper == nil {
+		return decrypted
+	}
+	if decrypted == nil {
+		return wrapper
+	}
+	merged := *wrapper
+	if strings.TrimSpace(decrypted.Option) != "" {
+		merged.Option = decrypted.Option
+	}
+	if strings.TrimSpace(merged.PollMessageID) == "" {
+		merged.PollMessageID = decrypted.PollMessageID
+	}
+	if strings.TrimSpace(merged.PollChatJID) == "" {
+		merged.PollChatJID = decrypted.PollChatJID
+	}
+	if strings.TrimSpace(merged.PollSenderJID) == "" {
+		merged.PollSenderJID = decrypted.PollSenderJID
+	}
+	return &merged
 }
 
 func resolvePollAddKey(pm wa.ParsedMessage, add *wa.PollAddOptionRef) (string, string, error) {
