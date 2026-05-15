@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -292,11 +293,40 @@ func pollStoreLookupJID(ctx context.Context, a *app.App, jid types.JID) types.JI
 	return jid
 }
 
+func primaryPollChatJID(ctx context.Context, a *app.App, jid types.JID) string {
+	candidates := pollChatJIDCandidates(ctx, a, jid)
+	if len(candidates) == 0 {
+		return ""
+	}
+	return candidates[0]
+}
+
+func pollChatJIDCandidates(ctx context.Context, a *app.App, jid types.JID) []string {
+	jids := make([]types.JID, 0, 3)
+	if a != nil {
+		if a.WA() == nil {
+			if _, err := os.Stat(filepath.Join(a.StoreDir(), "session.db")); err == nil {
+				_ = a.OpenWA()
+			}
+		}
+		if client := a.WA(); client != nil {
+			resolved := client.ResolveLIDToPN(ctx, jid)
+			jids = append(jids, canonicalMessageFilterJID(resolved))
+			if resolved.Server == types.DefaultUserServer {
+				jids = append(jids, canonicalMessageFilterJID(client.ResolvePNToLID(ctx, resolved)))
+			}
+		}
+	}
+	jids = append(jids, canonicalMessageFilterJID(jid))
+	return jidStrings(jids)
+}
+
 func persistOutboundVote(ctx context.Context, a *app.App, chat types.JID, pollMsgID, voteMsgID string, options []string, now time.Time) {
+	chatJID := primaryPollChatJID(ctx, a, chat)
 	chatName := a.WA().ResolveChatName(ctx, chat, "")
-	_ = a.DB().UpsertChat(chat.String(), chatKindFromJID(chat), chatName, now)
+	_ = a.DB().UpsertChat(chatJID, chatKindFromJID(chat), chatName, now)
 	_ = a.DB().UpsertMessage(store.UpsertMessageParams{
-		ChatJID:    chat.String(),
+		ChatJID:    chatJID,
 		ChatName:   chatName,
 		MsgID:      voteMsgID,
 		SenderName: "me",
@@ -309,7 +339,7 @@ func persistOutboundVote(ctx context.Context, a *app.App, chat types.JID, pollMs
 		return
 	}
 	_ = a.DB().UpsertPollVote(store.PollVote{
-		ChatJID:   chat.String(),
+		ChatJID:   chatJID,
 		PollMsgID: pollMsgID,
 		VoterJID:  voter,
 		VoteMsgID: voteMsgID,
@@ -392,15 +422,11 @@ func newPollShowCmd(flags *rootFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			poll, err := a.DB().GetPoll(toJID.String(), msgID)
+			poll, votes, err := getPollForShow(ctx, a, toJID, msgID)
 			if err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
 					return fmt.Errorf("poll %s not found in local store for chat %s; run `wacli sync` first", msgID, toJID.String())
 				}
-				return err
-			}
-			votes, err := a.DB().ListPollVotes(toJID.String(), msgID)
-			if err != nil {
 				return err
 			}
 
@@ -418,6 +444,26 @@ func newPollShowCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().IntVar(&pick, "pick", 0, "when --to is ambiguous, pick the Nth match (1-indexed)")
 	cmd.Flags().StringVar(&msgID, "id", "", "poll message ID")
 	return cmd
+}
+
+func getPollForShow(ctx context.Context, a *app.App, chat types.JID, msgID string) (store.Poll, []store.PollVote, error) {
+	var lastErr error = sql.ErrNoRows
+	for _, chatJID := range pollChatJIDCandidates(ctx, a, chat) {
+		poll, err := a.DB().GetPoll(chatJID, msgID)
+		if err != nil {
+			lastErr = err
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
+			return store.Poll{}, nil, err
+		}
+		votes, err := a.DB().ListPollVotes(poll.ChatJID, msgID)
+		if err != nil {
+			return store.Poll{}, nil, err
+		}
+		return poll, votes, nil
+	}
+	return store.Poll{}, nil, lastErr
 }
 
 func aggregatePollVotes(options []string, votes []store.PollVote) map[string]int {
@@ -546,7 +592,7 @@ func newPollsListCmd(flags *rootFlags) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				filter.ChatJID = toJID.String()
+				filter.ChatJID = primaryPollChatJID(ctx, a, toJID)
 			}
 			polls, err := a.DB().ListPolls(filter)
 			if err != nil {

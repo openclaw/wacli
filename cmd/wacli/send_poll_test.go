@@ -4,8 +4,10 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/openclaw/wacli/internal/app"
+	"github.com/openclaw/wacli/internal/store"
 	"go.mau.fi/whatsmeow/types"
 )
 
@@ -164,5 +166,48 @@ func TestBuildPollVoteInfoMarksGroupMessages(t *testing.T) {
 	}
 	if info.Sender.String() != sender {
 		t.Fatalf("Sender = %s, want %s", info.Sender, sender)
+	}
+}
+
+func TestGetPollForShowFindsNonADChat(t *testing.T) {
+	a, err := app.New(app.Options{StoreDir: t.TempDir(), AllowUnauthed: true})
+	if err != nil {
+		t.Fatalf("app.New: %v", err)
+	}
+	defer a.Close()
+
+	chat := types.NewJID("15551234567", types.DefaultUserServer)
+	deviceChat := chat
+	deviceChat.Device = 2
+	if err := a.DB().UpsertPoll(store.Poll{
+		ChatJID:         chat.String(),
+		MsgID:           "poll-id",
+		Question:        "Dinner?",
+		Options:         []string{"Yes", "No"},
+		SelectableCount: 1,
+		CreatedAt:       time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("UpsertPoll: %v", err)
+	}
+	if err := a.DB().UpsertPollVote(store.PollVote{
+		ChatJID:   chat.String(),
+		PollMsgID: "poll-id",
+		VoterJID:  "15557654321@s.whatsapp.net",
+		VoteMsgID: "vote-id",
+		Selected:  []string{"Yes"},
+		VotedAt:   time.Date(2026, 5, 9, 12, 1, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("UpsertPollVote: %v", err)
+	}
+
+	poll, votes, err := getPollForShow(context.Background(), a, deviceChat, "poll-id")
+	if err != nil {
+		t.Fatalf("getPollForShow: %v", err)
+	}
+	if poll.ChatJID != chat.String() {
+		t.Fatalf("ChatJID = %q, want %q", poll.ChatJID, chat.String())
+	}
+	if len(votes) != 1 || votes[0].VoteMsgID != "vote-id" {
+		t.Fatalf("votes = %+v", votes)
 	}
 }

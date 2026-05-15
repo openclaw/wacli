@@ -161,10 +161,11 @@ func sendPollMessage(ctx context.Context, sender pollSender, to types.JID, quest
 }
 
 func persistOutboundPoll(ctx context.Context, a *app.App, chat types.JID, msgID, question string, options []string, selectable uint32, now time.Time) {
+	chatJID := primaryPollChatJID(ctx, a, chat)
 	chatName := a.WA().ResolveChatName(ctx, chat, "")
-	_ = a.DB().UpsertChat(chat.String(), chatKindFromJID(chat), chatName, now)
+	_ = a.DB().UpsertChat(chatJID, chatKindFromJID(chat), chatName, now)
 	_ = a.DB().UpsertMessage(store.UpsertMessageParams{
-		ChatJID:    chat.String(),
+		ChatJID:    chatJID,
 		ChatName:   chatName,
 		MsgID:      msgID,
 		SenderName: "me",
@@ -173,7 +174,7 @@ func persistOutboundPoll(ctx context.Context, a *app.App, chat types.JID, msgID,
 		Text:       "Poll: " + question,
 	})
 	_ = a.DB().UpsertPoll(store.Poll{
-		ChatJID:         chat.String(),
+		ChatJID:         chatJID,
 		MsgID:           msgID,
 		SenderJID:       a.WA().LinkedJID(),
 		Question:        question,
