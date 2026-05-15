@@ -62,6 +62,9 @@ func contextInfoForMessage(m *waProto.Message) *waProto.ContextInfo {
 	if tbr := m.GetTemplateButtonReplyMessage(); tbr != nil {
 		return tbr.GetContextInfo()
 	}
+	if creation := pickPollCreation(m); creation != nil {
+		return creation.GetContextInfo()
+	}
 	return nil
 }
 

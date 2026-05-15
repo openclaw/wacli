@@ -199,6 +199,55 @@ func TestParseLiveMessageReply(t *testing.T) {
 	}
 }
 
+func TestParseLiveMessagePollReplyAndForwardedContext(t *testing.T) {
+	chat, _ := types.ParseJID("123@s.whatsapp.net")
+	sender, _ := types.ParseJID("sender@s.whatsapp.net")
+
+	ev := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:     chat,
+				Sender:   sender,
+				IsFromMe: false,
+			},
+			ID:        "poll-mid",
+			Timestamp: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+			PushName:  "Sender",
+		},
+		Message: &waProto.Message{
+			PollCreationMessageV3: &waProto.PollCreationMessage{
+				Name: proto.String("Lunch?"),
+				Options: []*waProto.PollCreationMessage_Option{
+					{OptionName: proto.String("Pizza")},
+					{OptionName: proto.String("Sushi")},
+				},
+				ContextInfo: &waProto.ContextInfo{
+					StanzaID: proto.String("orig"),
+					QuotedMessage: &waProto.Message{
+						Conversation: proto.String("quoted text"),
+					},
+					IsForwarded:     proto.Bool(true),
+					ForwardingScore: proto.Uint32(2),
+				},
+			},
+		},
+	}
+
+	pm := ParseLiveMessage(ev)
+	if pm.Poll == nil {
+		t.Fatalf("expected poll parse, got %+v", pm)
+	}
+	if pm.ReplyToID != "orig" {
+		t.Fatalf("expected ReplyToID to be orig, got %q", pm.ReplyToID)
+	}
+	if pm.ReplyToDisplay != "quoted text" {
+		t.Fatalf("expected ReplyToDisplay to be quoted text, got %q", pm.ReplyToDisplay)
+	}
+	if !pm.IsForwarded || pm.ForwardingScore != 2 {
+		t.Fatalf("expected forwarded poll context, got forwarded=%v score=%d", pm.IsForwarded, pm.ForwardingScore)
+	}
+}
+
 func TestParseLiveMessageForwarded(t *testing.T) {
 	chat, _ := types.ParseJID("123@s.whatsapp.net")
 	sender, _ := types.ParseJID("sender@s.whatsapp.net")
