@@ -18,7 +18,7 @@ import (
 // message has been persisted to the messages table.
 func (a *App) handlePollSideEffects(ctx context.Context, pm wa.ParsedMessage, evt *events.Message) {
 	if pm.Poll != nil {
-		a.upsertPollFromParsed(pm)
+		a.upsertPollFromParsed(ctx, pm)
 	}
 	if pm.PollVote != nil && evt != nil {
 		a.handlePollVote(ctx, pm, evt)
@@ -31,7 +31,7 @@ func (a *App) handlePollSideEffects(ctx context.Context, pm wa.ParsedMessage, ev
 // input, which we reconstruct via ParseWebMessage.
 func (a *App) handleHistoryPollSideEffects(ctx context.Context, pm wa.ParsedMessage, hist *waProto.WebMessageInfo) {
 	if pm.Poll != nil {
-		a.upsertPollFromParsed(pm)
+		a.upsertPollFromParsed(ctx, pm)
 	}
 	if pm.PollVote != nil && hist != nil {
 		evt, err := a.wa.ParseWebMessage(pm.Chat, hist)
@@ -47,18 +47,22 @@ func (a *App) handleHistoryPollSideEffects(ctx context.Context, pm wa.ParsedMess
 	}
 }
 
-func (a *App) upsertPollFromParsed(pm wa.ParsedMessage) {
+func (a *App) upsertPollFromParsed(ctx context.Context, pm wa.ParsedMessage) {
 	if a.db == nil || pm.Poll == nil {
 		return
 	}
-	chatJID := canonicalJIDString(pm.Chat)
+	chatJID := canonicalJIDString(a.canonicalStoreJID(ctx, pm.Chat))
 	if chatJID == "" {
 		return
+	}
+	senderJID := strings.TrimSpace(pm.SenderJID)
+	if jid, err := types.ParseJID(senderJID); err == nil {
+		senderJID = canonicalJIDString(a.canonicalStoreJID(ctx, jid))
 	}
 	if err := a.db.UpsertPoll(store.Poll{
 		ChatJID:         chatJID,
 		MsgID:           pm.ID,
-		SenderJID:       pm.SenderJID,
+		SenderJID:       senderJID,
 		Question:        pm.Poll.Question,
 		Options:         pm.Poll.Options,
 		SelectableCount: pm.Poll.SelectableCount,

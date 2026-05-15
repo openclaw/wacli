@@ -262,6 +262,7 @@ func buildPollVoteInfo(a *app.App, chat types.JID, pollMsgID, senderOverride str
 			Chat:     chat,
 			Sender:   senderJID,
 			IsFromMe: fromMe,
+			IsGroup:  chat.Server == types.GroupServer,
 		},
 		ID:        pollMsgID,
 		Timestamp: ts,

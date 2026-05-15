@@ -59,6 +59,50 @@ func TestLiveSyncStoresPollCreation(t *testing.T) {
 	}
 }
 
+func TestLiveSyncStoresPollCreationUnderCanonicalPN(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	lid := types.JID{User: "999", Server: types.HiddenUserServer}
+	pn := types.JID{User: "15551234567", Server: types.DefaultUserServer}
+	senderLID := types.JID{User: "777", Server: types.HiddenUserServer}
+	senderPN := types.JID{User: "15557654321", Server: types.DefaultUserServer}
+	f.lids[lid] = pn
+	f.lids[senderLID] = senderPN
+
+	evt := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{Chat: lid, Sender: senderLID},
+			ID:            "POLL-LID",
+			Timestamp:     time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC),
+		},
+		Message: &waProto.Message{
+			PollCreationMessageV3: &waProto.PollCreationMessage{
+				Name: proto.String("Canonical?"),
+				Options: []*waProto.PollCreationMessage_Option{
+					{OptionName: proto.String("Yes")},
+					{OptionName: proto.String("No")},
+				},
+			},
+		},
+	}
+
+	var messagesStored atomic.Int64
+	a.handleLiveSyncMessage(context.Background(), SyncOptions{}, evt, &messagesStored, func(string, string) {}, nil)
+
+	poll, err := a.db.GetPoll(pn.String(), "POLL-LID")
+	if err != nil {
+		t.Fatalf("GetPoll canonical PN: %v", err)
+	}
+	if poll.SenderJID != senderPN.String() {
+		t.Fatalf("SenderJID = %q, want %q", poll.SenderJID, senderPN.String())
+	}
+	if _, err := a.db.GetPoll(lid.String(), "POLL-LID"); err == nil {
+		t.Fatalf("poll was also stored under raw LID")
+	}
+}
+
 func TestLiveSyncDecryptsAndStoresPollVote(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()

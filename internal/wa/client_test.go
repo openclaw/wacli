@@ -9,7 +9,9 @@ import (
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/appstate"
+	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow/types"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestNewEnablesRetryMessageStore(t *testing.T) {
@@ -63,6 +65,22 @@ func TestBuildDeleteForMePatch(t *testing.T) {
 	action := mut.Value.GetDeleteMessageForMeAction()
 	if action == nil || !action.GetDeleteMedia() || action.GetMessageTimestamp() != ts.UnixMilli() {
 		t.Fatalf("delete-for-me action = %+v", action)
+	}
+}
+
+func TestWrapEphemeralPollMessagePreservesSecretOnOuterMessage(t *testing.T) {
+	secret := []byte("poll-secret")
+	inner := &waProto.Message{
+		PollCreationMessage: &waProto.PollCreationMessage{Name: proto.String("Lunch?")},
+		MessageContextInfo:  &waProto.MessageContextInfo{MessageSecret: secret},
+	}
+
+	wrapped := wrapEphemeralPollMessage(inner)
+	if wrapped.GetEphemeralMessage().GetMessage() != inner {
+		t.Fatalf("inner message not wrapped")
+	}
+	if got := wrapped.GetMessageContextInfo().GetMessageSecret(); string(got) != string(secret) {
+		t.Fatalf("outer message secret = %q, want %q", got, secret)
 	}
 }
 

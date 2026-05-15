@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/openclaw/wacli/internal/app"
 	"go.mau.fi/whatsmeow/types"
 )
 
@@ -127,5 +128,29 @@ func TestCleanVoteOptionsDedupAndTrim(t *testing.T) {
 	}
 	if _, err := cleanVoteOptions(nil); err == nil {
 		t.Fatal("expected error for empty options")
+	}
+}
+
+func TestBuildPollVoteInfoMarksGroupMessages(t *testing.T) {
+	a, err := app.New(app.Options{StoreDir: t.TempDir(), AllowUnauthed: true})
+	if err != nil {
+		t.Fatalf("app.New: %v", err)
+	}
+	defer a.Close()
+
+	group := types.NewJID("120363001234567890", types.GroupServer)
+	sender := "15551234567@s.whatsapp.net"
+	info, _, err := buildPollVoteInfo(a, group, "poll-id", sender)
+	if err != nil {
+		t.Fatalf("buildPollVoteInfo: %v", err)
+	}
+	if !info.IsGroup {
+		t.Fatalf("IsGroup = false, want true")
+	}
+	if info.Chat != group {
+		t.Fatalf("Chat = %s, want %s", info.Chat, group)
+	}
+	if info.Sender.String() != sender {
+		t.Fatalf("Sender = %s, want %s", info.Sender, sender)
 	}
 }

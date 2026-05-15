@@ -250,15 +250,23 @@ func (c *Client) SendPoll(ctx context.Context, to types.JID, name string, option
 	}
 	msg := cli.BuildPollCreation(name, options, selectable)
 	if ephemeral {
-		msg = &waE2E.Message{
-			EphemeralMessage: &waE2E.FutureProofMessage{Message: msg},
-		}
+		msg = wrapEphemeralPollMessage(msg)
 	}
 	resp, err := cli.SendMessage(ctx, to, msg)
 	if err != nil {
 		return "", err
 	}
 	return resp.ID, nil
+}
+
+func wrapEphemeralPollMessage(msg *waE2E.Message) *waE2E.Message {
+	if msg == nil {
+		return nil
+	}
+	return &waE2E.Message{
+		EphemeralMessage:   &waE2E.FutureProofMessage{Message: msg},
+		MessageContextInfo: msg.MessageContextInfo,
+	}
 }
 
 // SendPollVote builds and sends a poll vote for the poll identified by

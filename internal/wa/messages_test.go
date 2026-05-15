@@ -915,6 +915,27 @@ func TestParseLiveMessagePollCreationV1(t *testing.T) {
 	}
 }
 
+func TestParseLiveMessagePollCreationV6(t *testing.T) {
+	chat, _ := types.ParseJID("15551112222@s.whatsapp.net")
+	evt := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{Chat: chat, Sender: chat},
+			ID:            "POLL-V6",
+			Timestamp:     time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC),
+		},
+		Message: &waProto.Message{
+			PollCreationMessageV6: &waProto.PollCreationMessage{
+				Name:    proto.String("V6?"),
+				Options: []*waProto.PollCreationMessage_Option{{OptionName: proto.String("a")}, {OptionName: proto.String("b")}},
+			},
+		},
+	}
+	pm := ParseLiveMessage(evt)
+	if pm.Poll == nil || pm.Poll.Question != "V6?" {
+		t.Fatalf("v6 poll not parsed: %+v", pm)
+	}
+}
+
 func TestParseLiveMessagePollUpdateRefersToCreation(t *testing.T) {
 	chat, _ := types.ParseJID("15551112222@s.whatsapp.net")
 	evt := &events.Message{

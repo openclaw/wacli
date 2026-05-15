@@ -228,6 +228,9 @@ func pickPollCreation(m *waProto.Message) *waProto.PollCreationMessage {
 	if c := m.GetPollCreationMessageV5(); c != nil {
 		return c
 	}
+	if c := m.GetPollCreationMessageV6(); c != nil {
+		return c
+	}
 	if fp := m.GetPollCreationMessageV4(); fp != nil {
 		if inner := fp.GetMessage(); inner != nil {
 			if c := inner.GetPollCreationMessage(); c != nil {
@@ -240,6 +243,9 @@ func pickPollCreation(m *waProto.Message) *waProto.PollCreationMessage {
 				return c
 			}
 			if c := inner.GetPollCreationMessageV5(); c != nil {
+				return c
+			}
+			if c := inner.GetPollCreationMessageV6(); c != nil {
 				return c
 			}
 		}
