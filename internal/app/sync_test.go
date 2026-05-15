@@ -847,6 +847,60 @@ func TestSyncStoresDisplayText(t *testing.T) {
 	}
 }
 
+func TestSyncDownloadMediaCanonicalizesLIDChatBeforeEnqueue(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	lid := types.JID{User: "152527844733129", Server: types.HiddenUserServer}
+	pn := types.JID{User: "447356168511", Server: types.DefaultUserServer}
+	f.lids[lid] = pn
+	f.contacts[pn] = types.ContactInfo{Found: true, FullName: "Dave", PushName: "Dave"}
+
+	msgID := "media-lid"
+	f.connectEvents = append(f.connectEvents, &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:     lid,
+				Sender:   lid,
+				IsFromMe: false,
+			},
+			ID:        msgID,
+			Timestamp: time.Date(2026, 5, 15, 17, 30, 0, 0, time.UTC),
+			PushName:  "Dave",
+		},
+		Message: &waProto.Message{
+			ImageMessage: &waProto.ImageMessage{
+				Mimetype:      proto.String("image/jpeg"),
+				DirectPath:    proto.String("/direct"),
+				MediaKey:      []byte{1, 2, 3},
+				FileSHA256:    []byte{4, 5, 6},
+				FileEncSHA256: []byte{7, 8, 9},
+				FileLength:    proto.Uint64(4),
+			},
+		},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := a.Sync(ctx, SyncOptions{
+		Mode:          SyncModeOnce,
+		AllowQR:       false,
+		DownloadMedia: true,
+		IdleExit:      100 * time.Millisecond,
+	}); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	msg, err := a.db.GetMessage(pn.String(), msgID)
+	if err != nil {
+		t.Fatalf("GetMessage canonical PN row: %v", err)
+	}
+	if msg.LocalPath == "" {
+		t.Fatalf("expected media downloaded via canonical PN row, got empty local_path")
+	}
+}
+
 func TestSyncMediaEnqueueUsesBoundedBackpressure(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()

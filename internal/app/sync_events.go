@@ -207,7 +207,7 @@ func (a *App) handleLiveSyncMessage(ctx context.Context, opts SyncOptions, v *ev
 		a.handlePollSideEffects(sideEffectCtx, pm, v)
 	}
 	if opts.DownloadMedia && pm.Media != nil && pm.ID != "" {
-		enqueueMedia(pm.Chat.String(), pm.ID)
+		enqueueMedia(canonicalJIDString(a.canonicalStoreJID(ctx, pm.Chat)), pm.ID)
 	}
 }
 
@@ -283,7 +283,7 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 				return
 			}
 			if opts.DownloadMedia && pm.Media != nil && pm.ID != "" {
-				enqueueMedia(pm.Chat.String(), pm.ID)
+				enqueueMedia(canonicalJIDString(a.canonicalStoreJID(ctx, pm.Chat)), pm.ID)
 			}
 		}
 		flushCtx := ctx
