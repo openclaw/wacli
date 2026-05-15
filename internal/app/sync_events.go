@@ -224,6 +224,11 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 			if pm.ID == "" || pm.Chat.IsEmpty() {
 				continue
 			}
+			var pollEvt *events.Message
+			if normalized, evt, ok := a.normalizeHistoryPollMessage(pm, m.Message); ok {
+				pm = normalized
+				pollEvt = evt
+			}
 			if pm.ReactionToID != "" && pm.ReactionEmoji == "" && m.Message.GetMessage().GetEncReactionMessage() != nil {
 				evt, err := a.wa.ParseWebMessage(pm.Chat, m.Message)
 				if err != nil {
@@ -238,7 +243,7 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 			}
 			if err := a.storeParsedMessageForSync(ctx, pm, limits...); err == nil {
 				a.emitSyncProgress(messagesStored.Add(1))
-				a.handleHistoryPollSideEffects(ctx, pm, m.Message)
+				a.handleHistoryPollSideEffects(ctx, pm, pollEvt, m.Message)
 			} else if ctx.Err() != nil {
 				return
 			}

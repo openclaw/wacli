@@ -159,6 +159,13 @@ func TestHistorySyncStoresWrappedSelfPollWithLinkedSender(t *testing.T) {
 	if poll.SenderJID != f.LinkedJID() {
 		t.Fatalf("SenderJID = %q, want %q", poll.SenderJID, f.LinkedJID())
 	}
+	msg, err := a.db.GetMessage(chat.String(), "POLL-HIST")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if msg.Text != "Poll: Wrapped?" || msg.DisplayText != "Poll: Wrapped?" {
+		t.Fatalf("message text/display = %q/%q", msg.Text, msg.DisplayText)
+	}
 }
 
 func TestLiveSyncDecryptsAndStoresPollVote(t *testing.T) {

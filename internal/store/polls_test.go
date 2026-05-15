@@ -119,6 +119,40 @@ func TestUpsertPollVoteReplacesPriorVote(t *testing.T) {
 	}
 }
 
+func TestUpsertPollVoteKeepsNewerVote(t *testing.T) {
+	db := openTestDB(t)
+
+	newer := PollVote{
+		ChatJID:   "chat@s.whatsapp.net",
+		PollMsgID: "P1",
+		VoterJID:  "voter@s.whatsapp.net",
+		VoteMsgID: "V2",
+		Selected:  []string{"new"},
+		VotedAt:   time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC),
+	}
+	if err := db.UpsertPollVote(newer); err != nil {
+		t.Fatal(err)
+	}
+	older := newer
+	older.VoteMsgID = "V1"
+	older.Selected = []string{"old"}
+	older.VotedAt = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := db.UpsertPollVote(older); err != nil {
+		t.Fatal(err)
+	}
+
+	votes, err := db.ListPollVotes(newer.ChatJID, newer.PollMsgID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(votes) != 1 {
+		t.Fatalf("vote count = %d", len(votes))
+	}
+	if votes[0].VoteMsgID != "V2" || !reflect.DeepEqual(votes[0].Selected, []string{"new"}) {
+		t.Fatalf("vote = %+v", votes[0])
+	}
+}
+
 func TestListPollsFilterAndOrder(t *testing.T) {
 	db := openTestDB(t)
 

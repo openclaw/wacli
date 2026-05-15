@@ -29,20 +29,12 @@ func (a *App) handlePollSideEffects(ctx context.Context, pm wa.ParsedMessage, ev
 // arriving via HistorySync, where we have a *waProto.WebMessageInfo rather
 // than an events.Message. Vote decryption requires an events.Message-shaped
 // input, which we reconstruct via ParseWebMessage.
-func (a *App) handleHistoryPollSideEffects(ctx context.Context, pm wa.ParsedMessage, hist *waProto.WebMessageInfo) {
-	var evt *events.Message
-	if hist != nil && historyPollNeedsEventParse(pm, hist) {
-		parsed, err := a.wa.ParseWebMessage(pm.Chat, hist)
-		if err != nil {
-			a.emitWarning(
-				"poll_history_parse_failed",
-				fmt.Sprintf("warning: failed to parse history poll message %s: %v", pm.ID, err),
-				map[string]any{"message_id": pm.ID, "error": err.Error()},
-			)
-			return
+func (a *App) handleHistoryPollSideEffects(ctx context.Context, pm wa.ParsedMessage, evt *events.Message, hist *waProto.WebMessageInfo) {
+	if evt == nil {
+		if normalized, parsed, ok := a.normalizeHistoryPollMessage(pm, hist); ok {
+			pm = normalized
+			evt = parsed
 		}
-		evt = parsed
-		pm = wa.ParseLiveMessage(parsed)
 	}
 	if pm.Poll != nil {
 		a.upsertPollFromParsed(ctx, pm)
@@ -70,6 +62,30 @@ func (a *App) handleHistoryPollSideEffects(ctx context.Context, pm wa.ParsedMess
 		}
 		a.handlePollVote(ctx, pm, evt)
 	}
+}
+
+func (a *App) normalizeHistoryPollMessage(pm wa.ParsedMessage, hist *waProto.WebMessageInfo) (wa.ParsedMessage, *events.Message, bool) {
+	if hist == nil || !historyPollNeedsEventParse(pm, hist) {
+		return pm, nil, false
+	}
+	parsed, err := a.wa.ParseWebMessage(pm.Chat, hist)
+	if err != nil {
+		a.emitWarning(
+			"poll_history_parse_failed",
+			fmt.Sprintf("warning: failed to parse history poll message %s: %v", pm.ID, err),
+			map[string]any{"message_id": pm.ID, "error": err.Error()},
+		)
+		return pm, nil, false
+	}
+	normalized := wa.ParseLiveMessage(parsed)
+	if normalized.Poll == nil && normalized.PollVote == nil {
+		return pm, parsed, false
+	}
+	if pm.StarredKnown {
+		normalized.StarredKnown = true
+		normalized.Starred = pm.Starred
+	}
+	return normalized, parsed, true
 }
 
 func historyPollNeedsEventParse(pm wa.ParsedMessage, hist *waProto.WebMessageInfo) bool {

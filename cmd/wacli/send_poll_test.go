@@ -152,7 +152,7 @@ func TestBuildPollVoteInfoMarksGroupMessages(t *testing.T) {
 
 	group := types.NewJID("120363001234567890", types.GroupServer)
 	sender := "15551234567@s.whatsapp.net"
-	info, _, _, err := buildPollVoteInfo(a, group, "poll-id", sender)
+	info, _, _, err := buildPollVoteInfo(context.Background(), a, group, "poll-id", sender)
 	if err != nil {
 		t.Fatalf("buildPollVoteInfo: %v", err)
 	}

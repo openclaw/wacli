@@ -226,6 +226,7 @@ func (d *DB) UpsertPollVote(v PollVote) error {
 			vote_msg_id = excluded.vote_msg_id,
 			selected_options_json = excluded.selected_options_json,
 			ts = excluded.ts
+		WHERE excluded.ts >= poll_votes.ts
 	`,
 		v.ChatJID,
 		v.PollMsgID,

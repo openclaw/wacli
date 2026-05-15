@@ -101,7 +101,7 @@ func newPollVoteCmd(flags *rootFlags) *cobra.Command {
 			}
 			toJID = warmupRecipient(ctx, a.WA(), toJID, os.Stderr)
 
-			info, knownOptions, selectableCount, err := buildPollVoteInfo(a, toJID, msgID, senderOverride)
+			info, knownOptions, selectableCount, err := buildPollVoteInfo(ctx, a, toJID, msgID, senderOverride)
 			if err != nil {
 				return err
 			}
@@ -194,8 +194,8 @@ func requirePollSelectableCount(selectable uint32, requested []string) error {
 // buildPollVoteInfo resolves the MessageInfo whatsmeow needs to encrypt the
 // vote. Looks up the poll in the local store first; falls back to manually
 // supplied --sender for unknown polls.
-func buildPollVoteInfo(a *app.App, chat types.JID, pollMsgID, senderOverride string) (*types.MessageInfo, []string, uint32, error) {
-	chatJID := chat.String()
+func buildPollVoteInfo(ctx context.Context, a *app.App, chat types.JID, pollMsgID, senderOverride string) (*types.MessageInfo, []string, uint32, error) {
+	chatJID := pollStoreLookupJID(ctx, a, chat).String()
 
 	var (
 		senderJID       types.JID
@@ -259,7 +259,7 @@ func buildPollVoteInfo(a *app.App, chat types.JID, pollMsgID, senderOverride str
 
 	if senderJID.IsEmpty() {
 		// 1:1 DMs: the chat itself is the sender unless we sent the poll.
-		if chat.Server == types.DefaultUserServer {
+		if chat.Server == types.DefaultUserServer || chat.Server == types.HiddenUserServer {
 			senderJID = chat
 		} else if chat.Server == types.GroupServer {
 			return nil, knownOptions, selectableCount, fmt.Errorf("poll %s is not in the local store; pass --sender <JID> to vote", pollMsgID)
@@ -280,6 +280,16 @@ func buildPollVoteInfo(a *app.App, chat types.JID, pollMsgID, senderOverride str
 		Timestamp: ts,
 	}
 	return info, knownOptions, selectableCount, nil
+}
+
+func pollStoreLookupJID(ctx context.Context, a *app.App, jid types.JID) types.JID {
+	if a != nil && a.WA() != nil {
+		jid = a.WA().ResolveLIDToPN(ctx, jid)
+	}
+	if jid.Server == types.DefaultUserServer {
+		return jid.ToNonAD()
+	}
+	return jid
 }
 
 func persistOutboundVote(ctx context.Context, a *app.App, chat types.JID, pollMsgID, voteMsgID string, options []string, now time.Time) {
@@ -321,7 +331,7 @@ func executeDelegatedPollVote(ctx context.Context, a *app.App, req sendDelegateR
 		return sendDelegateResponse{}, err
 	}
 	toJID = warmupDelegatedRecipient(ctx, a, toJID)
-	info, knownOptions, selectableCount, err := buildPollVoteInfo(a, toJID, req.ID, req.Sender)
+	info, knownOptions, selectableCount, err := buildPollVoteInfo(ctx, a, toJID, req.ID, req.Sender)
 	if err != nil {
 		return sendDelegateResponse{}, err
 	}
