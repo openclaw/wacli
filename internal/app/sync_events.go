@@ -56,6 +56,13 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 		switch v := evt.(type) {
 		case *events.Message:
 			lastEvent.Store(nowUTC().UnixNano())
+			if notif := historySyncNotificationFromMessage(v); notif != nil {
+				if notif.GetSyncType() == waE2E.HistorySyncType_ON_DEMAND {
+					return
+				}
+				a.downloadAndHandleHistorySync(ctx, opts, notif, messagesStored, lastEvent, enqueueMedia, limits)
+				return
+			}
 			a.handleLiveSyncMessage(ctx, opts, v, messagesStored, enqueueMedia, enqueueWebhook, limits)
 		case *events.HistorySync:
 			lastEvent.Store(nowUTC().UnixNano())
@@ -198,6 +205,19 @@ func (a *App) handleLiveSyncMessage(ctx context.Context, opts SyncOptions, v *ev
 	if opts.DownloadMedia && pm.Media != nil && pm.ID != "" {
 		enqueueMedia(pm.Chat.String(), pm.ID)
 	}
+}
+
+func (a *App) downloadAndHandleHistorySync(ctx context.Context, opts SyncOptions, notif *waE2E.HistorySyncNotification, messagesStored, lastEvent *atomic.Int64, enqueueMedia func(string, string), limits ...*syncStorageLimits) {
+	data, err := a.wa.DownloadHistorySync(ctx, notif)
+	if err != nil {
+		a.emitWarning(
+			"history_download_failed",
+			fmt.Sprintf("warning: failed to download history sync: %v", err),
+			map[string]any{"error": err.Error()},
+		)
+		return
+	}
+	a.handleHistorySync(ctx, opts, &events.HistorySync{Data: data}, messagesStored, lastEvent, enqueueMedia, limits...)
 }
 
 func historySyncNotificationFromMessage(v *events.Message) *waE2E.HistorySyncNotification {

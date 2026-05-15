@@ -484,7 +484,7 @@ func (c *Client) DownloadHistorySync(ctx context.Context, notif *waE2E.HistorySy
 	if cli == nil {
 		return nil, fmt.Errorf("whatsapp client is not initialized")
 	}
-	return cli.DownloadHistorySync(ctx, notif, false)
+	return cli.DownloadHistorySync(ctx, notif, true)
 }
 
 func (c *Client) RequestHistorySyncOnDemand(ctx context.Context, lastKnown types.MessageInfo, count int) (types.MessageID, error) {

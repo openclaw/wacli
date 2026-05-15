@@ -79,6 +79,8 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	if err := a.OpenWA(); err != nil {
 		return SyncResult{}, err
 	}
+	a.wa.SetManualHistorySyncDownload(true)
+	defer a.wa.SetManualHistorySyncDownload(false)
 
 	var messagesStored atomic.Int64
 	lastEvent := atomic.Int64{}

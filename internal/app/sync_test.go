@@ -540,6 +540,50 @@ func TestSyncStoresLiveAndHistoryMessages(t *testing.T) {
 	}
 }
 
+func TestSyncDownloadsHistoryNotificationBeforeProcessing(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	chat := types.JID{User: "555", Server: types.DefaultUserServer}
+	base := time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)
+	syncType := waE2E.HistorySyncType_INITIAL_BOOTSTRAP
+	notif := &waE2E.HistorySyncNotification{SyncType: &syncType}
+	f.connectEvents = []interface{}{&events.Message{
+		Message: &waProto.Message{
+			ProtocolMessage: &waProto.ProtocolMessage{
+				HistorySyncNotification: notif,
+			},
+		},
+	}}
+	downloadCalls := 0
+	f.downloadHistory = func(got *waE2E.HistorySyncNotification) (*waHistorySync.HistorySync, error) {
+		downloadCalls++
+		if got != notif {
+			t.Fatalf("DownloadHistorySync notification = %p, want %p", got, notif)
+		}
+		return historySyncWithTextMessages(chat, base, "m-hist").Data, nil
+	}
+
+	res, err := a.Sync(context.Background(), SyncOptions{
+		Mode:     SyncModeOnce,
+		AllowQR:  false,
+		IdleExit: 10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if downloadCalls != 1 {
+		t.Fatalf("download calls = %d, want 1", downloadCalls)
+	}
+	if res.MessagesStored != 1 {
+		t.Fatalf("messages stored = %d, want 1", res.MessagesStored)
+	}
+	if got := f.manualHistorySyncCalls; len(got) != 2 || !got[0] || got[1] {
+		t.Fatalf("manual history calls = %v", got)
+	}
+}
+
 func TestStoreParsedMessageNormalizesDefaultUserADJIDs(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()

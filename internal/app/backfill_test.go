@@ -80,8 +80,8 @@ func TestBackfillHistoryAddsOlderMessages(t *testing.T) {
 	if oldest.MsgID != "m1" {
 		t.Fatalf("expected oldest m1, got %q", oldest.MsgID)
 	}
-	if len(f.manualHistorySyncCalls) != 2 || !f.manualHistorySyncCalls[0] || f.manualHistorySyncCalls[1] {
-		t.Fatalf("manual history sync calls = %v, want [true false]", f.manualHistorySyncCalls)
+	if got := f.manualHistorySyncCalls; len(got) != 4 || !got[0] || !got[1] || got[2] || got[3] {
+		t.Fatalf("manual history sync calls = %v, want [true true false false]", got)
 	}
 }
 
