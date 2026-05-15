@@ -23,6 +23,12 @@ type pollSender interface {
 	SendPoll(ctx context.Context, to types.JID, name string, options []string, selectable int, ephemeral bool) (types.MessageID, error)
 }
 
+type outboundPollIdentityResolver interface {
+	LinkedJID() string
+	ResolvePNToLID(ctx context.Context, jid types.JID) types.JID
+	GetGroupInfo(ctx context.Context, jid types.JID) (*types.GroupInfo, error)
+}
+
 func newSendPollCmd(flags *rootFlags) *cobra.Command {
 	var to string
 	var pick int
@@ -176,12 +182,35 @@ func persistOutboundPoll(ctx context.Context, a *app.App, chat types.JID, msgID,
 	_ = a.DB().UpsertPoll(store.Poll{
 		ChatJID:         chatJID,
 		MsgID:           msgID,
-		SenderJID:       a.WA().LinkedJID(),
+		SenderJID:       outboundPollSenderJID(ctx, a.WA(), chat),
 		Question:        question,
 		Options:         options,
 		SelectableCount: selectable,
 		CreatedAt:       now,
 	})
+}
+
+func outboundPollSenderJID(ctx context.Context, wa outboundPollIdentityResolver, chat types.JID) string {
+	if wa == nil {
+		return ""
+	}
+	linked := strings.TrimSpace(wa.LinkedJID())
+	if chat.Server != types.GroupServer {
+		return linked
+	}
+	info, _ := wa.GetGroupInfo(ctx, chat)
+	if info == nil || info.AddressingMode != types.AddressingModeLID {
+		return linked
+	}
+	linkedJID, err := types.ParseJID(linked)
+	if err != nil {
+		return ""
+	}
+	lid := wa.ResolvePNToLID(ctx, linkedJID)
+	if lid.IsEmpty() || lid.Server != types.HiddenUserServer {
+		return ""
+	}
+	return lid.String()
 }
 
 func executeDelegatedPoll(ctx context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {

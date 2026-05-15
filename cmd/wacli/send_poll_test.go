@@ -15,6 +15,12 @@ type recordingPollSender struct {
 	calls []recordingPollCall
 }
 
+type fakeOutboundPollIdentity struct {
+	linked string
+	group  *types.GroupInfo
+	lid    types.JID
+}
+
 type recordingPollCall struct {
 	to         types.JID
 	name       string
@@ -32,6 +38,18 @@ func (r *recordingPollSender) SendPoll(_ context.Context, to types.JID, name str
 		ephemeral:  ephemeral,
 	})
 	return "pollid", nil
+}
+
+func (f fakeOutboundPollIdentity) LinkedJID() string {
+	return f.linked
+}
+
+func (f fakeOutboundPollIdentity) ResolvePNToLID(_ context.Context, _ types.JID) types.JID {
+	return f.lid
+}
+
+func (f fakeOutboundPollIdentity) GetGroupInfo(_ context.Context, _ types.JID) (*types.GroupInfo, error) {
+	return f.group, nil
 }
 
 func TestValidatePollOptionsRequiresQuestion(t *testing.T) {
@@ -108,6 +126,38 @@ func TestSendPollMessageEphemeral(t *testing.T) {
 	}
 	if rec.calls[0].selectable != 2 {
 		t.Fatalf("selectable = %d", rec.calls[0].selectable)
+	}
+}
+
+func TestOutboundPollSenderJIDUsesGroupLIDAddressing(t *testing.T) {
+	group := types.NewJID("120363001234567890", types.GroupServer)
+	pn := types.NewJID("15551234567", types.DefaultUserServer)
+	lid := types.NewJID("999123456789", types.HiddenUserServer)
+	wa := fakeOutboundPollIdentity{
+		linked: pn.String(),
+		group:  &types.GroupInfo{AddressingMode: types.AddressingModeLID},
+		lid:    lid,
+	}
+
+	got := outboundPollSenderJID(context.Background(), wa, group)
+	if got != lid.String() {
+		t.Fatalf("sender = %q, want %q", got, lid.String())
+	}
+}
+
+func TestOutboundPollSenderJIDKeepsPNForPNAddressedGroup(t *testing.T) {
+	group := types.NewJID("120363001234567890", types.GroupServer)
+	pn := types.NewJID("15551234567", types.DefaultUserServer)
+	lid := types.NewJID("999123456789", types.HiddenUserServer)
+	wa := fakeOutboundPollIdentity{
+		linked: pn.String(),
+		group:  &types.GroupInfo{AddressingMode: types.AddressingModePN},
+		lid:    lid,
+	}
+
+	got := outboundPollSenderJID(context.Background(), wa, group)
+	if got != pn.String() {
+		t.Fatalf("sender = %q, want %q", got, pn.String())
 	}
 }
 

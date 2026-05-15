@@ -134,6 +134,17 @@ func TestMigrateLIDToPNMergesChatsAndMessages(t *testing.T) {
 		t.Fatalf("UpsertPoll lid: %v", err)
 	}
 	if err := db.UpsertPoll(Poll{
+		ChatJID:         pn,
+		MsgID:           "poll",
+		SenderJID:       pn,
+		Question:        "Dinner?",
+		Options:         []string{"yes", "no", "maybe"},
+		SelectableCount: 1,
+		CreatedAt:       base.Add(9 * time.Second),
+	}); err != nil {
+		t.Fatalf("UpsertPoll pn: %v", err)
+	}
+	if err := db.UpsertPoll(Poll{
 		ChatJID:         group,
 		MsgID:           "group-poll",
 		SenderJID:       lid,
@@ -181,7 +192,7 @@ func TestMigrateLIDToPNMergesChatsAndMessages(t *testing.T) {
 	if got := countRows(t, db.sql, "SELECT COUNT(*) FROM messages WHERE sender_jid = ?", lid); got != 0 {
 		t.Fatalf("lid sender rows = %d, want 0", got)
 	}
-	if got := countRows(t, db.sql, "SELECT COUNT(*) FROM polls WHERE chat_jid = ? OR sender_jid = ?", lid, lid); got != 0 {
+	if got := countRows(t, db.sql, "SELECT COUNT(*) FROM polls WHERE chat_jid = ? OR (sender_jid = ? AND chat_jid NOT GLOB '*@g.us')", lid, lid); got != 0 {
 		t.Fatalf("lid poll rows = %d, want 0", got)
 	}
 	if got := countRows(t, db.sql, "SELECT COUNT(*) FROM poll_votes WHERE chat_jid = ? OR voter_jid = ?", lid, lid); got != 0 {
@@ -231,12 +242,15 @@ func TestMigrateLIDToPNMergesChatsAndMessages(t *testing.T) {
 	if poll.SenderJID != pn {
 		t.Fatalf("migrated poll sender = %q, want %q", poll.SenderJID, pn)
 	}
+	if !reflect.DeepEqual(poll.Options, []string{"yes", "no", "maybe"}) {
+		t.Fatalf("migrated poll options = %#v, want yes/no/maybe", poll.Options)
+	}
 	groupPoll, err := db.GetPoll(group, "group-poll")
 	if err != nil {
 		t.Fatalf("GetPoll group: %v", err)
 	}
-	if groupPoll.SenderJID != pn {
-		t.Fatalf("group poll sender = %q, want %q", groupPoll.SenderJID, pn)
+	if groupPoll.SenderJID != lid {
+		t.Fatalf("group poll sender = %q, want %q", groupPoll.SenderJID, lid)
 	}
 	votes, err := db.ListPollVotes(pn, "poll")
 	if err != nil {
