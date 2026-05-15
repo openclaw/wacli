@@ -5,6 +5,7 @@
 ### Added
 
 - Docker: add a local image with `/data` persistence, bundled `ffmpeg`, and Docker CI smoke coverage.
+- Polls: add sending, voting, local result inspection, and sync persistence for WhatsApp polls. (#230 - thanks @Ortes)
 - Send: add opt-in `send text --ephemeral` wrapping for disappearing-message chats. (#227 - thanks @AndroidPoet)
 
 ### Security

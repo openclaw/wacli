@@ -1,6 +1,6 @@
 # send
 
-Read when: sending text, files, stickers, quoted replies, or reactions.
+Read when: sending text, files, stickers, polls, quoted replies, or reactions.
 
 `wacli send` requires authentication, a live connection, and writable mode. Send attempts are bounded and retry once after reconnect for known stale-session/usync timeout failures. `Sent to ...` and JSON `sent: true` mean WhatsApp accepted the send request and returned a message ID; they do not confirm recipient delivery. After a successful send, wacli keeps the connection alive briefly so whatsmeow can handle retry receipts from devices that could not decrypt the first copy. Repeated send commands within 5 seconds print a stderr warning so tight loops make WhatsApp rate-limit/account-risk visible.
 
@@ -14,6 +14,10 @@ wacli send file --to RECIPIENT --file PATH [--pick N] [--caption TEXT] [--filena
 wacli send sticker --to RECIPIENT --file PATH [--pick N] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
 wacli send voice --to RECIPIENT --file PATH [--pick N] [--mime TYPE] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
 wacli send react --to PHONE_OR_JID --id MSG_ID [--reaction TEXT] [--sender JID] [--post-send-wait 2s]
+wacli send poll --to RECIPIENT --question TEXT --option TEXT --option TEXT [--multi N] [--ephemeral] [--post-send-wait 2s]
+wacli poll vote --to RECIPIENT --id MSG_ID --option TEXT [--option TEXT] [--sender JID] [--post-send-wait 2s]
+wacli poll show --to RECIPIENT --id MSG_ID [--json]
+wacli polls list [--chat RECIPIENT] [--limit N] [--json]
 ```
 
 ## Recipients
@@ -39,6 +43,16 @@ wacli send react --to PHONE_OR_JID --id MSG_ID [--reaction TEXT] [--sender JID] 
 - Sent reactions are stored locally immediately, including reaction target and display text.
 - For group reactions, pass `--sender` for the original message sender.
 - Use `--post-send-wait 0` to disable the retry-receipt grace window for latency-sensitive scripts.
+
+## Polls
+
+- `send poll` accepts 2-12 repeatable `--option` values.
+- `--multi N` sets how many options a voter may select. The default is `1`.
+- Incoming polls and poll votes are stored during sync in the local poll tables.
+- `poll vote` validates selected options when the original poll is present in the local store.
+- For unsynced group polls, pass `--sender` with the poll author's JID.
+- `poll show` prints current aggregates and per-voter selections from the local store.
+- `polls list` shows recently synced or sent polls, optionally filtered with `--chat`.
 
 ## Files
 
@@ -69,4 +83,8 @@ wacli send file --to 1234567890 --file /tmp/report --filename report.pdf
 wacli send sticker --to 1234567890 --file ./sticker-512.webp
 wacli send voice --to 1234567890 --file ./voice.ogg
 wacli send react --to 1234567890 --id ABC123 --reaction "❤️"
+wacli send poll --to "Family" --question "Dinner?" --option "Pizza" --option "Sushi" --multi 1
+wacli poll vote --to "Family" --id ABC123 --option "Pizza"
+wacli poll show --to "Family" --id ABC123 --json
+wacli polls list --chat "Family" --limit 10
 ```

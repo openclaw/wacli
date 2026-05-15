@@ -82,6 +82,7 @@ func newSendPollCmd(flags *rootFlags) *cobra.Command {
 			if err := a.Connect(ctx, false, nil); err != nil {
 				return err
 			}
+			toJID = warmupRecipient(ctx, a.WA(), toJID, os.Stderr)
 			if err := warnRapidSendIfNeeded(a.StoreDir(), time.Now().UTC(), os.Stderr); err != nil {
 				return err
 			}
@@ -191,6 +192,7 @@ func executeDelegatedPoll(ctx context.Context, a *app.App, req sendDelegateReque
 	if err != nil {
 		return sendDelegateResponse{}, err
 	}
+	toJID = warmupDelegatedRecipient(ctx, a, toJID)
 	if err := warnRapidSendIfNeeded(a.StoreDir(), time.Now().UTC(), os.Stderr); err != nil {
 		return sendDelegateResponse{}, err
 	}

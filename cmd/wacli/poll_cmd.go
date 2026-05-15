@@ -99,6 +99,7 @@ func newPollVoteCmd(flags *rootFlags) *cobra.Command {
 			if err := a.Connect(ctx, false, nil); err != nil {
 				return err
 			}
+			toJID = warmupRecipient(ctx, a.WA(), toJID, os.Stderr)
 
 			info, knownOptions, err := buildPollVoteInfo(a, toJID, msgID, senderOverride)
 			if err != nil {
@@ -306,6 +307,7 @@ func executeDelegatedPollVote(ctx context.Context, a *app.App, req sendDelegateR
 	if err != nil {
 		return sendDelegateResponse{}, err
 	}
+	toJID = warmupDelegatedRecipient(ctx, a, toJID)
 	info, knownOptions, err := buildPollVoteInfo(a, toJID, req.ID, req.Sender)
 	if err != nil {
 		return sendDelegateResponse{}, err
