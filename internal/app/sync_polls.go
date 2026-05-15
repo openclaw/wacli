@@ -223,6 +223,12 @@ func (a *App) upsertPollFromParsed(ctx context.Context, pm wa.ParsedMessage) {
 	senderJID := strings.TrimSpace(pm.SenderJID)
 	if jid, err := types.ParseJID(senderJID); err == nil && pm.Chat.Server != types.GroupServer {
 		senderJID = canonicalJIDString(a.canonicalStoreJID(ctx, jid))
+	} else if err == nil && pm.FromMe && jid.Server == types.DefaultUserServer {
+		if info, infoErr := a.wa.GetGroupInfo(ctx, pm.Chat); infoErr == nil && info != nil && info.AddressingMode == types.AddressingModeLID {
+			if lid := a.wa.ResolvePNToLID(ctx, jid); !lid.IsEmpty() && lid.Server == types.HiddenUserServer {
+				senderJID = canonicalJIDString(lid)
+			}
+		}
 	}
 	if err := a.db.UpsertPoll(store.Poll{
 		ChatJID:         chatJID,

@@ -204,6 +204,55 @@ func TestHistorySyncStoresWrappedSelfPollWithLinkedSender(t *testing.T) {
 	}
 }
 
+func TestHistorySyncStoresSelfGroupPollWithLIDSender(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	group := types.JID{User: "120363001234567890", Server: types.GroupServer}
+	ownPN := types.JID{User: "1234567890", Server: types.DefaultUserServer}
+	ownLID := types.JID{User: "999123456789", Server: types.HiddenUserServer}
+	f.groups[group] = &types.GroupInfo{JID: group, AddressingMode: types.AddressingModeLID}
+	f.lids[ownLID] = ownPN
+
+	created := time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)
+	hist := &waWeb.WebMessageInfo{
+		Key: &waCommon.MessageKey{
+			RemoteJID: proto.String(group.String()),
+			FromMe:    proto.Bool(true),
+			ID:        proto.String("POLL-GROUP-HIST"),
+		},
+		MessageTimestamp: proto.Uint64(uint64(created.Unix())),
+		Message: &waProto.Message{
+			PollCreationMessageV3: &waProto.PollCreationMessage{
+				Name:    proto.String("Group history?"),
+				Options: []*waProto.PollCreationMessage_Option{{OptionName: proto.String("Yes")}, {OptionName: proto.String("No")}},
+			},
+		},
+	}
+	history := &events.HistorySync{
+		Data: &waHistorySync.HistorySync{
+			SyncType: waHistorySync.HistorySync_FULL.Enum(),
+			Conversations: []*waHistorySync.Conversation{{
+				ID:       proto.String(group.String()),
+				Messages: []*waHistorySync.HistorySyncMsg{{Message: hist}},
+			}},
+		},
+	}
+
+	var messagesStored atomic.Int64
+	var lastEvent atomic.Int64
+	a.handleHistorySync(context.Background(), SyncOptions{}, history, &messagesStored, &lastEvent, func(string, string) {})
+
+	poll, err := a.db.GetPoll(group.String(), "POLL-GROUP-HIST")
+	if err != nil {
+		t.Fatalf("GetPoll: %v", err)
+	}
+	if poll.SenderJID != ownLID.String() {
+		t.Fatalf("SenderJID = %q, want LID %q", poll.SenderJID, ownLID.String())
+	}
+}
+
 func TestHistorySyncStoresPollVoteBeforeCreation(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
