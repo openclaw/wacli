@@ -10,6 +10,7 @@
 ### Fixed
 
 - History: unwrap edited WhatsApp messages during history sync and backfill so stored/searchable text shows the edited body instead of `(message)`. (#246 - thanks @hiasinho)
+- Polls: use WhatsApp's single-select poll creation field for outbound single-select polls and preserve unmatched poll vote hashes in `poll show --json`.
 - Sync: canonicalize `@lid` chat JIDs before enqueuing media downloads so `sync --follow --download-media` finds the correct DB row for live one-to-one messages. (#244 - thanks @Daniel1of1)
 
 ## 0.9.1 - 2026-05-15

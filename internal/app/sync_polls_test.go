@@ -486,6 +486,19 @@ func TestLiveSyncDecryptsAndStoresPollVote(t *testing.T) {
 	_ = options
 }
 
+func TestMatchPollOptionsPreservesUnknownHashes(t *testing.T) {
+	knownHash := whatsmeow.HashPollOptions([]string{"Yes"})[0]
+	unknownHash := []byte{0, 1, 2, 3}
+
+	matched := matchPollOptions([]string{"Yes", "No"}, [][]byte{knownHash, unknownHash})
+	if !sameStringSet(matched.Selected, []string{"Yes"}) {
+		t.Fatalf("selected = %v", matched.Selected)
+	}
+	if !sameStringSet(matched.UnknownHashes, []string{"00010203"}) {
+		t.Fatalf("unknown hashes = %v", matched.UnknownHashes)
+	}
+}
+
 func TestLiveSyncKeepsNewerSameSecondPollVote(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()

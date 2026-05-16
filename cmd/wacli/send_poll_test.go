@@ -308,3 +308,34 @@ func TestGetPollForShowFindsNonADChat(t *testing.T) {
 		t.Fatalf("votes = %+v", votes)
 	}
 }
+
+func TestPollShowPayloadIncludesUnknownVoteHashes(t *testing.T) {
+	poll := store.Poll{
+		ChatJID:         "chat@s.whatsapp.net",
+		MsgID:           "poll-id",
+		Question:        "Dinner?",
+		Options:         []string{"Yes", "No"},
+		SelectableCount: 1,
+		CreatedAt:       time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC),
+	}
+	votes := []store.PollVote{{
+		ChatJID:       poll.ChatJID,
+		PollMsgID:     poll.MsgID,
+		VoterJID:      "15557654321@s.whatsapp.net",
+		VoteMsgID:     "vote-id",
+		Selected:      []string{"Yes"},
+		UnknownHashes: []string{"001122"},
+		VotedAt:       time.Date(2026, 5, 9, 12, 1, 0, 0, time.UTC),
+	}}
+
+	payload := pollShowPayload(nil, context.Background(), poll, votes, aggregatePollVotes(poll.Options, votes))
+	if len(payload.Voters) != 1 {
+		t.Fatalf("voter count = %d", len(payload.Voters))
+	}
+	if !reflect.DeepEqual(payload.Voters[0].UnknownHashes, []string{"001122"}) {
+		t.Fatalf("unknown hashes = %#v", payload.Voters[0].UnknownHashes)
+	}
+	if payload.Aggregates["Yes"] != 1 || payload.Aggregates["No"] != 0 {
+		t.Fatalf("aggregates = %#v", payload.Aggregates)
+	}
+}

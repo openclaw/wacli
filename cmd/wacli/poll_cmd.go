@@ -494,10 +494,11 @@ func aggregatePollVotes(options []string, votes []store.PollVote) map[string]int
 }
 
 type pollVoterPayload struct {
-	JID      string   `json:"jid"`
-	Name     string   `json:"name,omitempty"`
-	Selected []string `json:"selected"`
-	VotedAt  string   `json:"voted_at"`
+	JID           string   `json:"jid"`
+	Name          string   `json:"name,omitempty"`
+	Selected      []string `json:"selected"`
+	UnknownHashes []string `json:"unknown_hashes,omitempty"`
+	VotedAt       string   `json:"voted_at"`
 }
 
 type pollShowJSON struct {
@@ -527,10 +528,11 @@ func pollShowPayload(a *app.App, ctx context.Context, poll store.Poll, votes []s
 	for _, v := range votes {
 		name := resolveVoterName(a, ctx, v.VoterJID)
 		out.Voters = append(out.Voters, pollVoterPayload{
-			JID:      v.VoterJID,
-			Name:     name,
-			Selected: v.Selected,
-			VotedAt:  v.VotedAt.Format(time.RFC3339),
+			JID:           v.VoterJID,
+			Name:          name,
+			Selected:      v.Selected,
+			UnknownHashes: v.UnknownHashes,
+			VotedAt:       v.VotedAt.Format(time.RFC3339),
 		})
 	}
 	return out

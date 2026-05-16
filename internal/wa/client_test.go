@@ -86,6 +86,67 @@ func TestWrapEphemeralPollMessagePreservesSecretOnOuterMessage(t *testing.T) {
 	}
 }
 
+func TestBuildPollCreationMessageSelectsVersion(t *testing.T) {
+	tests := []struct {
+		name           string
+		selectable     int
+		announcement   bool
+		wantBase       bool
+		wantV2         bool
+		wantV3         bool
+		wantSelectable uint32
+	}{
+		{name: "multi base", selectable: 2, wantBase: true, wantSelectable: 2},
+		{name: "single v3", selectable: 1, wantV3: true, wantSelectable: 1},
+		{name: "announcement v2", selectable: 1, announcement: true, wantV2: true, wantSelectable: 1},
+		{name: "zero stays base", selectable: 0, wantBase: true, wantSelectable: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := buildPollCreationMessage("Lunch?", []string{"A", "B"}, tt.selectable, tt.announcement)
+			if got := msg.GetPollCreationMessage() != nil; got != tt.wantBase {
+				t.Fatalf("base = %t, want %t", got, tt.wantBase)
+			}
+			if got := msg.GetPollCreationMessageV2() != nil; got != tt.wantV2 {
+				t.Fatalf("v2 = %t, want %t", got, tt.wantV2)
+			}
+			if got := msg.GetPollCreationMessageV3() != nil; got != tt.wantV3 {
+				t.Fatalf("v3 = %t, want %t", got, tt.wantV3)
+			}
+			creation := pickOutboundPollCreation(msg)
+			if creation.GetName() != "Lunch?" {
+				t.Fatalf("name = %q", creation.GetName())
+			}
+			if got := creation.GetSelectableOptionsCount(); got != tt.wantSelectable {
+				t.Fatalf("selectable = %d, want %d", got, tt.wantSelectable)
+			}
+			if len(msg.GetMessageContextInfo().GetMessageSecret()) != 32 {
+				t.Fatalf("message secret length = %d, want 32", len(msg.GetMessageContextInfo().GetMessageSecret()))
+			}
+		})
+	}
+}
+
+func TestIsCommunityAnnouncementGroup(t *testing.T) {
+	tests := []struct {
+		name string
+		info *types.GroupInfo
+		want bool
+	}{
+		{name: "nil"},
+		{name: "regular announce", info: &types.GroupInfo{GroupAnnounce: types.GroupAnnounce{IsAnnounce: true}}},
+		{name: "community parent not announce", info: &types.GroupInfo{GroupParent: types.GroupParent{IsParent: true}}},
+		{name: "community announcement", info: &types.GroupInfo{GroupAnnounce: types.GroupAnnounce{IsAnnounce: true}, GroupParent: types.GroupParent{IsParent: true}}, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isCommunityAnnouncementGroup(tt.info); got != tt.want {
+				t.Fatalf("isCommunityAnnouncementGroup = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRewritePollVoteInfoForLIDRewritesDM(t *testing.T) {
 	chat := types.NewJID("15551234567", types.DefaultUserServer)
 	sender := types.NewJID("15557654321", types.DefaultUserServer)

@@ -49,10 +49,11 @@ wacli polls list [--chat RECIPIENT] [--limit N] [--json]
 
 - `send poll` accepts 2-12 repeatable `--option` values.
 - `--multi N` sets how many options a voter may select. The default is `1`.
+- Outbound single-select polls use WhatsApp's V3 poll creation field. Multi-select polls use the base poll creation field. Community announcement groups use V2 when live group metadata identifies the target as both announce-only and a community parent.
 - Incoming polls and poll votes are stored during sync in the local poll tables.
 - `poll vote` validates selected options when the original poll is present in the local store.
 - For unsynced group polls, pass `--sender` with the poll author's JID.
-- `poll show` prints current aggregates and per-voter selections from the local store.
+- `poll show` prints current aggregates and per-voter selections from the local store. JSON output includes `unknown_hashes` for vote hashes that could not be matched to a stored option.
 - `polls list` shows recently synced or sent polls, optionally filtered with `--chat`.
 
 ## Status broadcasts

@@ -24,12 +24,13 @@ type Poll struct {
 
 // PollVote represents one voter's latest vote on a poll.
 type PollVote struct {
-	ChatJID   string
-	PollMsgID string
-	VoterJID  string
-	VoteMsgID string
-	Selected  []string
-	VotedAt   time.Time
+	ChatJID       string
+	PollMsgID     string
+	VoterJID      string
+	VoteMsgID     string
+	Selected      []string
+	UnknownHashes []string
+	VotedAt       time.Time
 }
 
 // PollListFilter narrows down polls returned by ListPolls.
@@ -222,7 +223,7 @@ func (d *DB) UpsertPollVote(v PollVote) error {
 	if v.Selected == nil {
 		v.Selected = []string{}
 	}
-	selJSON, err := json.Marshal(v.Selected)
+	selJSON, err := marshalPollVoteSelection(v)
 	if err != nil {
 		return fmt.Errorf("marshal selected: %w", err)
 	}
@@ -393,11 +394,46 @@ func pollVotesFromRows(rows []storedb.PollVote) ([]PollVote, error) {
 			VotedAt:   time.UnixMilli(row.Ts).UTC(),
 		}
 		if row.SelectedOptionsJson != "" {
-			if err := json.Unmarshal([]byte(row.SelectedOptionsJson), &v.Selected); err != nil {
+			if err := unmarshalPollVoteSelection(row.SelectedOptionsJson, &v); err != nil {
 				return nil, fmt.Errorf("unmarshal selected: %w", err)
 			}
 		}
 		out = append(out, v)
 	}
 	return out, nil
+}
+
+type pollVoteSelectionJSON struct {
+	Selected      []string `json:"selected"`
+	UnknownHashes []string `json:"unknown_hashes,omitempty"`
+}
+
+func marshalPollVoteSelection(v PollVote) (string, error) {
+	if len(v.UnknownHashes) == 0 {
+		raw, err := json.Marshal(v.Selected)
+		return string(raw), err
+	}
+	raw, err := json.Marshal(pollVoteSelectionJSON{
+		Selected:      v.Selected,
+		UnknownHashes: v.UnknownHashes,
+	})
+	return string(raw), err
+}
+
+func unmarshalPollVoteSelection(raw string, v *PollVote) error {
+	var selected []string
+	if err := json.Unmarshal([]byte(raw), &selected); err == nil {
+		v.Selected = selected
+		return nil
+	}
+	var wrapped pollVoteSelectionJSON
+	if err := json.Unmarshal([]byte(raw), &wrapped); err != nil {
+		return err
+	}
+	v.Selected = wrapped.Selected
+	v.UnknownHashes = wrapped.UnknownHashes
+	if v.Selected == nil {
+		v.Selected = []string{}
+	}
+	return nil
 }

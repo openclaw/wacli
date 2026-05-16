@@ -2,6 +2,7 @@ package wa
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"os"
 	"strings"
@@ -248,7 +249,11 @@ func (c *Client) SendPoll(ctx context.Context, to types.JID, name string, option
 	if cli == nil || !cli.IsConnected() {
 		return "", fmt.Errorf("not connected")
 	}
-	msg := cli.BuildPollCreation(name, options, selectable)
+	var groupInfo *types.GroupInfo
+	if to.Server == types.GroupServer {
+		groupInfo, _ = cli.GetGroupInfo(ctx, to)
+	}
+	msg := buildPollCreationMessage(name, options, selectable, isCommunityAnnouncementGroup(groupInfo))
 	if ephemeral {
 		msg = wrapEphemeralPollMessage(msg)
 	}
@@ -257,6 +262,54 @@ func (c *Client) SendPoll(ctx context.Context, to types.JID, name string, option
 		return "", err
 	}
 	return resp.ID, nil
+}
+
+func buildPollCreationMessage(name string, optionNames []string, selectableOptionCount int, toAnnouncementGroup bool) *waE2E.Message {
+	msgSecret := make([]byte, 32)
+	_, _ = rand.Read(msgSecret)
+	if selectableOptionCount < 0 || selectableOptionCount > len(optionNames) {
+		selectableOptionCount = 0
+	}
+	options := make([]*waE2E.PollCreationMessage_Option, len(optionNames))
+	for i, option := range optionNames {
+		options[i] = &waE2E.PollCreationMessage_Option{OptionName: proto.String(option)}
+	}
+	creation := &waE2E.PollCreationMessage{
+		Name:                   proto.String(name),
+		Options:                options,
+		SelectableOptionsCount: proto.Uint32(uint32(selectableOptionCount)),
+	}
+	msg := &waE2E.Message{
+		MessageContextInfo: &waE2E.MessageContextInfo{
+			MessageSecret: msgSecret,
+		},
+	}
+	switch {
+	case toAnnouncementGroup:
+		msg.PollCreationMessageV2 = creation
+	case selectableOptionCount == 1:
+		msg.PollCreationMessageV3 = creation
+	default:
+		msg.PollCreationMessage = creation
+	}
+	return msg
+}
+
+func isCommunityAnnouncementGroup(info *types.GroupInfo) bool {
+	return info != nil && info.IsAnnounce && info.IsParent
+}
+
+func pickOutboundPollCreation(msg *waE2E.Message) *waE2E.PollCreationMessage {
+	if msg == nil {
+		return nil
+	}
+	if msg.GetPollCreationMessage() != nil {
+		return msg.GetPollCreationMessage()
+	}
+	if msg.GetPollCreationMessageV2() != nil {
+		return msg.GetPollCreationMessageV2()
+	}
+	return msg.GetPollCreationMessageV3()
 }
 
 func wrapEphemeralPollMessage(msg *waE2E.Message) *waE2E.Message {

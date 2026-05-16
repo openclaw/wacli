@@ -147,6 +147,33 @@ func TestUpsertPollVoteReplacesPriorVote(t *testing.T) {
 	}
 }
 
+func TestUpsertPollVoteRoundTripsUnknownHashes(t *testing.T) {
+	db := openTestDB(t)
+
+	in := PollVote{
+		ChatJID:       "chat@s.whatsapp.net",
+		PollMsgID:     "P1",
+		VoterJID:      "voter@s.whatsapp.net",
+		VoteMsgID:     "V1",
+		Selected:      []string{"known"},
+		UnknownHashes: []string{"001122"},
+		VotedAt:       time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+	}
+	if err := db.UpsertPollVote(in); err != nil {
+		t.Fatal(err)
+	}
+	votes, err := db.ListPollVotes(in.ChatJID, in.PollMsgID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(votes) != 1 {
+		t.Fatalf("vote count = %d", len(votes))
+	}
+	if !reflect.DeepEqual(votes[0].Selected, in.Selected) || !reflect.DeepEqual(votes[0].UnknownHashes, in.UnknownHashes) {
+		t.Fatalf("vote = %+v", votes[0])
+	}
+}
+
 func TestUpsertPollVoteKeepsNewerVote(t *testing.T) {
 	db := openTestDB(t)
 

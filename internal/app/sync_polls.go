@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
@@ -327,12 +328,13 @@ func (a *App) handlePollVote(ctx context.Context, pm wa.ParsedMessage, evt *even
 	}
 
 	if err := a.db.UpsertPollVote(store.PollVote{
-		ChatJID:   chatJID,
-		PollMsgID: pollMsgID,
-		VoterJID:  voterJID,
-		VoteMsgID: pm.ID,
-		Selected:  selected,
-		VotedAt:   votedAt,
+		ChatJID:       chatJID,
+		PollMsgID:     pollMsgID,
+		VoterJID:      voterJID,
+		VoteMsgID:     pm.ID,
+		Selected:      selected.Selected,
+		UnknownHashes: selected.UnknownHashes,
+		VotedAt:       votedAt,
 	}); err != nil {
 		a.emitWarning(
 			"poll_vote_store_failed",
@@ -417,21 +419,30 @@ func resolvePollAddKey(pm wa.ParsedMessage, add *wa.PollAddOptionRef) (string, s
 	return chatJID, pollMsgID, nil
 }
 
+type pollOptionMatches struct {
+	Selected      []string
+	UnknownHashes []string
+}
+
 // matchPollOptions maps SHA-256 vote hashes back to option names by hashing
 // the stored option list (whatsmeow.HashPollOptions) and matching by bytes.
-// Unknown hashes are dropped silently.
-func matchPollOptions(stored []string, hashes [][]byte) []string {
+func matchPollOptions(stored []string, hashes [][]byte) pollOptionMatches {
 	if len(hashes) == 0 {
-		return []string{}
+		return pollOptionMatches{Selected: []string{}}
 	}
 	storedHashes := whatsmeow.HashPollOptions(stored)
-	out := make([]string, 0, len(hashes))
+	out := pollOptionMatches{Selected: make([]string, 0, len(hashes))}
 	for _, h := range hashes {
+		matched := false
 		for i, sh := range storedHashes {
 			if bytes.Equal(h, sh) {
-				out = append(out, stored[i])
+				out.Selected = append(out.Selected, stored[i])
+				matched = true
 				break
 			}
+		}
+		if !matched {
+			out.UnknownHashes = append(out.UnknownHashes, hex.EncodeToString(h))
 		}
 	}
 	return out
