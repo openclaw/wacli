@@ -877,7 +877,8 @@ SET deleted_for_me = 1,
     file_enc_sha256 = NULL,
     file_length = NULL,
     local_path = NULL,
-    downloaded_at = NULL
+    downloaded_at = NULL,
+    edited = 0
 WHERE chat_jid = ? AND msg_id = ?
 `
 
@@ -911,7 +912,8 @@ SET revoked = 1,
     file_enc_sha256 = NULL,
     file_length = NULL,
     local_path = NULL,
-    downloaded_at = NULL
+    downloaded_at = NULL,
+    edited = 0
 WHERE chat_jid = ? AND msg_id = ?
 `
 
@@ -1382,7 +1384,8 @@ SET text = ?,
     local_path = NULL,
     downloaded_at = NULL,
     revoked = 0,
-    deleted_for_me = 0
+    deleted_for_me = 0,
+    edited = 1
 WHERE chat_jid = ? AND msg_id = ?
 `
 

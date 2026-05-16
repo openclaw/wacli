@@ -916,6 +916,22 @@ func TestMessageButtonsClearedOnUpdateText(t *testing.T) {
 	if len(msg.Buttons) != 0 {
 		t.Fatalf("expected buttons cleared after text edit, got %+v", msg.Buttons)
 	}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID:   chat,
+		MsgID:     "m1",
+		SenderJID: chat,
+		Timestamp: now,
+		Text:      "original",
+	}); err != nil {
+		t.Fatalf("UpsertMessage original after edit: %v", err)
+	}
+	msg, err = db.GetMessage(chat, "m1")
+	if err != nil {
+		t.Fatalf("GetMessage after original: %v", err)
+	}
+	if msg.Text != "edited" {
+		t.Fatalf("original upsert clobbered edited text: %q", msg.Text)
+	}
 }
 
 func TestUpdateMessageTextClearsMediaState(t *testing.T) {
