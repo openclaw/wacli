@@ -20,7 +20,8 @@ wacli groups prune [--days N] [--left-only=false|--include-active] [--dry-run] [
 
 ## Notes
 
-- `store stats` reads local counts for chats, groups, left groups, and messages.
+- `store stats` reads local counts for chats, groups, left groups, and normal chat messages.
+- Status broadcasts are persisted separately in `status_messages`; they are not chat rows and are not included in normal chat/message cleanup paths.
 - `store cleanup` removes chats whose known local activity is older than `--days` and deletes their messages through the SQLite chat/message cascade.
 - `chats cleanup --jid JID` removes one local chat row and its local messages.
 - `groups prune` removes local group metadata plus the matching local chat/messages for pruned group JIDs.

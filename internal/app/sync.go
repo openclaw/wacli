@@ -297,8 +297,10 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 	pm.Chat = a.canonicalStoreJID(ctx, pm.Chat)
 	chatJID := canonicalJIDString(pm.Chat)
 	chatName := a.wa.ResolveChatName(ctx, pm.Chat, pm.PushName)
-	if err := a.db.UpsertChat(chatJID, chatKind(pm.Chat), chatName, pm.Timestamp); err != nil {
-		return err
+	if pm.Chat != types.StatusBroadcastJID {
+		if err := a.db.UpsertChat(chatJID, chatKind(pm.Chat), chatName, pm.Timestamp); err != nil {
+			return err
+		}
 	}
 
 	// Best-effort: store contact info for DMs.
@@ -378,6 +380,26 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 		fileSha = pm.Media.FileSHA256
 		fileEncSha = pm.Media.FileEncSHA256
 		fileLen = pm.Media.FileLength
+	}
+
+	if pm.Chat == types.StatusBroadcastJID {
+		return a.db.UpsertStatusMessage(store.UpsertStatusMessageParams{
+			MsgID:         pm.ID,
+			Timestamp:     pm.Timestamp,
+			FromMe:        pm.FromMe,
+			SenderJID:     senderJID,
+			SenderName:    senderName,
+			Text:          pm.Text,
+			MediaType:     mediaType,
+			MediaCaption:  caption,
+			Filename:      filename,
+			MimeType:      mimeType,
+			DirectPath:    directPath,
+			MediaKey:      mediaKey,
+			FileSHA256:    fileSha,
+			FileEncSHA256: fileEncSha,
+			FileLength:    fileLen,
+		})
 	}
 
 	displayText := a.buildDisplayText(ctx, pm)

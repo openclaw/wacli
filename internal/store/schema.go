@@ -96,6 +96,28 @@ const coreSchemaSQL = `
 	CREATE INDEX IF NOT EXISTS idx_messages_chat_ts ON messages(chat_jid, ts);
 	CREATE INDEX IF NOT EXISTS idx_messages_ts ON messages(ts);
 
+	CREATE TABLE IF NOT EXISTS status_messages (
+		rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+		msg_id TEXT NOT NULL UNIQUE,
+		ts INTEGER NOT NULL,
+		from_me INTEGER NOT NULL,
+		sender_jid TEXT,
+		sender_name TEXT,
+		text TEXT,
+		media_type TEXT,
+		media_caption TEXT,
+		filename TEXT,
+		mime_type TEXT,
+		direct_path TEXT,
+		media_key BLOB,
+		file_sha256 BLOB,
+		file_enc_sha256 BLOB,
+		file_length INTEGER,
+		background_color TEXT,
+		font INTEGER
+	);
+	CREATE INDEX IF NOT EXISTS idx_status_messages_ts ON status_messages(ts);
+
 	CREATE TABLE IF NOT EXISTS call_events (
 		rowid INTEGER PRIMARY KEY AUTOINCREMENT,
 		chat_jid TEXT NOT NULL,
@@ -134,6 +156,39 @@ const coreSchemaSQL = `
 func migrateCoreSchema(d *DB) error {
 	if _, err := d.sql.Exec(coreSchemaSQL); err != nil {
 		return fmt.Errorf("create tables: %w", err)
+	}
+	if err := migrateStatusMessageMediaColumns(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+func migrateStatusMessageMediaColumns(d *DB) error {
+	columns := []struct {
+		name string
+		sql  string
+	}{
+		{"sender_jid", `ALTER TABLE status_messages ADD COLUMN sender_jid TEXT`},
+		{"sender_name", `ALTER TABLE status_messages ADD COLUMN sender_name TEXT`},
+		{"filename", `ALTER TABLE status_messages ADD COLUMN filename TEXT`},
+		{"mime_type", `ALTER TABLE status_messages ADD COLUMN mime_type TEXT`},
+		{"direct_path", `ALTER TABLE status_messages ADD COLUMN direct_path TEXT`},
+		{"media_key", `ALTER TABLE status_messages ADD COLUMN media_key BLOB`},
+		{"file_sha256", `ALTER TABLE status_messages ADD COLUMN file_sha256 BLOB`},
+		{"file_enc_sha256", `ALTER TABLE status_messages ADD COLUMN file_enc_sha256 BLOB`},
+		{"file_length", `ALTER TABLE status_messages ADD COLUMN file_length INTEGER`},
+	}
+	for _, col := range columns {
+		has, err := d.tableHasColumn("status_messages", col.name)
+		if err != nil {
+			return fmt.Errorf("inspect status_messages.%s: %w", col.name, err)
+		}
+		if has {
+			continue
+		}
+		if _, err := d.sql.Exec(col.sql); err != nil {
+			return fmt.Errorf("add status_messages.%s: %w", col.name, err)
+		}
 	}
 	return nil
 }

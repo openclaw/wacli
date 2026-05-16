@@ -105,6 +105,9 @@ Immediately after QR pairing success, `wacli auth` runs a bootstrap sync:
 - `messages`
   - `rowid` (PK), `chat_jid`, `msg_id`, `sender_jid`, `ts`, `from_me`, `text`, `display_text`, `revoked`, `deleted_for_me`, `media_type`, `media_caption`, `filename`, `mime_type`, `direct_path`, hashes/keys, …
   - unique constraint: (`chat_jid`, `msg_id`)
+- `status_messages`
+  - `rowid` (PK), `msg_id` (unique), `ts`, `from_me`, `sender_jid`, `sender_name`, `text`, `media_type`, `media_caption`, `filename`, `mime_type`, `direct_path`, hashes/keys, `background_color`, `font`, …
+  - status broadcasts use WhatsApp's `status@broadcast` target and are kept out of normal chat `messages`.
 - `contact_aliases` (local management)
   - `jid` (PK/FK), `alias`, `notes`, `tags` (or join table)
 
@@ -208,12 +211,14 @@ WhatsApp Web history is best-effort. If you want to try fetching *older* message
 - `wacli send sticker --to RECIPIENT --file PATH [--pick N] [--reply-to MSG_ID] [--reply-to-sender JID]`
 - `wacli send voice --to RECIPIENT --file PATH [--mime TYPE] [--pick N] [--reply-to MSG_ID] [--reply-to-sender JID]`
 - `wacli send react --to PHONE_OR_JID --id MSG_ID [--reaction TEXT] [--sender JID]`
+- `wacli send status [--message TEXT] [--file PATH] [--mime TYPE] [--background-color '#RRGGBB'] [--font N]`
 
 `RECIPIENT` accepts a JID, phone number, channel JID (`...@newsletter`), or synced contact/group/chat name. If a name is ambiguous, interactive terminals prompt; scripts can pass `--pick N`.
 Sending to channels requires channel posting permission. File sends to channels use WhatsApp's unencrypted newsletter media upload and pass the returned media handle through `whatsmeow.SendRequestExtra`.
 Text sends automatically include a link preview for the first `http://` or `https://` URL unless `--no-preview` is passed.
 Voice notes require OGG/Opus audio and use optional `ffprobe`/`ffmpeg` metadata when available.
 Stickers require 512x512 WebP input and are stored locally as `sticker` media after sending. Static stickers are capped at 100 KiB; animated stickers are capped at 500 KiB and carry animation metadata in the outgoing proto.
+Status broadcasts are sent to `status@broadcast`; text statuses can carry background color and font metadata, and media statuses reuse the file upload path with optional captions.
 
 Send-file uploads and media downloads are capped at 100 MiB to avoid reading
 or writing unexpectedly large payloads in one command.

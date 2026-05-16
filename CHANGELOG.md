@@ -2,6 +2,11 @@
 
 ## 0.9.2 - Unreleased
 
+### Added
+
+- Send: add `wacli send status` for WhatsApp status broadcasts, including text statuses with optional background/font and media statuses with captions.
+- Store: persist synced and locally sent status broadcasts separately in `status_messages` instead of mixing them into normal chat messages.
+
 ### Fixed
 
 - History: unwrap edited WhatsApp messages during history sync and backfill so stored/searchable text shows the edited body instead of `(message)`. (#246 - thanks @hiasinho)

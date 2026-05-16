@@ -775,6 +775,33 @@ func TestSyncDownloadsHistoryNotificationBeforeProcessing(t *testing.T) {
 	}
 }
 
+func TestStoreParsedStatusMessageUsesSeparateStatusTable(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	err := a.storeParsedMessage(context.Background(), wa.ParsedMessage{
+		Chat:      types.StatusBroadcastJID,
+		ID:        "status-incoming",
+		SenderJID: "15551234567@s.whatsapp.net",
+		Timestamp: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+		Text:      "incoming status",
+	})
+	if err != nil {
+		t.Fatalf("storeParsedMessage: %v", err)
+	}
+	if _, err := a.db.GetMessage(types.StatusBroadcastJID.String(), "status-incoming"); err == nil {
+		t.Fatalf("status retrieval was stored as a regular message")
+	}
+	status, err := a.db.GetStatusMessage("status-incoming")
+	if err != nil {
+		t.Fatalf("GetStatusMessage: %v", err)
+	}
+	if status.MsgID != "status-incoming" || status.Text != "incoming status" || status.SenderJID != "15551234567@s.whatsapp.net" {
+		t.Fatalf("unexpected status retrieval: %+v", status)
+	}
+}
+
 func TestStoreParsedMessageNormalizesDefaultUserADJIDs(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()

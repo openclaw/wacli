@@ -17,6 +17,7 @@ wacli [command] --help
 ```bash
 wacli help send
 wacli send text --help
+wacli send status --help
 wacli docs
 wacli groups participants add --help
 ```

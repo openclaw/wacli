@@ -3,6 +3,7 @@
 Read when: listing, searching, exporting, showing, or inspecting local message context.
 
 Most `wacli messages` commands read from the local store. `messages edit` and `messages delete` are remote WhatsApp mutations and require an authenticated, writable store.
+WhatsApp status broadcasts are stored separately in `status_messages`; they are not returned by `messages list`, `messages search`, or `messages export`.
 
 ## Commands
 

@@ -159,28 +159,47 @@ func sendFile(ctx context.Context, a interface {
 		return "", nil, err
 	}
 
-	chatName := a.WA().ResolveChatName(ctx, to, "")
-	kind := chatKindFromJID(to)
-	_ = a.DB().UpsertChat(to.String(), kind, chatName, now)
-	_ = a.DB().UpsertMessage(store.UpsertMessageParams{
-		ChatJID:       to.String(),
-		ChatName:      chatName,
-		MsgID:         id,
-		SenderJID:     "",
-		SenderName:    "me",
-		Timestamp:     now,
-		FromMe:        true,
-		Text:          opts.caption,
-		MediaType:     mediaType,
-		MediaCaption:  opts.caption,
-		Filename:      name,
-		MimeType:      mimeType,
-		DirectPath:    up.DirectPath,
-		MediaKey:      up.MediaKey,
-		FileSHA256:    up.FileSHA256,
-		FileEncSHA256: up.FileEncSHA256,
-		FileLength:    up.FileLength,
-	})
+	if to == types.StatusBroadcastJID {
+		_ = a.DB().UpsertStatusMessage(store.UpsertStatusMessageParams{
+			MsgID:         id,
+			Timestamp:     now,
+			FromMe:        true,
+			SenderName:    "me",
+			Text:          opts.caption,
+			MediaType:     mediaType,
+			MediaCaption:  opts.caption,
+			Filename:      name,
+			MimeType:      mimeType,
+			DirectPath:    up.DirectPath,
+			MediaKey:      up.MediaKey,
+			FileSHA256:    up.FileSHA256,
+			FileEncSHA256: up.FileEncSHA256,
+			FileLength:    up.FileLength,
+		})
+	} else {
+		chatName := a.WA().ResolveChatName(ctx, to, "")
+		kind := chatKindFromJID(to)
+		_ = a.DB().UpsertChat(to.String(), kind, chatName, now)
+		_ = a.DB().UpsertMessage(store.UpsertMessageParams{
+			ChatJID:       to.String(),
+			ChatName:      chatName,
+			MsgID:         id,
+			SenderJID:     "",
+			SenderName:    "me",
+			Timestamp:     now,
+			FromMe:        true,
+			Text:          opts.caption,
+			MediaType:     mediaType,
+			MediaCaption:  opts.caption,
+			Filename:      name,
+			MimeType:      mimeType,
+			DirectPath:    up.DirectPath,
+			MediaKey:      up.MediaKey,
+			FileSHA256:    up.FileSHA256,
+			FileEncSHA256: up.FileEncSHA256,
+			FileLength:    up.FileLength,
+		})
+	}
 
 	return id, map[string]string{
 		"name":      name,

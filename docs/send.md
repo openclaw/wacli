@@ -1,6 +1,6 @@
 # send
 
-Read when: sending text, files, stickers, polls, quoted replies, or reactions.
+Read when: sending text, files, stickers, polls, status broadcasts, quoted replies, or reactions.
 
 `wacli send` requires authentication, a live connection, and writable mode. Send attempts are bounded and retry once after reconnect for known stale-session/usync timeout failures. `Sent to ...` and JSON `sent: true` mean WhatsApp accepted the send request and returned a message ID; they do not confirm recipient delivery. After a successful send, wacli keeps the connection alive briefly so whatsmeow can handle retry receipts from devices that could not decrypt the first copy. Repeated send commands within 5 seconds print a stderr warning so tight loops make WhatsApp rate-limit/account-risk visible.
 
@@ -15,6 +15,7 @@ wacli send sticker --to RECIPIENT --file PATH [--pick N] [--reply-to MSG_ID] [--
 wacli send voice --to RECIPIENT --file PATH [--pick N] [--mime TYPE] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
 wacli send react --to PHONE_OR_JID --id MSG_ID [--reaction TEXT] [--sender JID] [--post-send-wait 2s]
 wacli send poll --to RECIPIENT --question TEXT --option TEXT --option TEXT [--multi N] [--ephemeral] [--post-send-wait 2s]
+wacli send status [--message TEXT] [--file PATH] [--mime TYPE] [--background-color '#RRGGBB'] [--font N] [--post-send-wait 2s]
 wacli poll vote --to RECIPIENT --id MSG_ID --option TEXT [--option TEXT] [--sender JID] [--post-send-wait 2s]
 wacli poll show --to RECIPIENT --id MSG_ID [--json]
 wacli polls list [--chat RECIPIENT] [--limit N] [--json]
@@ -54,6 +55,16 @@ wacli polls list [--chat RECIPIENT] [--limit N] [--json]
 - `poll show` prints current aggregates and per-voter selections from the local store.
 - `polls list` shows recently synced or sent polls, optionally filtered with `--chat`.
 
+## Status broadcasts
+
+- `send status` posts to WhatsApp's `status@broadcast` target.
+- `--message` or `--file` is required.
+- Text statuses use `--message`; media statuses use `--file` and can use `--message` as the caption.
+- Text statuses accept `--background-color` as `#RRGGBB` or `#AARRGGBB`.
+- Text statuses accept `--font N` to pass a WhatsApp text status font number.
+- Media statuses reuse the normal upload path, including MIME detection and `--mime` overrides.
+- Sent and synced statuses are stored in the local `status_messages` table, separate from normal chat `messages`.
+
 ## Files
 
 - File uploads are capped at 100 MiB.
@@ -84,6 +95,8 @@ wacli send sticker --to 1234567890 --file ./sticker-512.webp
 wacli send voice --to 1234567890 --file ./voice.ogg
 wacli send react --to 1234567890 --id ABC123 --reaction "❤️"
 wacli send poll --to "Family" --question "Dinner?" --option "Pizza" --option "Sushi" --multi 1
+wacli send status --message "available today" --background-color '#1f7a8c' --font 1
+wacli send status --file ./photo.jpg --message "new update"
 wacli poll vote --to "Family" --id ABC123 --option "Pizza"
 wacli poll show --to "Family" --id ABC123 --json
 wacli polls list --chat "Family" --limit 10

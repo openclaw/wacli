@@ -85,9 +85,12 @@ wacli send voice --to 1234567890 --file ./voice.ogg
 
 # React (omit --reaction for the default thumbs-up; use --reaction "" to clear)
 wacli send react --to 1234567890 --id <message-id> --reaction "🎉"
+
+# Post a WhatsApp status broadcast
+wacli send status --message "available today" --background-color '#1f7a8c'
 ```
 
-Recipient resolution and disambiguation (`--pick N`, ambiguous-name prompts), link-preview behavior, and post-send waits are documented in [Send](send.md).
+Recipient resolution and disambiguation (`--pick N`, ambiguous-name prompts), link-preview behavior, status broadcasts, and post-send waits are documented in [Send](send.md).
 
 ## 6. Backfill older history (optional, best-effort)
 

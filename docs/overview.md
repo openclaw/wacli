@@ -26,7 +26,7 @@ Read when: you need the user-facing command map, global flags, store model, or l
 - [sync](sync.md) - sync messages, contacts, groups, channels, and optional media.
 - [messages](messages.md) - list, search, show, and contextualize stored messages.
 - [calls](calls.md) - list stored WhatsApp call events.
-- [send](send.md) - send text, files, stickers, replies, and reactions.
+- [send](send.md) - send text, files, stickers, statuses, replies, and reactions.
 - [media](media.md) - download media attached to stored messages.
 - [contacts](contacts.md) - search contacts and manage local aliases/tags.
 - [contacts import-system](contacts-import-system.md) - import macOS Contacts names into local contact metadata.
@@ -51,6 +51,7 @@ wacli auth
 wacli sync --follow
 wacli messages search "meeting"
 wacli send text --to mom --message "hello"
+wacli send status --message "available today"
 ```
 
 ## Recipient formats

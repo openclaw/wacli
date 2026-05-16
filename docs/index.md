@@ -6,7 +6,7 @@ description: "wacli is a single Go CLI that pairs as a linked WhatsApp Web devic
 
 # wacli
 
-A script-friendly WhatsApp CLI built on [`whatsmeow`](https://github.com/tulir/whatsmeow). One binary pairs as a linked WhatsApp Web device, syncs messages into a local SQLite store, and exposes search, send, media, contact, and group commands with predictable output for terminals, shell pipelines, and coding agents.
+A script-friendly WhatsApp CLI built on [`whatsmeow`](https://github.com/tulir/whatsmeow). One binary pairs as a linked WhatsApp Web device, syncs messages and status broadcasts into a local SQLite store, and exposes search, send, media, contact, and group commands with predictable output for terminals, shell pipelines, and coding agents.
 
 ## Why wacli
 
@@ -25,7 +25,7 @@ A script-friendly WhatsApp CLI built on [`whatsmeow`](https://github.com/tulir/w
 - **Searching old chats.** Read [Sync](sync.md) for the sync model and [History](history.md) for coverage planning and on-demand backfill.
 - **Managing chat state.** Read [Chats](chats.md) for archive, pin, mute, and read/unread commands.
 - **Managing local storage.** Read [Store](store.md) for stats, dry-run cleanup, and local-only pruning.
-- **Sending from scripts.** Read [Send](send.md) for recipient resolution, channels, replies, mentions, files, and reactions.
+- **Sending from scripts.** Read [Send](send.md) for recipient resolution, channels, status broadcasts, replies, mentions, files, and reactions.
 - **Mirroring address-book names.** Read [Contacts import-system](contacts-import-system.md) to import macOS Contacts display names into local wacli metadata.
 - **Wiring up an agent.** Pair `--read-only`, `--json`, and `--events` from [Overview](overview.md); read [Doctor](doctor.md) for self-checks.
 - **Building companion tools.** Read [Companion integrations](integrations.md) for safe read-only SQLite and JSON integration patterns.

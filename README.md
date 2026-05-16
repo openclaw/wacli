@@ -9,8 +9,8 @@ Full documentation: **<https://wacli.sh>**
 ## Features
 
 - **Auth + sync** — QR pairing, one-shot or follow-mode sync, optional media downloads, optional signed webhook fan-out.
-- **Offline message store** — SQLite with FTS5 search (LIKE fallback), filterable by chat, sender, direction, time, and media type.
-- **Sending** — text with mentions/replies/link-previews, files (image/video/audio/document, ≤100 MiB), stickers, voice notes, reactions; rapid-send guardrails and retry-receipt grace.
+- **Offline message store** — SQLite with FTS5 search (LIKE fallback), filterable by chat, sender, direction, time, and media type, with status broadcasts stored separately.
+- **Sending** — text with mentions/replies/link-previews, files (image/video/audio/document, ≤100 MiB), stickers, voice notes, reactions, and status broadcasts; rapid-send guardrails and retry-receipt grace.
 - **History backfill** — best-effort per-chat requests to your primary device for older messages.
 - **Contacts / chats / groups / channels** — search, alias, tag, archive, pin, mute, mark-read, rename, prune, manage participants and invite links, send to channels.
 - **Diagnostics + safety** — `doctor`, read-only mode, store locks with owner reporting, panic recovery, bounded media queue, owner-only DB perms.
@@ -73,6 +73,7 @@ wacli messages search "meeting"
 # 4. Send
 wacli send text --to 1234567890 --message "hello"
 wacli send file --to mom --file ./pic.jpg --caption "hi"
+wacli send status --message "available today" --background-color '#1f7a8c'
 
 # 5. Diagnostics
 wacli doctor
@@ -80,7 +81,7 @@ wacli doctor
 
 Recipients accept a JID, phone number (E.164 or formatted), channel JID, or a synced contact/group/chat name. Ambiguous names prompt in a TTY; pass `--pick N` in scripts.
 
-More recipes — replies, mentions, stickers, voice, reactions, channels, history backfill, chat management — live in the [docs](https://wacli.sh).
+More recipes — replies, mentions, stickers, voice, reactions, statuses, channels, history backfill, chat management — live in the [docs](https://wacli.sh).
 
 ## Documentation
 

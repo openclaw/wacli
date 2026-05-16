@@ -25,7 +25,7 @@ Override with `--store DIR` or `WACLI_STORE_DIR`. Named accounts live in `config
 The store contains two SQLite databases:
 
 - `session.db`: owned by `whatsmeow`; contains linked-device identity and keys.
-- `wacli.db`: owned by `wacli`; contains chats, contacts, groups, messages, call events, media metadata, and local state.
+- `wacli.db`: owned by `wacli`; contains chats, contacts, groups, messages, status broadcasts, call events, media metadata, and local state.
 
 Companion tools should not read or write `session.db` unless they are explicitly working on WhatsApp session internals. Never write to `wacli.db` from a companion tool.
 
@@ -101,6 +101,15 @@ Recent WhatsApp call events:
 ```sql
 SELECT chat_jid, call_id, event_type, direction, media, outcome, duration_secs, ts
 FROM call_events
+ORDER BY ts DESC
+LIMIT 100;
+```
+
+Recent WhatsApp status broadcasts:
+
+```sql
+SELECT msg_id, sender_jid, sender_name, ts, text, media_type, media_caption
+FROM status_messages
 ORDER BY ts DESC
 LIMIT 100;
 ```
