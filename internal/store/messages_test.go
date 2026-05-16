@@ -349,6 +349,59 @@ func TestGetMessageReturnsRichDetails(t *testing.T) {
 	}
 }
 
+func TestUpsertMessagePreservesNewerContentFromOlderDuplicate(t *testing.T) {
+	db := openTestDB(t)
+	chat := "123@s.whatsapp.net"
+	base := time.Date(2024, 3, 2, 0, 0, 0, 0, time.UTC)
+	if err := db.UpsertChat(chat, "dm", "Alice", base); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID:      chat,
+		ChatName:     "Alice",
+		MsgID:        "mid",
+		SenderJID:    chat,
+		SenderName:   "Alice",
+		Timestamp:    base.Add(time.Minute),
+		Text:         "edited body",
+		DisplayText:  "edited body",
+		MediaType:    "image",
+		MediaCaption: "edited caption",
+		Filename:     "edited.jpg",
+	}); err != nil {
+		t.Fatalf("UpsertMessage newer: %v", err)
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID:      chat,
+		ChatName:     "Alice",
+		MsgID:        "mid",
+		SenderJID:    chat,
+		SenderName:   "Alice",
+		Timestamp:    base,
+		Text:         "original body",
+		DisplayText:  "original body",
+		MediaType:    "image",
+		MediaCaption: "original caption",
+		Filename:     "original.jpg",
+	}); err != nil {
+		t.Fatalf("UpsertMessage older duplicate: %v", err)
+	}
+
+	msg, err := db.GetMessage(chat, "mid")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if msg.Text != "edited body" || msg.DisplayText != "edited body" {
+		t.Fatalf("older duplicate clobbered text: %+v", msg)
+	}
+	if !msg.Timestamp.Equal(base.Add(time.Minute)) {
+		t.Fatalf("timestamp = %s, want newer timestamp", msg.Timestamp)
+	}
+	if msg.MediaCaption != "edited caption" || msg.Filename != "edited.jpg" {
+		t.Fatalf("older duplicate clobbered media fields: %+v", msg)
+	}
+}
+
 func TestListStarredMessagesOrdersByStarredTime(t *testing.T) {
 	db := openTestDB(t)
 	chat := "starred@s.whatsapp.net"

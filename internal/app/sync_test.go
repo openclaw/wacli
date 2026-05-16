@@ -589,6 +589,74 @@ func TestHistorySyncDecryptsEncryptedReaction(t *testing.T) {
 	}
 }
 
+func TestHistorySyncEditedMessageSurvivesOlderOriginal(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	chat := types.JID{User: "123", Server: types.DefaultUserServer}
+	f.contacts[chat.ToNonAD()] = types.ContactInfo{Found: true, FullName: "Alice"}
+	base := time.Date(2024, 1, 3, 0, 0, 0, 0, time.UTC)
+	editMsg := &waWeb.WebMessageInfo{
+		Key: &waCommon.MessageKey{
+			RemoteJID: proto.String(chat.String()),
+			FromMe:    proto.Bool(false),
+			ID:        proto.String("edit-event"),
+		},
+		MessageTimestamp: proto.Uint64(uint64(base.Add(time.Minute).Unix())),
+		Message: &waProto.Message{
+			ProtocolMessage: &waProto.ProtocolMessage{
+				Type: waProto.ProtocolMessage_MESSAGE_EDIT.Enum(),
+				Key: &waCommon.MessageKey{
+					RemoteJID: proto.String(chat.String()),
+					FromMe:    proto.Bool(false),
+					ID:        proto.String("original-id"),
+				},
+				EditedMessage: &waProto.Message{Conversation: proto.String("edited body")},
+			},
+		},
+	}
+	originalMsg := &waWeb.WebMessageInfo{
+		Key: &waCommon.MessageKey{
+			RemoteJID: proto.String(chat.String()),
+			FromMe:    proto.Bool(false),
+			ID:        proto.String("original-id"),
+		},
+		MessageTimestamp: proto.Uint64(uint64(base.Unix())),
+		Message:          &waProto.Message{Conversation: proto.String("original body")},
+	}
+	history := &events.HistorySync{
+		Data: &waHistorySync.HistorySync{
+			SyncType: waHistorySync.HistorySync_FULL.Enum(),
+			Conversations: []*waHistorySync.Conversation{{
+				ID:       proto.String(chat.String()),
+				Messages: []*waHistorySync.HistorySyncMsg{{Message: editMsg}, {Message: originalMsg}},
+			}},
+		},
+	}
+
+	var messagesStored atomic.Int64
+	var lastEvent atomic.Int64
+	a.handleHistorySync(context.Background(), SyncOptions{}, history, &messagesStored, &lastEvent, func(string, string) {})
+
+	if messagesStored.Load() != 2 {
+		t.Fatalf("expected 2 stored attempts, got %d", messagesStored.Load())
+	}
+	if n, err := a.db.CountMessages(); err != nil || n != 1 {
+		t.Fatalf("expected 1 stored row, got %d (err=%v)", n, err)
+	}
+	msg, err := a.db.GetMessage(chat.String(), "original-id")
+	if err != nil {
+		t.Fatalf("GetMessage edited original: %v", err)
+	}
+	if msg.Text != "edited body" || msg.DisplayText != "edited body" {
+		t.Fatalf("older original clobbered edit: %+v", msg)
+	}
+	if !msg.Timestamp.Equal(base.Add(time.Minute)) {
+		t.Fatalf("timestamp = %s, want edit timestamp", msg.Timestamp)
+	}
+}
+
 func TestSyncStoresLiveAndHistoryMessages(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
