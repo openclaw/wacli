@@ -29,6 +29,7 @@ var schemaMigrations = []migration{
 	{version: 13, name: "messages buttons column", up: migrateMessagesButtonsColumn},
 	{version: 14, name: "polls and poll_votes", up: migratePolls},
 	{version: 15, name: "call events", up: migrateCallEvents},
+	{version: 16, name: "messages edited column", up: migrateMessagesEditedColumn},
 }
 
 func (d *DB) ensureSchema() error {
@@ -89,6 +90,9 @@ func (d *DB) ensureCurrentSchema() error {
 	}
 	if err := migrateCallEvents(d); err != nil {
 		return fmt.Errorf("ensure current call events schema: %w", err)
+	}
+	if err := migrateMessagesEditedColumn(d); err != nil {
+		return fmt.Errorf("ensure current messages edited column: %w", err)
 	}
 	return nil
 }
@@ -279,6 +283,27 @@ func migrateMessagesButtonsColumn(d *DB) error {
 	}
 	if _, err := d.sql.Exec(`ALTER TABLE messages ADD COLUMN buttons TEXT`); err != nil {
 		return fmt.Errorf("add messages.buttons column: %w", err)
+	}
+	return nil
+}
+
+func migrateMessagesEditedColumn(d *DB) error {
+	hasTable, err := d.tableExists("messages")
+	if err != nil {
+		return err
+	}
+	if !hasTable {
+		return nil
+	}
+	has, err := d.tableHasColumn("messages", "edited")
+	if err != nil {
+		return err
+	}
+	if has {
+		return nil
+	}
+	if _, err := d.sql.Exec(`ALTER TABLE messages ADD COLUMN edited INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return fmt.Errorf("add messages.edited column: %w", err)
 	}
 	return nil
 }

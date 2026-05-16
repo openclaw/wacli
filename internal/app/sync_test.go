@@ -603,7 +603,7 @@ func TestHistorySyncEditedMessageSurvivesOlderOriginal(t *testing.T) {
 			FromMe:    proto.Bool(false),
 			ID:        proto.String("edit-event"),
 		},
-		MessageTimestamp: proto.Uint64(uint64(base.Add(time.Minute).Unix())),
+		MessageTimestamp: proto.Uint64(uint64(base.Unix())),
 		Message: &waProto.Message{
 			ProtocolMessage: &waProto.ProtocolMessage{
 				Type: waProto.ProtocolMessage_MESSAGE_EDIT.Enum(),
@@ -652,8 +652,8 @@ func TestHistorySyncEditedMessageSurvivesOlderOriginal(t *testing.T) {
 	if msg.Text != "edited body" || msg.DisplayText != "edited body" {
 		t.Fatalf("older original clobbered edit: %+v", msg)
 	}
-	if !msg.Timestamp.Equal(base.Add(time.Minute)) {
-		t.Fatalf("timestamp = %s, want edit timestamp", msg.Timestamp)
+	if !msg.Timestamp.Equal(base) {
+		t.Fatalf("timestamp = %s, want original timestamp", msg.Timestamp)
 	}
 }
 

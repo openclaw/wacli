@@ -362,12 +362,13 @@ func TestUpsertMessagePreservesNewerContentFromOlderDuplicate(t *testing.T) {
 		MsgID:        "mid",
 		SenderJID:    chat,
 		SenderName:   "Alice",
-		Timestamp:    base.Add(time.Minute),
+		Timestamp:    base,
 		Text:         "edited body",
 		DisplayText:  "edited body",
 		MediaType:    "image",
 		MediaCaption: "edited caption",
 		Filename:     "edited.jpg",
+		Edited:       true,
 	}); err != nil {
 		t.Fatalf("UpsertMessage newer: %v", err)
 	}
@@ -394,8 +395,8 @@ func TestUpsertMessagePreservesNewerContentFromOlderDuplicate(t *testing.T) {
 	if msg.Text != "edited body" || msg.DisplayText != "edited body" {
 		t.Fatalf("older duplicate clobbered text: %+v", msg)
 	}
-	if !msg.Timestamp.Equal(base.Add(time.Minute)) {
-		t.Fatalf("timestamp = %s, want newer timestamp", msg.Timestamp)
+	if !msg.Timestamp.Equal(base) {
+		t.Fatalf("timestamp = %s, want original timestamp", msg.Timestamp)
 	}
 	if msg.MediaCaption != "edited caption" || msg.Filename != "edited.jpg" {
 		t.Fatalf("older duplicate clobbered media fields: %+v", msg)

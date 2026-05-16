@@ -160,6 +160,9 @@ func TestParseHistoryMessageUnwrapsProtocolEdit(t *testing.T) {
 	if pm.Text != "edited body" {
 		t.Fatalf("Text = %q, want edited body", pm.Text)
 	}
+	if !pm.Edited {
+		t.Fatalf("Edited = false, want true")
+	}
 	if pm.SenderJID != sender {
 		t.Fatalf("SenderJID = %q, want %q", pm.SenderJID, sender)
 	}
@@ -192,6 +195,9 @@ func TestParseHistoryMessageUnwrapsTopLevelEdit(t *testing.T) {
 	}
 	if pm.Text != "top-level edited body" {
 		t.Fatalf("Text = %q, want top-level edited body", pm.Text)
+	}
+	if !pm.Edited {
+		t.Fatalf("Edited = false, want true")
 	}
 	if pm.SenderJID != sender {
 		t.Fatalf("SenderJID = %q, want %q", pm.SenderJID, sender)

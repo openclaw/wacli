@@ -79,6 +79,7 @@ type ParsedMessage struct {
 	ForwardingScore uint32
 	StarredKnown    bool
 	Starred         bool
+	Edited          bool
 	Revoked         bool
 	Call            *ParsedCallEvent
 }
@@ -140,6 +141,7 @@ func extractWAProto(m *waProto.Message, pm *ParsedMessage) {
 		if edited.MessageContextInfo == nil && m.MessageContextInfo != nil {
 			edited.MessageContextInfo = m.MessageContextInfo
 		}
+		pm.Edited = true
 		extractWAProto(edited, pm)
 		return
 	}
@@ -179,6 +181,7 @@ func extractProtocolMutation(m *waProto.Message, pm *ParsedMessage) (*waProto.Me
 	switch protocol.GetType() {
 	case waProto.ProtocolMessage_MESSAGE_EDIT:
 		applyProtocolKey(protocol.GetKey(), pm)
+		pm.Edited = true
 		return protocol.GetEditedMessage(), true
 	case waProto.ProtocolMessage_REVOKE:
 		key := protocol.GetKey()

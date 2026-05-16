@@ -409,6 +409,7 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 		FileSHA256:      fileSha,
 		FileEncSHA256:   fileEncSha,
 		FileLength:      fileLen,
+		Edited:          pm.Edited,
 		Revoked:         pm.Revoked,
 	}); err != nil {
 		return err
