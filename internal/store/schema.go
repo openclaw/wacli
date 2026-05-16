@@ -157,7 +157,7 @@ func migrateCoreSchema(d *DB) error {
 	if _, err := d.sql.Exec(coreSchemaSQL); err != nil {
 		return fmt.Errorf("create tables: %w", err)
 	}
-	if err := migrateStatusMessageMediaColumns(d); err != nil {
+	if err := migrateStatusMessages(d); err != nil {
 		return err
 	}
 	return nil

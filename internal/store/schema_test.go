@@ -86,6 +86,19 @@ func TestOpenCreatesExpectedSchema(t *testing.T) {
 	if !contactCols["system_name"] {
 		t.Fatalf("expected contacts system_name column to exist")
 	}
+
+	statusCols, err := tableColumns(db.sql, "status_messages")
+	if err != nil {
+		t.Fatalf("status_messages tableColumns: %v", err)
+	}
+	for _, want := range []string{"msg_id", "ts", "from_me", "sender_jid", "media_key", "background_color", "font"} {
+		if !statusCols[want] {
+			t.Fatalf("expected status_messages column %q to exist", want)
+		}
+	}
+	if !indexExists(t, db.sql, "idx_status_messages_ts") {
+		t.Fatalf("expected status_messages timestamp index to exist")
+	}
 }
 
 func TestOpenRepairsRecordedCallEventsMigrationMissingTable(t *testing.T) {
@@ -291,6 +304,59 @@ func TestOpenMigratesContactsSystemNameColumn(t *testing.T) {
 	}
 	if !contactCols["system_name"] {
 		t.Fatalf("expected migrated contacts system_name column")
+	}
+}
+
+func TestOpenMigratesStatusMessagesTable(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "wacli.db")
+
+	raw, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	if _, err := raw.Exec(`
+		CREATE TABLE schema_migrations (
+			version INTEGER PRIMARY KEY,
+			name TEXT NOT NULL,
+			applied_at INTEGER NOT NULL
+		);
+	`); err != nil {
+		_ = raw.Close()
+		t.Fatalf("create old schema: %v", err)
+	}
+	for _, m := range schemaMigrations {
+		if m.version >= 17 {
+			continue
+		}
+		if _, err := raw.Exec(`INSERT INTO schema_migrations(version, name, applied_at) VALUES(?, ?, 1)`, m.version, m.name); err != nil {
+			_ = raw.Close()
+			t.Fatalf("mark migration %d: %v", m.version, err)
+		}
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("raw close: %v", err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open migrated DB: %v", err)
+	}
+	defer db.Close()
+
+	if ok, err := db.tableExists("status_messages"); err != nil || !ok {
+		t.Fatalf("status_messages exists=%v err=%v", ok, err)
+	}
+	if !indexExists(t, db.sql, "idx_status_messages_ts") {
+		t.Fatalf("expected status_messages timestamp index to exist")
+	}
+	if err := db.UpsertStatusMessage(UpsertStatusMessageParams{
+		MsgID:     "status-after-upgrade",
+		Timestamp: nowUTC(),
+		FromMe:    true,
+		Text:      "after upgrade",
+	}); err != nil {
+		t.Fatalf("UpsertStatusMessage after migration: %v", err)
 	}
 }
 

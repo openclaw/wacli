@@ -4,7 +4,7 @@
 
 ### Added
 
-- Send: add `wacli send status` for WhatsApp status broadcasts, including text statuses with optional background/font and media statuses with captions.
+- Send: add `wacli send status` for WhatsApp status broadcasts, including text statuses with optional background/font and media statuses with captions. (#247 - thanks @dovocoder)
 - Store: persist synced and locally sent status broadcasts separately in `status_messages` instead of mixing them into normal chat messages.
 
 ### Fixed

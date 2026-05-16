@@ -30,6 +30,7 @@ var schemaMigrations = []migration{
 	{version: 14, name: "polls and poll_votes", up: migratePolls},
 	{version: 15, name: "call events", up: migrateCallEvents},
 	{version: 16, name: "messages edited columns", up: migrateMessagesEditedColumns},
+	{version: 17, name: "status messages", up: migrateStatusMessages},
 }
 
 func (d *DB) ensureSchema() error {
@@ -93,6 +94,9 @@ func (d *DB) ensureCurrentSchema() error {
 	}
 	if err := migrateMessagesEditedColumns(d); err != nil {
 		return fmt.Errorf("ensure current messages edited columns: %w", err)
+	}
+	if err := migrateStatusMessages(d); err != nil {
+		return fmt.Errorf("ensure current status messages schema: %w", err)
 	}
 	return nil
 }
@@ -374,6 +378,35 @@ func migrateCallEvents(d *DB) error {
 		return fmt.Errorf("create call_events table: %w", err)
 	}
 	return nil
+}
+
+func migrateStatusMessages(d *DB) error {
+	if _, err := d.sql.Exec(`
+		CREATE TABLE IF NOT EXISTS status_messages (
+			rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+			msg_id TEXT NOT NULL UNIQUE,
+			ts INTEGER NOT NULL,
+			from_me INTEGER NOT NULL,
+			sender_jid TEXT,
+			sender_name TEXT,
+			text TEXT,
+			media_type TEXT,
+			media_caption TEXT,
+			filename TEXT,
+			mime_type TEXT,
+			direct_path TEXT,
+			media_key BLOB,
+			file_sha256 BLOB,
+			file_enc_sha256 BLOB,
+			file_length INTEGER,
+			background_color TEXT,
+			font INTEGER
+		);
+		CREATE INDEX IF NOT EXISTS idx_status_messages_ts ON status_messages(ts);
+	`); err != nil {
+		return fmt.Errorf("create status_messages table: %w", err)
+	}
+	return migrateStatusMessageMediaColumns(d)
 }
 
 func migrateContactsSystemNameColumn(d *DB) error {
