@@ -137,6 +137,9 @@ func extractWAProto(m *waProto.Message, pm *ParsedMessage) {
 	}
 
 	if edited := m.GetEditedMessage().GetMessage(); edited != nil {
+		if edited.MessageContextInfo == nil && m.MessageContextInfo != nil {
+			edited.MessageContextInfo = m.MessageContextInfo
+		}
 		extractWAProto(edited, pm)
 		return
 	}
@@ -207,7 +210,9 @@ func applyProtocolKey(key *waProto.MessageKey, pm *ParsedMessage) {
 	if participant := strings.TrimSpace(key.GetParticipant()); participant != "" {
 		pm.SenderJID = participant
 	}
-	pm.FromMe = key.GetFromMe()
+	if key.FromMe != nil {
+		pm.FromMe = key.GetFromMe()
+	}
 }
 
 func extractReaction(m *waProto.Message, pm *ParsedMessage) {
