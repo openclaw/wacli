@@ -136,7 +136,14 @@ func extractWAProto(m *waProto.Message, pm *ParsedMessage) {
 		return
 	}
 
-	if extractProtocolMutation(m, pm) {
+	if edited := m.GetEditedMessage().GetMessage(); edited != nil {
+		extractWAProto(edited, pm)
+		return
+	}
+	if replacement, handled := extractProtocolMutation(m, pm); handled {
+		if replacement != nil {
+			extractWAProto(replacement, pm)
+		}
 		return
 	}
 	extractReaction(m, pm)
@@ -161,36 +168,46 @@ func extractWAProto(m *waProto.Message, pm *ParsedMessage) {
 	}
 }
 
-func extractProtocolMutation(m *waProto.Message, pm *ParsedMessage) bool {
+func extractProtocolMutation(m *waProto.Message, pm *ParsedMessage) (*waProto.Message, bool) {
 	protocol := m.GetProtocolMessage()
 	if protocol == nil {
-		return false
+		return nil, false
 	}
 	switch protocol.GetType() {
+	case waProto.ProtocolMessage_MESSAGE_EDIT:
+		applyProtocolKey(protocol.GetKey(), pm)
+		return protocol.GetEditedMessage(), true
 	case waProto.ProtocolMessage_REVOKE:
 		key := protocol.GetKey()
 		if key == nil {
-			return false
+			return nil, false
 		}
-		if id := strings.TrimSpace(key.GetID()); id != "" {
-			pm.ID = id
-		}
-		if remote := strings.TrimSpace(key.GetRemoteJID()); remote != "" {
-			if chat, err := types.ParseJID(remote); err == nil {
-				pm.Chat = chat
-			}
-		}
-		if participant := strings.TrimSpace(key.GetParticipant()); participant != "" {
-			pm.SenderJID = participant
-		}
-		pm.FromMe = key.GetFromMe()
+		applyProtocolKey(key, pm)
 		pm.Text = ""
 		pm.Media = nil
 		pm.Revoked = true
-		return true
+		return nil, true
 	default:
-		return false
+		return nil, false
 	}
+}
+
+func applyProtocolKey(key *waProto.MessageKey, pm *ParsedMessage) {
+	if key == nil || pm == nil {
+		return
+	}
+	if id := strings.TrimSpace(key.GetID()); id != "" {
+		pm.ID = id
+	}
+	if remote := strings.TrimSpace(key.GetRemoteJID()); remote != "" {
+		if chat, err := types.ParseJID(remote); err == nil {
+			pm.Chat = chat
+		}
+	}
+	if participant := strings.TrimSpace(key.GetParticipant()); participant != "" {
+		pm.SenderJID = participant
+	}
+	pm.FromMe = key.GetFromMe()
 }
 
 func extractReaction(m *waProto.Message, pm *ParsedMessage) {

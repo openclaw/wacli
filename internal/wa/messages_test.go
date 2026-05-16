@@ -128,6 +128,76 @@ func TestParseHistoryMessageStarred(t *testing.T) {
 	}
 }
 
+func TestParseHistoryMessageUnwrapsProtocolEdit(t *testing.T) {
+	groupJID := "120363001234567890@g.us"
+	sender := "16048339070@s.whatsapp.net"
+	h := &waProto.WebMessageInfo{
+		Key: &waProto.MessageKey{
+			ID:          proto.String("edit-event-id"),
+			FromMe:      proto.Bool(false),
+			RemoteJID:   proto.String(groupJID),
+			Participant: proto.String(sender),
+		},
+		MessageTimestamp: proto.Uint64(uint64(time.Date(2026, 5, 15, 19, 30, 25, 0, time.UTC).Unix())),
+		Message: &waProto.Message{
+			ProtocolMessage: &waProto.ProtocolMessage{
+				Type: waProto.ProtocolMessage_MESSAGE_EDIT.Enum(),
+				Key: &waProto.MessageKey{
+					ID:          proto.String("original-msg-id"),
+					FromMe:      proto.Bool(false),
+					RemoteJID:   proto.String(groupJID),
+					Participant: proto.String(sender),
+				},
+				EditedMessage: &waProto.Message{Conversation: proto.String("edited body")},
+			},
+		},
+	}
+
+	pm := ParseHistoryMessage(groupJID, h)
+	if pm.ID != "original-msg-id" {
+		t.Fatalf("ID = %q, want original-msg-id", pm.ID)
+	}
+	if pm.Text != "edited body" {
+		t.Fatalf("Text = %q, want edited body", pm.Text)
+	}
+	if pm.SenderJID != sender {
+		t.Fatalf("SenderJID = %q, want %q", pm.SenderJID, sender)
+	}
+	if pm.Chat.String() != groupJID {
+		t.Fatalf("Chat = %q, want %q", pm.Chat.String(), groupJID)
+	}
+}
+
+func TestParseHistoryMessageUnwrapsTopLevelEdit(t *testing.T) {
+	groupJID := "120363001234567890@g.us"
+	sender := "16048339070@s.whatsapp.net"
+	h := &waProto.WebMessageInfo{
+		Key: &waProto.MessageKey{
+			ID:          proto.String("original-msg-id"),
+			FromMe:      proto.Bool(false),
+			RemoteJID:   proto.String(groupJID),
+			Participant: proto.String(sender),
+		},
+		MessageTimestamp: proto.Uint64(uint64(time.Date(2026, 5, 15, 19, 37, 1, 0, time.UTC).Unix())),
+		Message: &waProto.Message{
+			EditedMessage: &waProto.FutureProofMessage{
+				Message: &waProto.Message{Conversation: proto.String("top-level edited body")},
+			},
+		},
+	}
+
+	pm := ParseHistoryMessage(groupJID, h)
+	if pm.ID != "original-msg-id" {
+		t.Fatalf("ID = %q, want original-msg-id", pm.ID)
+	}
+	if pm.Text != "top-level edited body" {
+		t.Fatalf("Text = %q, want top-level edited body", pm.Text)
+	}
+	if pm.SenderJID != sender {
+		t.Fatalf("SenderJID = %q, want %q", pm.SenderJID, sender)
+	}
+}
+
 func TestParseLiveMessageImageClonesBytes(t *testing.T) {
 	chat, _ := types.ParseJID("123@s.whatsapp.net")
 	sender, _ := types.ParseJID("sender@s.whatsapp.net")
