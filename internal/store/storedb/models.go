@@ -89,6 +89,8 @@ type Message struct {
 	DownloadedAt    sql.NullInt64
 	Revoked         int64
 	DeletedForMe    int64
+	Edited          int64
+	EditedTs        int64
 	Buttons         sql.NullString
 }
 

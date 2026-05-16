@@ -403,6 +403,96 @@ func TestUpsertMessagePreservesNewerContentFromOlderDuplicate(t *testing.T) {
 	}
 }
 
+func TestUpsertMessageKeepsNewestEditedBody(t *testing.T) {
+	db := openTestDB(t)
+	chat := "123@s.whatsapp.net"
+	base := time.Date(2024, 3, 2, 0, 0, 0, 0, time.UTC)
+	if err := db.UpsertChat(chat, "dm", "Alice", base); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID:     chat,
+		ChatName:    "Alice",
+		MsgID:       "mid",
+		SenderJID:   chat,
+		SenderName:  "Alice",
+		Timestamp:   base.Add(2 * time.Minute),
+		Text:        "newer edit",
+		DisplayText: "newer edit",
+		Edited:      true,
+	}); err != nil {
+		t.Fatalf("UpsertMessage newer edit: %v", err)
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID:     chat,
+		ChatName:    "Alice",
+		MsgID:       "mid",
+		SenderJID:   chat,
+		SenderName:  "Alice",
+		Timestamp:   base.Add(time.Minute),
+		Text:        "older edit",
+		DisplayText: "older edit",
+		Edited:      true,
+	}); err != nil {
+		t.Fatalf("UpsertMessage older edit: %v", err)
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID:     chat,
+		ChatName:    "Alice",
+		MsgID:       "mid",
+		SenderJID:   chat,
+		SenderName:  "Alice",
+		Timestamp:   base,
+		Text:        "original",
+		DisplayText: "original",
+	}); err != nil {
+		t.Fatalf("UpsertMessage original: %v", err)
+	}
+
+	msg, err := db.GetMessage(chat, "mid")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if msg.Text != "newer edit" || msg.DisplayText != "newer edit" {
+		t.Fatalf("older edit clobbered newer edit: %+v", msg)
+	}
+	if !msg.Timestamp.Equal(base) {
+		t.Fatalf("timestamp = %s, want original timestamp", msg.Timestamp)
+	}
+}
+
+func TestUpsertMessageAllowsSameSecondEditReplacement(t *testing.T) {
+	db := openTestDB(t)
+	chat := "123@s.whatsapp.net"
+	base := time.Date(2024, 3, 2, 0, 0, 0, 0, time.UTC)
+	if err := db.UpsertChat(chat, "dm", "Alice", base); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	for _, text := range []string{"first edit", "second edit"} {
+		if err := db.UpsertMessage(UpsertMessageParams{
+			ChatJID:     chat,
+			ChatName:    "Alice",
+			MsgID:       "mid",
+			SenderJID:   chat,
+			SenderName:  "Alice",
+			Timestamp:   base.Add(time.Minute),
+			Text:        text,
+			DisplayText: text,
+			Edited:      true,
+		}); err != nil {
+			t.Fatalf("UpsertMessage %q: %v", text, err)
+		}
+	}
+
+	msg, err := db.GetMessage(chat, "mid")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if msg.Text != "second edit" || msg.DisplayText != "second edit" {
+		t.Fatalf("same-second edit did not replace previous edit: %+v", msg)
+	}
+}
+
 func TestListStarredMessagesOrdersByStarredTime(t *testing.T) {
 	db := openTestDB(t)
 	chat := "starred@s.whatsapp.net"

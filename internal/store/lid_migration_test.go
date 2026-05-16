@@ -312,3 +312,78 @@ func TestMigrateLIDToPNPreservesButtons(t *testing.T) {
 		}
 	}
 }
+
+func TestMigrateLIDToPNPreservesEditedState(t *testing.T) {
+	db := openTestDB(t)
+	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	pn := "15551234567@s.whatsapp.net"
+	lid := "999123456789@lid"
+	if err := db.UpsertChat(pn, "dm", "Alice", base); err != nil {
+		t.Fatalf("UpsertChat pn: %v", err)
+	}
+	if err := db.UpsertChat(lid, "dm", "Alice", base); err != nil {
+		t.Fatalf("UpsertChat lid: %v", err)
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID:     pn,
+		MsgID:       "mid",
+		SenderJID:   pn,
+		Timestamp:   base,
+		Text:        "original",
+		DisplayText: "original",
+	}); err != nil {
+		t.Fatalf("UpsertMessage pn original: %v", err)
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID:     lid,
+		MsgID:       "mid",
+		SenderJID:   lid,
+		Timestamp:   base.Add(time.Minute),
+		Text:        "edited",
+		DisplayText: "edited",
+		Edited:      true,
+	}); err != nil {
+		t.Fatalf("UpsertMessage lid edited: %v", err)
+	}
+
+	if err := db.MigrateLIDToPN(lid, pn); err != nil {
+		t.Fatalf("MigrateLIDToPN: %v", err)
+	}
+
+	msg, err := db.GetMessage(pn, "mid")
+	if err != nil {
+		t.Fatalf("GetMessage after migration: %v", err)
+	}
+	if msg.Text != "edited" || msg.DisplayText != "edited" {
+		t.Fatalf("migration lost edited body: %+v", msg)
+	}
+	if !msg.Timestamp.Equal(base) {
+		t.Fatalf("timestamp = %s, want original timestamp", msg.Timestamp)
+	}
+
+	var edited, editedTS int64
+	if err := db.sql.QueryRow(`SELECT edited, edited_ts FROM messages WHERE chat_jid = ? AND msg_id = ?`, pn, "mid").Scan(&edited, &editedTS); err != nil {
+		t.Fatalf("query edited metadata: %v", err)
+	}
+	if edited != 1 || editedTS != base.Add(time.Minute).Unix() {
+		t.Fatalf("edited metadata = (%d, %d), want (1, %d)", edited, editedTS, base.Add(time.Minute).Unix())
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID:     pn,
+		MsgID:       "mid",
+		SenderJID:   pn,
+		Timestamp:   base,
+		Text:        "original again",
+		DisplayText: "original again",
+	}); err != nil {
+		t.Fatalf("UpsertMessage original after migration: %v", err)
+	}
+	msg, err = db.GetMessage(pn, "mid")
+	if err != nil {
+		t.Fatalf("GetMessage after original: %v", err)
+	}
+	if msg.Text != "edited" {
+		t.Fatalf("original upsert clobbered migrated edit: %q", msg.Text)
+	}
+}

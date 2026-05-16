@@ -180,7 +180,8 @@ SET revoked = 1,
     file_length = NULL,
     local_path = NULL,
     downloaded_at = NULL,
-    edited = 0
+    edited = 0,
+    edited_ts = 0
 WHERE chat_jid = ? AND msg_id = ?;
 
 -- name: MarkMessageDeletedForMe :execrows
@@ -200,7 +201,8 @@ SET deleted_for_me = 1,
     file_length = NULL,
     local_path = NULL,
     downloaded_at = NULL,
-    edited = 0
+    edited = 0,
+    edited_ts = 0
 WHERE chat_jid = ? AND msg_id = ?;
 
 -- name: UpdateMessageText :execrows
@@ -221,7 +223,8 @@ SET text = ?,
     downloaded_at = NULL,
     revoked = 0,
     deleted_for_me = 0,
-    edited = 1
+    edited = 1,
+    edited_ts = strftime('%s', 'now')
 WHERE chat_jid = ? AND msg_id = ?;
 
 -- name: GetMessage :one

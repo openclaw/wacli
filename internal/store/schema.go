@@ -87,6 +87,7 @@ const coreSchemaSQL = `
 		revoked INTEGER NOT NULL DEFAULT 0,
 		deleted_for_me INTEGER NOT NULL DEFAULT 0,
 		edited INTEGER NOT NULL DEFAULT 0,
+		edited_ts INTEGER NOT NULL DEFAULT 0,
 		buttons TEXT,
 		UNIQUE(chat_jid, msg_id),
 		FOREIGN KEY (chat_jid) REFERENCES chats(jid) ON DELETE CASCADE

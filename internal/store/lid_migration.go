@@ -163,7 +163,7 @@ func migrateLIDMessagesToPN(tx *sql.Tx, lidJID, pnJID string) error {
 			is_forwarded, forwarding_score, reaction_to_id, reaction_emoji,
 			media_type, media_caption, filename, mime_type, direct_path,
 			media_key, file_sha256, file_enc_sha256, file_length, local_path, downloaded_at,
-			revoked, deleted_for_me, buttons
+			revoked, deleted_for_me, edited, edited_ts, buttons
 		)
 		SELECT
 			?,
@@ -192,6 +192,8 @@ func migrateLIDMessagesToPN(tx *sql.Tx, lidJID, pnJID string) error {
 			downloaded_at,
 			revoked,
 			deleted_for_me,
+			edited,
+			edited_ts,
 			buttons
 		FROM messages
 		WHERE chat_jid = ?
@@ -199,10 +201,10 @@ func migrateLIDMessagesToPN(tx *sql.Tx, lidJID, pnJID string) error {
 			chat_name = COALESCE(NULLIF(messages.chat_name, ''), excluded.chat_name),
 			sender_jid = COALESCE(NULLIF(messages.sender_jid, ''), excluded.sender_jid),
 			sender_name = COALESCE(NULLIF(messages.sender_name, ''), excluded.sender_name),
-			ts = max(messages.ts, excluded.ts),
+			ts = CASE WHEN messages.revoked != 0 OR messages.deleted_for_me != 0 THEN messages.ts WHEN excluded.edited != 0 THEN messages.ts WHEN messages.edited != 0 AND excluded.edited = 0 THEN excluded.ts ELSE max(messages.ts, excluded.ts) END,
 			from_me = messages.from_me,
-			text = CASE WHEN messages.revoked != 0 OR messages.deleted_for_me != 0 OR excluded.revoked != 0 OR excluded.deleted_for_me != 0 THEN NULL ELSE COALESCE(NULLIF(messages.text, ''), excluded.text) END,
-			display_text = CASE WHEN messages.deleted_for_me != 0 OR excluded.deleted_for_me != 0 THEN ? WHEN messages.revoked != 0 OR excluded.revoked != 0 THEN ? ELSE COALESCE(NULLIF(messages.display_text, ''), excluded.display_text) END,
+			text = CASE WHEN messages.revoked != 0 OR messages.deleted_for_me != 0 OR excluded.revoked != 0 OR excluded.deleted_for_me != 0 THEN NULL WHEN excluded.edited != 0 AND (messages.edited = 0 OR excluded.edited_ts > messages.edited_ts) THEN excluded.text WHEN messages.edited != 0 AND excluded.edited = 0 THEN messages.text ELSE COALESCE(NULLIF(messages.text, ''), excluded.text) END,
+			display_text = CASE WHEN messages.deleted_for_me != 0 OR excluded.deleted_for_me != 0 THEN ? WHEN messages.revoked != 0 OR excluded.revoked != 0 THEN ? WHEN excluded.edited != 0 AND (messages.edited = 0 OR excluded.edited_ts > messages.edited_ts) THEN excluded.display_text WHEN messages.edited != 0 AND excluded.edited = 0 THEN messages.display_text ELSE COALESCE(NULLIF(messages.display_text, ''), excluded.display_text) END,
 			is_forwarded = CASE WHEN messages.is_forwarded != 0 THEN messages.is_forwarded ELSE excluded.is_forwarded END,
 			forwarding_score = max(messages.forwarding_score, excluded.forwarding_score),
 			reaction_to_id = COALESCE(NULLIF(messages.reaction_to_id, ''), excluded.reaction_to_id),
@@ -220,6 +222,8 @@ func migrateLIDMessagesToPN(tx *sql.Tx, lidJID, pnJID string) error {
 			downloaded_at = CASE WHEN messages.revoked != 0 OR messages.deleted_for_me != 0 OR excluded.revoked != 0 OR excluded.deleted_for_me != 0 THEN NULL WHEN messages.downloaded_at IS NOT NULL AND messages.downloaded_at > 0 THEN messages.downloaded_at ELSE excluded.downloaded_at END,
 			revoked = CASE WHEN messages.revoked != 0 OR excluded.revoked != 0 THEN 1 ELSE 0 END,
 			deleted_for_me = CASE WHEN messages.deleted_for_me != 0 OR excluded.deleted_for_me != 0 THEN 1 ELSE 0 END,
+			edited = CASE WHEN messages.revoked != 0 OR messages.deleted_for_me != 0 OR excluded.revoked != 0 OR excluded.deleted_for_me != 0 THEN 0 WHEN messages.edited != 0 OR excluded.edited != 0 THEN 1 ELSE 0 END,
+			edited_ts = CASE WHEN messages.revoked != 0 OR messages.deleted_for_me != 0 OR excluded.revoked != 0 OR excluded.deleted_for_me != 0 THEN 0 ELSE max(COALESCE(messages.edited_ts, 0), COALESCE(excluded.edited_ts, 0)) END,
 			buttons = CASE WHEN messages.revoked != 0 OR messages.deleted_for_me != 0 OR excluded.revoked != 0 OR excluded.deleted_for_me != 0 THEN NULL ELSE COALESCE(messages.buttons, excluded.buttons) END
 	`, pnJID, lidJID, pnJID, lidJID, DeletedForMeMessageDisplayText, DeletedMessageDisplayText); err != nil {
 		return fmt.Errorf("merge lid messages into pn chat: %w", err)
