@@ -544,7 +544,7 @@ func TestHistorySyncDecryptsEncryptedReaction(t *testing.T) {
 			FromMe:    proto.Bool(false),
 			ID:        proto.String("m-text"),
 		},
-		MessageTimestamp: proto.Uint64(uint64(base.Unix())),
+		MessageTimestamp: proto.Uint64(uint64(base.Add(time.Minute).Unix())),
 		Message:          &waProto.Message{Conversation: proto.String("hello")},
 	}
 	reactionMsg := &waWeb.WebMessageInfo{

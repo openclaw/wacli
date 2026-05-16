@@ -362,7 +362,7 @@ func TestUpsertMessagePreservesNewerContentFromOlderDuplicate(t *testing.T) {
 		MsgID:        "mid",
 		SenderJID:    chat,
 		SenderName:   "Alice",
-		Timestamp:    base,
+		Timestamp:    base.Add(time.Minute),
 		Text:         "edited body",
 		DisplayText:  "edited body",
 		MediaType:    "image",
