@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.3 - Unreleased
+
+### Added
+
+### Security
+
+### Fixed
+
 ## 0.9.2 - 2026-05-17
 
 ### Added
