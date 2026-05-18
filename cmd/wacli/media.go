@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/openclaw/wacli/internal/out"
+	"github.com/openclaw/wacli/internal/wa"
 	"github.com/spf13/cobra"
 )
 
@@ -31,21 +33,30 @@ func newMediaDownloadCmd(flags *rootFlags) *cobra.Command {
 			if chat == "" || id == "" {
 				return fmt.Errorf("--chat and --id are required")
 			}
-			if err := flags.requireWritable(); err != nil {
-				return err
+			readOnly := flags.isReadOnly()
+			if readOnly {
+				if strings.TrimSpace(outputPath) == "" {
+					return fmt.Errorf("--output is required in read-only mode")
+				}
+			} else {
+				if err := flags.requireWritable(); err != nil {
+					return err
+				}
 			}
 
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
-			a, lk, err := newApp(ctx, flags, true, false)
+			a, lk, err := newApp(ctx, flags, !readOnly, false)
 			if err != nil {
 				return err
 			}
 			defer closeApp(a, lk)
 
-			if err := a.EnsureAuthed(); err != nil {
-				return err
+			if !readOnly {
+				if err := a.EnsureAuthed(); err != nil {
+					return err
+				}
 			}
 
 			info, err := a.DB().GetMediaDownloadInfo(chat, id)
@@ -59,6 +70,29 @@ func newMediaDownloadCmd(flags *rootFlags) *cobra.Command {
 			target, err := a.ResolveMediaOutputPath(info, outputPath)
 			if err != nil {
 				return err
+			}
+
+			if readOnly {
+				bytes, err := wa.DownloadMediaDirectToFile(ctx, info.DirectPath, info.FileEncSHA256, info.FileSHA256, info.MediaKey, info.FileLength, info.MediaType, target)
+				if err != nil {
+					return err
+				}
+				resp := map[string]any{
+					"chat":       info.ChatJID,
+					"id":         info.MsgID,
+					"path":       target,
+					"bytes":      bytes,
+					"media_type": info.MediaType,
+					"mime_type":  info.MimeType,
+					"downloaded": true,
+					"read_only":  true,
+					"recorded":   false,
+				}
+				if flags.asJSON {
+					return out.WriteJSON(os.Stdout, resp)
+				}
+				fmt.Fprintf(os.Stdout, "%s (%d bytes)\n", target, bytes)
+				return nil
 			}
 
 			if err := a.Connect(ctx, false, nil); err != nil {

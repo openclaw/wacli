@@ -2,11 +2,19 @@ package wa
 
 import (
 	"bytes"
+	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/util/cbcutil"
 )
 
 func TestMediaTypeFromString(t *testing.T) {
@@ -33,6 +41,57 @@ func TestMediaDownloadLength(t *testing.T) {
 	}
 	if got, err := mediaDownloadLength(123); err != nil || got != 123 {
 		t.Fatalf("length(123) = %d, %v; want 123, nil", got, err)
+	}
+}
+
+func TestDownloadMediaDirectToFile(t *testing.T) {
+	plaintext := []byte("voice note bytes")
+	mediaKey := bytes.Repeat([]byte{7}, 32)
+	iv, cipherKey, macKey := directMediaKeys(mediaKey, whatsmeow.MediaAudio)
+	ciphertext, err := cbcutil.Encrypt(cipherKey, iv, append([]byte(nil), plaintext...))
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	mac := hmac.New(sha256.New, macKey)
+	mac.Write(iv)
+	mac.Write(ciphertext)
+	encrypted := append(append([]byte(nil), ciphertext...), mac.Sum(nil)[:mediaHMACLength]...)
+	encHash := sha256.Sum256(encrypted)
+	fileHash := sha256.Sum256(plaintext)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Origin") == "" || r.Header.Get("Referer") == "" {
+			t.Fatalf("missing WhatsApp media headers")
+		}
+		_, _ = w.Write(encrypted)
+	}))
+	defer server.Close()
+
+	target := filepath.Join(t.TempDir(), "voice.ogg")
+	n, err := DownloadMediaDirectToFile(context.Background(), server.URL+"/voice.ogg", encHash[:], fileHash[:], mediaKey, uint64(len(plaintext)), "audio", target)
+	if err != nil {
+		t.Fatalf("DownloadMediaDirectToFile: %v", err)
+	}
+	if n != int64(len(plaintext)) {
+		t.Fatalf("downloaded bytes = %d, want %d", n, len(plaintext))
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !bytes.Equal(got, plaintext) {
+		t.Fatalf("output = %q, want %q", got, plaintext)
+	}
+}
+
+func TestDownloadMediaDirectToFileRejectsMalformedDirectPath(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "voice.ogg")
+	_, err := DownloadMediaDirectToFile(context.Background(), "not-a-path", nil, nil, bytes.Repeat([]byte{7}, 32), 0, "audio", target)
+	if err == nil || !strings.Contains(err.Error(), "does not start with slash") {
+		t.Fatalf("DownloadMediaDirectToFile error = %v, want malformed direct path", err)
+	}
+	if _, statErr := os.Stat(target); !os.IsNotExist(statErr) {
+		t.Fatalf("target stat err = %v, want not exist", statErr)
 	}
 }
 

@@ -1,15 +1,22 @@
 package wa
 
 import (
+	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/openclaw/wacli/internal/fsutil"
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/socket"
+	"go.mau.fi/whatsmeow/util/cbcutil"
+	"go.mau.fi/whatsmeow/util/hkdfutil"
 )
 
 const MaxMediaDownloadSize = 100 * 1024 * 1024
@@ -100,6 +107,155 @@ func (c *Client) DownloadMediaToFile(ctx context.Context, directPath string, enc
 	}
 	return info.Size(), nil
 }
+
+func DownloadMediaDirectToFile(ctx context.Context, directPath string, encFileHash, fileHash, mediaKey []byte, fileLength uint64, mediaType string, targetPath string) (int64, error) {
+	if strings.TrimSpace(directPath) == "" {
+		return 0, fmt.Errorf("direct path is required")
+	}
+	mediaURL, err := directMediaURL(directPath)
+	if err != nil {
+		return 0, err
+	}
+	mt, err := MediaTypeFromString(mediaType)
+	if err != nil {
+		return 0, err
+	}
+	if _, err := mediaDownloadLength(fileLength); err != nil {
+		return 0, err
+	}
+
+	plaintext, err := downloadAndDecryptDirect(ctx, mediaURL, encFileHash, fileHash, mediaKey, fileLength, mt)
+	if err != nil {
+		return 0, err
+	}
+	if len(plaintext) > MaxMediaDownloadSize {
+		return 0, fmt.Errorf("media too large; maximum download size is %d bytes", MaxMediaDownloadSize)
+	}
+	if err := fsutil.EnsureWritableDir(filepath.Dir(targetPath)); err != nil {
+		return 0, fmt.Errorf("create output dir: %w", err)
+	}
+
+	tmpFile, err := os.CreateTemp(filepath.Dir(targetPath), ".wacli-download-*")
+	if err != nil {
+		return 0, fmt.Errorf("create temp file: %w", err)
+	}
+	tmpName := tmpFile.Name()
+	success := false
+	defer func() {
+		_ = tmpFile.Close()
+		if !success {
+			_ = os.Remove(tmpName)
+		}
+	}()
+
+	if _, err := tmpFile.Write(plaintext); err != nil {
+		return 0, fmt.Errorf("write media file: %w", err)
+	}
+	if err := tmpFile.Sync(); err != nil {
+		return 0, fmt.Errorf("flush temp file: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		return 0, fmt.Errorf("close temp file: %w", err)
+	}
+	if err := os.Rename(tmpName, targetPath); err != nil {
+		return 0, fmt.Errorf("move media file: %w", err)
+	}
+	success = true
+	return int64(len(plaintext)), nil
+}
+
+func directMediaURL(directPath string) (string, error) {
+	path := strings.TrimSpace(directPath)
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+		return path, nil
+	}
+	if !strings.HasPrefix(path, "/") {
+		return "", fmt.Errorf("media download path does not start with slash: %s", path)
+	}
+	return "https://mmg.whatsapp.net" + path, nil
+}
+
+func downloadAndDecryptDirect(ctx context.Context, mediaURL string, encFileHash, fileHash, mediaKey []byte, fileLength uint64, mediaType whatsmeow.MediaType) ([]byte, error) {
+	encrypted, err := downloadDirectBytes(ctx, mediaURL)
+	if err != nil {
+		return nil, err
+	}
+	if len(encrypted) <= mediaHMACLength {
+		return nil, whatsmeow.ErrTooShortFile
+	}
+	if len(encrypted) > MaxMediaDownloadSize+maxEncryptedMediaDownloadOverhead {
+		return nil, fmt.Errorf("media too large; maximum download size is %d bytes", MaxMediaDownloadSize)
+	}
+	if len(encFileHash) == sha256.Size {
+		sum := sha256.Sum256(encrypted)
+		if !bytes.Equal(sum[:], encFileHash) {
+			return nil, whatsmeow.ErrInvalidMediaEncSHA256
+		}
+	}
+
+	iv, cipherKey, macKey := directMediaKeys(mediaKey, mediaType)
+	ciphertext := encrypted[:len(encrypted)-mediaHMACLength]
+	mac := encrypted[len(encrypted)-mediaHMACLength:]
+	if err := validateDirectMedia(iv, ciphertext, macKey, mac); err != nil {
+		return nil, err
+	}
+	plaintext, err := cbcutil.Decrypt(cipherKey, iv, append([]byte(nil), ciphertext...))
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt file: %w", err)
+	}
+	if fileLength > 0 && uint64(len(plaintext)) != fileLength {
+		return nil, fmt.Errorf("%w: expected %d, got %d", whatsmeow.ErrFileLengthMismatch, fileLength, len(plaintext))
+	}
+	if len(fileHash) == sha256.Size {
+		sum := sha256.Sum256(plaintext)
+		if !bytes.Equal(sum[:], fileHash) {
+			return nil, whatsmeow.ErrInvalidMediaSHA256
+		}
+	}
+	return plaintext, nil
+}
+
+func downloadDirectBytes(ctx context.Context, mediaURL string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, mediaURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("prepare media request: %w", err)
+	}
+	req.Header.Set("Origin", socket.Origin)
+	req.Header.Set("Referer", socket.Origin+"/")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, whatsmeow.DownloadHTTPError{Response: resp}
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, MaxMediaDownloadSize+maxEncryptedMediaDownloadOverhead+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > MaxMediaDownloadSize+maxEncryptedMediaDownloadOverhead {
+		return nil, fmt.Errorf("media too large; maximum download size is %d bytes", MaxMediaDownloadSize)
+	}
+	return body, nil
+}
+
+func directMediaKeys(mediaKey []byte, appInfo whatsmeow.MediaType) (iv, cipherKey, macKey []byte) {
+	expanded := hkdfutil.SHA256(mediaKey, nil, []byte(appInfo), 112)
+	return expanded[:16], expanded[16:48], expanded[48:80]
+}
+
+func validateDirectMedia(iv, ciphertext, macKey, mac []byte) error {
+	h := hmac.New(sha256.New, macKey)
+	h.Write(iv)
+	h.Write(ciphertext)
+	if !hmac.Equal(h.Sum(nil)[:mediaHMACLength], mac) {
+		return whatsmeow.ErrInvalidMediaHMAC
+	}
+	return nil
+}
+
+const mediaHMACLength = 10
 
 type limitedDownloadFile struct {
 	*os.File
