@@ -53,7 +53,7 @@ jobs:
 
   update-homebrew-tap:
     runs-on: ubuntu-latest
-    needs: goreleaser-darwin
+    needs: goreleaser-linux-windows
     steps:
       - name: Resolve release tag
         env:
@@ -72,7 +72,7 @@ jobs:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           if [ -z "$GH_TOKEN" ]; then
-            echo "::warning::Skipping Homebrew tap update because HOMEBREW_TAP_TOKEN is not configured with workflow access to steipete/homebrew-tap"
+            echo "::warning::Skipping Homebrew tap update because HOMEBREW_TAP_TOKEN is not configured with workflow access to dovocoder/homebrew-tap"
             exit 0
           fi
 
@@ -80,18 +80,20 @@ jobs:
           expected_title="Update wacli for ${RELEASE_TAG} (${request_id})"
 
           gh workflow run update-formula.yml \
-            --repo steipete/homebrew-tap \
+            --repo dovocoder/homebrew-tap \
             --ref main \
             -f formula=wacli \
             -f tag="$RELEASE_TAG" \
-            -f repository=openclaw/wacli \
-            -f macos_artifact=wacli-macos-universal.tar.gz \
+            -f repository=dovocoder/wacli \
+            -f description="WhatsApp CLI built on whatsmeow" \
+            -f artifact_template=wacli-{target}.tar.gz \
+            -f target_aliases=darwin_amd64=darwin-amd64,darwin_arm64=darwin-arm64,linux_amd64=linux-amd64,linux_arm64=linux-arm64 \
             -f request_id="$request_id"
 
           run_id=""
           for _ in {1..30}; do
             run_id=$(gh run list \
-              --repo steipete/homebrew-tap \
+              --repo dovocoder/homebrew-tap \
               --workflow update-formula.yml \
               --branch main \
               --event workflow_dispatch \
@@ -110,7 +112,7 @@ jobs:
           fi
 
           gh run watch "$run_id" \
-            --repo steipete/homebrew-tap \
+            --repo dovocoder/homebrew-tap \
             --exit-status \
             --interval 10
 
@@ -161,12 +163,32 @@ jobs:
             echo "RELEASE_TAG=$REF_NAME" >> "$GITHUB_ENV"
           fi
 
-      - name: Upload linux/windows artifacts
+      - name: Create combined checksums
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download "$RELEASE_TAG" \
+            --pattern "wacli-darwin-*.tar.gz" \
+            --dir dist
+
+          cd dist
+          archives=(
+            wacli-darwin-amd64.tar.gz
+            wacli-darwin-arm64.tar.gz
+            wacli-darwin-universal.tar.gz
+            wacli-linux-amd64.tar.gz
+            wacli-linux-arm64.tar.gz
+            wacli-windows-amd64.zip
+          )
+          sha256sum "${archives[@]}" > checksums.txt
+
+      - name: Upload release artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload "$RELEASE_TAG" \
-            dist/*.tar.gz \
-            dist/*.zip \
-            dist/checksums-linux-windows.txt \
+            dist/wacli-linux-amd64.tar.gz \
+            dist/wacli-linux-arm64.tar.gz \
+            dist/wacli-windows-amd64.zip \
+            dist/checksums.txt \
             --clobber
