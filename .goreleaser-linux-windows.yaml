@@ -71,7 +71,7 @@ archives:
       - README.md
 
 checksum:
-  name_template: checksums-linux-windows.txt
+  name_template: checksums.txt
 
 changelog:
   disable: true

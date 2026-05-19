@@ -8,6 +8,8 @@
 
 ### Fixed
 
+- Release: publish unified checksums and hand off target-specific assets to the Homebrew tap for aqua and Homebrew Linux support. (#249)
+
 ## 0.9.2 - 2026-05-17
 
 ### Added
