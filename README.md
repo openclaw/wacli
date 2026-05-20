@@ -21,10 +21,10 @@ Full documentation: **<https://wacli.sh>**
 ### Homebrew (recommended)
 
 ```bash
-brew install steipete/tap/wacli
+brew install openclaw/tap/wacli
 ```
 
-If a Linux install reports `Binary was compiled with 'CGO_ENABLED=0'`, run `brew update && brew reinstall steipete/tap/wacli`.
+If a Linux install reports `Binary was compiled with 'CGO_ENABLED=0'`, run `brew update && brew reinstall openclaw/tap/wacli`.
 
 ### Build from source
 

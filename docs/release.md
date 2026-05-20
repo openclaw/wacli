@@ -36,7 +36,7 @@ The release workflow dispatches the `Update Formula` workflow in `openclaw/homeb
 
 Optional repository secret:
 
-- `HOMEBREW_TAP_TOKEN`: token with permission to run workflows in `steipete/homebrew-tap`
+- `HOMEBREW_TAP_TOKEN`: token with permission to run workflows in `openclaw/homebrew-tap`
 
 If `HOMEBREW_TAP_TOKEN` is missing, release artifacts are still published and the tap update is skipped with a workflow warning.
 

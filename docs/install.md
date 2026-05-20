@@ -10,7 +10,7 @@ description: "Install wacli via Homebrew tap, prebuilt release archives, or a lo
 ## Homebrew (macOS, Linux)
 
 ```bash
-brew install steipete/tap/wacli
+brew install openclaw/tap/wacli
 wacli --version
 ```
 
@@ -18,7 +18,7 @@ If a Linux install from the tap reports `Binary was compiled with 'CGO_ENABLED=0
 
 ```bash
 brew update
-brew reinstall steipete/tap/wacli
+brew reinstall openclaw/tap/wacli
 ```
 
 ## GitHub releases (raw binaries)
@@ -68,7 +68,7 @@ wacli --help
 
 ## Updating
 
-- **Homebrew tap**: `brew upgrade wacli` (or `brew reinstall steipete/tap/wacli`).
+- **Homebrew tap**: `brew upgrade wacli` (or `brew reinstall openclaw/tap/wacli`).
 - **GitHub release archives**: download the new tarball / ZIP and replace the binary.
 - **Source builds**: `git pull && pnpm build` (or the manual `go build` above). Local builds use the version compiled into the source tree; release artifacts inject the tag during GoReleaser builds.
 

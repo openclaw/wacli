@@ -17,7 +17,7 @@ const productName = "wacli";
 const productTagline = "WhatsApp in your terminal";
 const productDescription =
   "A single Go CLI that pairs as a linked WhatsApp Web device, mirrors message history into local SQLite with FTS5 search, and exposes send, media, contact, and group workflows for terminals, scripts, and coding agents.";
-const brewInstall = "brew install steipete/tap/wacli";
+const brewInstall = "brew install openclaw/tap/wacli";
 
 const sections = [
   ["Start", ["index.md", "install.md", "quickstart.md", "overview.md"]],

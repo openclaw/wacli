@@ -72,7 +72,7 @@ jobs:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           if [ -z "$GH_TOKEN" ]; then
-            echo "::warning::Skipping Homebrew tap update because HOMEBREW_TAP_TOKEN is not configured with workflow access to steipete/homebrew-tap"
+            echo "::warning::Skipping Homebrew tap update because HOMEBREW_TAP_TOKEN is not configured with workflow access to openclaw/homebrew-tap"
             exit 0
           fi
 

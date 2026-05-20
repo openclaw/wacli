@@ -277,7 +277,7 @@ export function socialCardSvg() {
   </g>
   <text x="114" y="315" fill="#ffffff" font-family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="104" font-weight="700">wacli</text>
   <text x="114" y="388" fill="#dcfce7" font-family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="44" font-weight="600">WhatsApp in your terminal</text>
-  <text x="114" y="468" fill="#b7c8c0" font-family="JetBrains Mono, ui-monospace, SFMono-Regular, Menlo, monospace" font-size="32">$ brew install steipete/tap/wacli</text>
+  <text x="114" y="468" fill="#b7c8c0" font-family="JetBrains Mono, ui-monospace, SFMono-Regular, Menlo, monospace" font-size="32">$ brew install openclaw/tap/wacli</text>
   <g fill="#9af1b7" font-family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="28" font-weight="600">
     <text x="742" y="150">sync</text>
     <text x="857" y="150">search</text>

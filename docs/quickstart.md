@@ -10,7 +10,7 @@ Five minutes from a clean machine to authenticated sync, search, and send. For d
 ## 1. Install
 
 ```bash
-brew install steipete/tap/wacli
+brew install openclaw/tap/wacli
 wacli --version
 ```
 
