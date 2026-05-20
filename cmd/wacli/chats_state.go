@@ -193,7 +193,11 @@ func chatFlagsString(c store.Chat) string {
 		flags = append(flags, "muted")
 	}
 	if c.Unread {
-		flags = append(flags, "unread")
+		if c.UnreadCount > 0 {
+			flags = append(flags, fmt.Sprintf("unread:%d", c.UnreadCount))
+		} else {
+			flags = append(flags, "unread")
+		}
 	}
 	return strings.Join(flags, ",")
 }

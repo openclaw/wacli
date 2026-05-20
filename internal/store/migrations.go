@@ -31,6 +31,7 @@ var schemaMigrations = []migration{
 	{version: 15, name: "call events", up: migrateCallEvents},
 	{version: 16, name: "messages edited columns", up: migrateMessagesEditedColumns},
 	{version: 17, name: "status messages", up: migrateStatusMessages},
+	{version: 18, name: "chat unread count column", up: migrateChatUnreadCountColumn},
 }
 
 func (d *DB) ensureSchema() error {
@@ -97,6 +98,9 @@ func (d *DB) ensureCurrentSchema() error {
 	}
 	if err := migrateStatusMessages(d); err != nil {
 		return fmt.Errorf("ensure current status messages schema: %w", err)
+	}
+	if err := migrateChatUnreadCountColumn(d); err != nil {
+		return fmt.Errorf("ensure current chat unread count column: %w", err)
 	}
 	return nil
 }
@@ -240,6 +244,49 @@ func migrateChatStateColumns(d *DB) error {
 		if _, err := d.sql.Exec(col.ddl); err != nil {
 			return fmt.Errorf("add chats.%s column: %w", col.name, err)
 		}
+	}
+	return nil
+}
+
+func migrateChatUnreadCountColumn(d *DB) error {
+	hasChats, err := d.tableExists("chats")
+	if err != nil {
+		return err
+	}
+	if !hasChats {
+		return nil
+	}
+	hasUnreadCount, err := d.tableHasColumn("chats", "unread_count")
+	if err != nil {
+		return err
+	}
+	if hasUnreadCount {
+		return nil
+	}
+	if _, err := d.sql.Exec(`ALTER TABLE chats ADD COLUMN unread_count INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return fmt.Errorf("add chats.unread_count column: %w", err)
+	}
+	hasUnread, err := d.tableHasColumn("chats", "unread")
+	if err != nil {
+		return err
+	}
+	if !hasUnread {
+		return nil
+	}
+	if _, err := d.sql.Exec(`
+		UPDATE chats
+		SET unread_count = CASE
+			WHEN COALESCE(unread, 0) > 0 THEN COALESCE(unread, 0)
+			ELSE 0
+		END
+	`); err != nil {
+		return fmt.Errorf("migrate chats unread counts: %w", err)
+	}
+	if _, err := d.sql.Exec(`
+		UPDATE chats
+		SET unread = CASE WHEN COALESCE(unread, 0) != 0 THEN 1 ELSE 0 END
+	`); err != nil {
+		return fmt.Errorf("migrate chats unread markers: %w", err)
 	}
 	return nil
 }

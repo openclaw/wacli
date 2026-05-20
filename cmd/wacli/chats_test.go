@@ -72,13 +72,13 @@ func TestResolveStoredChatsMergesMappedDuplicates(t *testing.T) {
 	newer := time.Unix(20, 0)
 
 	got := resolveStoredChatsWith(context.Background(), resolver, []store.Chat{
-		{JID: lid.String(), Kind: "unknown", Name: lid.String(), LastMessageTS: newer},
-		{JID: pn.String(), Kind: "dm", Name: "", LastMessageTS: old},
+		{JID: lid.String(), Kind: "unknown", Name: lid.String(), LastMessageTS: newer, Unread: true, UnreadCount: 2},
+		{JID: pn.String(), Kind: "dm", Name: "", LastMessageTS: old, Unread: true, UnreadCount: 1},
 	})
 	if len(got) != 1 {
 		t.Fatalf("len = %d, want 1: %+v", len(got), got)
 	}
-	if got[0].JID != pn.String() || got[0].Name != "Alice" || !got[0].LastMessageTS.Equal(newer) {
+	if got[0].JID != pn.String() || got[0].Name != "Alice" || !got[0].LastMessageTS.Equal(newer) || !got[0].Unread || got[0].UnreadCount != 3 {
 		t.Fatalf("merged chat = %+v", got[0])
 	}
 }
@@ -86,6 +86,14 @@ func TestResolveStoredChatsMergesMappedDuplicates(t *testing.T) {
 func TestChatFlagsString(t *testing.T) {
 	got := chatFlagsString(store.Chat{Pinned: true, Archived: true, MutedUntil: -1, Unread: true})
 	if got != "pinned,archived,muted,unread" {
+		t.Fatalf("flags = %q", got)
+	}
+	got = chatFlagsString(store.Chat{Unread: true, UnreadCount: 1})
+	if got != "unread:1" {
+		t.Fatalf("flags = %q", got)
+	}
+	got = chatFlagsString(store.Chat{Unread: true, UnreadCount: 3})
+	if got != "unread:3" {
 		t.Fatalf("flags = %q", got)
 	}
 	if err := validateBoolFilter("archived", true, true); err == nil {

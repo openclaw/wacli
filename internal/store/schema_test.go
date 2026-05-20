@@ -87,6 +87,14 @@ func TestOpenCreatesExpectedSchema(t *testing.T) {
 		t.Fatalf("expected contacts system_name column to exist")
 	}
 
+	chatCols, err := tableColumns(db.sql, "chats")
+	if err != nil {
+		t.Fatalf("chats tableColumns: %v", err)
+	}
+	if !chatCols["unread_count"] {
+		t.Fatalf("expected chats unread_count column to exist")
+	}
+
 	statusCols, err := tableColumns(db.sql, "status_messages")
 	if err != nil {
 		t.Fatalf("status_messages tableColumns: %v", err)
@@ -98,6 +106,80 @@ func TestOpenCreatesExpectedSchema(t *testing.T) {
 	}
 	if !indexExists(t, db.sql, "idx_status_messages_ts") {
 		t.Fatalf("expected status_messages timestamp index to exist")
+	}
+}
+
+func TestOpenMigratesLegacyUnreadCounts(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "wacli.db")
+
+	raw, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	if _, err := raw.Exec(`
+		CREATE TABLE schema_migrations (
+			version INTEGER PRIMARY KEY,
+			name TEXT NOT NULL,
+			applied_at INTEGER NOT NULL
+		);
+		CREATE TABLE chats (
+			jid TEXT PRIMARY KEY,
+			kind TEXT NOT NULL,
+			name TEXT,
+			last_message_ts INTEGER,
+			archived INTEGER NOT NULL DEFAULT 0,
+			pinned INTEGER NOT NULL DEFAULT 0,
+			muted_until INTEGER NOT NULL DEFAULT 0,
+			unread INTEGER NOT NULL DEFAULT 0
+		);
+		INSERT INTO chats(jid, kind, unread) VALUES
+			('counted@s.whatsapp.net', 'dm', 4),
+			('marker@s.whatsapp.net', 'dm', -1),
+			('read@s.whatsapp.net', 'dm', 0);
+	`); err != nil {
+		_ = raw.Close()
+		t.Fatalf("create old schema: %v", err)
+	}
+	for _, m := range schemaMigrations {
+		if m.version >= 18 {
+			continue
+		}
+		if _, err := raw.Exec(`INSERT INTO schema_migrations(version, name, applied_at) VALUES(?, ?, 1)`, m.version, m.name); err != nil {
+			_ = raw.Close()
+			t.Fatalf("mark migration %d: %v", m.version, err)
+		}
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("raw close: %v", err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open migrated DB: %v", err)
+	}
+	defer db.Close()
+
+	counted, err := db.GetChat("counted@s.whatsapp.net")
+	if err != nil {
+		t.Fatalf("GetChat counted: %v", err)
+	}
+	if !counted.Unread || counted.UnreadCount != 4 {
+		t.Fatalf("counted unread = %+v, want unread count 4", counted)
+	}
+	marker, err := db.GetChat("marker@s.whatsapp.net")
+	if err != nil {
+		t.Fatalf("GetChat marker: %v", err)
+	}
+	if !marker.Unread || marker.UnreadCount != 0 {
+		t.Fatalf("marker unread = %+v, want unread marker only", marker)
+	}
+	read, err := db.GetChat("read@s.whatsapp.net")
+	if err != nil {
+		t.Fatalf("GetChat read: %v", err)
+	}
+	if read.Unread || read.UnreadCount != 0 {
+		t.Fatalf("read unread = %+v, want read count 0", read)
 	}
 }
 

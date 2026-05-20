@@ -7,7 +7,7 @@ ON CONFLICT(jid) DO UPDATE SET
     last_message_ts=CASE WHEN excluded.last_message_ts > COALESCE(chats.last_message_ts, 0) THEN excluded.last_message_ts ELSE chats.last_message_ts END;
 
 -- name: GetChat :one
-SELECT jid, kind, COALESCE(name,''), COALESCE(last_message_ts,0), COALESCE(archived,0), COALESCE(pinned,0), COALESCE(muted_until,0), COALESCE(unread,0)
+SELECT jid, kind, COALESCE(name,''), COALESCE(last_message_ts,0), COALESCE(archived,0), COALESCE(pinned,0), COALESCE(muted_until,0), COALESCE(unread,0), COALESCE(unread_count,0)
 FROM chats
 WHERE jid = ?;
 
@@ -30,11 +30,6 @@ ON CONFLICT(jid) DO UPDATE SET pinned=excluded.pinned;
 INSERT INTO chats(jid, kind, muted_until)
 VALUES(?, 'unknown', ?)
 ON CONFLICT(jid) DO UPDATE SET muted_until=excluded.muted_until;
-
--- name: SetChatUnread :exec
-INSERT INTO chats(jid, kind, unread)
-VALUES(?, 'unknown', ?)
-ON CONFLICT(jid) DO UPDATE SET unread=excluded.unread;
 
 -- name: DeletePollVotesForChat :exec
 DELETE FROM poll_votes WHERE chat_jid = ?;

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"runtime"
@@ -68,6 +69,159 @@ func TestLiveSyncWarnsOnEncryptedReactionDecryptFailure(t *testing.T) {
 	}
 	if msg.DisplayText != "Reacted to message" {
 		t.Fatalf("expected fallback reaction display text, got %q", msg.DisplayText)
+	}
+}
+
+func TestLiveSyncIncrementsUnreadCountForIncomingMessages(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	chat := types.JID{User: "123", Server: types.DefaultUserServer}
+	incoming := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:     chat,
+				Sender:   chat,
+				IsFromMe: false,
+			},
+			ID:        "incoming-1",
+			Timestamp: time.Date(2024, 1, 3, 0, 0, 0, 0, time.UTC),
+			PushName:  "Alice",
+		},
+		Message: &waProto.Message{Conversation: proto.String("hello")},
+	}
+
+	var messagesStored atomic.Int64
+	a.handleLiveSyncMessage(context.Background(), SyncOptions{}, incoming, &messagesStored, func(string, string) {}, nil)
+
+	c, err := a.db.GetChat(chat.String())
+	if err != nil {
+		t.Fatalf("GetChat: %v", err)
+	}
+	if !c.Unread || c.UnreadCount != 1 {
+		t.Fatalf("unread state after incoming message = %+v, want count 1", c)
+	}
+
+	a.handleLiveSyncMessage(context.Background(), SyncOptions{}, incoming, &messagesStored, func(string, string) {}, nil)
+	c, err = a.db.GetChat(chat.String())
+	if err != nil {
+		t.Fatalf("GetChat after duplicate: %v", err)
+	}
+	if !c.Unread || c.UnreadCount != 1 {
+		t.Fatalf("unread state after duplicate incoming message = %+v, want count 1", c)
+	}
+}
+
+func TestLiveSyncDoesNotIncrementUnreadForOwnMessagesOrStatus(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	chat := types.JID{User: "123", Server: types.DefaultUserServer}
+	own := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:     chat,
+				Sender:   chat,
+				IsFromMe: true,
+			},
+			ID:        "own-1",
+			Timestamp: time.Date(2024, 1, 3, 0, 0, 0, 0, time.UTC),
+		},
+		Message: &waProto.Message{Conversation: proto.String("sent")},
+	}
+	status := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:     types.StatusBroadcastJID,
+				Sender:   chat,
+				IsFromMe: false,
+			},
+			ID:        "status-1",
+			Timestamp: time.Date(2024, 1, 3, 0, 1, 0, 0, time.UTC),
+		},
+		Message: &waProto.Message{Conversation: proto.String("status")},
+	}
+
+	var messagesStored atomic.Int64
+	a.handleLiveSyncMessage(context.Background(), SyncOptions{}, own, &messagesStored, func(string, string) {}, nil)
+	a.handleLiveSyncMessage(context.Background(), SyncOptions{}, status, &messagesStored, func(string, string) {}, nil)
+
+	c, err := a.db.GetChat(chat.String())
+	if err != nil {
+		t.Fatalf("GetChat: %v", err)
+	}
+	if c.Unread || c.UnreadCount != 0 {
+		t.Fatalf("unread state after own message = %+v, want count 0", c)
+	}
+	if _, err := a.db.GetChat(types.StatusBroadcastJID.String()); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("status chat lookup err = %v, want sql.ErrNoRows", err)
+	}
+}
+
+func TestHistorySyncStoresConversationUnreadCount(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	chat := types.JID{User: "123", Server: types.DefaultUserServer}
+	base := time.Date(2024, 1, 3, 0, 0, 0, 0, time.UTC)
+	msg := &waWeb.WebMessageInfo{
+		Key: &waCommon.MessageKey{
+			RemoteJID: proto.String(chat.String()),
+			FromMe:    proto.Bool(false),
+			ID:        proto.String("history-1"),
+		},
+		MessageTimestamp: proto.Uint64(uint64(base.Unix())),
+		Message:          &waProto.Message{Conversation: proto.String("hello")},
+	}
+	history := &events.HistorySync{Data: &waHistorySync.HistorySync{
+		SyncType: waHistorySync.HistorySync_FULL.Enum(),
+		Conversations: []*waHistorySync.Conversation{{
+			ID:          proto.String(chat.String()),
+			UnreadCount: proto.Uint32(3),
+			Messages:    []*waHistorySync.HistorySyncMsg{{Message: msg}},
+		}},
+	}}
+
+	var messagesStored atomic.Int64
+	var lastEvent atomic.Int64
+	a.handleHistorySync(context.Background(), SyncOptions{}, history, &messagesStored, &lastEvent, func(string, string) {})
+
+	c, err := a.db.GetChat(chat.String())
+	if err != nil {
+		t.Fatalf("GetChat: %v", err)
+	}
+	if !c.Unread || c.UnreadCount != 3 {
+		t.Fatalf("unread state after history sync = %+v, want count 3", c)
+	}
+}
+
+func TestHistorySyncStoresMarkedUnreadWithoutCountAsMarkerOnly(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	chat := types.JID{User: "123", Server: types.DefaultUserServer}
+	history := &events.HistorySync{Data: &waHistorySync.HistorySync{
+		SyncType: waHistorySync.HistorySync_FULL.Enum(),
+		Conversations: []*waHistorySync.Conversation{{
+			ID:             proto.String(chat.String()),
+			MarkedAsUnread: proto.Bool(true),
+		}},
+	}}
+
+	var messagesStored atomic.Int64
+	var lastEvent atomic.Int64
+	a.handleHistorySync(context.Background(), SyncOptions{}, history, &messagesStored, &lastEvent, func(string, string) {})
+
+	c, err := a.db.GetChat(chat.String())
+	if err != nil {
+		t.Fatalf("GetChat: %v", err)
+	}
+	if !c.Unread || c.UnreadCount != 0 {
+		t.Fatalf("unread state after marked unread history sync = %+v, want marker-only unread", c)
 	}
 }
 
@@ -474,7 +628,7 @@ func TestChatStateEventsUpdateLocalStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetChat: %v", err)
 	}
-	if !c.Archived || !c.Pinned || c.MutedUntil != -1 || !c.Unread {
+	if !c.Archived || !c.Pinned || c.MutedUntil != -1 || !c.Unread || c.UnreadCount != 0 {
 		t.Fatalf("chat state = %+v", c)
 	}
 }

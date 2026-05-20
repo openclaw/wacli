@@ -139,8 +139,8 @@ func newChatsShowCmd(flags *rootFlags) *cobra.Command {
 			if flags.asJSON {
 				return out.WriteJSON(os.Stdout, c)
 			}
-			fmt.Fprintf(os.Stdout, "JID: %s\nKind: %s\nName: %s\nLast: %s\nArchived: %t\nPinned: %t\nMuted: %t\nMuted until: %s\nUnread: %t\n",
-				sanitize(c.JID), sanitize(c.Kind), sanitize(c.Name), c.LastMessageTS.Local().Format(time.RFC3339), c.Archived, c.Pinned, c.Muted(), formatMutedUntil(c.MutedUntil), c.Unread)
+			fmt.Fprintf(os.Stdout, "JID: %s\nKind: %s\nName: %s\nLast: %s\nArchived: %t\nPinned: %t\nMuted: %t\nMuted until: %s\nUnread: %t\nUnread count: %d\n",
+				sanitize(c.JID), sanitize(c.Kind), sanitize(c.Name), c.LastMessageTS.Local().Format(time.RFC3339), c.Archived, c.Pinned, c.Muted(), formatMutedUntil(c.MutedUntil), c.Unread, c.UnreadCount)
 			return nil
 		},
 	}
@@ -232,6 +232,8 @@ func mergeDisplayChats(a, b store.Chat) store.Chat {
 	if chatNameRank(b.Name, b.JID) > chatNameRank(out.Name, out.JID) {
 		out.Name = b.Name
 	}
+	out.UnreadCount += b.UnreadCount
+	out.Unread = out.Unread || b.Unread || out.UnreadCount > 0
 	return out
 }
 

@@ -4,6 +4,8 @@
 
 ### Added
 
+- Chats: store unread marker state and numeric `unread_count` separately; migrate existing stores away from sentinel unread values while preserving public chat JSON fields. (thanks @drelum)
+
 ### Security
 
 ### Fixed

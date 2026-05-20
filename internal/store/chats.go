@@ -42,7 +42,7 @@ func (d *DB) ListChatsFiltered(f ChatListFilter) ([]Chat, error) {
 	if f.Limit <= 0 {
 		f.Limit = 50
 	}
-	q := `SELECT jid, kind, COALESCE(name,''), COALESCE(last_message_ts,0), COALESCE(archived,0), COALESCE(pinned,0), COALESCE(muted_until,0), COALESCE(unread,0) FROM chats WHERE 1=1`
+	q := `SELECT jid, kind, COALESCE(name,''), COALESCE(last_message_ts,0), COALESCE(archived,0), COALESCE(pinned,0), COALESCE(muted_until,0), COALESCE(unread,0), COALESCE(unread_count,0) FROM chats WHERE 1=1`
 	var args []interface{}
 	if strings.TrimSpace(f.Query) != "" {
 		q += ` AND (LOWER(name) LIKE LOWER(?) ESCAPE '\' OR LOWER(jid) LIKE LOWER(?) ESCAPE '\')`
@@ -67,8 +67,11 @@ func (d *DB) ListChatsFiltered(f ChatListFilter) ([]Chat, error) {
 		args = append(args, now)
 	}
 	if f.Unread != nil {
-		q += ` AND unread = ?`
-		args = append(args, boolToInt(*f.Unread))
+		if *f.Unread {
+			q += ` AND unread != 0`
+		} else {
+			q += ` AND unread = 0`
+		}
 	}
 	q += ` ORDER BY pinned DESC, last_message_ts DESC LIMIT ?`
 	args = append(args, f.Limit)
@@ -83,14 +86,14 @@ func (d *DB) ListChatsFiltered(f ChatListFilter) ([]Chat, error) {
 	for rows.Next() {
 		var c Chat
 		var ts int64
-		var archived, pinned, unread int
-		if err := rows.Scan(&c.JID, &c.Kind, &c.Name, &ts, &archived, &pinned, &c.MutedUntil, &unread); err != nil {
+		var archived, pinned, unread, unreadCount int
+		if err := rows.Scan(&c.JID, &c.Kind, &c.Name, &ts, &archived, &pinned, &c.MutedUntil, &unread, &unreadCount); err != nil {
 			return nil, err
 		}
 		c.LastMessageTS = fromUnix(ts)
 		c.Archived = archived != 0
 		c.Pinned = pinned != 0
-		c.Unread = unread != 0
+		applyChatUnread(&c, unread, unreadCount)
 		out = append(out, c)
 	}
 	return out, rows.Err()
@@ -120,7 +123,47 @@ func (d *DB) SetChatMutedUntil(jid string, mutedUntil int64) error {
 }
 
 func (d *DB) SetChatUnread(jid string, unread bool) error {
-	return d.q.SetChatUnread(storeCtx(), storedb.SetChatUnreadParams{Jid: jid, Unread: boolToInt64(unread)})
+	if unread {
+		_, err := d.sql.ExecContext(storeCtx(), `
+			INSERT INTO chats(jid, kind, unread)
+			VALUES(?, 'unknown', 1)
+			ON CONFLICT(jid) DO UPDATE SET unread=1
+		`, jid)
+		return err
+	}
+	_, err := d.sql.ExecContext(storeCtx(), `
+		INSERT INTO chats(jid, kind, unread, unread_count)
+		VALUES(?, 'unknown', 0, 0)
+		ON CONFLICT(jid) DO UPDATE SET unread=0, unread_count=0
+	`, jid)
+	return err
+}
+
+func (d *DB) SetChatUnreadCount(jid string, count int) error {
+	if count < 0 {
+		count = 0
+	}
+	unread := 0
+	if count > 0 {
+		unread = 1
+	}
+	_, err := d.sql.ExecContext(storeCtx(), `
+		INSERT INTO chats(jid, kind, unread, unread_count)
+		VALUES(?, 'unknown', ?, ?)
+		ON CONFLICT(jid) DO UPDATE SET unread=excluded.unread, unread_count=excluded.unread_count
+	`, jid, unread, count)
+	return err
+}
+
+func (d *DB) IncrementChatUnread(jid string) error {
+	_, err := d.sql.ExecContext(storeCtx(), `
+		INSERT INTO chats(jid, kind, unread, unread_count)
+		VALUES(?, 'unknown', 1, 1)
+		ON CONFLICT(jid) DO UPDATE SET
+			unread=1,
+			unread_count=COALESCE(chats.unread_count, 0) + 1
+	`, jid)
+	return err
 }
 
 func (d *DB) DeleteChat(jid string) error {
@@ -214,7 +257,7 @@ func (d *DB) ListChatsOlderThan(days int) ([]Chat, error) {
 	}
 	cutoff := nowUTC().AddDate(0, 0, -days)
 	rows, err := d.sql.Query(`
-		SELECT jid, kind, name, last_message_ts, archived, pinned, muted_until, unread
+		SELECT jid, kind, name, last_message_ts, archived, pinned, muted_until, unread, unread_count
 		FROM (
 			SELECT
 				c.jid,
@@ -225,6 +268,7 @@ func (d *DB) ListChatsOlderThan(days int) ([]Chat, error) {
 				COALESCE(c.pinned,0) AS pinned,
 				COALESCE(c.muted_until,0) AS muted_until,
 				COALESCE(c.unread,0) AS unread,
+				COALESCE(c.unread_count,0) AS unread_count,
 				CASE
 					WHEN COALESCE(MAX(m.ts), 0) > COALESCE(c.last_message_ts, 0) THEN COALESCE(MAX(m.ts), 0)
 					ELSE COALESCE(c.last_message_ts, 0)
@@ -245,14 +289,14 @@ func (d *DB) ListChatsOlderThan(days int) ([]Chat, error) {
 	for rows.Next() {
 		var c Chat
 		var ts int64
-		var archived, pinned, unread int
-		if err := rows.Scan(&c.JID, &c.Kind, &c.Name, &ts, &archived, &pinned, &c.MutedUntil, &unread); err != nil {
+		var archived, pinned, unread, unreadCount int
+		if err := rows.Scan(&c.JID, &c.Kind, &c.Name, &ts, &archived, &pinned, &c.MutedUntil, &unread, &unreadCount); err != nil {
 			return nil, err
 		}
 		c.LastMessageTS = fromUnix(ts)
 		c.Archived = archived != 0
 		c.Pinned = pinned != 0
-		c.Unread = unread != 0
+		applyChatUnread(&c, unread, unreadCount)
 		out = append(out, c)
 	}
 	return out, rows.Err()
@@ -267,7 +311,7 @@ func (d *DB) CountChatMessages(jid string) (int64, error) {
 }
 
 func chatFromRow(row storedb.GetChatRow) Chat {
-	return Chat{
+	c := Chat{
 		JID:           row.Jid,
 		Kind:          row.Kind,
 		Name:          row.Name,
@@ -275,7 +319,17 @@ func chatFromRow(row storedb.GetChatRow) Chat {
 		Archived:      row.Archived != 0,
 		Pinned:        row.Pinned != 0,
 		MutedUntil:    row.MutedUntil,
-		Unread:        row.Unread != 0,
+	}
+	applyChatUnread(&c, int(row.Unread), int(row.UnreadCount))
+	return c
+}
+
+func applyChatUnread(c *Chat, unread, unreadCount int) {
+	c.Unread = unread != 0
+	if unreadCount > 0 {
+		c.UnreadCount = unreadCount
+	} else {
+		c.UnreadCount = 0
 	}
 }
 

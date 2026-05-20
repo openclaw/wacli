@@ -18,6 +18,7 @@ type Chat struct {
 	Pinned        bool      `json:"pinned"`
 	MutedUntil    int64     `json:"muted_until"`
 	Unread        bool      `json:"unread"`
+	UnreadCount   int       `json:"unread_count"`
 }
 
 func (c Chat) Muted() bool {

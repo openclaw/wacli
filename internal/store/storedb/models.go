@@ -36,6 +36,7 @@ type Chat struct {
 	Pinned        int64
 	MutedUntil    int64
 	Unread        int64
+	UnreadCount   int64
 }
 
 type Contact struct {

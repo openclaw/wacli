@@ -269,7 +269,7 @@ func (q *Queries) FindPollByMsgID(ctx context.Context, msgID string) (FindPollBy
 }
 
 const getChat = `-- name: GetChat :one
-SELECT jid, kind, COALESCE(name,''), COALESCE(last_message_ts,0), COALESCE(archived,0), COALESCE(pinned,0), COALESCE(muted_until,0), COALESCE(unread,0)
+SELECT jid, kind, COALESCE(name,''), COALESCE(last_message_ts,0), COALESCE(archived,0), COALESCE(pinned,0), COALESCE(muted_until,0), COALESCE(unread,0), COALESCE(unread_count,0)
 FROM chats
 WHERE jid = ?
 `
@@ -283,6 +283,7 @@ type GetChatRow struct {
 	Pinned        int64
 	MutedUntil    int64
 	Unread        int64
+	UnreadCount   int64
 }
 
 func (q *Queries) GetChat(ctx context.Context, jid string) (GetChatRow, error) {
@@ -297,6 +298,7 @@ func (q *Queries) GetChat(ctx context.Context, jid string) (GetChatRow, error) {
 		&i.Pinned,
 		&i.MutedUntil,
 		&i.Unread,
+		&i.UnreadCount,
 	)
 	return i, err
 }
@@ -1316,22 +1318,6 @@ type SetChatPinnedParams struct {
 
 func (q *Queries) SetChatPinned(ctx context.Context, arg SetChatPinnedParams) error {
 	_, err := q.db.ExecContext(ctx, setChatPinned, arg.Jid, arg.Pinned)
-	return err
-}
-
-const setChatUnread = `-- name: SetChatUnread :exec
-INSERT INTO chats(jid, kind, unread)
-VALUES(?, 'unknown', ?)
-ON CONFLICT(jid) DO UPDATE SET unread=excluded.unread
-`
-
-type SetChatUnreadParams struct {
-	Jid    string
-	Unread int64
-}
-
-func (q *Queries) SetChatUnread(ctx context.Context, arg SetChatUnreadParams) error {
-	_, err := q.db.ExecContext(ctx, setChatUnread, arg.Jid, arg.Unread)
 	return err
 }
 

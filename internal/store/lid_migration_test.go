@@ -79,6 +79,12 @@ func TestMigrateLIDToPNMergesChatsAndMessages(t *testing.T) {
 	if err := db.UpsertChat(lid, "unknown", lid, base.Add(10*time.Second)); err != nil {
 		t.Fatalf("UpsertChat lid: %v", err)
 	}
+	if err := db.SetChatUnreadCount(pn, 2); err != nil {
+		t.Fatalf("SetChatUnreadCount pn: %v", err)
+	}
+	if err := db.SetChatUnreadCount(lid, 3); err != nil {
+		t.Fatalf("SetChatUnreadCount lid: %v", err)
+	}
 	if err := db.UpsertChat(group, "group", "Project", base); err != nil {
 		t.Fatalf("UpsertChat group: %v", err)
 	}
@@ -211,6 +217,9 @@ func TestMigrateLIDToPNMergesChatsAndMessages(t *testing.T) {
 	}
 	if !chat.LastMessageTS.Equal(base.Add(10 * time.Second)) {
 		t.Fatalf("merged chat timestamp = %s, want %s", chat.LastMessageTS, base.Add(10*time.Second))
+	}
+	if !chat.Unread || chat.UnreadCount != 5 {
+		t.Fatalf("merged chat unread state = %+v, want unread count 5", chat)
 	}
 
 	dupe, err := db.GetMessage(pn, "dupe")

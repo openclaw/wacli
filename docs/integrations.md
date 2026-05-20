@@ -114,14 +114,18 @@ ORDER BY ts DESC
 LIMIT 100;
 ```
 
-Known chats by newest activity:
+Known chats by newest activity, including local unread badge counts:
 
 ```sql
-SELECT jid, kind, name, last_message_ts, archived, pinned, muted_until, unread
+SELECT jid, kind, name, last_message_ts, archived, pinned, muted_until,
+       unread != 0 AS unread,
+       unread_count
 FROM chats
 ORDER BY COALESCE(last_message_ts, 0) DESC
 LIMIT 100;
 ```
+
+`chats.unread` stores the boolean unread marker/state used by `chats list --unread` and `--no-unread`. `chats.unread_count` stores the numeric unread-message count separately; marker-only unread state from manual mark-unread and history sync leaves `unread_count` at zero.
 
 Community subgroups:
 

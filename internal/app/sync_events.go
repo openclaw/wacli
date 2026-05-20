@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"github.com/openclaw/wacli/internal/wa"
 	"go.mau.fi/whatsmeow/appstate"
 	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 )
@@ -232,7 +234,11 @@ func (a *App) handleLiveSyncMessage(ctx context.Context, opts SyncOptions, v *ev
 	if pm.ReactionToID != "" && pm.ReactionEmoji == "" && v.Message != nil && v.Message.GetEncReactionMessage() != nil {
 		a.decryptEncryptedReaction(ctx, &pm, v)
 	}
+	incrementUnread := a.shouldIncrementLiveUnread(ctx, pm)
 	if err := a.storeParsedMessageForSync(ctx, pm, limits...); err == nil {
+		if incrementUnread {
+			a.incrementLiveUnread(ctx, pm)
+		}
 		a.emitSyncProgress(messagesStored.Add(1))
 		if enqueueWebhook != nil {
 			enqueueWebhook(pm)
@@ -283,6 +289,7 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 		if chatID == "" {
 			continue
 		}
+		a.storeHistoryUnreadCount(ctx, chatID, conv)
 		var pendingPolls []historyPollSideEffect
 		for _, m := range conv.Messages {
 			lastEvent.Store(nowUTC().UnixNano())
@@ -331,6 +338,56 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 	}
 	if !a.eventsEnabled() {
 		a.emitOrPrint("progress", map[string]any{"messages_synced": messagesStored.Load()}, "\rSynced %d messages...", messagesStored.Load())
+	}
+}
+
+func (a *App) incrementLiveUnread(ctx context.Context, pm wa.ParsedMessage) {
+	chat := a.canonicalStoreJID(ctx, pm.Chat)
+	if err := a.db.IncrementChatUnread(canonicalJIDString(chat)); err != nil {
+		a.emitWarning(
+			"live_unread_store_failed",
+			fmt.Sprintf("warning: failed to increment unread count for chat %s: %v", chat, err),
+			map[string]any{"chat_jid": chat.String(), "error": err.Error()},
+		)
+	}
+}
+
+func (a *App) shouldIncrementLiveUnread(ctx context.Context, pm wa.ParsedMessage) bool {
+	if pm.FromMe || pm.ID == "" || pm.Chat.IsEmpty() || pm.Chat == types.StatusBroadcastJID {
+		return false
+	}
+	chat := canonicalJIDString(a.canonicalStoreJID(ctx, pm.Chat))
+	if chat == "" {
+		return false
+	}
+	_, err := a.db.GetMessage(chat, pm.ID)
+	return errors.Is(err, sql.ErrNoRows)
+}
+
+func (a *App) storeHistoryUnreadCount(ctx context.Context, chatID string, conv *waHistorySync.Conversation) {
+	if conv == nil || (conv.UnreadCount == nil && conv.MarkedAsUnread == nil) {
+		return
+	}
+	chat, err := types.ParseJID(chatID)
+	if err != nil || chat.IsEmpty() {
+		return
+	}
+	count := int(conv.GetUnreadCount())
+	chat = a.canonicalStoreJID(ctx, chat)
+	var storeErr error
+	if count > 0 {
+		storeErr = a.db.SetChatUnreadCount(canonicalJIDString(chat), count)
+	} else if conv.GetMarkedAsUnread() {
+		storeErr = a.db.SetChatUnread(canonicalJIDString(chat), true)
+	} else {
+		storeErr = a.db.SetChatUnreadCount(canonicalJIDString(chat), 0)
+	}
+	if storeErr != nil {
+		a.emitWarning(
+			"history_unread_store_failed",
+			fmt.Sprintf("warning: failed to store unread count for chat %s: %v", chat, storeErr),
+			map[string]any{"chat_jid": chat.String(), "unread_count": count, "error": storeErr.Error()},
+		)
 	}
 }
 
