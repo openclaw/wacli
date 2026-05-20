@@ -8,6 +8,10 @@
 
 ### Fixed
 
+### Docs
+
+- Docs: update Homebrew install and release-token references to the OpenClaw Homebrew tap. (#254 - thanks @dovocoder)
+
 ## 0.10.0 - 2026-05-20
 
 ### Added
