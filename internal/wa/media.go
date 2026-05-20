@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,6 +21,8 @@ import (
 )
 
 const MaxMediaDownloadSize = 100 * 1024 * 1024
+
+var directMediaBaseURL = "https://mmg.whatsapp.net"
 
 // WhatsApp writes encrypted media as padded ciphertext plus a 10-byte MAC before
 // truncating and decrypting it in place.
@@ -112,11 +115,11 @@ func DownloadMediaDirectToFile(ctx context.Context, directPath string, encFileHa
 	if strings.TrimSpace(directPath) == "" {
 		return 0, fmt.Errorf("direct path is required")
 	}
-	mediaURL, err := directMediaURL(directPath)
+	mt, err := MediaTypeFromString(mediaType)
 	if err != nil {
 		return 0, err
 	}
-	mt, err := MediaTypeFromString(mediaType)
+	mediaURL, err := directMediaURL(directPath, encFileHash, mt)
 	if err != nil {
 		return 0, err
 	}
@@ -164,15 +167,48 @@ func DownloadMediaDirectToFile(ctx context.Context, directPath string, encFileHa
 	return int64(len(plaintext)), nil
 }
 
-func directMediaURL(directPath string) (string, error) {
+func directMediaURL(directPath string, encFileHash []byte, mediaType whatsmeow.MediaType) (string, error) {
 	path := strings.TrimSpace(directPath)
-	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-		return path, nil
+	if strings.Contains(path, "://") || strings.HasPrefix(path, "//") {
+		return "", fmt.Errorf("media download path must be a WhatsApp direct path, not a URL")
 	}
 	if !strings.HasPrefix(path, "/") {
 		return "", fmt.Errorf("media download path does not start with slash: %s", path)
 	}
-	return "https://mmg.whatsapp.net" + path, nil
+	mediaURL := strings.TrimRight(directMediaBaseURL, "/") + path
+	if len(encFileHash) > 0 {
+		mediaURL = appendDirectMediaQuery(mediaURL, "hash", base64.URLEncoding.EncodeToString(encFileHash))
+	}
+	if mmsType := directMediaMMSType(mediaType); mmsType != "" {
+		mediaURL = appendDirectMediaQuery(mediaURL, "mms-type", mmsType)
+	}
+	return appendDirectMediaQuery(mediaURL, "__wa-mms", ""), nil
+}
+
+func appendDirectMediaQuery(mediaURL, key, value string) string {
+	sep := "?"
+	if strings.Contains(mediaURL, "?") {
+		sep = "&"
+	}
+	if strings.HasSuffix(mediaURL, "?") || strings.HasSuffix(mediaURL, "&") {
+		sep = ""
+	}
+	return mediaURL + sep + key + "=" + value
+}
+
+func directMediaMMSType(mediaType whatsmeow.MediaType) string {
+	switch mediaType {
+	case whatsmeow.MediaImage:
+		return "image"
+	case whatsmeow.MediaAudio:
+		return "audio"
+	case whatsmeow.MediaVideo:
+		return "video"
+	case whatsmeow.MediaDocument:
+		return "document"
+	default:
+		return ""
+	}
 }
 
 func downloadAndDecryptDirect(ctx context.Context, mediaURL string, encFileHash, fileHash, mediaKey []byte, fileLength uint64, mediaType whatsmeow.MediaType) ([]byte, error) {

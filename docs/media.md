@@ -16,6 +16,7 @@ wacli media download --chat JID --id MSG_ID [--output PATH]
 - Media downloads are capped at 100 MiB.
 - `--output` may be a file path or directory.
 - If `--output` is omitted, media is written under the store media directory.
+- `--read-only` is supported only with explicit `--output`; it writes the file without opening the WhatsApp session store or recording `local_path` / `downloaded_at`.
 
 ## Examples
 
@@ -23,4 +24,5 @@ wacli media download --chat JID --id MSG_ID [--output PATH]
 wacli media download --chat 1234567890@s.whatsapp.net --id ABC123
 wacli media download --chat 1234567890@s.whatsapp.net --id ABC123 --output ./downloads
 wacli media download --chat 1234567890@s.whatsapp.net --id ABC123 --output ./photo.jpg
+wacli --read-only media download --chat 1234567890@s.whatsapp.net --id ABC123 --output /tmp/photo.jpg
 ```

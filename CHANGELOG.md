@@ -4,6 +4,8 @@
 
 ### Added
 
+- Media: allow `media download --read-only` when `--output` is explicit, so synced media can be fetched without opening the WhatsApp session store or recording download state. (#250 - thanks @mbelinky)
+
 ### Security
 
 ### Fixed
