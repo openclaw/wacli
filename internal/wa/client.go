@@ -116,19 +116,7 @@ func (c *Client) Connect(ctx context.Context, opts ConnectOptions) error {
 	}
 
 	if authed {
-		// Announce ourselves as `available` so the server records the
-		// linked-device pushname. Without this, downstream recipients see
-		// notify="" or "-" for our messages, and Cloud API verified-business
-		// webhook pipelines silently drop them at the gateway (the message
-		// still gets a <biz/> delivery ack so the failure is invisible from
-		// the sender side). Whatsmeow's own SendPresence docs flag this:
-		// "call this at least once after connecting so that the server has
-		// your pushname".
-		if cli.Store != nil && len(cli.Store.PushName) > 0 {
-			if err := cli.SendPresence(ctx, types.PresenceAvailable); err != nil {
-				fmt.Fprintf(os.Stderr, "warn: failed to send initial available presence: %v\n", err)
-			}
-		}
+		sendInitialAvailablePresence(ctx, cli)
 		return nil
 	}
 
@@ -784,6 +772,16 @@ func (c *Client) SendChatPresence(ctx context.Context, jid types.JID, state type
 		return fmt.Errorf("not connected")
 	}
 	return cli.SendChatPresence(ctx, jid, state, media)
+}
+
+func sendInitialAvailablePresence(ctx context.Context, cli *whatsmeow.Client) {
+	// Whatsmeow recommends this once after connect so the server records the linked-device pushname.
+	if cli == nil || cli.Store == nil || strings.TrimSpace(cli.Store.PushName) == "" {
+		return
+	}
+	if err := cli.SendPresence(ctx, types.PresenceAvailable); err != nil {
+		fmt.Fprintf(os.Stderr, "warn: failed to send initial available presence: %v\n", err)
+	}
 }
 
 func (c *Client) Logout(ctx context.Context) error {

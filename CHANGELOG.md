@@ -9,7 +9,7 @@
 ### Fixed
 
 - Release: publish target-specific macOS/Linux/Windows archives with one combined checksum file and update the OpenClaw Homebrew tap.
-- Connect: send an `available` presence after authenticated connect so the server records the linked-device pushname; without it, downstream recipients receive `notify=""` and Cloud API verified-business webhooks silently drop the message at the gateway.
+- Connect: send an `available` presence after authenticated connect so the server records the linked-device pushname; without it, downstream recipients receive `notify=""` and Cloud API verified-business webhooks silently drop the message at the gateway. (#252 - thanks @ceifa)
 
 ## 0.9.2 - 2026-05-17
 
