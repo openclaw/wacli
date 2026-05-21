@@ -33,6 +33,7 @@ func newSendCmd(flags *rootFlags) *cobra.Command {
 	cmd.AddCommand(newSendReactCmd(flags))
 	cmd.AddCommand(newSendPollCmd(flags))
 	cmd.AddCommand(newSendStatusCmd(flags))
+	cmd.AddCommand(newSendSelectCmd(flags))
 	return cmd
 }
 
@@ -134,19 +135,7 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 
 			now := time.Now().UTC()
 			chat := toJID
-			chatName := a.WA().ResolveChatName(ctx, chat, "")
-			kind := chatKindFromJID(chat)
-			_ = a.DB().UpsertChat(chat.String(), kind, chatName, now)
-			_ = a.DB().UpsertMessage(store.UpsertMessageParams{
-				ChatJID:    chat.String(),
-				ChatName:   chatName,
-				MsgID:      string(msgID),
-				SenderJID:  "",
-				SenderName: "me",
-				Timestamp:  now,
-				FromMe:     true,
-				Text:       message,
-			})
+			persistOutboundText(ctx, a, chat, string(msgID), message, now)
 
 			waitForPostSendRetryReceipts(ctx, postSendWait)
 
@@ -174,6 +163,33 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().BoolVar(&messageEscapes, "message-escapes", false, `interpret backslash escapes in --message (\n, \r, \t, \\, \")`)
 	cmd.Flags().DurationVar(&postSendWait, "post-send-wait", postSendRetryReceiptWait, "keep the connection alive after send so retry receipts can be handled (0 disables)")
 	return cmd
+}
+
+func persistOutboundText(ctx context.Context, a *app.App, chat types.JID, msgID, text string, now time.Time) {
+	chatName := a.WA().ResolveChatName(ctx, chat, "")
+	if err := a.DB().UpsertChat(chat.String(), chatKindFromJID(chat), chatName, now); err != nil {
+		warnOutboundPersist("chat", msgID, err)
+		return
+	}
+	if err := a.DB().UpsertMessage(store.UpsertMessageParams{
+		ChatJID:    chat.String(),
+		ChatName:   chatName,
+		MsgID:      msgID,
+		SenderJID:  "",
+		SenderName: "me",
+		Timestamp:  now,
+		FromMe:     true,
+		Text:       text,
+	}); err != nil {
+		warnOutboundPersist("message", msgID, err)
+	}
+}
+
+func warnOutboundPersist(kind, msgID string, err error) {
+	if err == nil {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "warning: sent message %s was accepted by WhatsApp, but local outbound %s persistence failed: %v\n", msgID, kind, err)
 }
 
 type sendTextApp interface {

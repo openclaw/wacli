@@ -23,24 +23,28 @@ func extractBusinessText(m *waProto.Message, pm *ParsedMessage) {
 				}
 				pm.Text = strings.Join(parts, "\n")
 			}
-			for _, hb := range hydrated.GetHydratedButtons() {
+			for i, hb := range hydrated.GetHydratedButtons() {
 				if btn := hb.GetUrlButton(); btn != nil {
 					pm.Buttons = append(pm.Buttons, Button{
 						Type:        "url",
 						DisplayText: strings.TrimSpace(btn.GetDisplayText()),
 						URL:         strings.TrimSpace(btn.GetURL()),
+						Index:       i + 1,
 					})
 				} else if btn := hb.GetQuickReplyButton(); btn != nil {
 					pm.Buttons = append(pm.Buttons, Button{
-						Type:        "quick_reply",
-						DisplayText: strings.TrimSpace(btn.GetDisplayText()),
-						ID:          strings.TrimSpace(btn.GetID()),
+						Type:         "quick_reply",
+						DisplayText:  strings.TrimSpace(btn.GetDisplayText()),
+						ID:           strings.TrimSpace(btn.GetID()),
+						ResponseType: "template_button_reply",
+						Index:        i + 1,
 					})
 				} else if btn := hb.GetCallButton(); btn != nil {
 					pm.Buttons = append(pm.Buttons, Button{
 						Type:        "call",
 						DisplayText: strings.TrimSpace(btn.GetDisplayText()),
 						PhoneNumber: strings.TrimSpace(btn.GetPhoneNumber()),
+						Index:       i + 1,
 					})
 				}
 			}
@@ -66,14 +70,16 @@ func extractBusinessText(m *waProto.Message, pm *ParsedMessage) {
 			}
 			pm.Text = strings.Join(parts, "\n")
 		}
-		for _, b := range btn.GetButtons() {
+		for i, b := range btn.GetButtons() {
 			if bt := b.GetButtonText(); bt != nil {
 				dt := strings.TrimSpace(bt.GetDisplayText())
 				if dt != "" {
 					pm.Buttons = append(pm.Buttons, Button{
-						Type:        "quick_reply",
-						DisplayText: dt,
-						ID:          strings.TrimSpace(b.GetButtonID()),
+						Type:         "quick_reply",
+						DisplayText:  dt,
+						ID:           strings.TrimSpace(b.GetButtonID()),
+						ResponseType: "buttons_response",
+						Index:        i + 1,
 					})
 				}
 			}
@@ -111,17 +117,21 @@ func extractBusinessText(m *waProto.Message, pm *ParsedMessage) {
 		if bt := strings.TrimSpace(list.GetButtonText()); bt != "" {
 			pm.Buttons = append(pm.Buttons, Button{Type: "list", DisplayText: bt})
 		}
+		rowIndex := 0
 		for _, sec := range list.GetSections() {
 			for _, row := range sec.GetRows() {
 				dt := strings.TrimSpace(row.GetTitle())
 				if dt == "" {
 					continue
 				}
+				rowIndex++
 				pm.Buttons = append(pm.Buttons, Button{
-					Type:        "list_row",
-					DisplayText: dt,
-					ID:          strings.TrimSpace(row.GetRowID()),
-					Description: strings.TrimSpace(row.GetDescription()),
+					Type:         "list_row",
+					DisplayText:  dt,
+					ID:           strings.TrimSpace(row.GetRowID()),
+					Description:  strings.TrimSpace(row.GetDescription()),
+					ResponseType: "list_response",
+					Index:        rowIndex,
 				})
 			}
 		}
@@ -150,13 +160,13 @@ func hydratedTemplate(tmpl *waProto.TemplateMessage) *waProto.TemplateMessage_Hy
 
 func appendNativeFlowButtons(pm *ParsedMessage, im *waProto.InteractiveMessage) {
 	if nf := im.GetNativeFlowMessage(); nf != nil {
-		for _, btn := range nf.GetButtons() {
-			pm.Buttons = append(pm.Buttons, nativeFlowButton(btn)...)
+		for i, btn := range nf.GetButtons() {
+			pm.Buttons = append(pm.Buttons, nativeFlowButton(btn, i+1)...)
 		}
 	}
 }
 
-func nativeFlowButton(btn *waProto.InteractiveMessage_NativeFlowMessage_NativeFlowButton) []Button {
+func nativeFlowButton(btn *waProto.InteractiveMessage_NativeFlowMessage_NativeFlowButton, index int) []Button {
 	name := strings.TrimSpace(btn.GetName())
 	raw := strings.TrimSpace(btn.GetButtonParamsJSON())
 	if raw == "" {
@@ -169,7 +179,7 @@ func nativeFlowButton(btn *waProto.InteractiveMessage_NativeFlowMessage_NativeFl
 			URL         string `json:"url"`
 		}
 		if json.Unmarshal([]byte(raw), &p) == nil && (p.DisplayText != "" || p.URL != "") {
-			return []Button{{Type: "url", DisplayText: strings.TrimSpace(p.DisplayText), URL: strings.TrimSpace(p.URL)}}
+			return []Button{{Type: "url", DisplayText: strings.TrimSpace(p.DisplayText), URL: strings.TrimSpace(p.URL), Index: index}}
 		}
 	case "quick_reply":
 		var p struct {
@@ -177,7 +187,7 @@ func nativeFlowButton(btn *waProto.InteractiveMessage_NativeFlowMessage_NativeFl
 			ID          string `json:"id"`
 		}
 		if json.Unmarshal([]byte(raw), &p) == nil && p.DisplayText != "" {
-			return []Button{{Type: "quick_reply", DisplayText: strings.TrimSpace(p.DisplayText), ID: strings.TrimSpace(p.ID)}}
+			return []Button{{Type: "quick_reply", DisplayText: strings.TrimSpace(p.DisplayText), ID: strings.TrimSpace(p.ID), ResponseType: "interactive_response", Index: index}}
 		}
 	case "cta_call":
 		var p struct {
@@ -185,7 +195,7 @@ func nativeFlowButton(btn *waProto.InteractiveMessage_NativeFlowMessage_NativeFl
 			PhoneNumber string `json:"phone_number"`
 		}
 		if json.Unmarshal([]byte(raw), &p) == nil && p.DisplayText != "" {
-			return []Button{{Type: "call", DisplayText: strings.TrimSpace(p.DisplayText), PhoneNumber: strings.TrimSpace(p.PhoneNumber)}}
+			return []Button{{Type: "call", DisplayText: strings.TrimSpace(p.DisplayText), PhoneNumber: strings.TrimSpace(p.PhoneNumber), Index: index}}
 		}
 	}
 	return nil

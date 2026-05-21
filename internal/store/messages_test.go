@@ -877,8 +877,8 @@ func TestMessageButtonsListRowRoundTrip(t *testing.T) {
 
 	buttons := []Button{
 		{Type: "list", DisplayText: "Options"},
-		{Type: "list_row", DisplayText: "Alice", ID: "alice", Description: "Send to Alice"},
-		{Type: "list_row", DisplayText: "Bob", ID: "bob"},
+		{Type: "list_row", DisplayText: "Alice", ID: "alice", Description: "Send to Alice", ResponseType: "list_response", Index: 1},
+		{Type: "list_row", DisplayText: "Bob", ID: "bob", ResponseType: "list_response", Index: 2},
 	}
 	if err := db.UpsertMessage(UpsertMessageParams{
 		ChatJID:   chat,
@@ -901,10 +901,10 @@ func TestMessageButtonsListRowRoundTrip(t *testing.T) {
 	if msg.Buttons[0].Type != "list" || msg.Buttons[0].DisplayText != "Options" {
 		t.Fatalf("unexpected list button: %+v", msg.Buttons[0])
 	}
-	if msg.Buttons[1].ID != "alice" || msg.Buttons[1].Description != "Send to Alice" {
+	if msg.Buttons[1].ID != "alice" || msg.Buttons[1].Description != "Send to Alice" || msg.Buttons[1].ResponseType != "list_response" || msg.Buttons[1].Index != 1 {
 		t.Fatalf("unexpected row[0]: %+v", msg.Buttons[1])
 	}
-	if msg.Buttons[2].ID != "bob" || msg.Buttons[2].Description != "" {
+	if msg.Buttons[2].ID != "bob" || msg.Buttons[2].Description != "" || msg.Buttons[2].ResponseType != "list_response" || msg.Buttons[2].Index != 2 {
 		t.Fatalf("unexpected row[1]: %+v", msg.Buttons[2])
 	}
 }

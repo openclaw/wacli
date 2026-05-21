@@ -16,6 +16,7 @@ wacli send voice --to RECIPIENT --file PATH [--pick N] [--mime TYPE] [--reply-to
 wacli send react --to PHONE_OR_JID --id MSG_ID [--reaction TEXT] [--sender JID] [--post-send-wait 2s]
 wacli send poll --to RECIPIENT --question TEXT --option TEXT --option TEXT [--multi N] [--ephemeral] [--post-send-wait 2s]
 wacli send status [--message TEXT] [--file PATH] [--mime TYPE] [--background-color '#RRGGBB'] [--font N] [--post-send-wait 2s]
+wacli send select --to RECIPIENT --id MSG_ID (--label TEXT | --button-id ID | --index N) [--type list_row|quick_reply] [--pick N] [--sender JID] [--post-send-wait 2s]
 wacli poll vote --to RECIPIENT --id MSG_ID --option TEXT [--option TEXT] [--sender JID] [--post-send-wait 2s]
 wacli poll show --to RECIPIENT --id MSG_ID [--json]
 wacli polls list [--chat RECIPIENT] [--limit N] [--json]
@@ -55,6 +56,20 @@ wacli polls list [--chat RECIPIENT] [--limit N] [--json]
 - For unsynced group polls, pass `--sender` with the poll author's JID.
 - `poll show` prints current aggregates and per-voter selections from the local store. JSON output includes `unknown_hashes` for vote hashes that could not be matched to a stored option.
 - `polls list` shows recently synced or sent polls, optionally filtered with `--chat`.
+
+## Buttons and lists
+
+- `send select` selects a stored inbound WhatsApp quick-reply button or list row.
+- Sync the target chat first, then pass the inbound button or list message ID with `--id`.
+- Select exactly one option with `--label`, `--button-id`, or `--index`.
+- `--label` matches stored display text exactly after trimming whitespace. Ambiguous labels fail before sending.
+- `--button-id` matches the stored WhatsApp option ID exactly after trimming whitespace.
+- `--index` is 1-indexed and counts selectable controls only. URL buttons, call buttons, and list container buttons are excluded.
+- Use `--type list_row` or `--type quick_reply` to narrow the candidate set.
+- List rows from older stores are safely inferred as list responses, but older quick replies without `response_type` fail with a sync-again error.
+- Synced list rows and plain quick replies are sent as quoted text replies to the original message. Structured `list_response` and `buttons_response` sends are not used for these controls.
+- Native-flow quick replies are detected but not sent yet; wacli returns an explicit unsupported error instead of guessing the wire format.
+- Sent selections are stored locally as `Selected: <display text>` and support JSON output for scripts.
 
 ## Status broadcasts
 
@@ -98,6 +113,8 @@ wacli send react --to 1234567890 --id ABC123 --reaction "❤️"
 wacli send poll --to "Family" --question "Dinner?" --option "Pizza" --option "Sushi" --multi 1
 wacli send status --message "available today" --background-color '#1f7a8c' --font 1
 wacli send status --file ./photo.jpg --message "new update"
+wacli send select --to "Example Bot" --id ABC123 --label "View available lessons" --json
+wacli send select --to "Example Bot" --id ABC123 --index 2 --type list_row
 wacli poll vote --to "Family" --id ABC123 --option "Pizza"
 wacli poll show --to "Family" --id ABC123 --json
 wacli polls list --chat "Family" --limit 10

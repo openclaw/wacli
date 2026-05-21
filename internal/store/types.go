@@ -60,12 +60,14 @@ type MediaDownloadInfo struct {
 }
 
 type Button struct {
-	Type        string `json:"type"`
-	DisplayText string `json:"display_text"`
-	ID          string `json:"id,omitempty"`
-	URL         string `json:"url,omitempty"`
-	PhoneNumber string `json:"phone_number,omitempty"`
-	Description string `json:"description,omitempty"`
+	Type         string `json:"type"`
+	DisplayText  string `json:"display_text"`
+	ID           string `json:"id,omitempty"`
+	URL          string `json:"url,omitempty"`
+	PhoneNumber  string `json:"phone_number,omitempty"`
+	Description  string `json:"description,omitempty"`
+	ResponseType string `json:"response_type,omitempty"`
+	Index        int    `json:"index,omitempty"`
 }
 
 type Message struct {

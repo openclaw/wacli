@@ -14,7 +14,6 @@ import (
 	"github.com/openclaw/wacli/internal/app"
 	"github.com/openclaw/wacli/internal/lock"
 	"github.com/openclaw/wacli/internal/out"
-	"github.com/openclaw/wacli/internal/store"
 	"go.mau.fi/whatsmeow/types"
 )
 
@@ -46,6 +45,10 @@ type sendDelegateRequest struct {
 	ID                   string   `json:"id,omitempty"`
 	Reaction             string   `json:"reaction,omitempty"`
 	Sender               string   `json:"sender,omitempty"`
+	Label                string   `json:"label,omitempty"`
+	ButtonID             string   `json:"button_id,omitempty"`
+	SelectIndex          int      `json:"select_index,omitempty"`
+	Type                 string   `json:"type,omitempty"`
 	Question             string   `json:"question,omitempty"`
 	Options              []string `json:"options,omitempty"`
 	Selectable           int      `json:"selectable,omitempty"`
@@ -54,17 +57,18 @@ type sendDelegateRequest struct {
 }
 
 type sendDelegateResponse struct {
-	OK       bool              `json:"ok"`
-	Error    string            `json:"error,omitempty"`
-	Sent     bool              `json:"sent,omitempty"`
-	To       string            `json:"to,omitempty"`
-	ID       string            `json:"id,omitempty"`
-	Target   string            `json:"target,omitempty"`
-	Reaction string            `json:"reaction,omitempty"`
-	Question string            `json:"question,omitempty"`
-	Options  []string          `json:"options,omitempty"`
-	Selected []string          `json:"selected,omitempty"`
-	File     map[string]string `json:"file,omitempty"`
+	OK             bool              `json:"ok"`
+	Error          string            `json:"error,omitempty"`
+	Sent           bool              `json:"sent,omitempty"`
+	To             string            `json:"to,omitempty"`
+	ID             string            `json:"id,omitempty"`
+	Target         string            `json:"target,omitempty"`
+	Reaction       string            `json:"reaction,omitempty"`
+	Question       string            `json:"question,omitempty"`
+	Options        []string          `json:"options,omitempty"`
+	Selected       []string          `json:"selected,omitempty"`
+	SelectedOption *selectOption     `json:"selected_option,omitempty"`
+	File           map[string]string `json:"file,omitempty"`
 }
 
 func sendDelegateSocketPath(storeDir string) string {
@@ -204,6 +208,8 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 		return executeDelegatedPoll(ctx, a, req)
 	case "poll_vote":
 		return executeDelegatedPollVote(ctx, a, req)
+	case "button_list_select":
+		return executeDelegatedButtonListSelect(ctx, a, req)
 	default:
 		return sendDelegateResponse{}, fmt.Errorf("unsupported send kind %q", req.Kind)
 	}
@@ -238,17 +244,7 @@ func executeDelegatedText(ctx context.Context, a *app.App, req sendDelegateReque
 		return sendDelegateResponse{}, err
 	}
 	now := time.Now().UTC()
-	chatName := a.WA().ResolveChatName(ctx, toJID, "")
-	_ = a.DB().UpsertChat(toJID.String(), chatKindFromJID(toJID), chatName, now)
-	_ = a.DB().UpsertMessage(store.UpsertMessageParams{
-		ChatJID:    toJID.String(),
-		ChatName:   chatName,
-		MsgID:      string(msgID),
-		SenderName: "me",
-		Timestamp:  now,
-		FromMe:     true,
-		Text:       req.Message,
-	})
+	persistOutboundText(ctx, a, toJID, string(msgID), req.Message, now)
 	waitForPostSendRetryReceipts(ctx, millisDuration(req.PostSendWaitMS, 0))
 	return sendDelegateResponse{OK: true, Sent: true, To: toJID.String(), ID: string(msgID)}, nil
 }
@@ -349,6 +345,10 @@ func writeDelegatedSendOutput(flags *rootFlags, kind string, resp sendDelegateRe
 			body["target"] = resp.Target
 			body["selected"] = resp.Selected
 		}
+		if kind == "button_list_select" {
+			body["target"] = resp.Target
+			body["selected"] = resp.SelectedOption
+		}
 		return out.WriteJSON(os.Stdout, body)
 	}
 	switch kind {
@@ -368,6 +368,12 @@ func writeDelegatedSendOutput(flags *rootFlags, kind string, resp sendDelegateRe
 		fmt.Fprintf(os.Stdout, "Sent poll to %s (id %s)\n", resp.To, resp.ID)
 	case "poll_vote":
 		fmt.Fprintf(os.Stdout, "Voted on %s in %s (id %s)\n", resp.Target, resp.To, resp.ID)
+	case "button_list_select":
+		label := ""
+		if resp.SelectedOption != nil {
+			label = resp.SelectedOption.DisplayText
+		}
+		fmt.Fprintf(os.Stdout, "Selected %q on %s in %s (id %s)\n", label, resp.Target, resp.To, resp.ID)
 	default:
 		fmt.Fprintf(os.Stdout, "Sent to %s (id %s)\n", resp.To, resp.ID)
 	}

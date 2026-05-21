@@ -562,12 +562,14 @@ func waButtonsToStore(buttons []wa.Button) []store.Button {
 	out := make([]store.Button, len(buttons))
 	for i, b := range buttons {
 		out[i] = store.Button{
-			Type:        b.Type,
-			DisplayText: b.DisplayText,
-			ID:          b.ID,
-			URL:         b.URL,
-			PhoneNumber: b.PhoneNumber,
-			Description: b.Description,
+			Type:         b.Type,
+			DisplayText:  b.DisplayText,
+			ID:           b.ID,
+			URL:          b.URL,
+			PhoneNumber:  b.PhoneNumber,
+			Description:  b.Description,
+			ResponseType: b.ResponseType,
+			Index:        b.Index,
 		}
 	}
 	return out

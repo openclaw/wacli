@@ -593,7 +593,7 @@ func TestParseTemplateMessageWithMixedButtons(t *testing.T) {
 	if len(pm.Buttons) != 2 {
 		t.Fatalf("expected 2 buttons, got %d", len(pm.Buttons))
 	}
-	if pm.Buttons[0].Type != "quick_reply" || pm.Buttons[0].DisplayText != "Yes" || pm.Buttons[0].ID != "yes_id" {
+	if pm.Buttons[0].Type != "quick_reply" || pm.Buttons[0].DisplayText != "Yes" || pm.Buttons[0].ID != "yes_id" || pm.Buttons[0].ResponseType != "template_button_reply" || pm.Buttons[0].Index != 1 {
 		t.Fatalf("unexpected quick_reply button: %+v", pm.Buttons[0])
 	}
 	if pm.Buttons[1].Type != "call" || pm.Buttons[1].DisplayText != "Call us" || pm.Buttons[1].PhoneNumber != "+1234567890" {
@@ -642,10 +642,10 @@ func TestParseButtonsMessage(t *testing.T) {
 	if len(pm.Buttons) != 2 {
 		t.Fatalf("expected 2 buttons, got %d", len(pm.Buttons))
 	}
-	if pm.Buttons[0].Type != "quick_reply" || pm.Buttons[0].DisplayText != "Option A" || pm.Buttons[0].ID != "btn_a" {
+	if pm.Buttons[0].Type != "quick_reply" || pm.Buttons[0].DisplayText != "Option A" || pm.Buttons[0].ID != "btn_a" || pm.Buttons[0].ResponseType != "buttons_response" || pm.Buttons[0].Index != 1 {
 		t.Fatalf("unexpected button[0]: %+v", pm.Buttons[0])
 	}
-	if pm.Buttons[1].Type != "quick_reply" || pm.Buttons[1].DisplayText != "Option B" || pm.Buttons[1].ID != "btn_b" {
+	if pm.Buttons[1].Type != "quick_reply" || pm.Buttons[1].DisplayText != "Option B" || pm.Buttons[1].ID != "btn_b" || pm.Buttons[1].ResponseType != "buttons_response" || pm.Buttons[1].Index != 2 {
 		t.Fatalf("unexpected button[1]: %+v", pm.Buttons[1])
 	}
 }
@@ -764,7 +764,7 @@ func TestParseInteractiveMessageWithNativeFlowButtons(t *testing.T) {
 	if pm.Buttons[0].Type != "url" || pm.Buttons[0].DisplayText != "Pay now" || pm.Buttons[0].URL != "https://pay.example.com" {
 		t.Fatalf("unexpected button[0]: %+v", pm.Buttons[0])
 	}
-	if pm.Buttons[1].Type != "quick_reply" || pm.Buttons[1].DisplayText != "Cancel" || pm.Buttons[1].ID != "cancel" {
+	if pm.Buttons[1].Type != "quick_reply" || pm.Buttons[1].DisplayText != "Cancel" || pm.Buttons[1].ID != "cancel" || pm.Buttons[1].ResponseType != "interactive_response" || pm.Buttons[1].Index != 2 {
 		t.Fatalf("unexpected button[1]: %+v", pm.Buttons[1])
 	}
 	if pm.Buttons[2].Type != "call" || pm.Buttons[2].DisplayText != "Call" || pm.Buttons[2].PhoneNumber != "+15551234567" {
@@ -821,7 +821,7 @@ func TestParseInteractiveTemplateWithNativeFlowButtons(t *testing.T) {
 	if pm.Buttons[0].Type != "url" || pm.Buttons[0].DisplayText != "Open" || pm.Buttons[0].URL != "https://example.com" {
 		t.Fatalf("unexpected button[0]: %+v", pm.Buttons[0])
 	}
-	if pm.Buttons[1].Type != "quick_reply" || pm.Buttons[1].DisplayText != "Reply" || pm.Buttons[1].ID != "reply" {
+	if pm.Buttons[1].Type != "quick_reply" || pm.Buttons[1].DisplayText != "Reply" || pm.Buttons[1].ID != "reply" || pm.Buttons[1].ResponseType != "interactive_response" || pm.Buttons[1].Index != 2 {
 		t.Fatalf("unexpected button[1]: %+v", pm.Buttons[1])
 	}
 }
@@ -866,10 +866,10 @@ func TestParseListMessage(t *testing.T) {
 	if pm.Buttons[0].Type != "list" || pm.Buttons[0].DisplayText != "Options" {
 		t.Fatalf("unexpected list button: %+v", pm.Buttons[0])
 	}
-	if pm.Buttons[1].Type != "list_row" || pm.Buttons[1].DisplayText != "Alice" || pm.Buttons[1].ID != "alice" || pm.Buttons[1].Description != "Send to Alice" {
+	if pm.Buttons[1].Type != "list_row" || pm.Buttons[1].DisplayText != "Alice" || pm.Buttons[1].ID != "alice" || pm.Buttons[1].Description != "Send to Alice" || pm.Buttons[1].ResponseType != "list_response" || pm.Buttons[1].Index != 1 {
 		t.Fatalf("unexpected row[0]: %+v", pm.Buttons[1])
 	}
-	if pm.Buttons[2].Type != "list_row" || pm.Buttons[2].DisplayText != "Bob" || pm.Buttons[2].ID != "bob" {
+	if pm.Buttons[2].Type != "list_row" || pm.Buttons[2].DisplayText != "Bob" || pm.Buttons[2].ID != "bob" || pm.Buttons[2].ResponseType != "list_response" || pm.Buttons[2].Index != 2 {
 		t.Fatalf("unexpected row[1]: %+v", pm.Buttons[2])
 	}
 }
