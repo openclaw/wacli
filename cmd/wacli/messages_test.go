@@ -276,7 +276,9 @@ func TestMessagesExportCommandExposesDateFilters(t *testing.T) {
 func TestMessagesMutationCommandsExposeSafetyFlags(t *testing.T) {
 	for _, cmd := range []*cobra.Command{
 		newMessagesDeleteCmd(&rootFlags{}),
+		newMessagesRevokeCmd(&rootFlags{}),
 		newMessagesEditCmd(&rootFlags{}),
+		newMessagesForwardCmd(&rootFlags{}),
 	} {
 		for _, name := range []string{"chat", "id", "post-send-wait"} {
 			if cmd.Flags().Lookup(name) == nil {
@@ -286,6 +288,12 @@ func TestMessagesMutationCommandsExposeSafetyFlags(t *testing.T) {
 	}
 	if newMessagesEditCmd(&rootFlags{}).Flags().Lookup("message") == nil {
 		t.Fatalf("edit missing --message")
+	}
+	if newMessagesForwardCmd(&rootFlags{}).Flags().Lookup("to") == nil {
+		t.Fatalf("forward missing --to")
+	}
+	if newMessagesForwardCmd(&rootFlags{}).Flags().Lookup("pick") == nil {
+		t.Fatalf("forward missing --pick")
 	}
 }
 
@@ -341,6 +349,100 @@ func TestMessagesDeleteForMeValidation(t *testing.T) {
 	msg.DeletedForMe = true
 	if err := validateMessageCanDeleteForMe(msg); err == nil || !strings.Contains(err.Error(), "deleted for me") {
 		t.Fatalf("deleted-for-me error = %v", err)
+	}
+}
+
+func TestMessagesForwardValidation(t *testing.T) {
+	msg := store.Message{MsgID: "mid", Text: "hello"}
+	if err := validateMessageCanForward(msg); err != nil {
+		t.Fatalf("validateMessageCanForward: %v", err)
+	}
+
+	msg.Revoked = true
+	if err := validateMessageCanForward(msg); err == nil || !strings.Contains(err.Error(), "deleted") {
+		t.Fatalf("revoked error = %v", err)
+	}
+
+	msg.Revoked = false
+	msg.DeletedForMe = true
+	if err := validateMessageCanForward(msg); err == nil || !strings.Contains(err.Error(), "deleted for me") {
+		t.Fatalf("deleted-for-me error = %v", err)
+	}
+
+	msg.DeletedForMe = false
+	msg.MediaType = "image"
+	if err := validateMessageCanForward(msg); err != nil {
+		t.Fatalf("media validation error = %v", err)
+	}
+
+	msg.MediaType = ""
+	msg.ReactionToID = "target"
+	if err := validateMessageCanForward(msg); err == nil || !strings.Contains(err.Error(), "reaction") {
+		t.Fatalf("reaction error = %v", err)
+	}
+
+	msg.ReactionToID = ""
+	msg.Text = ""
+	if err := validateMessageCanForward(msg); err == nil || !strings.Contains(err.Error(), "text messages") {
+		t.Fatalf("empty text error = %v", err)
+	}
+}
+
+func TestBuildForwardedMediaMessageMarksContext(t *testing.T) {
+	media := store.MediaDownloadInfo{
+		MediaType:     "document",
+		Filename:      "report.pdf",
+		MimeType:      "application/pdf",
+		DirectPath:    "/v/t62/report",
+		MediaKey:      []byte{1, 2, 3},
+		FileSHA256:    []byte{4, 5, 6},
+		FileEncSHA256: []byte{7, 8, 9},
+		FileLength:    1234,
+	}
+	payload, err := buildForwardedMessage(store.Message{
+		MsgID:           "mid",
+		MediaType:       "document",
+		MediaCaption:    "the report",
+		ForwardingScore: 2,
+	}, &media)
+	if err != nil {
+		t.Fatalf("buildForwardedMessage: %v", err)
+	}
+	doc := payload.Message.GetDocumentMessage()
+	if doc.GetFileName() != "report.pdf" {
+		t.Fatalf("FileName = %q", doc.GetFileName())
+	}
+	if doc.GetCaption() != "the report" {
+		t.Fatalf("Caption = %q", doc.GetCaption())
+	}
+	ctx := doc.GetContextInfo()
+	if !ctx.GetIsForwarded() || ctx.GetForwardingScore() != 3 {
+		t.Fatalf("unexpected forwarded context: forwarded=%v score=%d", ctx.GetIsForwarded(), ctx.GetForwardingScore())
+	}
+	if payload.MediaType != "document" || payload.FileLength != 1234 || string(payload.MediaKey) != string(media.MediaKey) {
+		t.Fatalf("unexpected payload metadata: %+v", payload)
+	}
+}
+
+func TestBuildForwardedMediaMessageRequiresCompleteMetadata(t *testing.T) {
+	_, err := buildForwardedMessage(store.Message{MsgID: "mid", MediaType: "image"}, &store.MediaDownloadInfo{MediaType: "image"})
+	if err == nil || !strings.Contains(err.Error(), "incomplete media metadata") {
+		t.Fatalf("error = %v, want incomplete media metadata", err)
+	}
+}
+
+func TestBuildForwardedTextMessageMarksContext(t *testing.T) {
+	msg := buildForwardedTextMessage("hello", 4)
+	ext := msg.GetExtendedTextMessage()
+	if ext.GetText() != "hello" {
+		t.Fatalf("text = %q", ext.GetText())
+	}
+	ctx := ext.GetContextInfo()
+	if !ctx.GetIsForwarded() {
+		t.Fatal("IsForwarded = false")
+	}
+	if ctx.GetForwardingScore() != 4 {
+		t.Fatalf("ForwardingScore = %d, want 4", ctx.GetForwardingScore())
 	}
 }
 

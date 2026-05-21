@@ -33,6 +33,63 @@ func TestParseHistoryMessageTextAndSender(t *testing.T) {
 	}
 }
 
+func TestParseHistoryMessageDeviceSentUsesDestinationChat(t *testing.T) {
+	h := &waProto.WebMessageInfo{
+		Key: &waProto.MessageKey{
+			ID:        proto.String("sent-from-phone"),
+			FromMe:    proto.Bool(false),
+			RemoteJID: proto.String("me@s.whatsapp.net"),
+		},
+		MessageTimestamp: proto.Uint64(uint64(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC).Unix())),
+		Message: &waProto.Message{
+			DeviceSentMessage: &waProto.DeviceSentMessage{
+				DestinationJID: proto.String("15551234567@s.whatsapp.net"),
+				Message:        &waProto.Message{Conversation: proto.String("sent elsewhere")},
+			},
+		},
+	}
+
+	pm := ParseHistoryMessage("me@s.whatsapp.net", h)
+	if !pm.FromMe {
+		t.Fatalf("FromMe = false, want true")
+	}
+	if pm.Chat.String() != "15551234567@s.whatsapp.net" {
+		t.Fatalf("Chat = %q, want destination", pm.Chat.String())
+	}
+	if pm.ID != "sent-from-phone" || pm.Text != "sent elsewhere" {
+		t.Fatalf("unexpected parsed message: %+v", pm)
+	}
+}
+
+func TestParseLiveMessageDeviceSentMetaUsesDestinationChat(t *testing.T) {
+	evt := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:     types.NewJID("me", types.DefaultUserServer),
+				Sender:   types.NewJID("me", types.DefaultUserServer),
+				IsFromMe: false,
+			},
+			DeviceSentMeta: &types.DeviceSentMeta{
+				DestinationJID: "15551234567@s.whatsapp.net",
+			},
+			ID:        "live-sent-from-phone",
+			Timestamp: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+		},
+		Message: &waProto.Message{Conversation: proto.String("live sent")},
+	}
+
+	pm := ParseLiveMessage(evt)
+	if !pm.FromMe {
+		t.Fatalf("FromMe = false, want true")
+	}
+	if pm.Chat.String() != "15551234567@s.whatsapp.net" {
+		t.Fatalf("Chat = %q, want destination", pm.Chat.String())
+	}
+	if pm.Text != "live sent" {
+		t.Fatalf("Text = %q", pm.Text)
+	}
+}
+
 func TestParseHistoryMessageCallLog(t *testing.T) {
 	outcome := waProto.CallLogMessage_CONNECTED
 	callType := waProto.CallLogMessage_REGULAR

@@ -13,7 +13,9 @@ import (
 	"github.com/openclaw/wacli/internal/wa"
 	"github.com/spf13/cobra"
 	"go.mau.fi/whatsmeow"
+	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow/types"
+	"google.golang.org/protobuf/proto"
 )
 
 func newMessagesCmd(flags *rootFlags) *cobra.Command {
@@ -28,7 +30,9 @@ func newMessagesCmd(flags *rootFlags) *cobra.Command {
 	cmd.AddCommand(newMessagesContextCmd(flags))
 	cmd.AddCommand(newMessagesExportCmd(flags))
 	cmd.AddCommand(newMessagesDeleteCmd(flags))
+	cmd.AddCommand(newMessagesRevokeCmd(flags))
 	cmd.AddCommand(newMessagesEditCmd(flags))
+	cmd.AddCommand(newMessagesForwardCmd(flags))
 	return cmd
 }
 
@@ -582,6 +586,85 @@ func newMessagesDeleteCmd(flags *rootFlags) *cobra.Command {
 	return cmd
 }
 
+func newMessagesRevokeCmd(flags *rootFlags) *cobra.Command {
+	var chat string
+	var id string
+	postSendWait := postSendRetryReceiptWait
+
+	cmd := &cobra.Command{
+		Use:   "revoke",
+		Short: "Delete one of your sent messages for everyone",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if strings.TrimSpace(chat) == "" || strings.TrimSpace(id) == "" {
+				return fmt.Errorf("--chat and --id are required")
+			}
+			if err := flags.requireWritable(); err != nil {
+				return err
+			}
+
+			ctx, cancel := withTimeout(context.Background(), flags)
+			defer cancel()
+
+			a, lk, err := newApp(ctx, flags, true, false)
+			if err != nil {
+				return err
+			}
+			defer closeApp(a, lk)
+
+			if err := a.EnsureAuthed(); err != nil {
+				return err
+			}
+			msg, chatJID, found, err := loadMessageRevokeTarget(ctx, a, chat, id)
+			if err != nil {
+				return err
+			}
+			if found {
+				if err := validateMessageCanRevoke(msg); err != nil {
+					return err
+				}
+			}
+			if err := a.Connect(ctx, false, nil); err != nil {
+				return err
+			}
+			if err := warnRapidSendIfNeeded(a.StoreDir(), time.Now().UTC(), os.Stderr); err != nil {
+				return err
+			}
+			targetID := id
+			if found {
+				targetID = msg.MsgID
+			}
+			sentID, err := runSendOperation(ctx, reconnectForSend(a), func(ctx context.Context) (types.MessageID, error) {
+				return a.WA().RevokeMessage(ctx, chatJID, types.MessageID(targetID))
+			})
+			if err != nil {
+				return err
+			}
+			if found {
+				if err := a.DB().MarkMessageRevoked(msg.ChatJID, msg.MsgID); err != nil {
+					return fmt.Errorf("store deleted message state: %w", err)
+				}
+			}
+
+			waitForPostSendRetryReceipts(ctx, postSendWait)
+
+			if flags.asJSON {
+				return out.WriteJSON(os.Stdout, map[string]any{
+					"revoked": true,
+					"to":      chatJID.String(),
+					"id":      sentID,
+					"target":  id,
+				})
+			}
+			fmt.Fprintf(os.Stdout, "Revoked message %s in %s (id %s)\n", id, chatJID.String(), sentID)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&chat, "chat", "", "chat JID, phone number, or contact/group/chat name")
+	cmd.Flags().StringVar(&id, "id", "", "message ID to revoke")
+	cmd.Flags().DurationVar(&postSendWait, "post-send-wait", postSendRetryReceiptWait, "keep the connection alive after revoke so retry receipts can be handled (0 disables)")
+	return cmd
+}
+
 func newMessagesEditCmd(flags *rootFlags) *cobra.Command {
 	var chat string
 	var id string
@@ -656,6 +739,123 @@ func newMessagesEditCmd(flags *rootFlags) *cobra.Command {
 	return cmd
 }
 
+func newMessagesForwardCmd(flags *rootFlags) *cobra.Command {
+	var chat string
+	var id string
+	var to string
+	var pick int
+	postSendWait := postSendRetryReceiptWait
+
+	cmd := &cobra.Command{
+		Use:   "forward",
+		Short: "Forward a stored message",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if strings.TrimSpace(chat) == "" || strings.TrimSpace(id) == "" || strings.TrimSpace(to) == "" {
+				return fmt.Errorf("--chat, --id, and --to are required")
+			}
+			if err := flags.requireWritable(); err != nil {
+				return err
+			}
+
+			ctx, cancel := withTimeout(context.Background(), flags)
+			defer cancel()
+
+			a, lk, err := newApp(ctx, flags, true, false)
+			if err != nil {
+				return err
+			}
+			defer closeApp(a, lk)
+
+			if err := a.EnsureAuthed(); err != nil {
+				return err
+			}
+			source, _, err := loadMessageMutationTarget(ctx, a, chat, id)
+			if err != nil {
+				return err
+			}
+			if err := validateMessageCanForward(source); err != nil {
+				return err
+			}
+			var mediaInfo *store.MediaDownloadInfo
+			if strings.TrimSpace(source.MediaType) != "" {
+				info, err := a.DB().GetMediaDownloadInfo(source.ChatJID, source.MsgID)
+				if err != nil {
+					return err
+				}
+				mediaInfo = &info
+			}
+			toJID, err := resolveRecipient(a, to, recipientOptions{pick: pick, asJSON: flags.asJSON})
+			if err != nil {
+				return err
+			}
+			if mediaInfo != nil && toJID.Server == types.NewsletterServer {
+				return fmt.Errorf("media forwarding to channels is not supported")
+			}
+			if err := a.Connect(ctx, false, nil); err != nil {
+				return err
+			}
+			toJID = warmupRecipient(ctx, a.WA(), toJID, os.Stderr)
+			if err := warnRapidSendIfNeeded(a.StoreDir(), time.Now().UTC(), os.Stderr); err != nil {
+				return err
+			}
+			payload, err := buildForwardedMessage(source, mediaInfo)
+			if err != nil {
+				return err
+			}
+			sentID, err := runSendOperation(ctx, reconnectForSend(a), func(ctx context.Context) (types.MessageID, error) {
+				return a.WA().SendProtoMessage(ctx, toJID, payload.Message)
+			})
+			if err != nil {
+				return err
+			}
+
+			now := time.Now().UTC()
+			chatName := a.WA().ResolveChatName(ctx, toJID, "")
+			_ = a.DB().UpsertChat(toJID.String(), chatKindFromJID(toJID), chatName, now)
+			_ = a.DB().UpsertMessage(store.UpsertMessageParams{
+				ChatJID:         toJID.String(),
+				ChatName:        chatName,
+				MsgID:           string(sentID),
+				SenderName:      "me",
+				Timestamp:       now,
+				FromMe:          true,
+				Text:            payload.Text,
+				DisplayText:     payload.Text,
+				MediaType:       payload.MediaType,
+				MediaCaption:    payload.MediaCaption,
+				Filename:        payload.Filename,
+				MimeType:        payload.MimeType,
+				DirectPath:      payload.DirectPath,
+				MediaKey:        payload.MediaKey,
+				FileSHA256:      payload.FileSHA256,
+				FileEncSHA256:   payload.FileEncSHA256,
+				FileLength:      payload.FileLength,
+				IsForwarded:     true,
+				ForwardingScore: payload.ForwardingScore,
+			})
+
+			waitForPostSendRetryReceipts(ctx, postSendWait)
+
+			if flags.asJSON {
+				return out.WriteJSON(os.Stdout, map[string]any{
+					"forwarded": true,
+					"to":        toJID.String(),
+					"id":        sentID,
+					"source":    source.MsgID,
+				})
+			}
+			fmt.Fprintf(os.Stdout, "Forwarded message %s to %s (id %s)\n", source.MsgID, toJID.String(), sentID)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&chat, "chat", "", "source chat JID, phone number, or contact/group/chat name")
+	cmd.Flags().StringVar(&id, "id", "", "source message ID to forward")
+	cmd.Flags().StringVar(&to, "to", "", "recipient JID, phone number, or contact/group/chat name")
+	cmd.Flags().IntVar(&pick, "pick", 0, "when --to is ambiguous, pick the Nth match (1-indexed)")
+	cmd.Flags().DurationVar(&postSendWait, "post-send-wait", postSendRetryReceiptWait, "keep the connection alive after forward so retry receipts can be handled (0 disables)")
+	return cmd
+}
+
 func loadMessageMutationTarget(ctx context.Context, a *app.App, chat, id string) (store.Message, types.JID, error) {
 	chatJIDs, err := messageChatJIDFilter(ctx, a, chat)
 	if err != nil {
@@ -670,6 +870,21 @@ func loadMessageMutationTarget(ctx context.Context, a *app.App, chat, id string)
 		return store.Message{}, types.JID{}, fmt.Errorf("stored chat JID is invalid: %w", err)
 	}
 	return msg, chatJID, nil
+}
+
+func loadMessageRevokeTarget(ctx context.Context, a *app.App, chat, id string) (store.Message, types.JID, bool, error) {
+	msg, chatJID, err := loadMessageMutationTarget(ctx, a, chat, id)
+	if err == nil {
+		return msg, chatJID, true, nil
+	}
+	if !isNoRows(err) {
+		return store.Message{}, types.JID{}, false, err
+	}
+	chatJID, parseErr := wa.ParseUserOrJID(chat)
+	if parseErr != nil {
+		return store.Message{}, types.JID{}, false, err
+	}
+	return store.Message{}, chatJID, false, nil
 }
 
 func deleteLocalMediaIfRequested(deleteMedia bool, localPath string) (bool, error) {
@@ -748,4 +963,184 @@ func validateMessageCanEdit(msg store.Message, now time.Time) error {
 		return fmt.Errorf("message %s is older than WhatsApp's %s edit window", msg.MsgID, whatsmeow.EditWindow)
 	}
 	return nil
+}
+
+func validateMessageCanForward(msg store.Message) error {
+	if msg.Revoked {
+		return fmt.Errorf("message %s is deleted", msg.MsgID)
+	}
+	if msg.DeletedForMe {
+		return fmt.Errorf("message %s was deleted for me", msg.MsgID)
+	}
+	if strings.TrimSpace(msg.ReactionToID) != "" {
+		return fmt.Errorf("reaction messages cannot be forwarded")
+	}
+	mediaType := strings.ToLower(strings.TrimSpace(msg.MediaType))
+	if mediaType != "" && !isForwardableMediaType(mediaType) {
+		return fmt.Errorf("%s messages cannot be forwarded", mediaType)
+	}
+	if mediaType == "" && strings.TrimSpace(messageForwardText(msg)) == "" {
+		return fmt.Errorf("only text messages can be forwarded")
+	}
+	return nil
+}
+
+func messageForwardText(msg store.Message) string {
+	if text := strings.TrimSpace(msg.Text); text != "" {
+		return text
+	}
+	return strings.TrimSpace(msg.DisplayText)
+}
+
+type forwardedMessagePayload struct {
+	Message         *waProto.Message
+	Text            string
+	MediaType       string
+	MediaCaption    string
+	Filename        string
+	MimeType        string
+	DirectPath      string
+	MediaKey        []byte
+	FileSHA256      []byte
+	FileEncSHA256   []byte
+	FileLength      uint64
+	ForwardingScore uint32
+}
+
+func buildForwardedMessage(msg store.Message, mediaInfo *store.MediaDownloadInfo) (forwardedMessagePayload, error) {
+	forwardingScore := msg.ForwardingScore + 1
+	mediaType := strings.ToLower(strings.TrimSpace(msg.MediaType))
+	if mediaType == "" {
+		text := messageForwardText(msg)
+		return forwardedMessagePayload{
+			Message:         buildForwardedTextMessage(text, forwardingScore),
+			Text:            text,
+			ForwardingScore: forwardingScore,
+		}, nil
+	}
+	if mediaInfo == nil {
+		return forwardedMessagePayload{}, fmt.Errorf("message has no media metadata")
+	}
+	if err := validateForwardMediaInfo(*mediaInfo); err != nil {
+		return forwardedMessagePayload{}, err
+	}
+
+	payload := forwardedMessagePayload{
+		Text:            msg.MediaCaption,
+		MediaType:       mediaType,
+		MediaCaption:    msg.MediaCaption,
+		Filename:        mediaInfo.Filename,
+		MimeType:        mediaInfo.MimeType,
+		DirectPath:      mediaInfo.DirectPath,
+		MediaKey:        append([]byte(nil), mediaInfo.MediaKey...),
+		FileSHA256:      append([]byte(nil), mediaInfo.FileSHA256...),
+		FileEncSHA256:   append([]byte(nil), mediaInfo.FileEncSHA256...),
+		FileLength:      mediaInfo.FileLength,
+		ForwardingScore: forwardingScore,
+	}
+	ctx := forwardedContextInfo(forwardingScore)
+	switch mediaType {
+	case "image":
+		payload.Message = &waProto.Message{ImageMessage: &waProto.ImageMessage{
+			DirectPath:    proto.String(mediaInfo.DirectPath),
+			MediaKey:      mediaInfo.MediaKey,
+			FileSHA256:    mediaInfo.FileSHA256,
+			FileEncSHA256: mediaInfo.FileEncSHA256,
+			FileLength:    proto.Uint64(mediaInfo.FileLength),
+			Mimetype:      proto.String(mediaInfo.MimeType),
+			Caption:       proto.String(msg.MediaCaption),
+			ContextInfo:   ctx,
+		}}
+	case "video", "gif":
+		payload.Message = &waProto.Message{VideoMessage: &waProto.VideoMessage{
+			DirectPath:    proto.String(mediaInfo.DirectPath),
+			MediaKey:      mediaInfo.MediaKey,
+			FileSHA256:    mediaInfo.FileSHA256,
+			FileEncSHA256: mediaInfo.FileEncSHA256,
+			FileLength:    proto.Uint64(mediaInfo.FileLength),
+			Mimetype:      proto.String(mediaInfo.MimeType),
+			Caption:       proto.String(msg.MediaCaption),
+			GifPlayback:   proto.Bool(mediaType == "gif"),
+			ContextInfo:   ctx,
+		}}
+	case "audio":
+		payload.Message = &waProto.Message{AudioMessage: &waProto.AudioMessage{
+			DirectPath:    proto.String(mediaInfo.DirectPath),
+			MediaKey:      mediaInfo.MediaKey,
+			FileSHA256:    mediaInfo.FileSHA256,
+			FileEncSHA256: mediaInfo.FileEncSHA256,
+			FileLength:    proto.Uint64(mediaInfo.FileLength),
+			Mimetype:      proto.String(mediaInfo.MimeType),
+			ContextInfo:   ctx,
+		}}
+	case "document":
+		name := strings.TrimSpace(mediaInfo.Filename)
+		if name == "" {
+			name = "document"
+		}
+		payload.Filename = name
+		payload.Message = &waProto.Message{DocumentMessage: &waProto.DocumentMessage{
+			DirectPath:    proto.String(mediaInfo.DirectPath),
+			MediaKey:      mediaInfo.MediaKey,
+			FileSHA256:    mediaInfo.FileSHA256,
+			FileEncSHA256: mediaInfo.FileEncSHA256,
+			FileLength:    proto.Uint64(mediaInfo.FileLength),
+			Mimetype:      proto.String(mediaInfo.MimeType),
+			FileName:      proto.String(name),
+			Title:         proto.String(name),
+			Caption:       proto.String(msg.MediaCaption),
+			ContextInfo:   ctx,
+		}}
+	case "sticker":
+		payload.Message = &waProto.Message{StickerMessage: &waProto.StickerMessage{
+			DirectPath:    proto.String(mediaInfo.DirectPath),
+			MediaKey:      mediaInfo.MediaKey,
+			FileSHA256:    mediaInfo.FileSHA256,
+			FileEncSHA256: mediaInfo.FileEncSHA256,
+			FileLength:    proto.Uint64(mediaInfo.FileLength),
+			Mimetype:      proto.String(mediaInfo.MimeType),
+			ContextInfo:   ctx,
+		}}
+	default:
+		return forwardedMessagePayload{}, fmt.Errorf("%s messages cannot be forwarded", mediaType)
+	}
+	return payload, nil
+}
+
+func isForwardableMediaType(mediaType string) bool {
+	switch strings.ToLower(strings.TrimSpace(mediaType)) {
+	case "image", "video", "gif", "audio", "document", "sticker":
+		return true
+	default:
+		return false
+	}
+}
+
+func validateForwardMediaInfo(info store.MediaDownloadInfo) error {
+	if strings.TrimSpace(info.DirectPath) == "" || len(info.MediaKey) == 0 || len(info.FileSHA256) == 0 || len(info.FileEncSHA256) == 0 || info.FileLength == 0 {
+		return fmt.Errorf("message has incomplete media metadata (run `wacli sync` first)")
+	}
+	if strings.TrimSpace(info.MimeType) == "" {
+		return fmt.Errorf("message has incomplete media MIME metadata")
+	}
+	return nil
+}
+
+func buildForwardedTextMessage(text string, forwardingScore uint32) *waProto.Message {
+	return &waProto.Message{
+		ExtendedTextMessage: &waProto.ExtendedTextMessage{
+			Text:        proto.String(text),
+			ContextInfo: forwardedContextInfo(forwardingScore),
+		},
+	}
+}
+
+func forwardedContextInfo(forwardingScore uint32) *waProto.ContextInfo {
+	if forwardingScore == 0 {
+		forwardingScore = 1
+	}
+	return &waProto.ContextInfo{
+		IsForwarded:     proto.Bool(true),
+		ForwardingScore: proto.Uint32(forwardingScore),
+	}
 }

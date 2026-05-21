@@ -95,6 +95,9 @@ func ParseLiveMessage(evt *events.Message) ParsedMessage {
 	if s := evt.Info.Sender.String(); s != "" {
 		msg.SenderJID = s
 	}
+	if evt.Info.DeviceSentMeta != nil {
+		applyDeviceSentDestination(evt.Info.DeviceSentMeta.DestinationJID, &msg)
+	}
 
 	extractWAProto(evt.Message, &msg)
 	return msg
@@ -137,6 +140,11 @@ func extractWAProto(m *waProto.Message, pm *ParsedMessage) {
 		return
 	}
 
+	if deviceSent := m.GetDeviceSentMessage(); deviceSent.GetMessage() != nil {
+		applyDeviceSentDestination(deviceSent.GetDestinationJID(), pm)
+		extractWAProto(deviceSent.GetMessage(), pm)
+		return
+	}
 	if edited := m.GetEditedMessage().GetMessage(); edited != nil {
 		if edited.MessageContextInfo == nil && m.MessageContextInfo != nil {
 			edited.MessageContextInfo = m.MessageContextInfo
@@ -170,6 +178,16 @@ func extractWAProto(m *waProto.Message, pm *ParsedMessage) {
 		}
 		pm.ForwardingScore = ctx.GetForwardingScore()
 		pm.IsForwarded = ctx.GetIsForwarded() || pm.ForwardingScore > 0
+	}
+}
+
+func applyDeviceSentDestination(destination string, pm *ParsedMessage) {
+	if pm == nil {
+		return
+	}
+	pm.FromMe = true
+	if chat, err := types.ParseJID(strings.TrimSpace(destination)); err == nil && !chat.IsEmpty() {
+		pm.Chat = chat
 	}
 }
 
