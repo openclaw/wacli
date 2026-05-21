@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"mime"
 	"net/http"
 	"os"
@@ -17,10 +18,20 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+const maxSendFileSize = 100 * 1024 * 1024 // 100 MB; matches WhatsApp's practical file size limit
+
 func sendFile(ctx context.Context, a interface {
 	WA() app.WAClient
 	DB() *store.DB
 }, to types.JID, filePath, filename, caption, mimeOverride string) (string, map[string]string, error) {
+	stat, err := os.Stat(filePath)
+	if err != nil {
+		return "", nil, err
+	}
+	if stat.Size() > maxSendFileSize {
+		return "", nil, fmt.Errorf("file too large (%d bytes); maximum allowed is %d bytes (100 MB)", stat.Size(), maxSendFileSize)
+	}
+
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return "", nil, err

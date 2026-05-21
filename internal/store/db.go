@@ -46,9 +46,13 @@ func (d *DB) Close() error {
 
 func (d *DB) init() error {
 	// Pragmas: keep consistent for writers/readers.
-	_, _ = d.sql.Exec("PRAGMA journal_mode=WAL;")
+	// WAL mode is critical for concurrent read/write performance; log if it fails.
+	if _, err := d.sql.Exec("PRAGMA journal_mode=WAL;"); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: set WAL journal mode: %v\n", err)
+	}
 	_, _ = d.sql.Exec("PRAGMA synchronous=NORMAL;")
 	_, _ = d.sql.Exec("PRAGMA temp_store=MEMORY;")
+	// foreign_keys is also enforced via the DSN (_foreign_keys=on); belt-and-suspenders.
 	_, _ = d.sql.Exec("PRAGMA foreign_keys=ON;")
 
 	return d.ensureSchema()

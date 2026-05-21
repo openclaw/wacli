@@ -68,13 +68,8 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 			select {
 			case mediaJobs <- mediaJob{chatJID: chatJID, msgID: msgID}:
 			default:
-				// Avoid blocking the event handler.
-				go func() {
-					select {
-					case mediaJobs <- mediaJob{chatJID: chatJID, msgID: msgID}:
-					case <-ctx.Done():
-					}
-				}()
+				// Media job queue is full; drop to avoid blocking the event handler.
+				fmt.Fprintf(os.Stderr, "warning: media job queue full, dropping %s/%s\n", chatJID, msgID)
 			}
 		}
 	}
@@ -157,10 +152,14 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 
 	// Optional: bootstrap imports (helps contacts/groups management without waiting for events).
 	if opts.RefreshContacts {
-		_ = a.refreshContacts(ctx)
+		if err := a.refreshContacts(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: refresh contacts: %v\n", err)
+		}
 	}
 	if opts.RefreshGroups {
-		_ = a.refreshGroups(ctx)
+		if err := a.refreshGroups(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: refresh groups: %v\n", err)
+		}
 	}
 	if opts.AfterConnect != nil {
 		if err := opts.AfterConnect(ctx); err != nil {
