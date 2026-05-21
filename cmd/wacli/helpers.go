@@ -2,16 +2,9 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"time"
-
-	"golang.org/x/term"
 )
-
-func isTTY() bool {
-	return term.IsTerminal(int(os.Stdout.Fd()))
-}
 
 func parseTime(s string) (time.Time, error) {
 	s = strings.TrimSpace(s)

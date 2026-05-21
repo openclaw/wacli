@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -106,12 +104,3 @@ func closeApp(a *app.App, lk *lock.Lock) {
 	}
 }
 
-func wrapErr(err error, msg string) error {
-	if err == nil {
-		return nil
-	}
-	if errors.Is(err, context.Canceled) {
-		return err
-	}
-	return fmt.Errorf("%s: %w", msg, err)
-}
