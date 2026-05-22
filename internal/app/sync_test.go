@@ -1257,7 +1257,8 @@ func TestSyncStoresDisplayText(t *testing.T) {
 			ExtendedTextMessage: &waProto.ExtendedTextMessage{
 				Text: proto.String("reply text"),
 				ContextInfo: &waProto.ContextInfo{
-					StanzaID: proto.String("m-text"),
+					StanzaID:    proto.String("m-text"),
+					Participant: proto.String("123@s.whatsapp.net"),
 					QuotedMessage: &waProto.Message{
 						Conversation: proto.String("quoted text"),
 					},
@@ -1326,6 +1327,9 @@ func TestSyncStoresDisplayText(t *testing.T) {
 	}
 	if msg.DisplayText != "> quoted text\nreply text" {
 		t.Fatalf("unexpected reply display text: %q", msg.DisplayText)
+	}
+	if msg.QuotedMsgID != "m-text" || msg.QuotedSenderJID != "123@s.whatsapp.net" {
+		t.Fatalf("unexpected quoted metadata: id=%q sender=%q", msg.QuotedMsgID, msg.QuotedSenderJID)
 	}
 
 	msg, err = a.db.GetMessage(chat.String(), "m-react")

@@ -78,6 +78,8 @@ type Message struct {
 	FromMe          bool
 	Text            string
 	DisplayText     string
+	QuotedMsgID     string   `json:"quoted_msg_id,omitempty"`
+	QuotedSenderJID string   `json:"quoted_sender_jid,omitempty"`
 	Buttons         []Button `json:",omitempty"`
 	IsForwarded     bool
 	ForwardingScore uint32

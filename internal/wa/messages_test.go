@@ -295,7 +295,8 @@ func TestParseLiveMessageReply(t *testing.T) {
 			ExtendedTextMessage: &waProto.ExtendedTextMessage{
 				Text: proto.String("reply text"),
 				ContextInfo: &waProto.ContextInfo{
-					StanzaID: proto.String("orig"),
+					StanzaID:    proto.String("orig"),
+					Participant: proto.String("quoted-sender@s.whatsapp.net"),
 					QuotedMessage: &waProto.Message{
 						Conversation: proto.String("quoted"),
 					},
@@ -307,6 +308,9 @@ func TestParseLiveMessageReply(t *testing.T) {
 	pm := ParseLiveMessage(ev)
 	if pm.ReplyToID != "orig" {
 		t.Fatalf("expected ReplyToID to be orig, got %q", pm.ReplyToID)
+	}
+	if pm.ReplyToSenderJID != "quoted-sender@s.whatsapp.net" {
+		t.Fatalf("expected ReplyToSenderJID, got %q", pm.ReplyToSenderJID)
 	}
 	if pm.ReplyToDisplay != "quoted" {
 		t.Fatalf("expected ReplyToDisplay to be quoted, got %q", pm.ReplyToDisplay)

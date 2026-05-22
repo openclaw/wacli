@@ -20,6 +20,8 @@ type UpsertMessageParams struct {
 	FromMe          bool
 	Text            string
 	DisplayText     string
+	QuotedMsgID     string
+	QuotedSenderJID string
 	Buttons         []Button
 	IsForwarded     bool
 	ForwardingScore uint32
@@ -40,7 +42,7 @@ type UpsertMessageParams struct {
 }
 
 func messageSelectColumns(snippet string) string {
-	return fmt.Sprintf(`m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), m.is_forwarded, m.forwarding_score, COALESCE(m.reaction_to_id,''), COALESCE(m.reaction_emoji,''), COALESCE(m.media_type,''), COALESCE(m.media_caption,''), COALESCE(m.filename,''), COALESCE(m.mime_type,''), COALESCE(m.direct_path,''), COALESCE(m.local_path,''), COALESCE(m.downloaded_at,0), CASE WHEN s.msg_id IS NULL THEN 0 ELSE 1 END, COALESCE(s.starred_at,0), m.revoked, m.deleted_for_me, COALESCE(m.buttons,''), %s`, snippetSQL(snippet))
+	return fmt.Sprintf(`m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.quoted_msg_id,''), COALESCE(m.quoted_sender_jid,''), m.is_forwarded, m.forwarding_score, COALESCE(m.reaction_to_id,''), COALESCE(m.reaction_emoji,''), COALESCE(m.media_type,''), COALESCE(m.media_caption,''), COALESCE(m.filename,''), COALESCE(m.mime_type,''), COALESCE(m.direct_path,''), COALESCE(m.local_path,''), COALESCE(m.downloaded_at,0), CASE WHEN s.msg_id IS NULL THEN 0 ELSE 1 END, COALESCE(s.starred_at,0), m.revoked, m.deleted_for_me, COALESCE(m.buttons,''), %s`, snippetSQL(snippet))
 }
 
 func snippetSQL(snippet string) string {
@@ -54,6 +56,8 @@ func (d *DB) UpsertMessage(p UpsertMessageParams) error {
 	if p.Revoked || p.DeletedForMe {
 		p.Text = ""
 		p.Buttons = nil
+		p.QuotedMsgID = ""
+		p.QuotedSenderJID = ""
 		if p.DeletedForMe {
 			p.DisplayText = DeletedForMeMessageDisplayText
 		} else {
@@ -89,6 +93,8 @@ func (d *DB) UpsertMessage(p UpsertMessageParams) error {
 		FromMe:          boolToInt64(p.FromMe),
 		Text:            nullString(p.Text),
 		DisplayText:     nullString(p.DisplayText),
+		QuotedMsgID:     nullString(p.QuotedMsgID),
+		QuotedSenderJid: nullString(p.QuotedSenderJID),
 		IsForwarded:     boolToInt64(p.IsForwarded),
 		ForwardingScore: int64(p.ForwardingScore),
 		ReactionToID:    nullString(p.ReactionToID),
@@ -398,7 +404,7 @@ func (d *DB) scanMessages(query string, args ...interface{}) ([]Message, error) 
 		var revoked int
 		var deletedForMe int
 		var buttonsJSON string
-		if err := rows.Scan(&m.rowID, &m.ChatJID, &m.ChatName, &m.MsgID, &m.SenderJID, &m.SenderName, &ts, &fromMe, &m.Text, &m.DisplayText, &forwarded, &forwardingScore, &m.ReactionToID, &m.ReactionEmoji, &m.MediaType, &m.MediaCaption, &m.Filename, &m.MimeType, &m.DirectPath, &m.LocalPath, &downloadedAt, &starred, &starredAt, &revoked, &deletedForMe, &buttonsJSON, &m.Snippet); err != nil {
+		if err := rows.Scan(&m.rowID, &m.ChatJID, &m.ChatName, &m.MsgID, &m.SenderJID, &m.SenderName, &ts, &fromMe, &m.Text, &m.DisplayText, &m.QuotedMsgID, &m.QuotedSenderJID, &forwarded, &forwardingScore, &m.ReactionToID, &m.ReactionEmoji, &m.MediaType, &m.MediaCaption, &m.Filename, &m.MimeType, &m.DirectPath, &m.LocalPath, &downloadedAt, &starred, &starredAt, &revoked, &deletedForMe, &buttonsJSON, &m.Snippet); err != nil {
 			return nil, err
 		}
 		m.Timestamp = fromUnix(ts)
@@ -421,37 +427,37 @@ func (d *DB) scanMessages(query string, args ...interface{}) ([]Message, error) 
 func messageFromGetRow(row storedb.GetMessageRow) Message {
 	return messageFromScalars(
 		row.Rowid, row.ChatJid, row.Name, row.MsgID, row.SenderJid, row.SenderName,
-		row.Ts, row.FromMe, row.Text, row.DisplayText, row.IsForwarded,
+		row.Ts, row.FromMe, row.Text, row.DisplayText, row.QuotedMsgID, row.QuotedSenderJid, row.IsForwarded,
 		row.ForwardingScore, row.ReactionToID, row.ReactionEmoji, row.MediaType,
 		row.MediaCaption, row.Filename, row.MimeType, row.DirectPath, row.LocalPath,
-		row.DownloadedAt, row.Column22, row.StarredAt, row.Revoked, row.DeletedForMe,
-		row.Buttons, row.Column27,
+		row.DownloadedAt, row.Column24, row.StarredAt, row.Revoked, row.DeletedForMe,
+		row.Buttons, row.Column29,
 	)
 }
 
 func messageFromBeforeRow(row storedb.MessageContextBeforeRow) Message {
 	return messageFromScalars(
 		row.Rowid, row.ChatJid, row.Name, row.MsgID, row.SenderJid, row.SenderName,
-		row.Ts, row.FromMe, row.Text, row.DisplayText, row.IsForwarded,
+		row.Ts, row.FromMe, row.Text, row.DisplayText, row.QuotedMsgID, row.QuotedSenderJid, row.IsForwarded,
 		row.ForwardingScore, row.ReactionToID, row.ReactionEmoji, row.MediaType,
 		row.MediaCaption, row.Filename, row.MimeType, row.DirectPath, row.LocalPath,
-		row.DownloadedAt, row.Column22, row.StarredAt, row.Revoked, row.DeletedForMe,
-		row.Buttons, row.Column27,
+		row.DownloadedAt, row.Column24, row.StarredAt, row.Revoked, row.DeletedForMe,
+		row.Buttons, row.Column29,
 	)
 }
 
 func messageFromAfterRow(row storedb.MessageContextAfterRow) Message {
 	return messageFromScalars(
 		row.Rowid, row.ChatJid, row.Name, row.MsgID, row.SenderJid, row.SenderName,
-		row.Ts, row.FromMe, row.Text, row.DisplayText, row.IsForwarded,
+		row.Ts, row.FromMe, row.Text, row.DisplayText, row.QuotedMsgID, row.QuotedSenderJid, row.IsForwarded,
 		row.ForwardingScore, row.ReactionToID, row.ReactionEmoji, row.MediaType,
 		row.MediaCaption, row.Filename, row.MimeType, row.DirectPath, row.LocalPath,
-		row.DownloadedAt, row.Column22, row.StarredAt, row.Revoked, row.DeletedForMe,
-		row.Buttons, row.Column27,
+		row.DownloadedAt, row.Column24, row.StarredAt, row.Revoked, row.DeletedForMe,
+		row.Buttons, row.Column29,
 	)
 }
 
-func messageFromScalars(rowID int64, chatJID, chatName, msgID, senderJID, senderName string, ts, fromMe int64, text, displayText string, forwarded, forwardingScore int64, reactionToID, reactionEmoji, mediaType, mediaCaption, filename, mimeType, directPath, localPath string, downloadedAt, starred, starredAt, revoked, deletedForMe int64, buttonsJSON, snippet string) Message {
+func messageFromScalars(rowID int64, chatJID, chatName, msgID, senderJID, senderName string, ts, fromMe int64, text, displayText, quotedMsgID, quotedSenderJID string, forwarded, forwardingScore int64, reactionToID, reactionEmoji, mediaType, mediaCaption, filename, mimeType, directPath, localPath string, downloadedAt, starred, starredAt, revoked, deletedForMe int64, buttonsJSON, snippet string) Message {
 	m := Message{
 		rowID:           rowID,
 		ChatJID:         chatJID,
@@ -463,6 +469,8 @@ func messageFromScalars(rowID int64, chatJID, chatName, msgID, senderJID, sender
 		FromMe:          fromMe != 0,
 		Text:            text,
 		DisplayText:     displayText,
+		QuotedMsgID:     quotedMsgID,
+		QuotedSenderJID: quotedSenderJID,
 		IsForwarded:     forwarded != 0,
 		ForwardingScore: uint32(forwardingScore),
 		ReactionToID:    reactionToID,

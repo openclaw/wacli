@@ -28,11 +28,13 @@ func TestHistoricalLIDJIDsFindsChatAndMessageColumns(t *testing.T) {
 		t.Fatalf("UpsertMessage lid chat: %v", err)
 	}
 	if err := db.UpsertMessage(UpsertMessageParams{
-		ChatJID:   group,
-		MsgID:     "group-sender",
-		SenderJID: lid,
-		Timestamp: base,
-		Text:      "group sender",
+		ChatJID:         group,
+		MsgID:           "group-sender",
+		SenderJID:       lid,
+		Timestamp:       base,
+		Text:            "group sender",
+		QuotedMsgID:     "quoted",
+		QuotedSenderJID: lid,
 	}); err != nil {
 		t.Fatalf("UpsertMessage group sender: %v", err)
 	}
@@ -109,22 +111,26 @@ func TestMigrateLIDToPNMergesChatsAndMessages(t *testing.T) {
 		t.Fatalf("UpsertMessage lid dupe: %v", err)
 	}
 	if err := db.UpsertMessage(UpsertMessageParams{
-		ChatJID:    lid,
-		ChatName:   "Alice LID",
-		MsgID:      "lid-only",
-		SenderJID:  lid,
-		SenderName: "Alice",
-		Timestamp:  base.Add(6 * time.Second),
-		Text:       "only on lid",
+		ChatJID:         lid,
+		ChatName:        "Alice LID",
+		MsgID:           "lid-only",
+		SenderJID:       lid,
+		SenderName:      "Alice",
+		Timestamp:       base.Add(6 * time.Second),
+		Text:            "only on lid",
+		QuotedMsgID:     "quoted-lid-only",
+		QuotedSenderJID: lid,
 	}); err != nil {
 		t.Fatalf("UpsertMessage lid only: %v", err)
 	}
 	if err := db.UpsertMessage(UpsertMessageParams{
-		ChatJID:   group,
-		MsgID:     "group",
-		SenderJID: lid,
-		Timestamp: base.Add(7 * time.Second),
-		Text:      "group message",
+		ChatJID:         group,
+		MsgID:           "group",
+		SenderJID:       lid,
+		Timestamp:       base.Add(7 * time.Second),
+		Text:            "group message",
+		QuotedMsgID:     "quoted-group",
+		QuotedSenderJID: lid,
 	}); err != nil {
 		t.Fatalf("UpsertMessage group: %v", err)
 	}
@@ -198,6 +204,9 @@ func TestMigrateLIDToPNMergesChatsAndMessages(t *testing.T) {
 	if got := countRows(t, db.sql, "SELECT COUNT(*) FROM messages WHERE sender_jid = ?", lid); got != 0 {
 		t.Fatalf("lid sender rows = %d, want 0", got)
 	}
+	if got := countRows(t, db.sql, "SELECT COUNT(*) FROM messages WHERE quoted_sender_jid = ?", lid); got != 0 {
+		t.Fatalf("lid quoted sender rows = %d, want 0", got)
+	}
 	if got := countRows(t, db.sql, "SELECT COUNT(*) FROM polls WHERE chat_jid = ? OR (sender_jid = ? AND chat_jid NOT GLOB '*@g.us')", lid, lid); got != 0 {
 		t.Fatalf("lid poll rows = %d, want 0", got)
 	}
@@ -235,6 +244,13 @@ func TestMigrateLIDToPNMergesChatsAndMessages(t *testing.T) {
 	if !dupe.Timestamp.Equal(base.Add(5 * time.Second)) {
 		t.Fatalf("merged duplicate timestamp = %s, want %s", dupe.Timestamp, base.Add(5*time.Second))
 	}
+	lidOnly, err := db.GetMessage(pn, "lid-only")
+	if err != nil {
+		t.Fatalf("GetMessage lid-only: %v", err)
+	}
+	if lidOnly.QuotedMsgID != "quoted-lid-only" || lidOnly.QuotedSenderJID != pn {
+		t.Fatalf("lid-only quoted metadata = id %q sender %q", lidOnly.QuotedMsgID, lidOnly.QuotedSenderJID)
+	}
 
 	groupMsg, err := db.GetMessage(group, "group")
 	if err != nil {
@@ -242,6 +258,9 @@ func TestMigrateLIDToPNMergesChatsAndMessages(t *testing.T) {
 	}
 	if groupMsg.SenderJID != pn {
 		t.Fatalf("group sender = %q, want %q", groupMsg.SenderJID, pn)
+	}
+	if groupMsg.QuotedMsgID != "quoted-group" || groupMsg.QuotedSenderJID != pn {
+		t.Fatalf("group quoted metadata = id %q sender %q", groupMsg.QuotedMsgID, groupMsg.QuotedSenderJID)
 	}
 
 	poll, err := db.GetPoll(pn, "poll")
@@ -319,6 +338,46 @@ func TestMigrateLIDToPNPreservesButtons(t *testing.T) {
 		if got.Type != b.Type || got.DisplayText != b.DisplayText || got.ID != b.ID || got.URL != b.URL {
 			t.Fatalf("button[%d]: got %+v, want %+v", i, got, b)
 		}
+	}
+}
+
+func TestMigrateLIDToPNClearsQuotedMetadataOnDeletedMessages(t *testing.T) {
+	db := openTestDB(t)
+	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	pn := "15551234567@s.whatsapp.net"
+	lid := "999123456789@lid"
+	if err := db.UpsertChat(lid, "dm", "Alice", base); err != nil {
+		t.Fatalf("UpsertChat lid: %v", err)
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID:         lid,
+		MsgID:           "deleted-reply",
+		SenderJID:       lid,
+		Timestamp:       base,
+		QuotedMsgID:     "quoted",
+		QuotedSenderJID: lid,
+		DeletedForMe:    true,
+	}); err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+	if _, err := db.sql.Exec(`UPDATE messages SET quoted_msg_id = ?, quoted_sender_jid = ? WHERE chat_jid = ? AND msg_id = ?`, "quoted", lid, lid, "deleted-reply"); err != nil {
+		t.Fatalf("seed legacy quoted metadata: %v", err)
+	}
+
+	if err := db.MigrateLIDToPN(lid, pn); err != nil {
+		t.Fatalf("MigrateLIDToPN: %v", err)
+	}
+
+	msg, err := db.GetMessage(pn, "deleted-reply")
+	if err != nil {
+		t.Fatalf("GetMessage after migration: %v", err)
+	}
+	if !msg.DeletedForMe {
+		t.Fatalf("DeletedForMe = false")
+	}
+	if msg.QuotedMsgID != "" || msg.QuotedSenderJID != "" {
+		t.Fatalf("deleted quoted metadata = id %q sender %q", msg.QuotedMsgID, msg.QuotedSenderJID)
 	}
 }
 

@@ -431,7 +431,7 @@ func (q *Queries) GetMediaDownloadInfo(ctx context.Context, arg GetMediaDownload
 }
 
 const getMessage = `-- name: GetMessage :one
-SELECT m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), m.is_forwarded, m.forwarding_score, COALESCE(m.reaction_to_id,''), COALESCE(m.reaction_emoji,''), COALESCE(m.media_type,''), COALESCE(m.media_caption,''), COALESCE(m.filename,''), COALESCE(m.mime_type,''), COALESCE(m.direct_path,''), COALESCE(m.local_path,''), COALESCE(m.downloaded_at,0), CASE WHEN s.msg_id IS NULL THEN 0 ELSE 1 END, COALESCE(s.starred_at,0), m.revoked, m.deleted_for_me, COALESCE(m.buttons,''), ''
+SELECT m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.quoted_msg_id,''), COALESCE(m.quoted_sender_jid,''), m.is_forwarded, m.forwarding_score, COALESCE(m.reaction_to_id,''), COALESCE(m.reaction_emoji,''), COALESCE(m.media_type,''), COALESCE(m.media_caption,''), COALESCE(m.filename,''), COALESCE(m.mime_type,''), COALESCE(m.direct_path,''), COALESCE(m.local_path,''), COALESCE(m.downloaded_at,0), CASE WHEN s.msg_id IS NULL THEN 0 ELSE 1 END, COALESCE(s.starred_at,0), m.revoked, m.deleted_for_me, COALESCE(m.buttons,''), ''
 FROM messages m
 LEFT JOIN chats c ON c.jid = m.chat_jid
 LEFT JOIN starred s ON s.chat_jid = m.chat_jid AND s.msg_id = m.msg_id
@@ -454,6 +454,8 @@ type GetMessageRow struct {
 	FromMe          int64
 	Text            string
 	DisplayText     string
+	QuotedMsgID     string
+	QuotedSenderJid string
 	IsForwarded     int64
 	ForwardingScore int64
 	ReactionToID    string
@@ -465,12 +467,12 @@ type GetMessageRow struct {
 	DirectPath      string
 	LocalPath       string
 	DownloadedAt    int64
-	Column22        int64
+	Column24        int64
 	StarredAt       int64
 	Revoked         int64
 	DeletedForMe    int64
 	Buttons         string
-	Column27        string
+	Column29        string
 }
 
 func (q *Queries) GetMessage(ctx context.Context, arg GetMessageParams) (GetMessageRow, error) {
@@ -487,6 +489,8 @@ func (q *Queries) GetMessage(ctx context.Context, arg GetMessageParams) (GetMess
 		&i.FromMe,
 		&i.Text,
 		&i.DisplayText,
+		&i.QuotedMsgID,
+		&i.QuotedSenderJid,
 		&i.IsForwarded,
 		&i.ForwardingScore,
 		&i.ReactionToID,
@@ -498,12 +502,12 @@ func (q *Queries) GetMessage(ctx context.Context, arg GetMessageParams) (GetMess
 		&i.DirectPath,
 		&i.LocalPath,
 		&i.DownloadedAt,
-		&i.Column22,
+		&i.Column24,
 		&i.StarredAt,
 		&i.Revoked,
 		&i.DeletedForMe,
 		&i.Buttons,
-		&i.Column27,
+		&i.Column29,
 	)
 	return i, err
 }
@@ -902,6 +906,8 @@ SET deleted_for_me = 1,
     text = NULL,
     display_text = ?,
     buttons = NULL,
+    quoted_msg_id = NULL,
+    quoted_sender_jid = NULL,
     media_type = NULL,
     media_caption = NULL,
     filename = NULL,
@@ -937,7 +943,9 @@ UPDATE messages
 SET deleted_for_me = 1,
     text = NULL,
     display_text = ?,
-    buttons = NULL
+    buttons = NULL,
+    quoted_msg_id = NULL,
+    quoted_sender_jid = NULL
 WHERE chat_jid = ? AND msg_id = ?
 `
 
@@ -961,6 +969,8 @@ SET revoked = 1,
     text = NULL,
     display_text = ?,
     buttons = NULL,
+    quoted_msg_id = NULL,
+    quoted_sender_jid = NULL,
     media_type = NULL,
     media_caption = NULL,
     filename = NULL,
@@ -992,7 +1002,7 @@ func (q *Queries) MarkMessageRevoked(ctx context.Context, arg MarkMessageRevoked
 }
 
 const messageContextAfter = `-- name: MessageContextAfter :many
-SELECT m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), m.is_forwarded, m.forwarding_score, COALESCE(m.reaction_to_id,''), COALESCE(m.reaction_emoji,''), COALESCE(m.media_type,''), COALESCE(m.media_caption,''), COALESCE(m.filename,''), COALESCE(m.mime_type,''), COALESCE(m.direct_path,''), COALESCE(m.local_path,''), COALESCE(m.downloaded_at,0), CASE WHEN s.msg_id IS NULL THEN 0 ELSE 1 END, COALESCE(s.starred_at,0), m.revoked, m.deleted_for_me, COALESCE(m.buttons,''), ''
+SELECT m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.quoted_msg_id,''), COALESCE(m.quoted_sender_jid,''), m.is_forwarded, m.forwarding_score, COALESCE(m.reaction_to_id,''), COALESCE(m.reaction_emoji,''), COALESCE(m.media_type,''), COALESCE(m.media_caption,''), COALESCE(m.filename,''), COALESCE(m.mime_type,''), COALESCE(m.direct_path,''), COALESCE(m.local_path,''), COALESCE(m.downloaded_at,0), CASE WHEN s.msg_id IS NULL THEN 0 ELSE 1 END, COALESCE(s.starred_at,0), m.revoked, m.deleted_for_me, COALESCE(m.buttons,''), ''
 FROM messages m
 LEFT JOIN chats c ON c.jid = m.chat_jid
 LEFT JOIN starred s ON s.chat_jid = m.chat_jid AND s.msg_id = m.msg_id
@@ -1020,6 +1030,8 @@ type MessageContextAfterRow struct {
 	FromMe          int64
 	Text            string
 	DisplayText     string
+	QuotedMsgID     string
+	QuotedSenderJid string
 	IsForwarded     int64
 	ForwardingScore int64
 	ReactionToID    string
@@ -1031,12 +1043,12 @@ type MessageContextAfterRow struct {
 	DirectPath      string
 	LocalPath       string
 	DownloadedAt    int64
-	Column22        int64
+	Column24        int64
 	StarredAt       int64
 	Revoked         int64
 	DeletedForMe    int64
 	Buttons         string
-	Column27        string
+	Column29        string
 }
 
 func (q *Queries) MessageContextAfter(ctx context.Context, arg MessageContextAfterParams) ([]MessageContextAfterRow, error) {
@@ -1065,6 +1077,8 @@ func (q *Queries) MessageContextAfter(ctx context.Context, arg MessageContextAft
 			&i.FromMe,
 			&i.Text,
 			&i.DisplayText,
+			&i.QuotedMsgID,
+			&i.QuotedSenderJid,
 			&i.IsForwarded,
 			&i.ForwardingScore,
 			&i.ReactionToID,
@@ -1076,12 +1090,12 @@ func (q *Queries) MessageContextAfter(ctx context.Context, arg MessageContextAft
 			&i.DirectPath,
 			&i.LocalPath,
 			&i.DownloadedAt,
-			&i.Column22,
+			&i.Column24,
 			&i.StarredAt,
 			&i.Revoked,
 			&i.DeletedForMe,
 			&i.Buttons,
-			&i.Column27,
+			&i.Column29,
 		); err != nil {
 			return nil, err
 		}
@@ -1097,7 +1111,7 @@ func (q *Queries) MessageContextAfter(ctx context.Context, arg MessageContextAft
 }
 
 const messageContextBefore = `-- name: MessageContextBefore :many
-SELECT m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), m.is_forwarded, m.forwarding_score, COALESCE(m.reaction_to_id,''), COALESCE(m.reaction_emoji,''), COALESCE(m.media_type,''), COALESCE(m.media_caption,''), COALESCE(m.filename,''), COALESCE(m.mime_type,''), COALESCE(m.direct_path,''), COALESCE(m.local_path,''), COALESCE(m.downloaded_at,0), CASE WHEN s.msg_id IS NULL THEN 0 ELSE 1 END, COALESCE(s.starred_at,0), m.revoked, m.deleted_for_me, COALESCE(m.buttons,''), ''
+SELECT m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.quoted_msg_id,''), COALESCE(m.quoted_sender_jid,''), m.is_forwarded, m.forwarding_score, COALESCE(m.reaction_to_id,''), COALESCE(m.reaction_emoji,''), COALESCE(m.media_type,''), COALESCE(m.media_caption,''), COALESCE(m.filename,''), COALESCE(m.mime_type,''), COALESCE(m.direct_path,''), COALESCE(m.local_path,''), COALESCE(m.downloaded_at,0), CASE WHEN s.msg_id IS NULL THEN 0 ELSE 1 END, COALESCE(s.starred_at,0), m.revoked, m.deleted_for_me, COALESCE(m.buttons,''), ''
 FROM messages m
 LEFT JOIN chats c ON c.jid = m.chat_jid
 LEFT JOIN starred s ON s.chat_jid = m.chat_jid AND s.msg_id = m.msg_id
@@ -1125,6 +1139,8 @@ type MessageContextBeforeRow struct {
 	FromMe          int64
 	Text            string
 	DisplayText     string
+	QuotedMsgID     string
+	QuotedSenderJid string
 	IsForwarded     int64
 	ForwardingScore int64
 	ReactionToID    string
@@ -1136,12 +1152,12 @@ type MessageContextBeforeRow struct {
 	DirectPath      string
 	LocalPath       string
 	DownloadedAt    int64
-	Column22        int64
+	Column24        int64
 	StarredAt       int64
 	Revoked         int64
 	DeletedForMe    int64
 	Buttons         string
-	Column27        string
+	Column29        string
 }
 
 func (q *Queries) MessageContextBefore(ctx context.Context, arg MessageContextBeforeParams) ([]MessageContextBeforeRow, error) {
@@ -1170,6 +1186,8 @@ func (q *Queries) MessageContextBefore(ctx context.Context, arg MessageContextBe
 			&i.FromMe,
 			&i.Text,
 			&i.DisplayText,
+			&i.QuotedMsgID,
+			&i.QuotedSenderJid,
 			&i.IsForwarded,
 			&i.ForwardingScore,
 			&i.ReactionToID,
@@ -1181,12 +1199,12 @@ func (q *Queries) MessageContextBefore(ctx context.Context, arg MessageContextBe
 			&i.DirectPath,
 			&i.LocalPath,
 			&i.DownloadedAt,
-			&i.Column22,
+			&i.Column24,
 			&i.StarredAt,
 			&i.Revoked,
 			&i.DeletedForMe,
 			&i.Buttons,
-			&i.Column27,
+			&i.Column29,
 		); err != nil {
 			return nil, err
 		}
@@ -1584,12 +1602,14 @@ func (q *Queries) UpsertGroupWithHierarchy(ctx context.Context, arg UpsertGroupW
 const upsertMessage = `-- name: UpsertMessage :exec
 INSERT INTO messages(
     chat_jid, chat_name, msg_id, sender_jid, sender_name, ts, from_me, text, display_text,
+    quoted_msg_id, quoted_sender_jid,
     is_forwarded, forwarding_score, reaction_to_id, reaction_emoji,
     media_type, media_caption, filename, mime_type, direct_path,
     media_key, file_sha256, file_enc_sha256, file_length, revoked, deleted_for_me, edited, edited_ts, buttons
 ) VALUES (
     ?, ?, ?, ?, ?,
     ?, ?, ?, ?,
+    ?, ?,
     ?, ?, ?, ?,
     ?, ?, ?, ?, ?,
     ?, ?, ?, ?,
@@ -1603,6 +1623,8 @@ ON CONFLICT(chat_jid, msg_id) DO UPDATE SET
     from_me=CASE WHEN messages.revoked != 0 OR messages.deleted_for_me != 0 OR (((messages.edited != 0 AND excluded.edited = 0) OR (messages.edited != 0 AND excluded.edited != 0 AND excluded.edited_ts < messages.edited_ts) OR (messages.edited = 0 AND excluded.edited = 0 AND excluded.ts < messages.ts)) AND excluded.revoked = 0 AND excluded.deleted_for_me = 0) THEN messages.from_me ELSE excluded.from_me END,
     text=CASE WHEN messages.revoked != 0 OR messages.deleted_for_me != 0 OR excluded.revoked != 0 OR excluded.deleted_for_me != 0 THEN NULL WHEN (messages.edited != 0 AND excluded.edited = 0) OR (messages.edited != 0 AND excluded.edited != 0 AND excluded.edited_ts < messages.edited_ts) OR (messages.edited = 0 AND excluded.edited = 0 AND excluded.ts < messages.ts) THEN messages.text ELSE excluded.text END,
     display_text=CASE WHEN excluded.deleted_for_me != 0 THEN excluded.display_text WHEN messages.deleted_for_me != 0 THEN messages.display_text WHEN excluded.revoked != 0 THEN excluded.display_text WHEN messages.revoked != 0 THEN messages.display_text WHEN (messages.edited != 0 AND excluded.edited = 0) OR (messages.edited != 0 AND excluded.edited != 0 AND excluded.edited_ts < messages.edited_ts) OR (messages.edited = 0 AND excluded.edited = 0 AND excluded.ts < messages.ts) THEN messages.display_text WHEN excluded.display_text IS NOT NULL AND excluded.display_text != '' THEN excluded.display_text ELSE messages.display_text END,
+    quoted_msg_id=CASE WHEN messages.revoked != 0 OR messages.deleted_for_me != 0 OR excluded.revoked != 0 OR excluded.deleted_for_me != 0 THEN NULL WHEN (messages.edited != 0 AND excluded.edited = 0) OR (messages.edited != 0 AND excluded.edited != 0 AND excluded.edited_ts < messages.edited_ts) OR (messages.edited = 0 AND excluded.edited = 0 AND excluded.ts < messages.ts) THEN messages.quoted_msg_id ELSE COALESCE(NULLIF(excluded.quoted_msg_id,''), messages.quoted_msg_id) END,
+    quoted_sender_jid=CASE WHEN messages.revoked != 0 OR messages.deleted_for_me != 0 OR excluded.revoked != 0 OR excluded.deleted_for_me != 0 THEN NULL WHEN (messages.edited != 0 AND excluded.edited = 0) OR (messages.edited != 0 AND excluded.edited != 0 AND excluded.edited_ts < messages.edited_ts) OR (messages.edited = 0 AND excluded.edited = 0 AND excluded.ts < messages.ts) THEN messages.quoted_sender_jid ELSE COALESCE(NULLIF(excluded.quoted_sender_jid,''), messages.quoted_sender_jid) END,
     is_forwarded=CASE WHEN ((messages.edited != 0 AND excluded.edited = 0) OR (messages.edited != 0 AND excluded.edited != 0 AND excluded.edited_ts < messages.edited_ts) OR (messages.edited = 0 AND excluded.edited = 0 AND excluded.ts < messages.ts)) AND messages.revoked = 0 AND messages.deleted_for_me = 0 AND excluded.revoked = 0 AND excluded.deleted_for_me = 0 THEN messages.is_forwarded ELSE excluded.is_forwarded END,
     forwarding_score=CASE WHEN ((messages.edited != 0 AND excluded.edited = 0) OR (messages.edited != 0 AND excluded.edited != 0 AND excluded.edited_ts < messages.edited_ts) OR (messages.edited = 0 AND excluded.edited = 0 AND excluded.ts < messages.ts)) AND messages.revoked = 0 AND messages.deleted_for_me = 0 AND excluded.revoked = 0 AND excluded.deleted_for_me = 0 THEN messages.forwarding_score ELSE excluded.forwarding_score END,
     reaction_to_id=CASE WHEN ((messages.edited != 0 AND excluded.edited = 0) OR (messages.edited != 0 AND excluded.edited != 0 AND excluded.edited_ts < messages.edited_ts) OR (messages.edited = 0 AND excluded.edited = 0 AND excluded.ts < messages.ts)) AND messages.revoked = 0 AND messages.deleted_for_me = 0 AND excluded.revoked = 0 AND excluded.deleted_for_me = 0 THEN messages.reaction_to_id ELSE COALESCE(NULLIF(excluded.reaction_to_id,''), messages.reaction_to_id) END,
@@ -1635,6 +1657,8 @@ type UpsertMessageParams struct {
 	FromMe          int64
 	Text            sql.NullString
 	DisplayText     sql.NullString
+	QuotedMsgID     sql.NullString
+	QuotedSenderJid sql.NullString
 	IsForwarded     int64
 	ForwardingScore int64
 	ReactionToID    sql.NullString
@@ -1666,6 +1690,8 @@ func (q *Queries) UpsertMessage(ctx context.Context, arg UpsertMessageParams) er
 		arg.FromMe,
 		arg.Text,
 		arg.DisplayText,
+		arg.QuotedMsgID,
+		arg.QuotedSenderJid,
 		arg.IsForwarded,
 		arg.ForwardingScore,
 		arg.ReactionToID,
