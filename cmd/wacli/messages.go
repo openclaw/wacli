@@ -659,7 +659,7 @@ func newMessagesRevokeCmd(flags *rootFlags) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&chat, "chat", "", "chat JID, phone number, or contact/group/chat name")
+	cmd.Flags().StringVar(&chat, "chat", "", "chat JID or phone number")
 	cmd.Flags().StringVar(&id, "id", "", "message ID to revoke")
 	cmd.Flags().DurationVar(&postSendWait, "post-send-wait", postSendRetryReceiptWait, "keep the connection alive after revoke so retry receipts can be handled (0 disables)")
 	return cmd
@@ -848,7 +848,7 @@ func newMessagesForwardCmd(flags *rootFlags) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&chat, "chat", "", "source chat JID, phone number, or contact/group/chat name")
+	cmd.Flags().StringVar(&chat, "chat", "", "source chat JID or phone number")
 	cmd.Flags().StringVar(&id, "id", "", "source message ID to forward")
 	cmd.Flags().StringVar(&to, "to", "", "recipient JID, phone number, or contact/group/chat name")
 	cmd.Flags().IntVar(&pick, "pick", 0, "when --to is ambiguous, pick the Nth match (1-indexed)")
