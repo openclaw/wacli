@@ -16,6 +16,12 @@
     "format": "gofmt -w .",
     "format:check": "bash -lc 'out=$(gofmt -l .); if [ -n \"$out\" ]; then echo \"$out\"; exit 1; fi'",
     "generate:sqlc": "go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate",
-    "docs:site": "node scripts/build-docs-site.mjs"
+    "docs:site": "node scripts/build-docs-site.mjs",
+    "check:changed": "pnpm run test",
+    "test:changed": "pnpm run test",
+    "crabbox:hydrate": "crabbox actions hydrate",
+    "crabbox:run": "crabbox run",
+    "crabbox:stop": "crabbox stop",
+    "crabbox:warmup": "crabbox warmup"
   }
 }
