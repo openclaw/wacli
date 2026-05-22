@@ -188,7 +188,7 @@ func sendButtonListSelection(ctx context.Context, a *app.App, chat types.JID, ta
 	if err != nil {
 		return selectResult{}, err
 	}
-	msg, err := buildSelectResponseMessage(selected, target, req.Sender)
+	msg, err := buildSelectResponseMessage(chat, selected, target, req.Sender)
 	if err != nil {
 		return selectResult{}, err
 	}
@@ -345,14 +345,14 @@ func describeSelectCandidates(buttons []store.Button) string {
 	return strings.Join(parts, "; ")
 }
 
-func buildSelectResponseMessage(opt selectOption, target store.Message, senderOverride string) (*waProto.Message, error) {
+func buildSelectResponseMessage(chat types.JID, opt selectOption, target store.Message, senderOverride string) (*waProto.Message, error) {
 	if opt.DisplayText == "" {
 		return nil, fmt.Errorf("selected option has no display text")
 	}
 	if opt.ID == "" {
 		return nil, fmt.Errorf("selected option %q has no stored ID; sync this message again with a newer wacli", opt.DisplayText)
 	}
-	ctx, err := buildSelectContextInfo(target, senderOverride)
+	ctx, err := buildSelectContextInfo(chat, target, senderOverride)
 	if err != nil {
 		return nil, err
 	}
@@ -403,24 +403,41 @@ func buildSelectResponseMessage(opt selectOption, target store.Message, senderOv
 	}
 }
 
-func buildSelectContextInfo(target store.Message, senderOverride string) (*waProto.ContextInfo, error) {
+func buildSelectContextInfo(chat types.JID, target store.Message, senderOverride string) (*waProto.ContextInfo, error) {
 	stanzaID := strings.TrimSpace(target.MsgID)
 	if stanzaID == "" {
 		return nil, fmt.Errorf("target message ID is required")
 	}
 	info := &waProto.ContextInfo{StanzaID: proto.String(stanzaID)}
-	sender := strings.TrimSpace(senderOverride)
-	if sender == "" {
-		sender = strings.TrimSpace(target.SenderJID)
+	jid, err := resolveSelectSender(chat, target, senderOverride)
+	if err != nil {
+		return nil, err
 	}
-	if sender != "" {
-		jid, err := wa.ParseUserOrJID(sender)
-		if err != nil {
-			return nil, fmt.Errorf("invalid --sender: %w", err)
-		}
+	if !jid.IsEmpty() {
 		info.Participant = proto.String(jid.String())
 	}
 	return info, nil
+}
+
+func resolveSelectSender(chat types.JID, target store.Message, override string) (types.JID, error) {
+	if strings.TrimSpace(override) != "" {
+		jid, err := wa.ParseUserOrJID(override)
+		if err != nil {
+			return types.JID{}, fmt.Errorf("invalid --sender: %w", err)
+		}
+		return jid, nil
+	}
+	if strings.TrimSpace(target.SenderJID) != "" {
+		jid, err := types.ParseJID(target.SenderJID)
+		if err != nil {
+			return types.JID{}, fmt.Errorf("stored target sender is invalid: %w", err)
+		}
+		return jid, nil
+	}
+	if chat.Server == types.GroupServer {
+		return types.JID{}, fmt.Errorf("--sender is required for unsynced group selections")
+	}
+	return types.JID{}, nil
 }
 
 func persistOutboundSelection(ctx context.Context, a *app.App, chat types.JID, chatJID, msgID string, selected selectOption, now time.Time) {
