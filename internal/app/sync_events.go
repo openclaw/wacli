@@ -132,10 +132,15 @@ func (a *App) handleDeleteForMeEvent(ctx context.Context, evt *events.DeleteForM
 
 func (a *App) handleLiveCallEvent(ctx context.Context, evt interface{}) {
 	self := a.linkedLiveCallIdentity()
+	var alternateSelf []types.JID
 	if _, ok := evt.(*events.AppState); ok {
-		self = a.linkedCallIdentity()
+		identities := a.linkedCallIdentities()
+		if len(identities) > 0 {
+			self = identities[0]
+			alternateSelf = identities[1:]
+		}
 	}
-	call, ok := wa.ParseLiveCallEvent(evt, self)
+	call, ok := wa.ParseLiveCallEvent(evt, self, alternateSelf...)
 	if ok {
 		if err := a.storeParsedCallEvent(ctx, call, "", ""); err != nil {
 			a.emitWarning(
@@ -160,21 +165,19 @@ func (a *App) handleLiveCallEvent(ctx context.Context, evt interface{}) {
 	}
 }
 
-func (a *App) linkedCallIdentity() types.JID {
-	self := types.JID{}
+func (a *App) linkedCallIdentities() []types.JID {
+	identities := make([]types.JID, 0, 2)
 	if linked := strings.TrimSpace(a.wa.LinkedLID()); linked != "" {
 		if jid, err := types.ParseJID(linked); err == nil {
-			self = jid
+			identities = append(identities, jid)
 		}
 	}
-	if self.IsEmpty() {
-		if linked := strings.TrimSpace(a.wa.LinkedJID()); linked != "" {
-			if jid, err := types.ParseJID(linked); err == nil {
-				self = jid
-			}
+	if linked := strings.TrimSpace(a.wa.LinkedJID()); linked != "" {
+		if jid, err := types.ParseJID(linked); err == nil {
+			identities = append(identities, jid)
 		}
 	}
-	return self
+	return identities
 }
 
 func (a *App) linkedLiveCallIdentity() types.JID {
@@ -370,10 +373,16 @@ func (a *App) storeHistoryCallLogRecords(ctx context.Context, v *events.HistoryS
 	if v == nil || v.Data == nil {
 		return
 	}
-	self := a.linkedCallIdentity()
+	identities := a.linkedCallIdentities()
+	self := types.JID{}
+	var alternateSelf []types.JID
+	if len(identities) > 0 {
+		self = identities[0]
+		alternateSelf = identities[1:]
+	}
 	for _, record := range v.Data.GetCallLogRecords() {
 		lastEvent.Store(nowUTC().UnixNano())
-		call, ok := wa.ParseCallLogRecord(record, self)
+		call, ok := wa.ParseCallLogRecord(record, self, alternateSelf...)
 		if !ok {
 			continue
 		}

@@ -45,3 +45,26 @@ func TestCallLogRecordChatIgnoresSelfGroupJIDForOneToOne(t *testing.T) {
 		t.Fatalf("sender = %q, want %q", call.SenderJID, self.String())
 	}
 }
+
+func TestCallLogRecordRecognizesPNAndLIDSelfIdentities(t *testing.T) {
+	selfPN := types.NewJID("15550000001", types.DefaultUserServer)
+	selfLID := types.NewJID("999123456789", types.HiddenUserServer)
+	peer := types.NewJID("15550000002", types.DefaultUserServer)
+
+	for _, creator := range []types.JID{selfPN, selfLID} {
+		call, ok := ParseCallLogRecord(&waSyncAction.CallLogRecord{
+			CallID:         proto.String("call-1"),
+			CallCreatorJID: proto.String(creator.String()),
+			Participants: []*waSyncAction.CallLogRecord_ParticipantInfo{{
+				UserJID: proto.String(peer.String()),
+			}},
+			StartTime: proto.Int64(time.Date(2026, 5, 22, 10, 45, 0, 0, time.UTC).Unix()),
+		}, selfLID, selfPN)
+		if !ok {
+			t.Fatalf("ParseCallLogRecord returned false for creator %s", creator)
+		}
+		if call.Chat != peer {
+			t.Fatalf("creator %s chat = %s, want %s", creator, call.Chat, peer)
+		}
+	}
+}
