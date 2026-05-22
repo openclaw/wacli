@@ -298,6 +298,28 @@ func (f *fakeWA) GetGroupInfo(ctx context.Context, jid types.JID) (*types.GroupI
 	return f.groups[jid], nil
 }
 
+func (f *fakeWA) CreateGroup(ctx context.Context, req wa.CreateGroupRequest) (*types.GroupInfo, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	jid := types.NewJID(fmt.Sprintf("group-%d", len(f.groups)+1), types.GroupServer)
+	g := &types.GroupInfo{
+		JID:           jid,
+		GroupName:     types.GroupName{Name: req.Name},
+		GroupAnnounce: types.GroupAnnounce{IsAnnounce: req.IsAnnounce},
+		GroupLocked:   types.GroupLocked{IsLocked: req.IsLocked},
+		GroupMembershipApprovalMode: types.GroupMembershipApprovalMode{
+			IsJoinApprovalRequired: req.IsJoinApprovalRequired,
+		},
+		GroupParent:       types.GroupParent{IsParent: req.IsParent},
+		GroupLinkedParent: types.GroupLinkedParent{LinkedParentJID: req.LinkedParentJID},
+	}
+	for _, p := range req.Participants {
+		g.Participants = append(g.Participants, types.GroupParticipant{JID: p})
+	}
+	f.groups[jid] = g
+	return g, nil
+}
+
 func (f *fakeWA) SetGroupName(ctx context.Context, jid types.JID, name string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -307,6 +329,42 @@ func (f *fakeWA) SetGroupName(ctx context.Context, jid types.JID, name string) e
 		f.groups[jid] = g
 	}
 	g.GroupName.Name = name
+	return nil
+}
+
+func (f *fakeWA) SetGroupTopic(ctx context.Context, jid types.JID, topic string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	g := f.groups[jid]
+	if g == nil {
+		g = &types.GroupInfo{JID: jid}
+		f.groups[jid] = g
+	}
+	g.GroupTopic.Topic = topic
+	return nil
+}
+
+func (f *fakeWA) SetGroupAnnounce(ctx context.Context, jid types.JID, announce bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	g := f.groups[jid]
+	if g == nil {
+		g = &types.GroupInfo{JID: jid}
+		f.groups[jid] = g
+	}
+	g.GroupAnnounce.IsAnnounce = announce
+	return nil
+}
+
+func (f *fakeWA) SetGroupLocked(ctx context.Context, jid types.JID, locked bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	g := f.groups[jid]
+	if g == nil {
+		g = &types.GroupInfo{JID: jid}
+		f.groups[jid] = g
+	}
+	g.GroupLocked.IsLocked = locked
 	return nil
 }
 
@@ -339,6 +397,18 @@ func (f *fakeWA) UpdateGroupParticipants(ctx context.Context, group types.JID, u
 		// promote/demote ignored for tests
 	}
 	return g.Participants, nil
+}
+
+func (f *fakeWA) GetGroupRequestParticipants(ctx context.Context, group types.JID) ([]types.GroupParticipantRequest, error) {
+	return nil, nil
+}
+
+func (f *fakeWA) UpdateGroupRequestParticipants(ctx context.Context, group types.JID, users []types.JID, action wa.GroupParticipantRequestAction) ([]types.GroupParticipant, error) {
+	out := make([]types.GroupParticipant, 0, len(users))
+	for _, u := range users {
+		out = append(out, types.GroupParticipant{JID: u})
+	}
+	return out, nil
 }
 
 func (f *fakeWA) GetGroupInviteLink(ctx context.Context, group types.JID, reset bool) (string, error) {
