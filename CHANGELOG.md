@@ -6,6 +6,7 @@
 
 - Chats: store unread marker state and numeric `unread_count` separately; migrate existing stores away from sentinel unread values while preserving public chat JSON fields. (#255 - thanks @drelum and @dovocoder)
 - Messages: add explicit `messages revoke` and `messages forward` commands for stored text and media/document messages.
+- Messages: persist quoted message ID and quoted sender JID metadata from WhatsApp reply context. (#260)
 ### Security
 
 ### Fixed

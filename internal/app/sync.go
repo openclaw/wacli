@@ -437,6 +437,8 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 		FromMe:          pm.FromMe,
 		Text:            pm.Text,
 		DisplayText:     displayText,
+		QuotedMsgID:     pm.ReplyToID,
+		QuotedSenderJID: pm.ReplyToSenderJID,
 		Buttons:         waButtonsToStore(pm.Buttons),
 		IsForwarded:     pm.IsForwarded,
 		ForwardingScore: pm.ForwardingScore,
