@@ -83,6 +83,7 @@ type WAClient interface {
 	RequestAppStateRecovery(ctx context.Context, name string) (types.MessageID, error)
 	Logout(ctx context.Context) error
 	LinkedJID() string
+	LinkedLID() string
 
 	SetProfilePicture(ctx context.Context, avatar []byte) (string, error)
 }

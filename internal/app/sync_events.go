@@ -131,11 +131,9 @@ func (a *App) handleDeleteForMeEvent(ctx context.Context, evt *events.DeleteForM
 }
 
 func (a *App) handleLiveCallEvent(ctx context.Context, evt interface{}) {
-	self := types.JID{}
-	if linked := strings.TrimSpace(a.wa.LinkedJID()); linked != "" {
-		if jid, err := types.ParseJID(linked); err == nil {
-			self = jid
-		}
+	self := a.linkedLiveCallIdentity()
+	if _, ok := evt.(*events.AppState); ok {
+		self = a.linkedCallIdentity()
 	}
 	call, ok := wa.ParseLiveCallEvent(evt, self)
 	if ok {
@@ -160,6 +158,32 @@ func (a *App) handleLiveCallEvent(ctx context.Context, evt interface{}) {
 			map[string]any{"chat_jid": deleted.Chat.String(), "direction": deleted.Direction, "error": err.Error()},
 		)
 	}
+}
+
+func (a *App) linkedCallIdentity() types.JID {
+	self := types.JID{}
+	if linked := strings.TrimSpace(a.wa.LinkedLID()); linked != "" {
+		if jid, err := types.ParseJID(linked); err == nil {
+			self = jid
+		}
+	}
+	if self.IsEmpty() {
+		if linked := strings.TrimSpace(a.wa.LinkedJID()); linked != "" {
+			if jid, err := types.ParseJID(linked); err == nil {
+				self = jid
+			}
+		}
+	}
+	return self
+}
+
+func (a *App) linkedLiveCallIdentity() types.JID {
+	if linked := strings.TrimSpace(a.wa.LinkedJID()); linked != "" {
+		if jid, err := types.ParseJID(linked); err == nil {
+			return jid
+		}
+	}
+	return types.JID{}
 }
 
 func (a *App) handleStarEvent(ctx context.Context, evt *events.Star) {
@@ -283,6 +307,7 @@ func historySyncNotificationFromMessage(v *events.Message) *waE2E.HistorySyncNot
 
 func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events.HistorySync, messagesStored, lastEvent *atomic.Int64, enqueueMedia func(string, string), limits ...*syncStorageLimits) {
 	a.emitOrPrint("history_sync", map[string]any{"conversations": len(v.Data.Conversations)}, "\nProcessing history sync (%d conversations)...\n", len(v.Data.Conversations))
+	a.storeHistoryCallLogRecords(ctx, v, lastEvent)
 	for _, conv := range v.Data.Conversations {
 		lastEvent.Store(nowUTC().UnixNano())
 		chatID := strings.TrimSpace(conv.GetID())
@@ -338,6 +363,27 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 	}
 	if !a.eventsEnabled() {
 		a.emitOrPrint("progress", map[string]any{"messages_synced": messagesStored.Load()}, "\rSynced %d messages...", messagesStored.Load())
+	}
+}
+
+func (a *App) storeHistoryCallLogRecords(ctx context.Context, v *events.HistorySync, lastEvent *atomic.Int64) {
+	if v == nil || v.Data == nil {
+		return
+	}
+	self := a.linkedCallIdentity()
+	for _, record := range v.Data.GetCallLogRecords() {
+		lastEvent.Store(nowUTC().UnixNano())
+		call, ok := wa.ParseCallLogRecord(record, self)
+		if !ok {
+			continue
+		}
+		if err := a.storeParsedCallEvent(ctx, call, "", ""); err != nil {
+			a.emitWarning(
+				"history_call_log_store_failed",
+				fmt.Sprintf("warning: failed to store history call log %s: %v", call.CallID, err),
+				map[string]any{"call_id": call.CallID, "error": err.Error()},
+			)
+		}
 	}
 }
 

@@ -255,6 +255,41 @@ func TestLiveCallOfferStoresCallEvent(t *testing.T) {
 	}
 }
 
+func TestLiveCallOfferUsesPNIdentityWhenLinkedLIDExists(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	f.linkedLID = types.NewJID("999123456789", types.HiddenUserServer).String()
+	a.wa = f
+
+	self, err := types.ParseJID(f.LinkedJID())
+	if err != nil {
+		t.Fatalf("ParseJID linked: %v", err)
+	}
+	remote := types.NewJID("15551234567", types.DefaultUserServer)
+	when := time.Date(2024, 1, 3, 12, 0, 0, 0, time.UTC)
+	a.handleLiveCallEvent(context.Background(), &events.CallOffer{
+		BasicCallMeta: types.BasicCallMeta{
+			From:        remote,
+			CallCreator: self,
+			CallID:      "call-live-lid-1",
+			Timestamp:   when,
+		},
+		Data: &waBinary.Node{Attrs: waBinary.Attrs{"media": "audio"}},
+	})
+
+	calls, err := a.db.ListCallEvents(store.ListCallEventsParams{ChatJID: remote.String(), Limit: 10})
+	if err != nil {
+		t.Fatalf("ListCallEvents: %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("calls len = %d, want 1", len(calls))
+	}
+	got := calls[0]
+	if got.CallID != "call-live-lid-1" || got.EventType != "offer" || got.Direction != "outbound" || got.Media != "audio" {
+		t.Fatalf("unexpected call event: %+v", got)
+	}
+}
+
 func TestLiveSyncStoresCallLogMessageAndCallEvent(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
@@ -302,6 +337,53 @@ func TestLiveSyncStoresCallLogMessageAndCallEvent(t *testing.T) {
 	}
 	got := calls[0]
 	if got.CallID != "call-msg-1" || got.MsgID != "call-msg-1" || got.EventType != "call_log" || got.Direction != "outbound" || got.Outcome != "connected" {
+		t.Fatalf("unexpected call log event: %+v", got)
+	}
+}
+
+func TestHistorySyncStoresCallLogRecords(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	chat := types.NewJID("15551234567", types.DefaultUserServer)
+	when := time.Date(2024, 1, 3, 12, 0, 0, 0, time.UTC)
+	result := waSyncAction.CallLogRecord_CONNECTED
+	callType := waSyncAction.CallLogRecord_REGULAR
+	history := &events.HistorySync{Data: &waHistorySync.HistorySync{
+		SyncType: waHistorySync.HistorySync_FULL.Enum(),
+		CallLogRecords: []*waSyncAction.CallLogRecord{{
+			CallID:         proto.String("call-history-1"),
+			CallCreatorJID: proto.String(f.LinkedJID()),
+			Participants: []*waSyncAction.CallLogRecord_ParticipantInfo{{
+				UserJID:    proto.String(chat.String()),
+				CallResult: &result,
+			}},
+			CallResult: &result,
+			CallType:   &callType,
+			Duration:   proto.Int64(61),
+			StartTime:  proto.Int64(when.UnixMilli()),
+			IsIncoming: proto.Bool(false),
+			IsVideo:    proto.Bool(false),
+		}},
+	}}
+	var messagesStored atomic.Int64
+	var lastEvent atomic.Int64
+
+	a.handleHistorySync(context.Background(), SyncOptions{}, history, &messagesStored, &lastEvent, func(string, string) {})
+
+	if messagesStored.Load() != 0 {
+		t.Fatalf("messages stored = %d, want 0", messagesStored.Load())
+	}
+	calls, err := a.db.ListCallEvents(store.ListCallEventsParams{ChatJID: chat.String(), Limit: 10})
+	if err != nil {
+		t.Fatalf("ListCallEvents: %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("calls len = %d, want 1", len(calls))
+	}
+	got := calls[0]
+	if got.CallID != "call-history-1" || got.EventType != "call_log" || got.Direction != "outbound" || got.Outcome != "connected" || got.DurationSecs != 61 {
 		t.Fatalf("unexpected call log event: %+v", got)
 	}
 }
@@ -525,6 +607,8 @@ func TestSyncFetchesChatAppStateDeltasAfterConnect(t *testing.T) {
 
 	chat := types.NewJID("15551234567", types.DefaultUserServer)
 	base := time.Date(2024, 1, 3, 0, 0, 0, 0, time.UTC)
+	result := waSyncAction.CallLogRecord_CONNECTED
+	callType := waSyncAction.CallLogRecord_REGULAR
 	if err := a.db.UpsertChat(chat.String(), "dm", "Alice", base); err != nil {
 		t.Fatalf("UpsertChat: %v", err)
 	}
@@ -538,10 +622,13 @@ func TestSyncFetchesChatAppStateDeltasAfterConnect(t *testing.T) {
 		t.Fatalf("UpsertMessage: %v", err)
 	}
 	f.appStateFetchEvent = func(name string, fullSync, onlyIfNotSynced bool) interface{} {
-		if fullSync || onlyIfNotSynced {
+		if onlyIfNotSynced {
 			return nil
 		}
 		if name == string(appstate.WAPatchRegularHigh) {
+			if fullSync {
+				return nil
+			}
 			return &events.DeleteForMe{
 				ChatJID:   chat,
 				MessageID: "m-offline-delete-for-me",
@@ -550,10 +637,37 @@ func TestSyncFetchesChatAppStateDeltasAfterConnect(t *testing.T) {
 			}
 		}
 		if name == string(appstate.WAPatchRegularLow) {
+			if fullSync {
+				return nil
+			}
 			return &events.Archive{
 				JID:       chat,
 				Timestamp: base.Add(2 * time.Minute),
 				Action:    &waSyncAction.ArchiveChatAction{Archived: proto.Bool(true)},
+			}
+		}
+		if name == string(appstate.WAPatchRegular) {
+			if !fullSync {
+				return nil
+			}
+			return &events.AppState{
+				SyncActionValue: &waSyncAction.SyncActionValue{
+					Timestamp: proto.Int64(base.Add(3 * time.Minute).UnixMilli()),
+					CallLogAction: &waSyncAction.CallLogAction{CallLogRecord: &waSyncAction.CallLogRecord{
+						CallID:         proto.String("call-app-state-1"),
+						CallCreatorJID: proto.String(f.LinkedJID()),
+						Participants: []*waSyncAction.CallLogRecord_ParticipantInfo{{
+							UserJID:    proto.String(chat.String()),
+							CallResult: &result,
+						}},
+						CallResult: &result,
+						CallType:   &callType,
+						Duration:   proto.Int64(61),
+						StartTime:  proto.Int64(base.Add(3 * time.Minute).UnixMilli()),
+						IsIncoming: proto.Bool(false),
+						IsVideo:    proto.Bool(false),
+					}},
+				},
 			}
 		}
 		return nil
@@ -572,7 +686,7 @@ func TestSyncFetchesChatAppStateDeltasAfterConnect(t *testing.T) {
 	f.mu.Lock()
 	fetches := append([]fakeAppStateFetch(nil), f.appStateFetches...)
 	f.mu.Unlock()
-	if len(fetches) != 2 {
+	if len(fetches) != 3 {
 		t.Fatalf("app state fetches = %+v", fetches)
 	}
 	if fetches[0].name != string(appstate.WAPatchRegularHigh) || fetches[0].fullSync || fetches[0].onlyIfNotSynced {
@@ -580,6 +694,9 @@ func TestSyncFetchesChatAppStateDeltasAfterConnect(t *testing.T) {
 	}
 	if fetches[1].name != string(appstate.WAPatchRegularLow) || fetches[1].fullSync || fetches[1].onlyIfNotSynced {
 		t.Fatalf("second app state fetch = %+v", fetches[1])
+	}
+	if fetches[2].name != string(appstate.WAPatchRegular) || !fetches[2].fullSync || fetches[2].onlyIfNotSynced {
+		t.Fatalf("third app state fetch = %+v", fetches[2])
 	}
 	msg, err := a.db.GetMessage(chat.String(), "m-offline-delete-for-me")
 	if err != nil {
@@ -594,6 +711,13 @@ func TestSyncFetchesChatAppStateDeltasAfterConnect(t *testing.T) {
 	}
 	if !storedChat.Archived {
 		t.Fatalf("chat was not marked archived from regular_low app state: %+v", storedChat)
+	}
+	calls, err := a.db.ListCallEvents(store.ListCallEventsParams{ChatJID: chat.String(), Limit: 10})
+	if err != nil {
+		t.Fatalf("ListCallEvents: %v", err)
+	}
+	if len(calls) != 1 || calls[0].CallID != "call-app-state-1" || calls[0].DurationSecs != 61 {
+		t.Fatalf("call log was not stored from regular app state: %+v", calls)
 	}
 }
 

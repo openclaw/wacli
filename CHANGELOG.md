@@ -5,10 +5,11 @@
 ### Added
 
 - Chats: store unread marker state and numeric `unread_count` separately; migrate existing stores away from sentinel unread values while preserving public chat JSON fields. (#255 - thanks @drelum and @dovocoder)
-
 ### Security
 
 ### Fixed
+
+- Calls: import call-log records from full history syncs and the `regular` app-state collection so old call events can be stored even when the live call signaling was missed. (#256)
 
 ### Docs
 

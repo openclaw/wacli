@@ -131,15 +131,26 @@ func parseCallLogAppState(evt *events.AppState, self types.JID) (ParsedCallEvent
 	if evt == nil || evt.SyncActionValue == nil || evt.GetCallLogAction() == nil || evt.GetCallLogAction().GetCallLogRecord() == nil {
 		return ParsedCallEvent{}, false
 	}
-	record := evt.GetCallLogAction().GetCallLogRecord()
+	var fallback time.Time
+	if evt.GetTimestamp() > 0 {
+		fallback = time.UnixMilli(evt.GetTimestamp()).UTC()
+	}
+	return parseCallLogRecord(evt.GetCallLogAction().GetCallLogRecord(), self, fallback)
+}
+
+func ParseCallLogRecord(record *waSyncAction.CallLogRecord, self types.JID) (ParsedCallEvent, bool) {
+	return parseCallLogRecord(record, self, time.Time{})
+}
+
+func parseCallLogRecord(record *waSyncAction.CallLogRecord, self types.JID, fallback time.Time) (ParsedCallEvent, bool) {
+	if record == nil {
+		return ParsedCallEvent{}, false
+	}
 	chat, sender := callLogRecordChatAndSender(record, self)
 	if chat.IsEmpty() {
 		return ParsedCallEvent{}, false
 	}
-	ts := time.UnixMilli(record.GetStartTime()).UTC()
-	if record.GetStartTime() <= 0 && evt.GetTimestamp() > 0 {
-		ts = time.UnixMilli(evt.GetTimestamp()).UTC()
-	}
+	ts := callLogRecordTimestamp(record.GetStartTime(), fallback)
 	return ParsedCallEvent{
 		Chat:         chat,
 		SenderJID:    sender,
@@ -156,9 +167,23 @@ func parseCallLogAppState(evt *events.AppState, self types.JID) (ParsedCallEvent
 	}, true
 }
 
+func callLogRecordTimestamp(raw int64, fallback time.Time) time.Time {
+	if raw <= 0 {
+		return fallback
+	}
+	switch {
+	case raw < 100_000_000_000:
+		return time.Unix(raw, 0).UTC()
+	case raw < 100_000_000_000_000:
+		return time.UnixMilli(raw).UTC()
+	default:
+		return time.UnixMicro(raw).UTC()
+	}
+}
+
 func callLogRecordChatAndSender(record *waSyncAction.CallLogRecord, self types.JID) (types.JID, string) {
 	if group := strings.TrimSpace(record.GetGroupJID()); group != "" {
-		if jid, err := types.ParseJID(group); err == nil {
+		if jid, err := types.ParseJID(group); err == nil && jid.Server == types.GroupServer {
 			return jid, strings.TrimSpace(record.GetCallCreatorJID())
 		}
 	}

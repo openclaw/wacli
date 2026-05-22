@@ -53,6 +53,35 @@ func (d *DB) UpsertCallEvent(p UpsertCallEventParams) error {
 		}
 	}
 
+	if callID != "" {
+		res, err := d.sql.Exec(`
+			UPDATE call_events SET
+				chat_jid=?,
+				chat_name=COALESCE(NULLIF(?,''), chat_name),
+				sender_jid=COALESCE(NULLIF(?,''), sender_jid),
+				sender_name=COALESCE(NULLIF(?,''), sender_name),
+				msg_id=COALESCE(NULLIF(?,''), msg_id),
+				direction=COALESCE(NULLIF(?,''), direction),
+				media=COALESCE(NULLIF(?,''), media),
+				outcome=COALESCE(NULLIF(?,''), outcome),
+				reason=COALESCE(NULLIF(?,''), reason),
+				call_type=COALESCE(NULLIF(?,''), call_type),
+				duration_secs=CASE WHEN ? > 0 THEN ? ELSE duration_secs END,
+				ts=?,
+				participants=COALESCE(NULLIF(?,''), participants)
+			WHERE call_id=? AND event_type=?
+		`, chatJID, nullIfEmpty(p.ChatName), nullIfEmpty(p.SenderJID), nullIfEmpty(p.SenderName),
+			nullIfEmpty(p.MsgID), nullIfEmpty(p.Direction), nullIfEmpty(p.Media), nullIfEmpty(p.Outcome),
+			nullIfEmpty(p.Reason), nullIfEmpty(p.CallType), p.DurationSecs, p.DurationSecs, ts, participantsJSON,
+			callID, eventType)
+		if err != nil {
+			return err
+		}
+		if rows, err := res.RowsAffected(); err == nil && rows > 0 {
+			return nil
+		}
+	}
+
 	_, err := d.sql.Exec(`
 		INSERT INTO call_events(
 			chat_jid, chat_name, sender_jid, sender_name, call_id, msg_id, event_type,
