@@ -5,9 +5,9 @@
 ### Added
 
 - Chats: store unread marker state and numeric `unread_count` separately; migrate existing stores away from sentinel unread values while preserving public chat JSON fields. (#255 - thanks @drelum and @dovocoder)
-- Messages: add explicit `messages revoke` and `messages forward` commands for stored text and media/document messages.
+- Messages: add explicit `messages revoke` and `messages forward` commands for stored text and media/document messages. (#259 - thanks @dovocoder)
 - Messages: persist quoted message ID and quoted sender JID metadata from WhatsApp reply context. (#260)
-- Send: add `send select` to choose stored inbound WhatsApp quick-reply buttons and list rows from scripts.
+- Send: add `send select` to choose stored inbound WhatsApp quick-reply buttons and list rows from scripts. (#258 - thanks @morgs)
 ### Security
 
 ### Fixed
