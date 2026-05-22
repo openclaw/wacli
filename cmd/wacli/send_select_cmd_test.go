@@ -79,6 +79,21 @@ func TestResolveSelectOption(t *testing.T) {
 	}
 }
 
+func TestResolveSelectOptionUsesStoredIndexOrder(t *testing.T) {
+	buttons := []store.Button{
+		{Type: "quick_reply", DisplayText: "Second", ID: "second", ResponseType: selectResponseTemplate, Index: 2},
+		{Type: "quick_reply", DisplayText: "First", ID: "first", ResponseType: selectResponseTemplate, Index: 1},
+	}
+
+	byIndex, err := resolveSelectOption(buttons, selectRequest{Index: 1, IndexSet: true})
+	if err != nil {
+		t.Fatalf("index select: %v", err)
+	}
+	if byIndex.ID != "first" || byIndex.Index != 1 {
+		t.Fatalf("index select = %+v, want first stored index", byIndex)
+	}
+}
+
 func TestResolveSelectOptionRejectsAmbiguousAndUnsupported(t *testing.T) {
 	_, err := resolveSelectOption([]store.Button{
 		{Type: "quick_reply", DisplayText: "Same", ID: "a"},

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -272,7 +273,7 @@ func resolveSelectOption(buttons []store.Button, req selectRequest) (selectOptio
 			}
 		}
 	case req.IndexSet:
-		selectable := selectableButtons(candidates)
+		selectable := selectableButtonsByIndex(candidates)
 		if req.Index > len(selectable) {
 			return selectOption{}, fmt.Errorf("--index %d is out of range; message has %d selectable option(s)", req.Index, len(selectable))
 		}
@@ -295,6 +296,19 @@ func selectableButtons(buttons []store.Button) []store.Button {
 			out = append(out, b)
 		}
 	}
+	return out
+}
+
+func selectableButtonsByIndex(buttons []store.Button) []store.Button {
+	out := selectableButtons(buttons)
+	for _, b := range out {
+		if b.Index < 1 {
+			return out
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].Index < out[j].Index
+	})
 	return out
 }
 
