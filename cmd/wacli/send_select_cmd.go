@@ -358,29 +358,17 @@ func buildSelectResponseMessage(chat types.JID, opt selectOption, target store.M
 	}
 	switch opt.ResponseType {
 	case selectResponseList:
-		listType := waProto.ListResponseMessage_SINGLE_SELECT
-		resp := &waProto.ListResponseMessage{
-			Title:             proto.String(opt.DisplayText),
-			ListType:          &listType,
-			SingleSelectReply: &waProto.ListResponseMessage_SingleSelectReply{SelectedRowID: proto.String(opt.ID)},
-			ContextInfo:       ctx,
-		}
-		if opt.Description != "" {
-			resp.Description = proto.String(opt.Description)
-		}
 		return &waProto.Message{
-			ListResponseMessage: resp,
+			ExtendedTextMessage: &waProto.ExtendedTextMessage{
+				Text:        proto.String(opt.DisplayText),
+				ContextInfo: ctx,
+			},
 		}, nil
 	case selectResponseButtons:
-		respType := waProto.ButtonsResponseMessage_DISPLAY_TEXT
 		return &waProto.Message{
-			ButtonsResponseMessage: &waProto.ButtonsResponseMessage{
-				SelectedButtonID: proto.String(opt.ID),
-				Response: &waProto.ButtonsResponseMessage_SelectedDisplayText{
-					SelectedDisplayText: opt.DisplayText,
-				},
+			ExtendedTextMessage: &waProto.ExtendedTextMessage{
+				Text:        proto.String(opt.DisplayText),
 				ContextInfo: ctx,
-				Type:        &respType,
 			},
 		}, nil
 	case selectResponseTemplate:
