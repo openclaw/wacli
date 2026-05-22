@@ -92,6 +92,8 @@ type Message struct {
 	FromMe          int64
 	Text            sql.NullString
 	DisplayText     sql.NullString
+	QuotedMsgID     sql.NullString
+	QuotedSenderJid sql.NullString
 	IsForwarded     int64
 	ForwardingScore int64
 	ReactionToID    sql.NullString

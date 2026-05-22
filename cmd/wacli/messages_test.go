@@ -171,19 +171,21 @@ func TestCallsListCommandHasExpectedFlags(t *testing.T) {
 
 func TestWriteMessageShowPrefersDisplayTextAndMediaDetails(t *testing.T) {
 	msg := store.Message{
-		ChatJID:      "chat@s.whatsapp.net",
-		SenderJID:    "sender@s.whatsapp.net",
-		SenderName:   "Alice",
-		MsgID:        "mid",
-		Timestamp:    time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC),
-		Text:         "raw payload",
-		DisplayText:  "Reacted 👍 to hello",
-		MediaType:    "image",
-		MediaCaption: "caption",
-		Filename:     "pic.jpg",
-		MimeType:     "image/jpeg",
-		LocalPath:    "/tmp/pic.jpg",
-		DownloadedAt: time.Date(2024, 1, 1, 12, 1, 0, 0, time.UTC),
+		ChatJID:         "chat@s.whatsapp.net",
+		SenderJID:       "sender@s.whatsapp.net",
+		SenderName:      "Alice",
+		MsgID:           "mid",
+		Timestamp:       time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC),
+		Text:            "raw payload",
+		DisplayText:     "Reacted 👍 to hello",
+		QuotedMsgID:     "quoted",
+		QuotedSenderJID: "quoted-sender@s.whatsapp.net",
+		MediaType:       "image",
+		MediaCaption:    "caption",
+		Filename:        "pic.jpg",
+		MimeType:        "image/jpeg",
+		LocalPath:       "/tmp/pic.jpg",
+		DownloadedAt:    time.Date(2024, 1, 1, 12, 1, 0, 0, time.UTC),
 	}
 
 	var out bytes.Buffer
@@ -193,6 +195,8 @@ func TestWriteMessageShowPrefersDisplayTextAndMediaDetails(t *testing.T) {
 	got := out.String()
 	for _, want := range []string{
 		"From: Alice (sender@s.whatsapp.net)",
+		"Quoted message: quoted",
+		"Quoted sender: quoted-sender@s.whatsapp.net",
 		"Caption: caption",
 		"Filename: pic.jpg",
 		"MIME type: image/jpeg",

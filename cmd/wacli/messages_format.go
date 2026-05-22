@@ -79,6 +79,12 @@ func writeMessageShow(dst io.Writer, m store.Message) error {
 	fmt.Fprintf(dst, "ID: %s\n", sanitize(m.MsgID))
 	fmt.Fprintf(dst, "Time: %s\n", m.Timestamp.Local().Format(time.RFC3339))
 	fmt.Fprintf(dst, "From: %s\n", sanitize(messageFromDetail(m)))
+	if m.QuotedMsgID != "" {
+		fmt.Fprintf(dst, "Quoted message: %s\n", sanitize(m.QuotedMsgID))
+	}
+	if m.QuotedSenderJID != "" {
+		fmt.Fprintf(dst, "Quoted sender: %s\n", sanitize(m.QuotedSenderJID))
+	}
 	if m.MediaType != "" {
 		fmt.Fprintf(dst, "Media: %s\n", sanitize(m.MediaType))
 	}
