@@ -94,6 +94,21 @@ func TestResolveSelectOptionUsesStoredIndexOrder(t *testing.T) {
 	}
 }
 
+func TestResolveSelectOptionIgnoresNonSelectableMatches(t *testing.T) {
+	buttons := []store.Button{
+		{Type: "url", DisplayText: "Same", URL: "https://example.com"},
+		{Type: "quick_reply", DisplayText: "Same", ID: "same", ResponseType: selectResponseButtons},
+	}
+
+	byLabel, err := resolveSelectOption(buttons, selectRequest{Label: "Same"})
+	if err != nil {
+		t.Fatalf("label select: %v", err)
+	}
+	if byLabel.ID != "same" {
+		t.Fatalf("label select = %+v, want quick reply", byLabel)
+	}
+}
+
 func TestResolveSelectOptionRejectsAmbiguousAndUnsupported(t *testing.T) {
 	_, err := resolveSelectOption([]store.Button{
 		{Type: "quick_reply", DisplayText: "Same", ID: "a"},
@@ -106,7 +121,7 @@ func TestResolveSelectOptionRejectsAmbiguousAndUnsupported(t *testing.T) {
 	_, err = resolveSelectOption([]store.Button{
 		{Type: "url", DisplayText: "Open", URL: "https://example.com"},
 	}, selectRequest{Label: "Open"})
-	if err == nil || !strings.Contains(err.Error(), "unsupported control type") {
+	if err == nil || !strings.Contains(err.Error(), "no selectable button or list options") {
 		t.Fatalf("unsupported error = %v", err)
 	}
 

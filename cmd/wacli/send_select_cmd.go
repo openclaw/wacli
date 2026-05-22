@@ -255,6 +255,10 @@ func resolveSelectOption(buttons []store.Button, req selectRequest) (selectOptio
 		}
 		return selectOption{}, fmt.Errorf("message has no stored button or list options")
 	}
+	candidates = selectableButtons(candidates)
+	if len(candidates) == 0 {
+		return selectOption{}, fmt.Errorf("message has no selectable button or list options")
+	}
 
 	var matches []store.Button
 	switch {
