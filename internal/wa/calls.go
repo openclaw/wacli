@@ -59,7 +59,7 @@ func extractCallLog(m *waProto.Message, pm *ParsedMessage) {
 	}
 }
 
-func ParseLiveCallEvent(evt interface{}, self types.JID) (ParsedCallEvent, bool) {
+func ParseLiveCallEvent(evt interface{}, self types.JID, alternateSelf ...types.JID) (ParsedCallEvent, bool) {
 	switch v := evt.(type) {
 	case *events.CallOffer:
 		return callEventFromMeta(v.BasicCallMeta, self, "offer", "", "", mediaFromCallNode(v.Data), ""), true
@@ -78,7 +78,7 @@ func ParseLiveCallEvent(evt interface{}, self types.JID) (ParsedCallEvent, bool)
 	case *events.CallReject:
 		return callEventFromMeta(v.BasicCallMeta, self, "reject", "", "", mediaFromCallNode(v.Data), ""), true
 	case *events.AppState:
-		return parseCallLogAppState(v, self)
+		return parseCallLogAppState(v, selfIdentities(self, alternateSelf...))
 	default:
 		return ParsedCallEvent{}, false
 	}
@@ -127,19 +127,30 @@ func callEventFromMeta(meta types.BasicCallMeta, self types.JID, eventType, outc
 	}
 }
 
-func parseCallLogAppState(evt *events.AppState, self types.JID) (ParsedCallEvent, bool) {
+func parseCallLogAppState(evt *events.AppState, self []types.JID) (ParsedCallEvent, bool) {
 	if evt == nil || evt.SyncActionValue == nil || evt.GetCallLogAction() == nil || evt.GetCallLogAction().GetCallLogRecord() == nil {
 		return ParsedCallEvent{}, false
 	}
-	record := evt.GetCallLogAction().GetCallLogRecord()
+	var fallback time.Time
+	if evt.GetTimestamp() > 0 {
+		fallback = time.UnixMilli(evt.GetTimestamp()).UTC()
+	}
+	return parseCallLogRecord(evt.GetCallLogAction().GetCallLogRecord(), self, fallback)
+}
+
+func ParseCallLogRecord(record *waSyncAction.CallLogRecord, self types.JID, alternateSelf ...types.JID) (ParsedCallEvent, bool) {
+	return parseCallLogRecord(record, selfIdentities(self, alternateSelf...), time.Time{})
+}
+
+func parseCallLogRecord(record *waSyncAction.CallLogRecord, self []types.JID, fallback time.Time) (ParsedCallEvent, bool) {
+	if record == nil {
+		return ParsedCallEvent{}, false
+	}
 	chat, sender := callLogRecordChatAndSender(record, self)
 	if chat.IsEmpty() {
 		return ParsedCallEvent{}, false
 	}
-	ts := time.UnixMilli(record.GetStartTime()).UTC()
-	if record.GetStartTime() <= 0 && evt.GetTimestamp() > 0 {
-		ts = time.UnixMilli(evt.GetTimestamp()).UTC()
-	}
+	ts := callLogRecordTimestamp(record.GetStartTime(), fallback)
 	return ParsedCallEvent{
 		Chat:         chat,
 		SenderJID:    sender,
@@ -156,15 +167,29 @@ func parseCallLogAppState(evt *events.AppState, self types.JID) (ParsedCallEvent
 	}, true
 }
 
-func callLogRecordChatAndSender(record *waSyncAction.CallLogRecord, self types.JID) (types.JID, string) {
+func callLogRecordTimestamp(raw int64, fallback time.Time) time.Time {
+	if raw <= 0 {
+		return fallback
+	}
+	switch {
+	case raw < 100_000_000_000:
+		return time.Unix(raw, 0).UTC()
+	case raw < 100_000_000_000_000:
+		return time.UnixMilli(raw).UTC()
+	default:
+		return time.UnixMicro(raw).UTC()
+	}
+}
+
+func callLogRecordChatAndSender(record *waSyncAction.CallLogRecord, self []types.JID) (types.JID, string) {
 	if group := strings.TrimSpace(record.GetGroupJID()); group != "" {
-		if jid, err := types.ParseJID(group); err == nil {
+		if jid, err := types.ParseJID(group); err == nil && jid.Server == types.GroupServer {
 			return jid, strings.TrimSpace(record.GetCallCreatorJID())
 		}
 	}
 	creator := strings.TrimSpace(record.GetCallCreatorJID())
 	if creator != "" {
-		if creatorJID, err := types.ParseJID(creator); err == nil && (self.IsEmpty() || creatorJID.ToNonAD() != self.ToNonAD()) {
+		if creatorJID, err := types.ParseJID(creator); err == nil && !isSelfJID(creatorJID, self) {
 			return creatorJID, creator
 		}
 	}
@@ -172,7 +197,7 @@ func callLogRecordChatAndSender(record *waSyncAction.CallLogRecord, self types.J
 		if p == nil || strings.TrimSpace(p.GetUserJID()) == "" {
 			continue
 		}
-		if jid, err := types.ParseJID(p.GetUserJID()); err == nil && (self.IsEmpty() || jid.ToNonAD() != self.ToNonAD()) {
+		if jid, err := types.ParseJID(p.GetUserJID()); err == nil && !isSelfJID(jid, self) {
 			return jid, creator
 		}
 	}
@@ -190,6 +215,38 @@ func callLogRecordChatAndSender(record *waSyncAction.CallLogRecord, self types.J
 		}
 	}
 	return types.JID{}, ""
+}
+
+func selfIdentities(primary types.JID, alternates ...types.JID) []types.JID {
+	ids := make([]types.JID, 0, 1+len(alternates))
+	for _, jid := range append([]types.JID{primary}, alternates...) {
+		if jid.IsEmpty() {
+			continue
+		}
+		seen := false
+		for _, existing := range ids {
+			if existing.ToNonAD() == jid.ToNonAD() {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			ids = append(ids, jid)
+		}
+	}
+	return ids
+}
+
+func isSelfJID(jid types.JID, self []types.JID) bool {
+	if jid.IsEmpty() {
+		return false
+	}
+	for _, candidate := range self {
+		if !candidate.IsEmpty() && jid.ToNonAD() == candidate.ToNonAD() {
+			return true
+		}
+	}
+	return false
 }
 
 func directionFromCallCreator(creator, self types.JID, eventType string) string {

@@ -178,8 +178,9 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 }
 
 func (a *App) syncAppStateDeltas(ctx context.Context) {
-	for _, name := range []appstate.WAPatchName{appstate.WAPatchRegularHigh, appstate.WAPatchRegularLow} {
-		if err := a.wa.FetchAppState(ctx, string(name), false, false); err != nil {
+	for _, name := range []appstate.WAPatchName{appstate.WAPatchRegularHigh, appstate.WAPatchRegularLow, appstate.WAPatchRegular} {
+		fullSync := name == appstate.WAPatchRegular
+		if err := a.wa.FetchAppState(ctx, string(name), fullSync, false); err != nil {
 			a.emitWarning(
 				"app_state_sync_failed",
 				fmt.Sprintf("warning: failed to sync WhatsApp app state %s: %v", name, err),

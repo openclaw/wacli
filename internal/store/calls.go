@@ -39,7 +39,8 @@ func (d *DB) UpsertCallEvent(p UpsertCallEventParams) error {
 		ts = nowUTC().Unix()
 	}
 	callID := strings.TrimSpace(p.CallID)
-	if callID == "" {
+	generatedCallID := callID == ""
+	if generatedCallID {
 		callID = fmt.Sprintf("%s:%d", eventType, ts)
 	}
 	if p.DurationSecs < 0 {
@@ -50,6 +51,16 @@ func (d *DB) UpsertCallEvent(p UpsertCallEventParams) error {
 	if len(p.Participants) > 0 {
 		if b, err := json.Marshal(p.Participants); err == nil {
 			participantsJSON = string(b)
+		}
+	}
+
+	if !generatedCallID {
+		rowID, ok, err := d.singleCallEventRow(chatJID, callID, eventType)
+		if err != nil {
+			return err
+		}
+		if ok {
+			return d.updateCallEventRow(rowID, p, chatJID, callID, eventType, ts, participantsJSON)
 		}
 	}
 
@@ -74,6 +85,66 @@ func (d *DB) UpsertCallEvent(p UpsertCallEventParams) error {
 		callID, nullIfEmpty(p.MsgID), eventType, nullIfEmpty(p.Direction), nullIfEmpty(p.Media),
 		nullIfEmpty(p.Outcome), nullIfEmpty(p.Reason), nullIfEmpty(p.CallType), p.DurationSecs, ts, participantsJSON)
 	return err
+}
+
+func (d *DB) singleCallEventRow(chatJID, callID, eventType string) (int64, bool, error) {
+	rows, err := d.sql.Query(`
+		SELECT rowid
+		FROM call_events
+		WHERE chat_jid=? AND call_id=? AND event_type=?
+		ORDER BY ts DESC, rowid DESC
+		LIMIT 2
+	`, chatJID, callID, eventType)
+	if err != nil {
+		return 0, false, err
+	}
+	defer rows.Close()
+
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return 0, false, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, false, err
+	}
+	if len(ids) != 1 {
+		return 0, false, nil
+	}
+	return ids[0], true, nil
+}
+
+func (d *DB) updateCallEventRow(rowID int64, p UpsertCallEventParams, chatJID, callID, eventType string, ts int64, participantsJSON interface{}) error {
+	res, err := d.sql.Exec(`
+			UPDATE call_events SET
+				chat_jid=?,
+				chat_name=COALESCE(NULLIF(?,''), chat_name),
+				sender_jid=COALESCE(NULLIF(?,''), sender_jid),
+				sender_name=COALESCE(NULLIF(?,''), sender_name),
+				msg_id=COALESCE(NULLIF(?,''), msg_id),
+				direction=COALESCE(NULLIF(?,''), direction),
+				media=COALESCE(NULLIF(?,''), media),
+				outcome=COALESCE(NULLIF(?,''), outcome),
+				reason=COALESCE(NULLIF(?,''), reason),
+				call_type=COALESCE(NULLIF(?,''), call_type),
+				duration_secs=CASE WHEN ? > 0 THEN ? ELSE duration_secs END,
+				ts=?,
+				participants=COALESCE(NULLIF(?,''), participants)
+			WHERE rowid=? AND chat_jid=? AND call_id=? AND event_type=?
+	`, chatJID, nullIfEmpty(p.ChatName), nullIfEmpty(p.SenderJID), nullIfEmpty(p.SenderName),
+		nullIfEmpty(p.MsgID), nullIfEmpty(p.Direction), nullIfEmpty(p.Media), nullIfEmpty(p.Outcome),
+		nullIfEmpty(p.Reason), nullIfEmpty(p.CallType), p.DurationSecs, p.DurationSecs, ts, participantsJSON,
+		rowID, chatJID, callID, eventType)
+	if err != nil {
+		return err
+	}
+	if rows, err := res.RowsAffected(); err == nil && rows > 0 {
+		return nil
+	}
+	return nil
 }
 
 type ListCallEventsParams struct {
