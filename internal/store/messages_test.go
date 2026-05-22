@@ -68,6 +68,78 @@ func TestMessageUpsertIdempotentAndContext(t *testing.T) {
 	}
 }
 
+func TestMessageQuotedMetadataRoundTrip(t *testing.T) {
+	db := openTestDB(t)
+
+	chat := "123@s.whatsapp.net"
+	if err := db.UpsertChat(chat, "dm", "Alice", time.Now()); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+
+	now := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID:         chat,
+		MsgID:           "reply",
+		SenderJID:       chat,
+		Timestamp:       now,
+		Text:            "reply text",
+		QuotedMsgID:     "quoted",
+		QuotedSenderJID: "sender@s.whatsapp.net",
+	}); err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+
+	msg, err := db.GetMessage(chat, "reply")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if msg.QuotedMsgID != "quoted" || msg.QuotedSenderJID != "sender@s.whatsapp.net" {
+		t.Fatalf("quoted metadata = id %q sender %q", msg.QuotedMsgID, msg.QuotedSenderJID)
+	}
+
+	msgs, err := db.ListMessages(ListMessagesParams{ChatJID: chat, Limit: 1})
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(msgs) != 1 || msgs[0].QuotedMsgID != "quoted" || msgs[0].QuotedSenderJID != "sender@s.whatsapp.net" {
+		t.Fatalf("listed quoted metadata = %+v", msgs)
+	}
+}
+
+func TestUpdateMessageTextPreservesQuotedMetadata(t *testing.T) {
+	db := openTestDB(t)
+
+	chat := "123@s.whatsapp.net"
+	if err := db.UpsertChat(chat, "dm", "Alice", time.Now()); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID:         chat,
+		MsgID:           "reply",
+		SenderJID:       chat,
+		Timestamp:       time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC),
+		Text:            "reply text",
+		QuotedMsgID:     "quoted",
+		QuotedSenderJID: "sender@s.whatsapp.net",
+	}); err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+	if err := db.UpdateMessageText(chat, "reply", "edited reply"); err != nil {
+		t.Fatalf("UpdateMessageText: %v", err)
+	}
+
+	msg, err := db.GetMessage(chat, "reply")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if msg.Text != "edited reply" {
+		t.Fatalf("text = %q", msg.Text)
+	}
+	if msg.QuotedMsgID != "quoted" || msg.QuotedSenderJID != "sender@s.whatsapp.net" {
+		t.Fatalf("quoted metadata = id %q sender %q", msg.QuotedMsgID, msg.QuotedSenderJID)
+	}
+}
+
 func TestCallEventsUpsertAndList(t *testing.T) {
 	db := openTestDB(t)
 	chat := "123@s.whatsapp.net"

@@ -198,6 +198,52 @@ func TestHistorySyncStoresConversationUnreadCount(t *testing.T) {
 	}
 }
 
+func TestHistorySyncStoresDeviceSentMessagesInDestinationChat(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	self := types.NewJID("1111111111", types.DefaultUserServer)
+	dest := types.NewJID("15551234567", types.DefaultUserServer)
+	base := time.Date(2024, 1, 3, 0, 0, 0, 0, time.UTC)
+	msg := &waWeb.WebMessageInfo{
+		Key: &waCommon.MessageKey{
+			RemoteJID: proto.String(self.String()),
+			FromMe:    proto.Bool(false),
+			ID:        proto.String("device-sent-1"),
+		},
+		MessageTimestamp: proto.Uint64(uint64(base.Unix())),
+		Message: &waProto.Message{
+			DeviceSentMessage: &waProto.DeviceSentMessage{
+				DestinationJID: proto.String(dest.String()),
+				Message:        &waProto.Message{Conversation: proto.String("sent from phone")},
+			},
+		},
+	}
+	history := &events.HistorySync{Data: &waHistorySync.HistorySync{
+		SyncType: waHistorySync.HistorySync_FULL.Enum(),
+		Conversations: []*waHistorySync.Conversation{{
+			ID:       proto.String(self.String()),
+			Messages: []*waHistorySync.HistorySyncMsg{{Message: msg}},
+		}},
+	}}
+
+	var messagesStored atomic.Int64
+	var lastEvent atomic.Int64
+	a.handleHistorySync(context.Background(), SyncOptions{}, history, &messagesStored, &lastEvent, func(string, string) {})
+
+	stored, err := a.db.GetMessage(dest.String(), "device-sent-1")
+	if err != nil {
+		t.Fatalf("GetMessage destination: %v", err)
+	}
+	if !stored.FromMe || stored.Text != "sent from phone" || stored.ChatJID != dest.String() {
+		t.Fatalf("unexpected stored sent message: %+v", stored)
+	}
+	if _, err := a.db.GetMessage(self.String(), "device-sent-1"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("self-chat message lookup err = %v, want sql.ErrNoRows", err)
+	}
+}
+
 func TestHistorySyncStoresMarkedUnreadWithoutCountAsMarkerOnly(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
@@ -1257,7 +1303,8 @@ func TestSyncStoresDisplayText(t *testing.T) {
 			ExtendedTextMessage: &waProto.ExtendedTextMessage{
 				Text: proto.String("reply text"),
 				ContextInfo: &waProto.ContextInfo{
-					StanzaID: proto.String("m-text"),
+					StanzaID:    proto.String("m-text"),
+					Participant: proto.String("123@s.whatsapp.net"),
 					QuotedMessage: &waProto.Message{
 						Conversation: proto.String("quoted text"),
 					},
@@ -1326,6 +1373,9 @@ func TestSyncStoresDisplayText(t *testing.T) {
 	}
 	if msg.DisplayText != "> quoted text\nreply text" {
 		t.Fatalf("unexpected reply display text: %q", msg.DisplayText)
+	}
+	if msg.QuotedMsgID != "m-text" || msg.QuotedSenderJID != "123@s.whatsapp.net" {
+		t.Fatalf("unexpected quoted metadata: id=%q sender=%q", msg.QuotedMsgID, msg.QuotedSenderJID)
 	}
 
 	msg, err = a.db.GetMessage(chat.String(), "m-react")

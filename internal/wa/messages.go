@@ -61,29 +61,30 @@ type PollAddOptionRef struct {
 }
 
 type ParsedMessage struct {
-	Chat            types.JID
-	ID              string
-	SenderJID       string
-	Timestamp       time.Time
-	FromMe          bool
-	Text            string
-	Buttons         []Button
-	Media           *Media
-	Poll            *Poll
-	PollVote        *PollVoteRef
-	PollAdd         *PollAddOptionRef
-	PushName        string
-	ReplyToID       string
-	ReplyToDisplay  string
-	ReactionToID    string
-	ReactionEmoji   string
-	IsForwarded     bool
-	ForwardingScore uint32
-	StarredKnown    bool
-	Starred         bool
-	Edited          bool
-	Revoked         bool
-	Call            *ParsedCallEvent
+	Chat             types.JID
+	ID               string
+	SenderJID        string
+	Timestamp        time.Time
+	FromMe           bool
+	Text             string
+	Buttons          []Button
+	Media            *Media
+	Poll             *Poll
+	PollVote         *PollVoteRef
+	PollAdd          *PollAddOptionRef
+	PushName         string
+	ReplyToID        string
+	ReplyToSenderJID string
+	ReplyToDisplay   string
+	ReactionToID     string
+	ReactionEmoji    string
+	IsForwarded      bool
+	ForwardingScore  uint32
+	StarredKnown     bool
+	Starred          bool
+	Edited           bool
+	Revoked          bool
+	Call             *ParsedCallEvent
 }
 
 func ParseLiveMessage(evt *events.Message) ParsedMessage {
@@ -96,6 +97,9 @@ func ParseLiveMessage(evt *events.Message) ParsedMessage {
 	}
 	if s := evt.Info.Sender.String(); s != "" {
 		msg.SenderJID = s
+	}
+	if evt.Info.DeviceSentMeta != nil {
+		applyDeviceSentDestination(evt.Info.DeviceSentMeta.DestinationJID, &msg)
 	}
 
 	extractWAProto(evt.Message, &msg)
@@ -139,6 +143,11 @@ func extractWAProto(m *waProto.Message, pm *ParsedMessage) {
 		return
 	}
 
+	if deviceSent := m.GetDeviceSentMessage(); deviceSent.GetMessage() != nil {
+		applyDeviceSentDestination(deviceSent.GetDestinationJID(), pm)
+		extractWAProto(deviceSent.GetMessage(), pm)
+		return
+	}
 	if edited := m.GetEditedMessage().GetMessage(); edited != nil {
 		if edited.MessageContextInfo == nil && m.MessageContextInfo != nil {
 			edited.MessageContextInfo = m.MessageContextInfo
@@ -167,11 +176,24 @@ func extractWAProto(m *waProto.Message, pm *ParsedMessage) {
 		if id := strings.TrimSpace(ctx.GetStanzaID()); id != "" {
 			pm.ReplyToID = id
 		}
+		if sender := strings.TrimSpace(ctx.GetParticipant()); sender != "" {
+			pm.ReplyToSenderJID = sender
+		}
 		if quoted := ctx.GetQuotedMessage(); quoted != nil {
 			pm.ReplyToDisplay = strings.TrimSpace(displayTextForProto(quoted))
 		}
 		pm.ForwardingScore = ctx.GetForwardingScore()
 		pm.IsForwarded = ctx.GetIsForwarded() || pm.ForwardingScore > 0
+	}
+}
+
+func applyDeviceSentDestination(destination string, pm *ParsedMessage) {
+	if pm == nil {
+		return
+	}
+	pm.FromMe = true
+	if chat, err := types.ParseJID(strings.TrimSpace(destination)); err == nil && !chat.IsEmpty() {
+		pm.Chat = chat
 	}
 }
 

@@ -66,6 +66,8 @@ CREATE TABLE IF NOT EXISTS messages (
     from_me INTEGER NOT NULL,
     text TEXT,
     display_text TEXT,
+    quoted_msg_id TEXT,
+    quoted_sender_jid TEXT,
     is_forwarded INTEGER NOT NULL DEFAULT 0,
     forwarding_score INTEGER NOT NULL DEFAULT 0,
     reaction_to_id TEXT,
