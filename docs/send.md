@@ -67,7 +67,8 @@ wacli polls list [--chat RECIPIENT] [--limit N] [--json]
 - `--index` is 1-indexed and counts selectable controls only. URL buttons, call buttons, and list container buttons are excluded.
 - Use `--type list_row` or `--type quick_reply` to narrow the candidate set.
 - List rows from older stores are safely inferred as list responses, but older quick replies without `response_type` fail with a sync-again error.
-- Synced list rows and plain quick replies send WhatsApp list/button response messages with the stored option ID.
+- Synced list rows and plain quick replies send the selected display text as a quoted reply to the original message.
+- This intentionally treats selection as a quoted text reply, not as a synthetic phone-tap event.
 - Native-flow quick replies are detected but not sent yet; wacli returns an explicit unsupported error instead of guessing the wire format.
 - Sent selections are stored locally as `Selected: <display text>` and support JSON output for scripts.
 
