@@ -44,7 +44,7 @@ func TestParseGroupUserJIDsAcceptsPhonesAndJIDs(t *testing.T) {
 
 func TestParseOnOffFlagsRequiresExactlyOneMode(t *testing.T) {
 	cmd := toggleTestCmd()
-	if _, err := parseOnOffFlags(cmd); err == nil {
+	if _, err := parseOnOffFlags(cmd, false, false); err == nil {
 		t.Fatal("expected missing toggle error")
 	}
 
@@ -55,7 +55,7 @@ func TestParseOnOffFlagsRequiresExactlyOneMode(t *testing.T) {
 	if err := cmd.Flags().Set("off", "true"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := parseOnOffFlags(cmd); err == nil {
+	if _, err := parseOnOffFlags(cmd, true, true); err == nil {
 		t.Fatal("expected conflicting toggle error")
 	}
 
@@ -63,7 +63,7 @@ func TestParseOnOffFlagsRequiresExactlyOneMode(t *testing.T) {
 	if err := cmd.Flags().Set("on", "true"); err != nil {
 		t.Fatal(err)
 	}
-	got, err := parseOnOffFlags(cmd)
+	got, err := parseOnOffFlags(cmd, true, false)
 	if err != nil || !got {
 		t.Fatalf("--on = %v, %v; want true, nil", got, err)
 	}
@@ -72,9 +72,27 @@ func TestParseOnOffFlagsRequiresExactlyOneMode(t *testing.T) {
 	if err := cmd.Flags().Set("off", "true"); err != nil {
 		t.Fatal(err)
 	}
-	got, err = parseOnOffFlags(cmd)
+	got, err = parseOnOffFlags(cmd, false, true)
 	if err != nil || got {
 		t.Fatalf("--off = %v, %v; want false, nil", got, err)
+	}
+}
+
+func TestParseOnOffFlagsRejectsExplicitFalseModes(t *testing.T) {
+	cmd := toggleTestCmd()
+	if err := cmd.Flags().Set("on", "false"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := parseOnOffFlags(cmd, false, false); err == nil || !strings.Contains(err.Error(), "--on=false") {
+		t.Fatalf("--on=false error = %v, want explicit false rejection", err)
+	}
+
+	cmd = toggleTestCmd()
+	if err := cmd.Flags().Set("off", "false"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := parseOnOffFlags(cmd, false, false); err == nil || !strings.Contains(err.Error(), "--off=false") {
+		t.Fatalf("--off=false error = %v, want explicit false rejection", err)
 	}
 }
 

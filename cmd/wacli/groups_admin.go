@@ -171,7 +171,7 @@ func newGroupsToggleCmd(flags *rootFlags, use, short string, apply func(context.
 			if strings.TrimSpace(jidStr) == "" {
 				return fmt.Errorf("--jid is required")
 			}
-			enabled, err := parseOnOffFlags(cmd)
+			enabled, err := parseOnOffFlags(cmd, on, off)
 			if err != nil {
 				return err
 			}
@@ -328,14 +328,20 @@ func newGroupsRequestsActionCmd(flags *rootFlags, action string) *cobra.Command 
 	return cmd
 }
 
-func parseOnOffFlags(cmd *cobra.Command) (bool, error) {
+func parseOnOffFlags(cmd *cobra.Command, on, off bool) (bool, error) {
 	onChanged := cmd.Flags().Changed("on")
 	offChanged := cmd.Flags().Changed("off")
 	if onChanged == offChanged {
 		return false, fmt.Errorf("exactly one of --on or --off is required")
 	}
 	if onChanged {
+		if !on {
+			return false, fmt.Errorf("--on=false does not select a mode; use --off to disable")
+		}
 		return true, nil
+	}
+	if !off {
+		return false, fmt.Errorf("--off=false does not select a mode; use --on to enable")
 	}
 	return false, nil
 }
