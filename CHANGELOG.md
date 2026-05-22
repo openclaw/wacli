@@ -13,6 +13,7 @@
 
 - Sync: store messages sent from other linked devices in the destination chat as outgoing messages.
 - Calls: import call-log records from full history syncs and the `regular` app-state collection so old call events can be stored even when the live call signaling was missed. (#256)
+
 ### Docs
 
 - Docs: update Homebrew install and release-token references to the OpenClaw Homebrew tap. (#254 - thanks @dovocoder)
