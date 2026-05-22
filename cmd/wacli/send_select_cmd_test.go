@@ -114,15 +114,15 @@ func TestBuildSelectResponseMessageListRow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build list response: %v", err)
 	}
-	ext := msg.GetExtendedTextMessage()
-	if ext == nil {
-		t.Fatalf("missing ExtendedTextMessage")
+	resp := msg.GetListResponseMessage()
+	if resp == nil {
+		t.Fatalf("missing ListResponseMessage")
 	}
-	if ext.GetText() != "Alpha" {
-		t.Fatalf("extended text = %q", ext.GetText())
+	if resp.GetTitle() != "Alpha" || resp.GetSingleSelectReply().GetSelectedRowID() != "alpha" || resp.GetDescription() != "First item" {
+		t.Fatalf("list response = %+v", resp)
 	}
-	if ext.GetContextInfo().GetStanzaID() != "inbound1" || ext.GetContextInfo().GetParticipant() != "15551234567@s.whatsapp.net" {
-		t.Fatalf("context = %+v", ext.GetContextInfo())
+	if resp.GetContextInfo().GetStanzaID() != "inbound1" || resp.GetContextInfo().GetParticipant() != "15551234567@s.whatsapp.net" {
+		t.Fatalf("context = %+v", resp.GetContextInfo())
 	}
 }
 
@@ -136,15 +136,15 @@ func TestBuildSelectResponseMessageClassicButton(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build button response: %v", err)
 	}
-	ext := msg.GetExtendedTextMessage()
-	if ext == nil {
-		t.Fatalf("missing ExtendedTextMessage")
+	resp := msg.GetButtonsResponseMessage()
+	if resp == nil {
+		t.Fatalf("missing ButtonsResponseMessage")
 	}
-	if ext.GetText() != "Yes" {
-		t.Fatalf("extended text = %q", ext.GetText())
+	if resp.GetSelectedButtonID() != "yes" || resp.GetSelectedDisplayText() != "Yes" {
+		t.Fatalf("button response = %+v", resp)
 	}
-	if ext.GetContextInfo().GetStanzaID() != "inbound2" {
-		t.Fatalf("stanza = %q", ext.GetContextInfo().GetStanzaID())
+	if resp.GetContextInfo().GetStanzaID() != "inbound2" {
+		t.Fatalf("stanza = %q", resp.GetContextInfo().GetStanzaID())
 	}
 }
 
