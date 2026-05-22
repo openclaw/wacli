@@ -24,12 +24,13 @@ func extractBusinessText(m *waProto.Message, pm *ParsedMessage) {
 				pm.Text = strings.Join(parts, "\n")
 			}
 			for i, hb := range hydrated.GetHydratedButtons() {
+				index := hydratedButtonIndex(hb, i)
 				if btn := hb.GetUrlButton(); btn != nil {
 					pm.Buttons = append(pm.Buttons, Button{
 						Type:        "url",
 						DisplayText: strings.TrimSpace(btn.GetDisplayText()),
 						URL:         strings.TrimSpace(btn.GetURL()),
-						Index:       i + 1,
+						Index:       index,
 					})
 				} else if btn := hb.GetQuickReplyButton(); btn != nil {
 					pm.Buttons = append(pm.Buttons, Button{
@@ -37,14 +38,14 @@ func extractBusinessText(m *waProto.Message, pm *ParsedMessage) {
 						DisplayText:  strings.TrimSpace(btn.GetDisplayText()),
 						ID:           strings.TrimSpace(btn.GetID()),
 						ResponseType: "template_button_reply",
-						Index:        i + 1,
+						Index:        index,
 					})
 				} else if btn := hb.GetCallButton(); btn != nil {
 					pm.Buttons = append(pm.Buttons, Button{
 						Type:        "call",
 						DisplayText: strings.TrimSpace(btn.GetDisplayText()),
 						PhoneNumber: strings.TrimSpace(btn.GetPhoneNumber()),
-						Index:       i + 1,
+						Index:       index,
 					})
 				}
 			}
@@ -156,6 +157,13 @@ func hydratedTemplate(tmpl *waProto.TemplateMessage) *waProto.TemplateMessage_Hy
 		return h
 	}
 	return tmpl.GetHydratedTemplate()
+}
+
+func hydratedButtonIndex(btn *waProto.HydratedTemplateButton, fallback int) int {
+	if btn != nil && btn.Index != nil {
+		return int(btn.GetIndex()) + 1
+	}
+	return fallback + 1
 }
 
 func appendNativeFlowButtons(pm *ParsedMessage, im *waProto.InteractiveMessage) {

@@ -662,6 +662,56 @@ func TestParseTemplateMessageWithMixedButtons(t *testing.T) {
 	}
 }
 
+func TestParseTemplateMessageUsesHydratedButtonIndex(t *testing.T) {
+	chat, _ := types.ParseJID("123@s.whatsapp.net")
+	sender, _ := types.ParseJID("biz@s.whatsapp.net")
+
+	ev := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat: chat, Sender: sender, IsFromMe: false,
+			},
+			ID:        "tmpl-index",
+			Timestamp: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+		},
+		Message: &waProto.Message{
+			TemplateMessage: &waProto.TemplateMessage{
+				HydratedTemplate: &waProto.TemplateMessage_HydratedFourRowTemplate{
+					HydratedContentText: proto.String("Choose"),
+					HydratedButtons: []*waProto.HydratedTemplateButton{
+						{
+							Index: proto.Uint32(1),
+							HydratedButton: &waProto.HydratedTemplateButton_UrlButton{
+								UrlButton: &waProto.HydratedTemplateButton_HydratedURLButton{
+									DisplayText: proto.String("Open"),
+									URL:         proto.String("https://example.com"),
+								},
+							},
+						},
+						{
+							Index: proto.Uint32(0),
+							HydratedButton: &waProto.HydratedTemplateButton_QuickReplyButton{
+								QuickReplyButton: &waProto.HydratedTemplateButton_HydratedQuickReplyButton{
+									DisplayText: proto.String("Yes"),
+									ID:          proto.String("yes_id"),
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	pm := ParseLiveMessage(ev)
+	if len(pm.Buttons) != 2 {
+		t.Fatalf("expected 2 buttons, got %d", len(pm.Buttons))
+	}
+	if pm.Buttons[1].Type != "quick_reply" || pm.Buttons[1].Index != 1 {
+		t.Fatalf("unexpected quick_reply button: %+v", pm.Buttons[1])
+	}
+}
+
 func TestParseButtonsMessage(t *testing.T) {
 	chat, _ := types.ParseJID("123@s.whatsapp.net")
 	sender, _ := types.ParseJID("biz@s.whatsapp.net")
