@@ -72,6 +72,19 @@ func (c *Client) LinkedJID() string {
 	return c.client.Store.ID.ToNonAD().String()
 }
 
+func (c *Client) LinkedLID() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.client == nil || c.client.Store == nil {
+		return ""
+	}
+	lid := c.client.Store.GetLID()
+	if lid.IsEmpty() {
+		return ""
+	}
+	return lid.ToNonAD().String()
+}
+
 func (c *Client) IsConnected() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()

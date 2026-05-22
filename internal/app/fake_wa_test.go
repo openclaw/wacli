@@ -26,6 +26,7 @@ type fakeWA struct {
 
 	authed    bool
 	connected bool
+	linkedLID string
 
 	nextHandlerID uint32
 	handlers      map[uint32]func(interface{})
@@ -652,4 +653,13 @@ func (f *fakeWA) LinkedJID() string {
 		return ""
 	}
 	return "1234567890@s.whatsapp.net"
+}
+
+func (f *fakeWA) LinkedLID() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.authed {
+		return ""
+	}
+	return f.linkedLID
 }
