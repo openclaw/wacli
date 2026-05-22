@@ -32,6 +32,7 @@ var schemaMigrations = []migration{
 	{version: 16, name: "messages edited columns", up: migrateMessagesEditedColumns},
 	{version: 17, name: "status messages", up: migrateStatusMessages},
 	{version: 18, name: "chat unread count column", up: migrateChatUnreadCountColumn},
+	{version: 19, name: "messages quoted columns", up: migrateMessagesQuotedColumns},
 }
 
 func (d *DB) ensureSchema() error {
@@ -101,6 +102,9 @@ func (d *DB) ensureCurrentSchema() error {
 	}
 	if err := migrateChatUnreadCountColumn(d); err != nil {
 		return fmt.Errorf("ensure current chat unread count column: %w", err)
+	}
+	if err := migrateMessagesQuotedColumns(d); err != nil {
+		return fmt.Errorf("ensure current messages quoted columns: %w", err)
 	}
 	return nil
 }
@@ -176,6 +180,23 @@ func addTextColumnIfMissing(d *DB, col, stmt string) error {
 	}
 	if _, err := d.sql.Exec(stmt); err != nil {
 		return fmt.Errorf("add messages.%s column: %w", col, err)
+	}
+	return nil
+}
+
+func migrateMessagesQuotedColumns(d *DB) error {
+	hasTable, err := d.tableExists("messages")
+	if err != nil {
+		return err
+	}
+	if !hasTable {
+		return nil
+	}
+	if err := addTextColumnIfMissing(d, "quoted_msg_id", `ALTER TABLE messages ADD COLUMN quoted_msg_id TEXT`); err != nil {
+		return err
+	}
+	if err := addTextColumnIfMissing(d, "quoted_sender_jid", `ALTER TABLE messages ADD COLUMN quoted_sender_jid TEXT`); err != nil {
+		return err
 	}
 	return nil
 }

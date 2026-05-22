@@ -61,29 +61,30 @@ type PollAddOptionRef struct {
 }
 
 type ParsedMessage struct {
-	Chat            types.JID
-	ID              string
-	SenderJID       string
-	Timestamp       time.Time
-	FromMe          bool
-	Text            string
-	Buttons         []Button
-	Media           *Media
-	Poll            *Poll
-	PollVote        *PollVoteRef
-	PollAdd         *PollAddOptionRef
-	PushName        string
-	ReplyToID       string
-	ReplyToDisplay  string
-	ReactionToID    string
-	ReactionEmoji   string
-	IsForwarded     bool
-	ForwardingScore uint32
-	StarredKnown    bool
-	Starred         bool
-	Edited          bool
-	Revoked         bool
-	Call            *ParsedCallEvent
+	Chat             types.JID
+	ID               string
+	SenderJID        string
+	Timestamp        time.Time
+	FromMe           bool
+	Text             string
+	Buttons          []Button
+	Media            *Media
+	Poll             *Poll
+	PollVote         *PollVoteRef
+	PollAdd          *PollAddOptionRef
+	PushName         string
+	ReplyToID        string
+	ReplyToSenderJID string
+	ReplyToDisplay   string
+	ReactionToID     string
+	ReactionEmoji    string
+	IsForwarded      bool
+	ForwardingScore  uint32
+	StarredKnown     bool
+	Starred          bool
+	Edited           bool
+	Revoked          bool
+	Call             *ParsedCallEvent
 }
 
 func ParseLiveMessage(evt *events.Message) ParsedMessage {
@@ -166,6 +167,9 @@ func extractWAProto(m *waProto.Message, pm *ParsedMessage) {
 	if ctx := contextInfoForMessage(m); ctx != nil {
 		if id := strings.TrimSpace(ctx.GetStanzaID()); id != "" {
 			pm.ReplyToID = id
+		}
+		if sender := strings.TrimSpace(ctx.GetParticipant()); sender != "" {
+			pm.ReplyToSenderJID = sender
 		}
 		if quoted := ctx.GetQuotedMessage(); quoted != nil {
 			pm.ReplyToDisplay = strings.TrimSpace(displayTextForProto(quoted))
