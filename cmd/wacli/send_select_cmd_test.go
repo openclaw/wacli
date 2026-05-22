@@ -134,7 +134,7 @@ func TestResolveSelectOptionRejectsAmbiguousAndUnsupported(t *testing.T) {
 	}
 }
 
-func TestBuildSelectResponseMessageListRowSendsQuotedText(t *testing.T) {
+func TestBuildSelectResponseMessageListRow(t *testing.T) {
 	msg, err := buildSelectResponseMessage(types.JID{User: "15557654321", Server: types.DefaultUserServer}, selectOption{
 		Type:         "list_row",
 		DisplayText:  "Alpha",
@@ -145,11 +145,11 @@ func TestBuildSelectResponseMessageListRowSendsQuotedText(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build list response: %v", err)
 	}
-	resp := msg.GetExtendedTextMessage()
+	resp := msg.GetListResponseMessage()
 	if resp == nil {
-		t.Fatalf("missing ExtendedTextMessage")
+		t.Fatalf("missing ListResponseMessage")
 	}
-	if resp.GetText() != "Alpha" {
+	if resp.GetTitle() != "Alpha" || resp.GetSingleSelectReply().GetSelectedRowID() != "alpha" || resp.GetDescription() != "First item" {
 		t.Fatalf("list response = %+v", resp)
 	}
 	if resp.GetContextInfo().GetStanzaID() != "inbound1" || resp.GetContextInfo().GetParticipant() != "15551234567@s.whatsapp.net" {
@@ -157,7 +157,7 @@ func TestBuildSelectResponseMessageListRowSendsQuotedText(t *testing.T) {
 	}
 }
 
-func TestBuildSelectResponseMessageClassicButtonSendsQuotedText(t *testing.T) {
+func TestBuildSelectResponseMessageClassicButton(t *testing.T) {
 	msg, err := buildSelectResponseMessage(types.JID{User: "15557654321", Server: types.DefaultUserServer}, selectOption{
 		Type:         "quick_reply",
 		DisplayText:  "Yes",
@@ -167,11 +167,11 @@ func TestBuildSelectResponseMessageClassicButtonSendsQuotedText(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build button response: %v", err)
 	}
-	resp := msg.GetExtendedTextMessage()
+	resp := msg.GetButtonsResponseMessage()
 	if resp == nil {
-		t.Fatalf("missing ExtendedTextMessage")
+		t.Fatalf("missing ButtonsResponseMessage")
 	}
-	if resp.GetText() != "Yes" {
+	if resp.GetSelectedButtonID() != "yes" || resp.GetSelectedDisplayText() != "Yes" {
 		t.Fatalf("button response = %+v", resp)
 	}
 	if resp.GetContextInfo().GetStanzaID() != "inbound2" {
@@ -230,7 +230,7 @@ func TestBuildSelectResponseMessageRequiresSenderForUnsyncedGroup(t *testing.T) 
 	if err != nil {
 		t.Fatalf("group sender override: %v", err)
 	}
-	if got := msg.GetExtendedTextMessage().GetContextInfo().GetParticipant(); got != "15551234567@s.whatsapp.net" {
+	if got := msg.GetButtonsResponseMessage().GetContextInfo().GetParticipant(); got != "15551234567@s.whatsapp.net" {
 		t.Fatalf("participant = %q", got)
 	}
 }
