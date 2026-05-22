@@ -387,7 +387,7 @@ func buildSelectResponseMessage(opt selectOption, target store.Message, senderOv
 		if opt.Index < 1 {
 			return nil, fmt.Errorf("template quick reply %q has no stored index; sync this message again with a newer wacli", opt.DisplayText)
 		}
-		selectedIndex := uint32(opt.Index)
+		selectedIndex := uint32(opt.Index - 1)
 		return &waProto.Message{
 			TemplateButtonReplyMessage: &waProto.TemplateButtonReplyMessage{
 				SelectedID:          proto.String(opt.ID),

@@ -163,7 +163,7 @@ func TestBuildSelectResponseMessageTemplateAndNativeFlow(t *testing.T) {
 	if tbr == nil {
 		t.Fatalf("missing TemplateButtonReplyMessage")
 	}
-	if tbr.GetSelectedID() != "book" || tbr.GetSelectedDisplayText() != "Book" || tbr.GetSelectedIndex() != 2 {
+	if tbr.GetSelectedID() != "book" || tbr.GetSelectedDisplayText() != "Book" || tbr.GetSelectedIndex() != 1 {
 		t.Fatalf("template response = %+v", tbr)
 	}
 
