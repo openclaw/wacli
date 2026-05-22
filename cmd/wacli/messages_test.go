@@ -446,6 +446,20 @@ func TestBuildForwardedTextMessageMarksContext(t *testing.T) {
 	}
 }
 
+func TestBuildForwardedTextMessagePreservesWhitespace(t *testing.T) {
+	payload, err := buildForwardedMessage(store.Message{MsgID: "mid", Text: "  code\n"}, nil)
+	if err != nil {
+		t.Fatalf("buildForwardedMessage: %v", err)
+	}
+	if payload.Text != "  code\n" {
+		t.Fatalf("payload text = %q", payload.Text)
+	}
+	ext := payload.Message.GetExtendedTextMessage()
+	if ext.GetText() != "  code\n" {
+		t.Fatalf("message text = %q", ext.GetText())
+	}
+}
+
 func TestMessagesExportCommandAppliesDateFilters(t *testing.T) {
 	storeDir := t.TempDir()
 	db, err := store.Open(filepath.Join(storeDir, "wacli.db"))

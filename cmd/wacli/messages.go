@@ -986,10 +986,13 @@ func validateMessageCanForward(msg store.Message) error {
 }
 
 func messageForwardText(msg store.Message) string {
-	if text := strings.TrimSpace(msg.Text); text != "" {
-		return text
+	if strings.TrimSpace(msg.Text) != "" {
+		return msg.Text
 	}
-	return strings.TrimSpace(msg.DisplayText)
+	if strings.TrimSpace(msg.DisplayText) != "" {
+		return msg.DisplayText
+	}
+	return ""
 }
 
 type forwardedMessagePayload struct {
