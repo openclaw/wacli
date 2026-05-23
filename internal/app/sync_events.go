@@ -91,6 +91,12 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 			case disconnected <- struct{}{}:
 			default:
 			}
+		case *events.StreamReplaced:
+			a.emitOrPrint("stream_replaced", nil, "\nStream replaced.\n")
+			select {
+			case disconnected <- struct{}{}:
+			default:
+			}
 		case *events.AppStateSyncError:
 			a.handleAppStateSyncError(ctx, v, &appStateRecoveries)
 		}

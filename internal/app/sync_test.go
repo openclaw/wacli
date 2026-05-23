@@ -1589,6 +1589,61 @@ func TestSyncOnceIdleExitStartsAfterConnected(t *testing.T) {
 	}
 }
 
+func TestSyncFollowReconnectsAfterStreamReplaced(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	reconnected := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(10 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				f.mu.Lock()
+				connectCalls := f.connectCalls
+				f.mu.Unlock()
+				if connectCalls >= 2 {
+					close(reconnected)
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+
+	_, err := a.Sync(ctx, SyncOptions{
+		Mode:         SyncModeFollow,
+		AllowQR:      false,
+		MaxReconnect: time.Second,
+		AfterConnect: func(context.Context) error {
+			f.mu.Lock()
+			f.connected = false
+			f.mu.Unlock()
+			f.emit(&events.StreamReplaced{})
+			return nil
+		},
+	})
+	if err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	select {
+	case <-reconnected:
+	default:
+		f.mu.Lock()
+		connectCalls := f.connectCalls
+		f.mu.Unlock()
+		t.Fatalf("expected StreamReplaced to trigger reconnect, connect calls = %d", connectCalls)
+	}
+}
+
 func TestSyncRetriesTransientAuthConnectFailure(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
