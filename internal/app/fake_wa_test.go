@@ -200,6 +200,12 @@ func (f *fakeWA) RemoveEventHandler(id uint32) {
 }
 
 func (f *fakeWA) ReconnectWithBackoff(ctx context.Context, minDelay, maxDelay time.Duration) error {
+	f.mu.Lock()
+	connected := f.connected
+	f.mu.Unlock()
+	if connected {
+		return nil
+	}
 	return f.Connect(ctx, wa.ConnectOptions{AllowQR: false})
 }
 

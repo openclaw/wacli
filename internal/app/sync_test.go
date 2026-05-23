@@ -1623,9 +1623,6 @@ func TestSyncFollowReconnectsAfterStreamReplaced(t *testing.T) {
 		AllowQR:      false,
 		MaxReconnect: time.Second,
 		AfterConnect: func(context.Context) error {
-			f.mu.Lock()
-			f.connected = false
-			f.mu.Unlock()
 			f.emit(&events.StreamReplaced{})
 			return nil
 		},
