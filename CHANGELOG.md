@@ -10,6 +10,8 @@
 
 ### Fixed
 
+- Sync: reconnect after WhatsApp replaces the linked-device stream instead of leaving `sync --follow` offline. (#266 - thanks @ngutman)
+
 ## 0.11.0 - 2026-05-22
 
 ### Added
