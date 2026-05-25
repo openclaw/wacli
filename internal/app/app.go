@@ -92,6 +92,10 @@ type WAClient interface {
 	LinkedLID() string
 
 	SetProfilePicture(ctx context.Context, avatar []byte) (string, error)
+	GetProfilePictureInfo(ctx context.Context, jid types.JID, preview bool, existingID string) (*types.ProfilePictureInfo, error)
+	SetStatusMessage(ctx context.Context, msg string) error
+	SetProfileName(ctx context.Context, name string) error
+	GetBusinessProfile(ctx context.Context, jid types.JID) (*types.BusinessProfile, error)
 }
 
 type Options struct {

@@ -724,6 +724,22 @@ func (f *fakeWA) SetProfilePicture(ctx context.Context, avatar []byte) (string, 
 	return "pic-id-fake", nil
 }
 
+func (f *fakeWA) GetProfilePictureInfo(ctx context.Context, jid types.JID, preview bool, existingID string) (*types.ProfilePictureInfo, error) {
+	return &types.ProfilePictureInfo{ID: "pic-id-fake", URL: "https://example.invalid/avatar.jpg", Type: "image"}, nil
+}
+
+func (f *fakeWA) SetStatusMessage(ctx context.Context, msg string) error {
+	return nil
+}
+
+func (f *fakeWA) SetProfileName(ctx context.Context, name string) error {
+	return nil
+}
+
+func (f *fakeWA) GetBusinessProfile(ctx context.Context, jid types.JID) (*types.BusinessProfile, error) {
+	return &types.BusinessProfile{JID: jid}, nil
+}
+
 func (f *fakeWA) LinkedJID() string {
 	if !f.IsAuthed() {
 		return ""

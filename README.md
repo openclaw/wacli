@@ -12,7 +12,7 @@ Full documentation: **<https://wacli.sh>**
 - **Offline message store** — SQLite with FTS5 search (LIKE fallback), filterable by chat, sender, direction, time, and media type, with status broadcasts stored separately.
 - **Sending** — text with mentions/replies/link-previews, files (image/video/audio/document, ≤100 MiB), stickers, voice notes, reactions, and status broadcasts; rapid-send guardrails and retry-receipt grace.
 - **History backfill** — best-effort per-chat requests to your primary device for older messages.
-- **Contacts / chats / groups / channels** — search, alias, tag, archive, pin, mute, mark-read, rename, prune, manage participants and invite links, send to channels.
+- **Contacts / chats / groups / channels / profile** — search, alias, tag, archive, pin, mute, mark-read, rename, prune, manage participants and invite links, send to channels, and manage profile metadata.
 - **Diagnostics + safety** — `doctor`, read-only mode, store locks with owner reporting, panic recovery, bounded media queue, owner-only DB perms.
 - **Scriptable** — `--json` everywhere, `--events` NDJSON lifecycle stream, deterministic exit codes.
 

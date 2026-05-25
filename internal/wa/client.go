@@ -850,6 +850,55 @@ func (c *Client) SetProfilePicture(ctx context.Context, avatar []byte) (string, 
 	return pictureID, nil
 }
 
+func (c *Client) GetProfilePictureInfo(ctx context.Context, jid types.JID, preview bool, existingID string) (*types.ProfilePictureInfo, error) {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || !cli.IsConnected() {
+		return nil, fmt.Errorf("not connected")
+	}
+	return cli.GetProfilePictureInfo(ctx, jid, &whatsmeow.GetProfilePictureParams{
+		Preview:    preview,
+		ExistingID: existingID,
+	})
+}
+
+func (c *Client) SetStatusMessage(ctx context.Context, msg string) error {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || !cli.IsConnected() {
+		return fmt.Errorf("not connected")
+	}
+	return cli.SetStatusMessage(ctx, msg)
+}
+
+func (c *Client) SetProfileName(ctx context.Context, name string) error {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || !cli.IsConnected() {
+		return fmt.Errorf("not connected")
+	}
+	if err := cli.SendAppState(ctx, appstate.BuildSettingPushName(name)); err != nil {
+		return err
+	}
+	if cli.Store != nil {
+		cli.Store.PushName = name
+	}
+	return nil
+}
+
+func (c *Client) GetBusinessProfile(ctx context.Context, jid types.JID) (*types.BusinessProfile, error) {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || !cli.IsConnected() {
+		return nil, fmt.Errorf("not connected")
+	}
+	return cli.GetBusinessProfile(ctx, jid)
+}
+
 // Reconnect loop helper.
 func (c *Client) ReconnectWithBackoff(ctx context.Context, minDelay, maxDelay time.Duration) error {
 	delay := minDelay

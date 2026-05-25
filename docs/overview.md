@@ -36,7 +36,7 @@ Read when: you need the user-facing command map, global flags, store model, or l
 - [channels](channels.md) - list, inspect, join, leave, and send to WhatsApp Channels.
 - [history](history.md) - inspect archive coverage and request older per-chat history from the primary device.
 - [presence](presence.md) - send typing/paused indicators.
-- [profile](profile.md) - set the authenticated account profile picture.
+- [profile](profile.md) - manage profile picture, About text, display name, and fetch profile metadata.
 - [doctor](doctor.md) - diagnose store, auth, search, and optional live connectivity.
 - [docs](docs.md) - print the hosted documentation URL.
 - [version](version.md) - print the CLI version.
