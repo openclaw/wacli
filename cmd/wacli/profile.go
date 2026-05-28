@@ -188,6 +188,9 @@ func newProfilePictureInfoCmd(flags *rootFlags) *cobra.Command {
 		Short: "Fetch WhatsApp profile picture metadata",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := flags.requireWritable(); err != nil {
+				return err
+			}
 			target, err := parseProfileTarget(targetRaw)
 			if err != nil {
 				return err
@@ -227,6 +230,9 @@ func newProfileGetAboutCmd(flags *rootFlags) *cobra.Command {
 		Short: "Fetch a user's WhatsApp profile About text",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := flags.requireWritable(); err != nil {
+				return err
+			}
 			target, err := parseProfileTarget(targetRaw)
 			if err != nil {
 				return err
@@ -259,6 +265,9 @@ func newProfileBusinessCmd(flags *rootFlags) *cobra.Command {
 		Short: "Fetch a WhatsApp business profile",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := flags.requireWritable(); err != nil {
+				return err
+			}
 			target, err := parseProfileTarget(targetRaw)
 			if err != nil {
 				return err
