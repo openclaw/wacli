@@ -123,6 +123,14 @@ func TestFetchProfileAboutReturnsTargetStatus(t *testing.T) {
 	}
 }
 
+func TestFetchProfileAboutErrorsWhenTargetMissing(t *testing.T) {
+	target := types.NewJID("15551234567", types.DefaultUserServer)
+	_, err := fetchProfileAbout(context.Background(), fakeProfileClient{userInfo: map[types.JID]types.UserInfo{}}, target)
+	if err == nil {
+		t.Fatal("expected missing target error")
+	}
+}
+
 type fakeProfileClient struct {
 	userInfo map[types.JID]types.UserInfo
 }

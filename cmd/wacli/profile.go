@@ -361,7 +361,11 @@ func fetchProfileAbout(ctx context.Context, client profileUserInfoGetter, target
 	if err != nil {
 		return profileAboutOutput{}, err
 	}
-	return profileAboutOutput{JID: target.String(), About: infos[target].Status}, nil
+	info, ok := infos[target]
+	if !ok {
+		return profileAboutOutput{}, fmt.Errorf("profile about unavailable for %s", target.String())
+	}
+	return profileAboutOutput{JID: target.String(), About: info.Status}, nil
 }
 
 type businessProfileOutput struct {
