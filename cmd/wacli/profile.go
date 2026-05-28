@@ -192,7 +192,7 @@ func newProfilePictureInfoCmd(flags *rootFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			ctx, cancel, a, lk, err := openLiveProfileApp(flags, false)
+			ctx, cancel, a, lk, err := openLiveProfileApp(flags, true)
 			if err != nil {
 				return err
 			}
@@ -207,10 +207,10 @@ func newProfilePictureInfoCmd(flags *rootFlags) *cobra.Command {
 				return out.WriteJSON(os.Stdout, output)
 			}
 			if info == nil {
-				fmt.Fprintf(os.Stdout, "%s profile picture is unchanged.\n", target.String())
+				fmt.Fprintf(os.Stdout, "%s profile picture is unchanged.\n", sanitize(target.String()))
 				return nil
 			}
-			fmt.Fprintf(os.Stdout, "JID: %s\nID: %s\nType: %s\nURL: %s\nDirect path: %s\n", output.JID, output.ID, output.Type, output.URL, output.DirectPath)
+			fmt.Fprintf(os.Stdout, "JID: %s\nID: %s\nType: %s\nURL: %s\nDirect path: %s\n", sanitize(output.JID), sanitize(output.ID), sanitize(output.Type), sanitize(output.URL), sanitize(output.DirectPath))
 			return nil
 		},
 	}
@@ -231,7 +231,7 @@ func newProfileGetAboutCmd(flags *rootFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			ctx, cancel, a, lk, err := openLiveProfileApp(flags, false)
+			ctx, cancel, a, lk, err := openLiveProfileApp(flags, true)
 			if err != nil {
 				return err
 			}
@@ -244,7 +244,7 @@ func newProfileGetAboutCmd(flags *rootFlags) *cobra.Command {
 			if flags.asJSON {
 				return out.WriteJSON(os.Stdout, output)
 			}
-			fmt.Fprintf(os.Stdout, "JID: %s\nAbout: %s\n", output.JID, output.About)
+			fmt.Fprintf(os.Stdout, "JID: %s\nAbout: %s\n", sanitize(output.JID), sanitize(output.About))
 			return nil
 		},
 	}
@@ -263,7 +263,7 @@ func newProfileBusinessCmd(flags *rootFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			ctx, cancel, a, lk, err := openLiveProfileApp(flags, false)
+			ctx, cancel, a, lk, err := openLiveProfileApp(flags, true)
 			if err != nil {
 				return err
 			}
@@ -277,7 +277,7 @@ func newProfileBusinessCmd(flags *rootFlags) *cobra.Command {
 			if flags.asJSON {
 				return out.WriteJSON(os.Stdout, output)
 			}
-			fmt.Fprintf(os.Stdout, "JID: %s\nAddress: %s\nEmail: %s\nTimezone: %s\n", output.JID, output.Address, output.Email, output.BusinessHoursTimeZone)
+			fmt.Fprintf(os.Stdout, "JID: %s\nAddress: %s\nEmail: %s\nTimezone: %s\n", sanitize(output.JID), sanitize(output.Address), sanitize(output.Email), sanitize(output.BusinessHoursTimeZone))
 			return nil
 		},
 	}
