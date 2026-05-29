@@ -2,11 +2,19 @@ package wa
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
 
 func TestNewDirectMediaHTTPClientHasTimeouts(t *testing.T) {
 	client := newDirectMediaHTTPClient()
@@ -31,7 +39,43 @@ func TestNewDirectMediaHTTPClientHasTimeouts(t *testing.T) {
 	}
 }
 
-func TestDownloadDirectBytesUsesBoundedHTTPClient(t *testing.T) {
+func TestDownloadDirectBytesUsesDedicatedHTTPClient(t *testing.T) {
+	oldClient := directMediaHTTPClient
+	called := false
+	directMediaHTTPClient = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			called = true
+			if got, want := req.URL.String(), "https://example.test/voice.ogg"; got != want {
+				t.Fatalf("request URL = %q, want %q", got, want)
+			}
+			if req.Header.Get("Origin") == "" || req.Header.Get("Referer") == "" {
+				t.Fatalf("missing WhatsApp media request headers")
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("media bytes")),
+				Request:    req,
+			}, nil
+		}),
+	}
+	defer func() {
+		directMediaHTTPClient = oldClient
+	}()
+
+	got, err := downloadDirectBytes(context.Background(), "https://example.test/voice.ogg")
+	if err != nil {
+		t.Fatalf("downloadDirectBytes: %v", err)
+	}
+	if !called {
+		t.Fatalf("dedicated direct media HTTP client was not used")
+	}
+	if string(got) != "media bytes" {
+		t.Fatalf("downloadDirectBytes = %q, want media bytes", string(got))
+	}
+}
+
+func TestDownloadDirectBytesFailsFastWhenServerStalls(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
