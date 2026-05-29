@@ -16,17 +16,26 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
 
-func TestNewDirectMediaHTTPClientHasTimeouts(t *testing.T) {
+func TestNewDirectMediaHTTPClientBoundsPhasesWithoutTotalBodyTimeout(t *testing.T) {
 	client := newDirectMediaHTTPClient()
-	if client.Timeout <= 0 {
-		t.Fatalf("direct media HTTP client timeout = %s, want positive timeout", client.Timeout)
+	if client.Timeout != 0 {
+		t.Fatalf("direct media HTTP client timeout = %s, want zero to preserve caller/body budget", client.Timeout)
 	}
 	transport, ok := client.Transport.(*http.Transport)
 	if !ok {
 		t.Fatalf("direct media HTTP client transport = %T, want *http.Transport", client.Transport)
 	}
+	if transport.DialContext == nil {
+		t.Fatalf("dial context is nil, want bounded dialer")
+	}
+	if transport.TLSHandshakeTimeout <= 0 {
+		t.Fatalf("TLS handshake timeout = %s, want positive timeout", transport.TLSHandshakeTimeout)
+	}
 	if transport.ResponseHeaderTimeout <= 0 {
 		t.Fatalf("response header timeout = %s, want positive timeout", transport.ResponseHeaderTimeout)
+	}
+	if transport.ExpectContinueTimeout <= 0 {
+		t.Fatalf("expect continue timeout = %s, want positive timeout", transport.ExpectContinueTimeout)
 	}
 	if transport.IdleConnTimeout <= 0 {
 		t.Fatalf("idle connection timeout = %s, want positive timeout", transport.IdleConnTimeout)
@@ -75,7 +84,7 @@ func TestDownloadDirectBytesUsesDedicatedHTTPClient(t *testing.T) {
 	}
 }
 
-func TestDownloadDirectBytesFailsFastWhenServerStalls(t *testing.T) {
+func TestDownloadDirectBytesFailsFastWhenServerStallsBeforeHeaders(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
@@ -85,7 +94,9 @@ func TestDownloadDirectBytesFailsFastWhenServerStalls(t *testing.T) {
 	defer server.Close()
 
 	oldClient := directMediaHTTPClient
-	directMediaHTTPClient = &http.Client{Timeout: 50 * time.Millisecond}
+	directMediaHTTPClient = &http.Client{
+		Transport: &http.Transport{ResponseHeaderTimeout: 50 * time.Millisecond},
+	}
 	defer func() {
 		directMediaHTTPClient = oldClient
 	}()
@@ -93,9 +104,37 @@ func TestDownloadDirectBytesFailsFastWhenServerStalls(t *testing.T) {
 	start := time.Now()
 	_, err := downloadDirectBytes(context.Background(), server.URL+"/voice.ogg")
 	if err == nil {
-		t.Fatalf("downloadDirectBytes succeeded, want timeout error")
+		t.Fatalf("downloadDirectBytes succeeded, want response header timeout error")
 	}
 	if elapsed := time.Since(start); elapsed > time.Second {
 		t.Fatalf("downloadDirectBytes elapsed = %s, want bounded failure under 1s", elapsed)
+	}
+}
+
+func TestDownloadDirectBytesAllowsSlowBodyAfterHeaders(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		time.Sleep(150 * time.Millisecond)
+		_, _ = w.Write([]byte("slow body"))
+	}))
+	defer server.Close()
+
+	oldClient := directMediaHTTPClient
+	directMediaHTTPClient = &http.Client{
+		Transport: &http.Transport{ResponseHeaderTimeout: 50 * time.Millisecond},
+	}
+	defer func() {
+		directMediaHTTPClient = oldClient
+	}()
+
+	got, err := downloadDirectBytes(context.Background(), server.URL+"/voice.ogg")
+	if err != nil {
+		t.Fatalf("downloadDirectBytes: %v", err)
+	}
+	if string(got) != "slow body" {
+		t.Fatalf("downloadDirectBytes = %q, want slow body", string(got))
 	}
 }
