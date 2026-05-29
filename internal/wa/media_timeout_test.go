@@ -46,6 +46,9 @@ func TestNewDirectMediaHTTPClientBoundsPhasesWithoutTotalBodyTimeout(t *testing.
 	if transport.MaxIdleConnsPerHost <= 0 {
 		t.Fatalf("max idle connections per host = %d, want positive limit", transport.MaxIdleConnsPerHost)
 	}
+
+	t.Logf("direct media behavior: client.Timeout=%s, so valid response bodies keep the caller context budget", client.Timeout)
+	t.Logf("direct media behavior: phase bounds active: TLSHandshakeTimeout=%s ResponseHeaderTimeout=%s ExpectContinueTimeout=%s IdleConnTimeout=%s MaxIdleConns=%d MaxIdleConnsPerHost=%d", transport.TLSHandshakeTimeout, transport.ResponseHeaderTimeout, transport.ExpectContinueTimeout, transport.IdleConnTimeout, transport.MaxIdleConns, transport.MaxIdleConnsPerHost)
 }
 
 func TestDownloadDirectBytesUsesDedicatedHTTPClient(t *testing.T) {
@@ -60,6 +63,7 @@ func TestDownloadDirectBytesUsesDedicatedHTTPClient(t *testing.T) {
 			if req.Header.Get("Origin") == "" || req.Header.Get("Referer") == "" {
 				t.Fatalf("missing WhatsApp media request headers")
 			}
+			t.Logf("direct media behavior: dedicated directMediaHTTPClient handled request host=%s path=%s origin_header_present=%t referer_header_present=%t", req.URL.Host, req.URL.Path, req.Header.Get("Origin") != "", req.Header.Get("Referer") != "")
 			return &http.Response{
 				StatusCode: http.StatusOK,
 				Header:     make(http.Header),
@@ -82,6 +86,7 @@ func TestDownloadDirectBytesUsesDedicatedHTTPClient(t *testing.T) {
 	if string(got) != "media bytes" {
 		t.Fatalf("downloadDirectBytes = %q, want media bytes", string(got))
 	}
+	t.Logf("direct media behavior: downloadDirectBytes used dedicated client and returned %d bytes", len(got))
 }
 
 func TestDownloadDirectBytesFailsFastWhenServerStallsBeforeHeaders(t *testing.T) {
@@ -103,12 +108,14 @@ func TestDownloadDirectBytesFailsFastWhenServerStallsBeforeHeaders(t *testing.T)
 
 	start := time.Now()
 	_, err := downloadDirectBytes(context.Background(), server.URL+"/voice.ogg")
+	elapsed := time.Since(start)
 	if err == nil {
 		t.Fatalf("downloadDirectBytes succeeded, want response header timeout error")
 	}
-	if elapsed := time.Since(start); elapsed > time.Second {
+	if elapsed > time.Second {
 		t.Fatalf("downloadDirectBytes elapsed = %s, want bounded failure under 1s", elapsed)
 	}
+	t.Logf("direct media behavior: pre-header stall failed in %s with error %q", elapsed, err.Error())
 }
 
 func TestDownloadDirectBytesAllowsSlowBodyAfterHeaders(t *testing.T) {
@@ -130,11 +137,17 @@ func TestDownloadDirectBytesAllowsSlowBodyAfterHeaders(t *testing.T) {
 		directMediaHTTPClient = oldClient
 	}()
 
+	start := time.Now()
 	got, err := downloadDirectBytes(context.Background(), server.URL+"/voice.ogg")
+	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("downloadDirectBytes: %v", err)
 	}
 	if string(got) != "slow body" {
 		t.Fatalf("downloadDirectBytes = %q, want slow body", string(got))
 	}
+	if elapsed < 150*time.Millisecond {
+		t.Fatalf("downloadDirectBytes elapsed = %s, want slow body delay to be observed", elapsed)
+	}
+	t.Logf("direct media behavior: headers arrived before the 50ms ResponseHeaderTimeout, then slow body completed in %s and returned %d bytes", elapsed, len(got))
 }
