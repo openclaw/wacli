@@ -6,6 +6,7 @@
 
 - Groups: add live admin commands for creating groups, setting descriptions, toggling announce-only and admin-only edits, and approving or rejecting join requests. (#265 - thanks @dovocoder)
 - Profile: add commands to remove the profile picture, set About text, set the profile display name, fetch profile picture metadata, fetch a user's About text, and fetch WhatsApp Business profile details. (#267 - thanks @dovocoder)
+- Contacts: add `contacts get-picture` to download a contact's profile picture JPEG to a file (or stdout). Supports `--type preview` (96x96 thumbnail) and `--type image` (full-size up to 640px); maps `ErrProfilePictureNotSet` and `ErrProfilePictureUnauthorized` to friendly error messages. Useful for syncing avatars into local address books for archived chats where the macOS WhatsApp app no longer caches the thumbnail.
 
 ### Security
 
