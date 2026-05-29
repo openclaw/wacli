@@ -26,7 +26,10 @@ func TestNewDirectMediaHTTPClientBoundsPhasesWithoutTotalBodyTimeout(t *testing.
 		t.Fatalf("direct media HTTP client transport = %T, want *http.Transport", client.Transport)
 	}
 	if transport.DialContext == nil {
-		t.Fatalf("dial context is nil, want bounded dialer")
+		t.Fatalf("dial context is nil, want default transport dialer")
+	}
+	if !transport.ForceAttemptHTTP2 {
+		t.Fatalf("ForceAttemptHTTP2 = false, want default transport HTTP/2 behavior preserved")
 	}
 	if transport.TLSHandshakeTimeout <= 0 {
 		t.Fatalf("TLS handshake timeout = %s, want positive timeout", transport.TLSHandshakeTimeout)
@@ -43,12 +46,9 @@ func TestNewDirectMediaHTTPClientBoundsPhasesWithoutTotalBodyTimeout(t *testing.
 	if transport.MaxIdleConns <= 0 {
 		t.Fatalf("max idle connections = %d, want positive limit", transport.MaxIdleConns)
 	}
-	if transport.MaxIdleConnsPerHost <= 0 {
-		t.Fatalf("max idle connections per host = %d, want positive limit", transport.MaxIdleConnsPerHost)
-	}
-
 	t.Logf("direct media behavior: client.Timeout=%s, so valid response bodies keep the caller context budget", client.Timeout)
-	t.Logf("direct media behavior: phase bounds active: TLSHandshakeTimeout=%s ResponseHeaderTimeout=%s ExpectContinueTimeout=%s IdleConnTimeout=%s MaxIdleConns=%d MaxIdleConnsPerHost=%d", transport.TLSHandshakeTimeout, transport.ResponseHeaderTimeout, transport.ExpectContinueTimeout, transport.IdleConnTimeout, transport.MaxIdleConns, transport.MaxIdleConnsPerHost)
+	t.Logf("direct media behavior: default transport semantics preserved: ForceAttemptHTTP2=%t DialContextPresent=%t MaxIdleConnsPerHost=%d", transport.ForceAttemptHTTP2, transport.DialContext != nil, transport.MaxIdleConnsPerHost)
+	t.Logf("direct media behavior: phase bounds active: TLSHandshakeTimeout=%s ResponseHeaderTimeout=%s ExpectContinueTimeout=%s IdleConnTimeout=%s MaxIdleConns=%d", transport.TLSHandshakeTimeout, transport.ResponseHeaderTimeout, transport.ExpectContinueTimeout, transport.IdleConnTimeout, transport.MaxIdleConns)
 }
 
 func TestDownloadDirectBytesUsesDedicatedHTTPClient(t *testing.T) {

@@ -8,7 +8,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -29,21 +28,10 @@ var directMediaBaseURL = "https://mmg.whatsapp.net"
 var directMediaHTTPClient = newDirectMediaHTTPClient()
 
 func newDirectMediaHTTPClient() *http.Client {
-	dialer := &net.Dialer{
-		Timeout:   10 * time.Second,
-		KeepAlive: 30 * time.Second,
-	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ResponseHeaderTimeout = 10 * time.Second
 	return &http.Client{
-		Transport: &http.Transport{
-			Proxy:                 http.ProxyFromEnvironment,
-			DialContext:           dialer.DialContext,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ResponseHeaderTimeout: 10 * time.Second,
-			ExpectContinueTimeout: 1 * time.Second,
-			IdleConnTimeout:       30 * time.Second,
-			MaxIdleConns:          10,
-			MaxIdleConnsPerHost:   4,
-		},
+		Transport: transport,
 	}
 }
 
