@@ -9,6 +9,8 @@
 
 ### Security
 
+- Media: bound direct WhatsApp media downloads with a response-header timeout while preserving the caller's body download budget. (#271 - thanks @jason-allen-oneal)
+
 ### Fixed
 
 - Sync: reconnect after WhatsApp replaces the linked-device stream instead of leaving `sync --follow` offline. (#266 - thanks @ngutman)
