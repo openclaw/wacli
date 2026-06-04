@@ -86,6 +86,39 @@ func TestSendDelegateRequestPreservesEphemeralInJSON(t *testing.T) {
 	}
 }
 
+func TestSendDelegateRequestPreservesPresenceInJSON(t *testing.T) {
+	raw, err := json.Marshal(sendDelegateRequest{
+		Version:       sendDelegateVersion,
+		Kind:          "presence",
+		To:            "+33600000000",
+		PresenceState: "composing",
+		PresenceMedia: "audio",
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), `"presence_state":"composing"`) {
+		t.Fatalf("encoded request missing presence state: %s", raw)
+	}
+	if !strings.Contains(string(raw), `"presence_media":"audio"`) {
+		t.Fatalf("encoded request missing presence media: %s", raw)
+	}
+
+	var got sendDelegateRequest
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if got.Kind != "presence" {
+		t.Fatalf("Kind = %q, want presence", got.Kind)
+	}
+	if got.PresenceState != "composing" {
+		t.Fatalf("PresenceState = %q, want composing", got.PresenceState)
+	}
+	if got.PresenceMedia != "audio" {
+		t.Fatalf("PresenceMedia = %q, want audio", got.PresenceMedia)
+	}
+}
+
 func TestRemoveStaleSendDelegateSocketRefusesRegularFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), sendDelegateSocketName)
 	if err := fsutil.WritePrivateFile(path, []byte("not a socket")); err != nil {

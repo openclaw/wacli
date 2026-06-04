@@ -14,6 +14,7 @@ import (
 	"github.com/openclaw/wacli/internal/app"
 	"github.com/openclaw/wacli/internal/lock"
 	"github.com/openclaw/wacli/internal/out"
+	"github.com/openclaw/wacli/internal/wa"
 	"go.mau.fi/whatsmeow/types"
 )
 
@@ -52,6 +53,8 @@ type sendDelegateRequest struct {
 	Question             string   `json:"question,omitempty"`
 	Options              []string `json:"options,omitempty"`
 	Selectable           int      `json:"selectable,omitempty"`
+	PresenceState        string   `json:"presence_state,omitempty"`
+	PresenceMedia        string   `json:"presence_media,omitempty"`
 	PostSendWaitMS       int64    `json:"post_send_wait_ms,omitempty"`
 	TimeoutMS            int64    `json:"timeout_ms,omitempty"`
 }
@@ -210,9 +213,27 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 		return executeDelegatedPollVote(ctx, a, req)
 	case "button_list_select":
 		return executeDelegatedButtonListSelect(ctx, a, req)
+	case "presence":
+		return executeDelegatedPresence(ctx, a, req)
 	default:
 		return sendDelegateResponse{}, fmt.Errorf("unsupported send kind %q", req.Kind)
 	}
+}
+
+func executeDelegatedPresence(ctx context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {
+	toJID, err := wa.ParseUserOrJID(req.To)
+	if err != nil {
+		return sendDelegateResponse{}, err
+	}
+	toJID = warmupDelegatedRecipient(ctx, a, toJID)
+	chatMedia, err := presenceMediaFromString(req.PresenceMedia)
+	if err != nil {
+		return sendDelegateResponse{}, err
+	}
+	if err := a.WA().SendChatPresence(ctx, toJID, types.ChatPresence(req.PresenceState), chatMedia); err != nil {
+		return sendDelegateResponse{}, err
+	}
+	return sendDelegateResponse{OK: true, Sent: true, To: toJID.String()}, nil
 }
 
 func executeDelegatedText(ctx context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {

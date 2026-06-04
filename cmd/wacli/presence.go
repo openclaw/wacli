@@ -67,6 +67,18 @@ func runPresence(flags *rootFlags, to string, state types.ChatPresence, media st
 
 	a, lk, err := newApp(ctx, flags, true, false)
 	if err != nil {
+		resp, delegated, delegateErr := tryDelegateSend(ctx, flags, err, sendDelegateRequest{
+			Kind:          "presence",
+			To:            to,
+			PresenceState: string(state),
+			PresenceMedia: media,
+		})
+		if delegated {
+			if delegateErr != nil {
+				return delegateErr
+			}
+			return writePresenceOutput(flags, state, resp)
+		}
 		return err
 	}
 	defer closeApp(a, lk)
@@ -100,6 +112,18 @@ func runPresence(flags *rootFlags, to string, state types.ChatPresence, media st
 		})
 	}
 	fmt.Fprintf(os.Stdout, "Presence '%s' sent to %s\n", state, toJID.String())
+	return nil
+}
+
+func writePresenceOutput(flags *rootFlags, state types.ChatPresence, resp sendDelegateResponse) error {
+	if flags.asJSON {
+		return out.WriteJSON(os.Stdout, map[string]any{
+			"sent":  true,
+			"to":    resp.To,
+			"state": string(state),
+		})
+	}
+	fmt.Fprintf(os.Stdout, "Presence '%s' sent to %s\n", state, resp.To)
 	return nil
 }
 
