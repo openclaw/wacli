@@ -19,9 +19,20 @@ import (
 )
 
 func TestMediaTypeFromString(t *testing.T) {
-	for _, tc := range []string{"image", "video", "audio", "document", "sticker"} {
-		if _, err := MediaTypeFromString(tc); err != nil {
+	for tc, want := range map[string]whatsmeow.MediaType{
+		"image":    whatsmeow.MediaImage,
+		"video":    whatsmeow.MediaVideo,
+		"gif":      whatsmeow.MediaVideo,
+		"audio":    whatsmeow.MediaAudio,
+		"document": whatsmeow.MediaDocument,
+		"sticker":  whatsmeow.MediaImage,
+	} {
+		got, err := MediaTypeFromString(tc)
+		if err != nil {
 			t.Fatalf("expected %s to be supported: %v", tc, err)
+		}
+		if got != want {
+			t.Fatalf("MediaTypeFromString(%q) = %q, want %q", tc, got, want)
 		}
 	}
 	if _, err := MediaTypeFromString("nope"); err == nil {

@@ -45,6 +45,10 @@ func MediaTypeFromString(mediaType string) (whatsmeow.MediaType, error) {
 		return whatsmeow.MediaImage, nil
 	case "video":
 		return whatsmeow.MediaVideo, nil
+	case "gif":
+		// WhatsApp gifs are video messages with a gif-playback hint;
+		// they are stored and encrypted as regular videos.
+		return whatsmeow.MediaVideo, nil
 	case "audio":
 		return whatsmeow.MediaAudio, nil
 	case "document":
