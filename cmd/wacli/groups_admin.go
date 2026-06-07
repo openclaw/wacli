@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	appcore "github.com/openclaw/wacli/internal/app"
 	"github.com/openclaw/wacli/internal/out"
@@ -227,6 +228,32 @@ func newGroupsRequestsCmd(flags *rootFlags) *cobra.Command {
 	return cmd
 }
 
+// requestListEntry is the JSON/text output shape for a single pending join request.
+type requestListEntry struct {
+	JID         string    `json:"JID"`
+	PhoneNumber string    `json:"phone_number,omitempty"`
+	RequestedAt time.Time `json:"RequestedAt"`
+}
+
+// resolveRequestEntries converts raw join-request participants to output entries,
+// resolving LID JIDs to phone numbers via the provided resolver function.
+func resolveRequestEntries(ctx context.Context, requests []types.GroupParticipantRequest, resolve func(context.Context, types.JID) types.JID) []requestListEntry {
+	entries := make([]requestListEntry, len(requests))
+	for i, req := range requests {
+		pn := resolve(ctx, req.JID)
+		phone := ""
+		if pn.Server == types.DefaultUserServer {
+			phone = "+" + pn.User
+		}
+		entries[i] = requestListEntry{
+			JID:         req.JID.String(),
+			PhoneNumber: phone,
+			RequestedAt: req.RequestedAt,
+		}
+	}
+	return entries
+}
+
 func newGroupsRequestsListCmd(flags *rootFlags) *cobra.Command {
 	var jidStr string
 	cmd := &cobra.Command{
@@ -259,11 +286,14 @@ func newGroupsRequestsListCmd(flags *rootFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
+
+			entries := resolveRequestEntries(ctx, requests, a.WA().ResolveLIDToPN)
+
 			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, requests)
+				return out.WriteJSON(os.Stdout, entries)
 			}
-			for _, req := range requests {
-				fmt.Fprintf(os.Stdout, "%s\t%s\n", req.JID.String(), req.RequestedAt.Local().Format("2006-01-02 15:04:05"))
+			for _, e := range entries {
+				fmt.Fprintf(os.Stdout, "%s\t%s\t%s\n", e.JID, e.RequestedAt.Local().Format("2006-01-02 15:04:05"), e.PhoneNumber)
 			}
 			return nil
 		},
