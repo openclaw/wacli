@@ -32,6 +32,11 @@ jobs:
       - name: pnpm lint
         run: pnpm -s lint
 
+      - name: deadcode
+        env:
+          CGO_ENABLED: "1"
+        run: go run golang.org/x/tools/cmd/deadcode@v0.45.0 -test -tags sqlite_fts5 ./...
+
       - name: pnpm test
         env:
           CGO_ENABLED: "1"
