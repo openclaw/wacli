@@ -35,7 +35,13 @@ jobs:
       - name: deadcode
         env:
           CGO_ENABLED: "1"
-        run: go run golang.org/x/tools/cmd/deadcode@v0.45.0 -test -tags sqlite_fts5 ./...
+        run: |
+          output_file=$(mktemp)
+          go run golang.org/x/tools/cmd/deadcode@v0.45.0 -test -tags sqlite_fts5 ./... > "$output_file"
+          if [ -s "$output_file" ]; then
+            cat "$output_file"
+            exit 1
+          fi
 
       - name: pnpm test
         env:
