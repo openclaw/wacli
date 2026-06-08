@@ -37,6 +37,8 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 	var panicCount atomic.Int64
 	var appStateRecoveries sync.Map
 	return a.wa.AddEventHandler(func(evt interface{}) {
+		a.writeHeartbeat()
+
 		// Recover from panics so unexpected message structures do not crash the
 		// process. Include event type, stack trace, and a running counter.
 		defer func() {

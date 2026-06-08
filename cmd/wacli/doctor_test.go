@@ -156,7 +156,44 @@ func TestDoctorReadOnlyIgnoresStaleLockText(t *testing.T) {
 	}
 }
 
-func TestDoctorReadOnlyReportsCorruptStore(t *testing.T) {
+func TestDoctorReportsLastActivityFromHeartbeat(t *testing.T) {
+	storeDir := filepath.Join(t.TempDir(), "store")
+	if err := os.MkdirAll(storeDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	// Create a minimal DB so doctor can open it.
+	db, err := store.Open(filepath.Join(storeDir, "wacli.db"))
+	if err != nil {
+		t.Fatalf("Open store: %v", err)
+	}
+	db.Close()
+
+	want := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	if err := os.WriteFile(filepath.Join(storeDir, "HEARTBEAT"), []byte(want.Format(time.RFC3339)), 0o644); err != nil {
+		t.Fatalf("write heartbeat: %v", err)
+	}
+
+	stdout := captureRootStdout(t, func() {
+		if err := execute([]string{"--store", storeDir, "--read-only", "--json", "doctor"}); err != nil {
+			t.Fatalf("execute doctor: %v", err)
+		}
+	})
+	var got struct {
+		Data struct {
+			Store struct {
+				LastActivityAt string `json:"last_activity_at"`
+			} `json:"store"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &got); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, stdout)
+	}
+	if got.Data.Store.LastActivityAt != want.UTC().Format(time.RFC3339) {
+		t.Fatalf("last_activity_at = %q, want %q", got.Data.Store.LastActivityAt, want.UTC().Format(time.RFC3339))
+	}
+}
+
+func TestDoctorReportsCorruptStore(t *testing.T) {
 	storeDir := filepath.Join(t.TempDir(), "store")
 	if err := os.MkdirAll(storeDir, 0o700); err != nil {
 		t.Fatalf("MkdirAll: %v", err)

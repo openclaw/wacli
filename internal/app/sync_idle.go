@@ -7,7 +7,14 @@ import (
 	"time"
 )
 
-func (a *App) runSyncFollow(ctx context.Context, maxReconnect time.Duration, messagesStored *atomic.Int64, disconnected <-chan struct{}) (SyncResult, error) {
+func (a *App) runSyncFollow(ctx context.Context, maxReconnect, staleThreshold time.Duration, messagesStored, lastEvent *atomic.Int64, disconnected <-chan struct{}) (SyncResult, error) {
+	var staleTicker *time.Ticker
+	var staleC <-chan time.Time
+	if staleThreshold > 0 {
+		staleTicker = time.NewTicker(staleThreshold / 2)
+		staleC = staleTicker.C
+		defer staleTicker.Stop()
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -17,6 +24,18 @@ func (a *App) runSyncFollow(ctx context.Context, maxReconnect time.Duration, mes
 			a.emitOrPrint("reconnecting", nil, "Reconnecting...\n")
 			if err := a.reconnect(ctx, maxReconnect); err != nil {
 				return SyncResult{MessagesStored: messagesStored.Load()}, err
+			}
+		case <-staleC:
+			last := time.Unix(0, lastEvent.Load())
+			idle := time.Since(last)
+			if idle >= staleThreshold {
+				a.emitOrPrint("stale", map[string]any{
+					"threshold":     staleThreshold.String(),
+					"idle_duration": idle.String(),
+				}, "\nNo events for %s (threshold %s), reconnecting...\n", idle, staleThreshold)
+				if err := a.reconnect(ctx, maxReconnect); err != nil {
+					return SyncResult{MessagesStored: messagesStored.Load()}, err
+				}
 			}
 		}
 	}

@@ -39,6 +39,7 @@ type SyncOptions struct {
 	RefreshChannels     bool
 	IdleExit            time.Duration // only used for bootstrap/once
 	MaxReconnect        time.Duration // max time to attempt reconnection before giving up (0 = unlimited)
+	StaleThreshold      time.Duration // force reconnect when no events arrive for this long in follow mode (0 = disabled)
 	MaxMessages         int64         // 0 = unlimited
 	MaxDBSizeBytes      int64         // 0 = unlimited
 	WarnNoLimits        bool
@@ -164,7 +165,7 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 
 	var err error
 	if opts.Mode == SyncModeFollow {
-		_, err = a.runSyncFollow(syncCtx, opts.MaxReconnect, &messagesStored, disconnected)
+		_, err = a.runSyncFollow(syncCtx, opts.MaxReconnect, opts.StaleThreshold, &messagesStored, &lastEvent, disconnected)
 	} else {
 		_, err = a.runSyncUntilIdle(syncCtx, opts.IdleExit, opts.MaxReconnect, &messagesStored, &lastEvent, disconnected)
 	}
