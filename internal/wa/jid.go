@@ -22,10 +22,6 @@ func ParseUserOrJID(s string) (types.JID, error) {
 	return types.JID{User: phone, Server: types.DefaultUserServer}, nil
 }
 
-func IsGroupJID(jid types.JID) bool {
-	return jid.Server == types.GroupServer
-}
-
 func normalizePhoneRecipient(s string) (string, error) {
 	var phone strings.Builder
 	for i, ch := range s {

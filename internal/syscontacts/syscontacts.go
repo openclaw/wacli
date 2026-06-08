@@ -3,9 +3,7 @@ package syscontacts
 import (
 	"bufio"
 	"encoding/json"
-	"fmt"
 	"io"
-	"os"
 	"strings"
 	"unicode"
 )
@@ -22,15 +20,6 @@ func (c Contact) Name() string {
 		return strings.TrimSpace(c.FullName)
 	}
 	return strings.TrimSpace(strings.Join([]string{c.FirstName, c.LastName}, " "))
-}
-
-func ReadFile(path string) ([]Contact, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	return Decode(f)
 }
 
 func Decode(r io.Reader) ([]Contact, error) {
@@ -98,8 +87,4 @@ func NormalizePhone(phone string) string {
 		out = strings.TrimPrefix(out, "00")
 	}
 	return out
-}
-
-func UnsupportedError() error {
-	return fmt.Errorf("system contacts import is only supported on macOS; pass --input with JSON/NDJSON contacts to import from a file")
 }

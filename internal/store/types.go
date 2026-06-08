@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -236,7 +235,3 @@ func (d *DB) HasFTS() bool { return d.ftsEnabled }
 
 const DeletedMessageDisplayText = "This message was deleted"
 const DeletedForMeMessageDisplayText = "This message was deleted for me"
-
-func IsNotFound(err error) bool {
-	return errors.Is(err, sql.ErrNoRows)
-}

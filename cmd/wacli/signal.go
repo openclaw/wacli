@@ -10,13 +10,6 @@ import (
 	"github.com/openclaw/wacli/internal/out"
 )
 
-// signalContext returns a context that is cancelled on the first SIGINT/SIGTERM.
-// A second signal force-kills the process so that a stuck cleanup never leaves
-// the user unable to get their terminal back.
-func signalContext() (context.Context, context.CancelFunc) {
-	return signalContextWithEvents(nil)
-}
-
 func signalContextWithEvents(events *out.EventWriter) (context.Context, context.CancelFunc) {
 	sigCh := make(chan os.Signal, 2)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
