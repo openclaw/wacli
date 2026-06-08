@@ -2,8 +2,11 @@
 
 package syscontacts
 
-import "context"
+import (
+	"context"
+	"fmt"
+)
 
 func ReadSystem(ctx context.Context) ([]Contact, error) {
-	return nil, UnsupportedError()
+	return nil, fmt.Errorf("system contacts import is only supported on macOS; pass --input with JSON/NDJSON contacts to import from a file")
 }
