@@ -147,6 +147,10 @@ func (f *fakeWA) IsConnected() bool {
 
 func (f *fakeWA) Connect(ctx context.Context, opts wa.ConnectOptions) error {
 	f.mu.Lock()
+	if f.connected {
+		f.mu.Unlock()
+		return nil
+	}
 	f.connectCalls++
 	authed := f.authed
 	var connectErr error

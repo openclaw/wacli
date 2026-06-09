@@ -7,7 +7,7 @@ Read when: running continuous capture, one-shot sync, contact/group refresh, or 
 ## Command
 
 ```bash
-wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--max-messages N] [--max-db-size SIZE] [--download-media] [--refresh-contacts] [--refresh-groups] [--refresh-channels] [--events] [--webhook URL] [--webhook-secret SECRET]
+wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--stale-threshold DURATION] [--max-messages N] [--max-db-size SIZE] [--download-media] [--refresh-contacts] [--refresh-groups] [--refresh-channels] [--events] [--webhook URL] [--webhook-secret SECRET]
 ```
 
 ## Modes
@@ -34,6 +34,9 @@ wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--max-mes
 - Sync stores WhatsApp call signaling and call-log metadata in `call_events`; inspect it with `wacli calls list`.
 - Sync stores WhatsApp status broadcasts in `status_messages`, separate from normal chat `messages`.
 - In an interactive terminal, routine connected/history/progress updates share one updating stderr status line. Warnings and errors still print as separate lines so they remain visible.
+- `--stale-threshold DURATION` in follow mode detects silent stream stalls. If no WhatsApp events arrive for this duration, sync force-closes the connection and reconnects. Disabled by default (`0`).
+- A `stale` NDJSON event is emitted when the threshold is exceeded, containing `threshold` and `idle_duration` fields.
+- While `sync --follow` is running, a `HEARTBEAT` file is written to the store directory (at most once per minute) with the last activity timestamp in RFC 3339 format. External watchdogs or `wacli doctor` can read this to detect stale sync sessions.
 - `--events` emits one NDJSON lifecycle event per stderr line for machine consumers. Routine human progress/status lines, interrupt prompts, and command errors are emitted as events while events are enabled.
 
 ## Examples
@@ -41,9 +44,11 @@ wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--max-mes
 ```bash
 wacli sync --once
 wacli sync --follow --max-reconnect 10m
+wacli sync --follow --stale-threshold 10m
 wacli sync --follow --max-messages 250000 --max-db-size 2GB
 wacli sync --once --refresh-contacts --refresh-groups --refresh-channels
 wacli sync --follow --download-media
 wacli sync --once --events 2>events.ndjson
+wacli sync --follow --stale-threshold 5m --events 2>events.ndjson
 wacli sync --follow --webhook https://example.com/wacli --webhook-secret "$WACLI_WEBHOOK_SECRET"
 ```

@@ -15,6 +15,7 @@ wacli doctor [--connect]
 - Without `--connect`, doctor avoids live WhatsApp connection.
 - `--connect` requires auth and the store lock.
 - Output includes local store counts, auth identity when available, FTS/search state, and lock details.
+- `--json` includes `store.last_activity_at` when a `HEARTBEAT` file is present, reflecting the last time `sync --follow` recorded activity. This is distinct from `store.last_sync_at`, which records the last successful sync completion.
 - Use `--json` for machine-readable diagnostics.
 
 ## Examples

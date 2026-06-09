@@ -33,6 +33,10 @@ func (a *App) runSyncFollow(ctx context.Context, maxReconnect, staleThreshold ti
 					"threshold":     staleThreshold.String(),
 					"idle_duration": idle.String(),
 				}, "\nNo events for %s (threshold %s), reconnecting...\n", idle, staleThreshold)
+				// Force-close the stale stream before reconnecting, matching
+				// the StreamReplaced handler. Without this, Client.Connect sees
+				// the existing connection as still live and returns nil.
+				a.wa.Close()
 				if err := a.reconnect(ctx, maxReconnect); err != nil {
 					return SyncResult{MessagesStored: messagesStored.Load()}, err
 				}
