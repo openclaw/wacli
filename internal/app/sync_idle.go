@@ -36,6 +36,8 @@ func (a *App) runSyncFollow(ctx context.Context, maxReconnect, staleThreshold ti
 				if err := a.reconnect(ctx, maxReconnect); err != nil {
 					return SyncResult{MessagesStored: messagesStored.Load()}, err
 				}
+				lastEvent.Store(nowUTC().UnixNano())
+				staleTicker.Reset(staleThreshold / 2)
 			}
 		}
 	}

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"time"
+
+	"github.com/openclaw/wacli/internal/fsutil"
 )
 
 var lastHeartbeatWrite atomic.Int64
@@ -22,7 +24,7 @@ func (a *App) writeHeartbeat() {
 	}
 	lastHeartbeatWrite.Store(now.UnixNano())
 	path := filepath.Join(a.opts.StoreDir, "HEARTBEAT")
-	_ = os.WriteFile(path, []byte(now.Format(time.RFC3339)), 0o644)
+	_ = fsutil.WritePrivateFile(path, []byte(now.Format(time.RFC3339)))
 }
 
 // ReadHeartbeat reads the last heartbeat timestamp from the store directory.
