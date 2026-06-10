@@ -1819,7 +1819,7 @@ func TestSyncRejectsIneffectiveStaleThreshold(t *testing.T) {
 
 	_, err := a.Sync(context.Background(), SyncOptions{
 		Mode:           SyncModeFollow,
-		StaleThreshold: MaxStaleThreshold,
+		StaleThreshold: MaxStaleThreshold(),
 	})
 	if err == nil || !strings.Contains(err.Error(), "upstream auto-reconnect threshold") {
 		t.Fatalf("expected stale threshold validation error, got %v", err)
