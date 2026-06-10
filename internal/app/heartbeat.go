@@ -15,11 +15,17 @@ const heartbeatMinInterval = time.Minute
 // lets external processes (e.g. wacli doctor) observe sync follow activity.
 func (a *App) writeHeartbeat() {
 	now := nowUTC()
-	last := time.Unix(0, a.heartbeatLast.Load())
-	if now.Sub(last) < heartbeatMinInterval {
-		return
+	nowNanos := now.UnixNano()
+	for {
+		lastNanos := a.heartbeatLast.Load()
+		last := time.Unix(0, lastNanos)
+		if now.Sub(last) < heartbeatMinInterval {
+			return
+		}
+		if a.heartbeatLast.CompareAndSwap(lastNanos, nowNanos) {
+			break
+		}
 	}
-	a.heartbeatLast.Store(now.UnixNano())
 	path := filepath.Join(a.opts.StoreDir, "HEARTBEAT")
 	_ = fsutil.WritePrivateFileAtomic(path, []byte(now.Format(time.RFC3339)))
 }
