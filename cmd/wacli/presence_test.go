@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -100,6 +102,8 @@ func TestPresenceDelegateHelper(t *testing.T) {
 }
 
 func TestPresenceDelegatesThroughSendSocketWhenStoreLocked(t *testing.T) {
+	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
+
 	tests := []struct {
 		name      string
 		command   string
@@ -201,6 +205,8 @@ func TestPresenceLockedStoreReturnsLockErrorWithoutDelegateSocket(t *testing.T) 
 }
 
 func TestPresenceDelegatePropagatesDaemonErrorWhenStoreLocked(t *testing.T) {
+	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
+
 	storeDir := shortPresenceDelegateStoreDir(t)
 	lk, err := lock.Acquire(storeDir)
 	if err != nil {
@@ -238,6 +244,30 @@ func TestExecuteDelegatedSendRoutesPresenceValidation(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "unsupported presence state") {
 		t.Fatalf("executeDelegatedSend error = %v, want presence state validation", err)
+	}
+}
+
+func TestSendPresenceWithRetryReconnectsOnNotConnected(t *testing.T) {
+	var sends int
+	var reconnects int
+	err := sendPresenceWithRetry(contextWithTestTimeout(t), func(context.Context) error {
+		reconnects++
+		return nil
+	}, func(context.Context) error {
+		sends++
+		if sends == 1 {
+			return errors.New("not connected")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("sendPresenceWithRetry: %v", err)
+	}
+	if sends != 2 {
+		t.Fatalf("send attempts = %d, want 2", sends)
+	}
+	if reconnects != 1 {
+		t.Fatalf("reconnects = %d, want 1", reconnects)
 	}
 }
 
@@ -325,12 +355,25 @@ func runPresenceDelegateHelper(t *testing.T, args []string) (string, string, err
 
 func shortPresenceDelegateStoreDir(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "wacli-presence-*")
+	base := os.TempDir()
+	if runtime.GOOS == "darwin" {
+		// Darwin has a short sockaddr_un path limit; the default TMPDIR under
+		// /var/folders is often too long for .send.sock integration tests.
+		base = "/tmp"
+	}
+	dir, err := os.MkdirTemp(base, "wacli-presence-*")
 	if err != nil {
 		t.Fatalf("temp store dir: %v", err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	return dir
+}
+
+func skipPresenceDelegateSocketTestOnUnsupportedOS(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix send delegate socket integration is not available on Windows")
+	}
 }
 
 func contextWithTestTimeout(t *testing.T) context.Context {

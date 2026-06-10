@@ -234,7 +234,9 @@ func executeDelegatedPresence(ctx context.Context, a *app.App, req sendDelegateR
 	if err != nil {
 		return sendDelegateResponse{}, err
 	}
-	if err := a.WA().SendChatPresence(ctx, toJID, state, chatMedia); err != nil {
+	if err := sendPresenceWithRetry(ctx, reconnectForSend(a), func(ctx context.Context) error {
+		return a.WA().SendChatPresence(ctx, toJID, state, chatMedia)
+	}); err != nil {
 		return sendDelegateResponse{}, err
 	}
 	return sendDelegateResponse{OK: true, Sent: true, To: toJID.String()}, nil
