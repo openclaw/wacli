@@ -7,14 +7,32 @@ import (
 	"time"
 )
 
-func (a *App) runSyncFollow(ctx context.Context, maxReconnect time.Duration, messagesStored *atomic.Int64, disconnected <-chan struct{}) (SyncResult, error) {
+func (a *App) runSyncFollow(ctx context.Context, maxReconnect time.Duration, messagesStored, connectionEpoch *atomic.Int64, disconnected <-chan struct{}, staleReconnect <-chan staleReconnectRequest) (SyncResult, error) {
 	for {
 		select {
 		case <-ctx.Done():
 			a.emitOrPrint("stopping", map[string]any{"messages_synced": messagesStored.Load()}, "\nStopping sync.\n")
 			return SyncResult{MessagesStored: messagesStored.Load()}, nil
+		case req := <-staleReconnect:
+			if epoch := connectionEpoch.Load(); epoch > 0 && req.lastSuccess.Before(time.Unix(0, epoch)) {
+				continue
+			}
+			a.emitOrPrint("stale", map[string]any{
+				"threshold":     req.threshold.String(),
+				"idle_duration": req.idle.String(),
+				"error_count":   req.errorCount,
+				"source":        req.source,
+			}, "\nKeepalive has been failing for %s (threshold %s), reconnecting...\n", req.idle, req.threshold)
+			// Force-close before reconnecting, matching StreamReplaced. Without this,
+			// Client.Connect can see the existing socket as still live and return nil.
+			a.wa.Close()
+			connectionEpoch.Store(nowUTC().UnixNano())
+			if err := a.reconnect(ctx, maxReconnect); err != nil {
+				return SyncResult{MessagesStored: messagesStored.Load()}, err
+			}
 		case <-disconnected:
 			a.emitOrPrint("reconnecting", nil, "Reconnecting...\n")
+			connectionEpoch.Store(nowUTC().UnixNano())
 			if err := a.reconnect(ctx, maxReconnect); err != nil {
 				return SyncResult{MessagesStored: messagesStored.Load()}, err
 			}

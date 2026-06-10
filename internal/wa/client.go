@@ -91,6 +91,20 @@ func (c *Client) IsConnected() bool {
 	return c.client != nil && c.client.IsConnected()
 }
 
+func (c *Client) SetAutoReconnect(enabled bool) (bool, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.client == nil {
+		return false, false
+	}
+	previous := c.client.EnableAutoReconnect
+	if c.client.IsConnected() {
+		return previous, false
+	}
+	c.client.EnableAutoReconnect = enabled
+	return previous, true
+}
+
 type ConnectOptions struct {
 	AllowQR         bool
 	OnQRCode        func(code string)

@@ -12,11 +12,19 @@ import (
 
 	"github.com/openclaw/wacli/internal/store"
 	"github.com/openclaw/wacli/internal/wa"
+	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/appstate"
 	"go.mau.fi/whatsmeow/types"
 )
 
 const maxAuthConnectAttempts = 3
+
+// MaxStaleThreshold returns the exclusive upper bound for keepalive-failure thresholds.
+// It reserves one maximum keepalive probe interval plus response deadline before
+// whatsmeow's own failed-keepalive auto-reconnect window.
+func MaxStaleThreshold() time.Duration {
+	return whatsmeow.KeepAliveMaxFailTime - whatsmeow.KeepAliveIntervalMax - whatsmeow.KeepAliveResponseDeadline
+}
 
 type SyncMode string
 
@@ -39,6 +47,7 @@ type SyncOptions struct {
 	RefreshChannels     bool
 	IdleExit            time.Duration // only used for bootstrap/once
 	MaxReconnect        time.Duration // max time to attempt reconnection before giving up (0 = unlimited)
+	StaleThreshold      time.Duration // force reconnect when keepalive failures last this long in follow mode (0 = disabled)
 	MaxMessages         int64         // 0 = unlimited
 	MaxDBSizeBytes      int64         // 0 = unlimited
 	WarnNoLimits        bool
@@ -62,6 +71,9 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	if (opts.Mode == SyncModeBootstrap || opts.Mode == SyncModeOnce) && opts.IdleExit <= 0 {
 		opts.IdleExit = 30 * time.Second
 	}
+	if maxStaleThreshold := MaxStaleThreshold(); opts.StaleThreshold >= maxStaleThreshold {
+		return SyncResult{}, fmt.Errorf("stale threshold %s must be less than upstream auto-reconnect threshold %s", opts.StaleThreshold, maxStaleThreshold)
+	}
 	if opts.WarnNoLimits && opts.MaxMessages <= 0 && opts.MaxDBSizeBytes <= 0 {
 		a.emitWarning(
 			"sync_storage_uncapped",
@@ -80,14 +92,28 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	if err := a.OpenWA(); err != nil {
 		return SyncResult{}, err
 	}
+	if opts.Mode == SyncModeFollow && opts.StaleThreshold > 0 {
+		restoreAutoReconnect, ok := a.wa.SetAutoReconnect(false)
+		if !ok {
+			return SyncResult{}, fmt.Errorf("could not configure stale-threshold reconnect on an already-connected WhatsApp client")
+		}
+		defer func() {
+			if !a.wa.IsConnected() {
+				a.wa.SetAutoReconnect(restoreAutoReconnect)
+			}
+		}()
+	}
 	a.wa.SetManualHistorySyncDownload(true)
 	defer a.wa.SetManualHistorySyncDownload(false)
 
 	var messagesStored atomic.Int64
 	lastEvent := atomic.Int64{}
-	lastEvent.Store(nowUTC().UnixNano())
+	connectionEpoch := atomic.Int64{}
+	now := nowUTC().UnixNano()
+	lastEvent.Store(now)
 
 	disconnected := make(chan struct{}, 1)
+	staleReconnect := make(chan staleReconnectRequest, 1)
 
 	var stopMedia func()
 	var mediaJobs chan mediaJob
@@ -116,13 +142,15 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 		defer stopWebhook()
 	}
 
-	handlerID := a.addSyncEventHandler(syncCtx, opts, &messagesStored, &lastEvent, disconnected, enqueueMedia, enqueueWebhook, limits)
+	handlerID := a.addSyncEventHandler(syncCtx, opts, &messagesStored, &lastEvent, disconnected, staleReconnect, enqueueMedia, enqueueWebhook, limits)
 	defer a.wa.RemoveEventHandler(handlerID)
 
+	connectionEpoch.Store(nowUTC().UnixNano())
 	if err := a.connectForSync(syncCtx, opts); err != nil {
 		return SyncResult{}, err
 	}
-	lastEvent.Store(nowUTC().UnixNano())
+	now = nowUTC().UnixNano()
+	lastEvent.Store(now)
 	if err := a.migrateHistoricalLIDs(syncCtx); err != nil {
 		return SyncResult{MessagesStored: messagesStored.Load()}, err
 	}
@@ -164,7 +192,7 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 
 	var err error
 	if opts.Mode == SyncModeFollow {
-		_, err = a.runSyncFollow(syncCtx, opts.MaxReconnect, &messagesStored, disconnected)
+		_, err = a.runSyncFollow(syncCtx, opts.MaxReconnect, &messagesStored, &connectionEpoch, disconnected, staleReconnect)
 	} else {
 		_, err = a.runSyncUntilIdle(syncCtx, opts.IdleExit, opts.MaxReconnect, &messagesStored, &lastEvent, disconnected)
 	}

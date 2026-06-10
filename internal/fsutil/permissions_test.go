@@ -107,6 +107,37 @@ func TestWritePrivateFileNarrowsExistingPermsBeforeRewrite(t *testing.T) {
 	}
 }
 
+func TestWritePrivateFileAtomicReplacesOwnerOnlyFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "file")
+	if err := WritePrivateFileAtomic(path, []byte("old-secret")); err != nil {
+		t.Fatalf("WritePrivateFileAtomic old: %v", err)
+	}
+	if err := WritePrivateFileAtomic(path, []byte("new-secret")); err != nil {
+		t.Fatalf("WritePrivateFileAtomic new: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(data) != "new-secret" {
+		t.Fatalf("data = %q", data)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("mode = %04o, want 0600", got)
+	}
+	matches, err := filepath.Glob(filepath.Join(filepath.Dir(path), ".file.tmp-*"))
+	if err != nil {
+		t.Fatalf("Glob: %v", err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("left temp files: %v", matches)
+	}
+}
+
 func TestEnsureWritableDirDoesNotChmodExistingDir(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "shared")
 	if err := os.MkdirAll(dir, 0o755); err != nil {

@@ -70,6 +70,9 @@ func TestDoctorStoreStatsFromStoreStats(t *testing.T) {
 	if got.Messages != 4 || got.Chats != 3 || got.Contacts != 2 || got.Groups != 1 {
 		t.Fatalf("unexpected counts: %+v", got)
 	}
+	if !got.StatsKnown {
+		t.Fatal("StatsKnown = false, want true")
+	}
 	if got.LastSyncAt != "2024-04-01T10:30:00Z" {
 		t.Fatalf("LastSyncAt = %q", got.LastSyncAt)
 	}
@@ -84,6 +87,7 @@ func TestWriteDoctorReportIncludesLinkedJIDAndStats(t *testing.T) {
 		ConnectionState: "disconnected",
 		FTSEnabled:      true,
 		Store: &doctorStoreStats{
+			StatsKnown: true,
 			Messages:   9,
 			Chats:      8,
 			Contacts:   7,
@@ -156,7 +160,95 @@ func TestDoctorReadOnlyIgnoresStaleLockText(t *testing.T) {
 	}
 }
 
-func TestDoctorReadOnlyReportsCorruptStore(t *testing.T) {
+func TestDoctorReportsLastActivityFromHeartbeat(t *testing.T) {
+	storeDir := filepath.Join(t.TempDir(), "store")
+	if err := os.MkdirAll(storeDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	// Create a minimal DB so doctor can open it.
+	db, err := store.Open(filepath.Join(storeDir, "wacli.db"))
+	if err != nil {
+		t.Fatalf("Open store: %v", err)
+	}
+	db.Close()
+
+	want := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	if err := os.WriteFile(filepath.Join(storeDir, "HEARTBEAT"), []byte(want.Format(time.RFC3339)), 0o644); err != nil {
+		t.Fatalf("write heartbeat: %v", err)
+	}
+
+	stdout := captureRootStdout(t, func() {
+		if err := execute([]string{"--store", storeDir, "--read-only", "--json", "doctor"}); err != nil {
+			t.Fatalf("execute doctor: %v", err)
+		}
+	})
+	var got struct {
+		Data struct {
+			Store struct {
+				LastActivityAt string `json:"last_activity_at"`
+			} `json:"store"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &got); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, stdout)
+	}
+	if got.Data.Store.LastActivityAt != want.UTC().Format(time.RFC3339) {
+		t.Fatalf("last_activity_at = %q, want %q", got.Data.Store.LastActivityAt, want.UTC().Format(time.RFC3339))
+	}
+}
+
+func TestDoctorReportsLastActivityWhenStoreDBMissing(t *testing.T) {
+	storeDir := filepath.Join(t.TempDir(), "store")
+	if err := os.MkdirAll(storeDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	want := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	if err := os.WriteFile(filepath.Join(storeDir, "HEARTBEAT"), []byte(want.Format(time.RFC3339)), 0o644); err != nil {
+		t.Fatalf("write heartbeat: %v", err)
+	}
+
+	stdout := captureRootStdout(t, func() {
+		if err := execute([]string{"--store", storeDir, "--read-only", "--json", "doctor"}); err != nil {
+			t.Fatalf("execute doctor: %v", err)
+		}
+	})
+	var got struct {
+		Data struct {
+			Store struct {
+				LastActivityAt string `json:"last_activity_at"`
+			} `json:"store"`
+			StoreError string `json:"store_error"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &got); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, stdout)
+	}
+	if got.Data.Store.LastActivityAt != want.UTC().Format(time.RFC3339) {
+		t.Fatalf("last_activity_at = %q, want %q", got.Data.Store.LastActivityAt, want.UTC().Format(time.RFC3339))
+	}
+	if got.Data.StoreError == "" {
+		t.Fatal("expected missing store DB error")
+	}
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &raw); err != nil {
+		t.Fatalf("unmarshal raw: %v\n%s", err, stdout)
+	}
+	data, ok := raw["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing data object in %#v", raw)
+	}
+	storeObj, ok := data["store"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing store object in %#v", data)
+	}
+	for _, name := range []string{"messages", "chats", "contacts", "groups"} {
+		if _, ok := storeObj[name]; ok {
+			t.Fatalf("heartbeat-only store object includes %q: %#v", name, storeObj)
+		}
+	}
+}
+
+func TestDoctorReportsCorruptStore(t *testing.T) {
 	storeDir := filepath.Join(t.TempDir(), "store")
 	if err := os.MkdirAll(storeDir, 0o700); err != nil {
 		t.Fatalf("MkdirAll: %v", err)

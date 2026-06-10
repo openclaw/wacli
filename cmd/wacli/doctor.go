@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -43,11 +44,35 @@ func doctorConnectionState(authed, connected, lockHeld, connect bool) string {
 }
 
 type doctorStoreStats struct {
-	Messages   int64  `json:"messages"`
-	Chats      int64  `json:"chats"`
-	Contacts   int64  `json:"contacts"`
-	Groups     int64  `json:"groups"`
-	LastSyncAt string `json:"last_sync_at,omitempty"`
+	StatsKnown     bool   `json:"-"`
+	Messages       int64  `json:"messages"`
+	Chats          int64  `json:"chats"`
+	Contacts       int64  `json:"contacts"`
+	Groups         int64  `json:"groups"`
+	LastSyncAt     string `json:"last_sync_at,omitempty"`
+	LastActivityAt string `json:"last_activity_at,omitempty"`
+}
+
+func (s doctorStoreStats) MarshalJSON() ([]byte, error) {
+	type storeStatsJSON struct {
+		Messages       *int64 `json:"messages,omitempty"`
+		Chats          *int64 `json:"chats,omitempty"`
+		Contacts       *int64 `json:"contacts,omitempty"`
+		Groups         *int64 `json:"groups,omitempty"`
+		LastSyncAt     string `json:"last_sync_at,omitempty"`
+		LastActivityAt string `json:"last_activity_at,omitempty"`
+	}
+	out := storeStatsJSON{
+		LastSyncAt:     s.LastSyncAt,
+		LastActivityAt: s.LastActivityAt,
+	}
+	if s.StatsKnown {
+		out.Messages = &s.Messages
+		out.Chats = &s.Chats
+		out.Contacts = &s.Contacts
+		out.Groups = &s.Groups
+	}
+	return json.Marshal(out)
 }
 
 type doctorReport struct {
@@ -66,10 +91,11 @@ type doctorReport struct {
 
 func doctorStoreStatsFromStoreStats(stats store.StoreStats) doctorStoreStats {
 	out := doctorStoreStats{
-		Messages: stats.Messages,
-		Chats:    stats.Chats,
-		Contacts: stats.Contacts,
-		Groups:   stats.Groups,
+		StatsKnown: true,
+		Messages:   stats.Messages,
+		Chats:      stats.Chats,
+		Contacts:   stats.Contacts,
+		Groups:     stats.Groups,
 	}
 	if stats.LastMessageTS > 0 {
 		out.LastSyncAt = time.Unix(stats.LastMessageTS, 0).UTC().Format(time.RFC3339)
@@ -95,12 +121,17 @@ func writeDoctorReport(w io.Writer, rep doctorReport) {
 	fmt.Fprintf(tw, "CONNECTION_STATE\t%s\n", sanitize(rep.ConnectionState))
 	fmt.Fprintf(tw, "FTS5\t%v\n", rep.FTSEnabled)
 	if rep.Store != nil {
-		fmt.Fprintf(tw, "MESSAGES\t%d\n", rep.Store.Messages)
-		fmt.Fprintf(tw, "CHATS\t%d\n", rep.Store.Chats)
-		fmt.Fprintf(tw, "CONTACTS\t%d\n", rep.Store.Contacts)
-		fmt.Fprintf(tw, "GROUPS\t%d\n", rep.Store.Groups)
+		if rep.Store.StatsKnown {
+			fmt.Fprintf(tw, "MESSAGES\t%d\n", rep.Store.Messages)
+			fmt.Fprintf(tw, "CHATS\t%d\n", rep.Store.Chats)
+			fmt.Fprintf(tw, "CONTACTS\t%d\n", rep.Store.Contacts)
+			fmt.Fprintf(tw, "GROUPS\t%d\n", rep.Store.Groups)
+		}
 		if rep.Store.LastSyncAt != "" {
 			fmt.Fprintf(tw, "LAST_SYNC\t%s\n", rep.Store.LastSyncAt)
+		}
+		if rep.Store.LastActivityAt != "" {
+			fmt.Fprintf(tw, "LAST_ACTIVITY\t%s\n", rep.Store.LastActivityAt)
 		}
 	}
 	_ = tw.Flush()
@@ -194,6 +225,10 @@ func newDoctorCmd(flags *rootFlags) *cobra.Command {
 			lockOwnerPID := parseLockOwnerPID(lockInfo)
 
 			var stats *doctorStoreStats
+			var lastActivityAt string
+			if hb := appPkg.ReadHeartbeat(storeDir); !hb.IsZero() {
+				lastActivityAt = hb.UTC().Format(time.RFC3339)
+			}
 			if db != nil {
 				if raw, err := db.Stats(); err == nil {
 					converted := doctorStoreStatsFromStoreStats(raw)
@@ -201,6 +236,12 @@ func newDoctorCmd(flags *rootFlags) *cobra.Command {
 				} else if storeErr == "" {
 					storeErr = err.Error()
 				}
+			}
+			if lastActivityAt != "" {
+				if stats == nil {
+					stats = &doctorStoreStats{}
+				}
+				stats.LastActivityAt = lastActivityAt
 			}
 
 			rep := doctorReport{

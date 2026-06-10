@@ -33,10 +33,22 @@ func newMediaEnqueuer(ctx context.Context, jobs chan<- mediaJob) func(chatJID, m
 	}
 }
 
-func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, messagesStored, lastEvent *atomic.Int64, disconnected chan<- struct{}, enqueueMedia func(string, string), enqueueWebhook func(wa.ParsedMessage), limits *syncStorageLimits) uint32 {
+type staleReconnectRequest struct {
+	threshold   time.Duration
+	idle        time.Duration
+	errorCount  int
+	lastSuccess time.Time
+	source      string
+}
+
+func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, messagesStored, lastEvent *atomic.Int64, disconnected chan<- struct{}, staleReconnect chan<- staleReconnectRequest, enqueueMedia func(string, string), enqueueWebhook func(wa.ParsedMessage), limits *syncStorageLimits) uint32 {
 	var panicCount atomic.Int64
 	var appStateRecoveries sync.Map
 	return a.wa.AddEventHandler(func(evt interface{}) {
+		if opts.Mode == SyncModeFollow && syncActivityEvent(evt) {
+			a.writeHeartbeat()
+		}
+
 		// Recover from panics so unexpected message structures do not crash the
 		// process. Include event type, stack trace, and a running counter.
 		defer func() {
@@ -88,6 +100,8 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 			a.handleChatStateEvent(ctx, v)
 		case *events.Connected:
 			a.emitOrPrint("connected", nil, "\nConnected.\n")
+		case *events.KeepAliveTimeout:
+			a.handleKeepAliveTimeout(opts, v, staleReconnect)
 		case *events.Disconnected:
 			a.emitOrPrint("disconnected", nil, "\nDisconnected.\n")
 			select {
@@ -107,6 +121,49 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 			a.handleAppStateSyncError(ctx, v, &appStateRecoveries)
 		}
 	})
+}
+
+func (a *App) handleKeepAliveTimeout(opts SyncOptions, evt *events.KeepAliveTimeout, staleReconnect chan<- staleReconnectRequest) {
+	if opts.Mode != SyncModeFollow || opts.StaleThreshold <= 0 || evt == nil || evt.LastSuccess.IsZero() {
+		return
+	}
+	idle := time.Since(evt.LastSuccess)
+	if idle < opts.StaleThreshold {
+		return
+	}
+	req := staleReconnectRequest{
+		threshold:   opts.StaleThreshold,
+		idle:        idle,
+		errorCount:  evt.ErrorCount,
+		lastSuccess: evt.LastSuccess,
+		source:      "keepalive_timeout",
+	}
+	select {
+	case staleReconnect <- req:
+	default:
+	}
+}
+
+func syncActivityEvent(evt interface{}) bool {
+	switch evt.(type) {
+	case nil,
+		*events.KeepAliveTimeout,
+		*events.PairError,
+		*events.LoggedOut,
+		*events.StreamReplaced,
+		*events.ManualLoginReconnect,
+		*events.TemporaryBan,
+		*events.ConnectFailure,
+		*events.ClientOutdated,
+		*events.CATRefreshError,
+		*events.StreamError,
+		*events.Disconnected,
+		*events.AppStateSyncError,
+		*events.MediaRetryError:
+		return false
+	default:
+		return true
+	}
 }
 
 func (a *App) handleReceiptEvent(ctx context.Context, evt *events.Receipt) {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/openclaw/wacli/internal/fsutil"
@@ -25,6 +26,7 @@ type WAClient interface {
 	Close()
 	IsAuthed() bool
 	IsConnected() bool
+	SetAutoReconnect(enabled bool) (previous bool, ok bool)
 	Connect(ctx context.Context, opts wa.ConnectOptions) error
 
 	AddEventHandler(handler func(interface{})) uint32
@@ -115,6 +117,7 @@ type App struct {
 	db              *store.DB
 	statusMu        sync.Mutex
 	status          *syncStatus
+	heartbeatLast   atomic.Int64
 }
 
 func New(opts Options) (*App, error) {

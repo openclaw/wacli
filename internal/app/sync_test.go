@@ -131,6 +131,7 @@ func TestSyncEventHandlerClearsUnreadCountOnReadSelfReceipt(t *testing.T) {
 		&messagesStored,
 		&lastEvent,
 		make(chan struct{}, 1),
+		make(chan staleReconnectRequest, 1),
 		func(string, string) {},
 		nil,
 		nil,
@@ -171,6 +172,7 @@ func TestSyncEventHandlerIgnoresRegularReadReceiptsForUnreadCount(t *testing.T) 
 		&messagesStored,
 		&lastEvent,
 		make(chan struct{}, 1),
+		make(chan staleReconnectRequest, 1),
 		func(string, string) {},
 		nil,
 		nil,
@@ -1715,6 +1717,187 @@ func TestSyncFollowReconnectsAfterStreamReplaced(t *testing.T) {
 		connectCalls := f.connectCalls
 		f.mu.Unlock()
 		t.Fatalf("expected StreamReplaced to trigger reconnect, connect calls = %d", connectCalls)
+	}
+}
+
+func TestSyncFollowReconnectsWhenStaleThresholdExceeded(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	reconnected := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(10 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				f.mu.Lock()
+				connectCalls := f.connectCalls
+				f.mu.Unlock()
+				if connectCalls >= 2 {
+					close(reconnected)
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+
+	_, err := a.Sync(ctx, SyncOptions{
+		Mode:           SyncModeFollow,
+		AllowQR:        false,
+		MaxReconnect:   time.Second,
+		StaleThreshold: 200 * time.Millisecond,
+		AfterConnect: func(context.Context) error {
+			time.Sleep(250 * time.Millisecond)
+			f.emit(&events.KeepAliveTimeout{ErrorCount: 2, LastSuccess: nowUTC().Add(-250 * time.Millisecond)})
+			return nil
+		},
+	})
+	if err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	select {
+	case <-reconnected:
+	default:
+		f.mu.Lock()
+		connectCalls := f.connectCalls
+		f.mu.Unlock()
+		t.Fatalf("expected stale threshold to trigger reconnect, connect calls = %d", connectCalls)
+	}
+}
+
+func TestSyncFollowStaleThresholdDisablesAutoReconnectWhileConnected(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	var sawDisabled bool
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	_, err := a.Sync(ctx, SyncOptions{
+		Mode:           SyncModeFollow,
+		AllowQR:        false,
+		StaleThreshold: time.Second,
+		AfterConnect: func(context.Context) error {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if f.autoReconnect {
+				return fmt.Errorf("auto reconnect still enabled during stale-threshold sync")
+			}
+			sawDisabled = true
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if !sawDisabled {
+		t.Fatal("AfterConnect did not observe disabled auto reconnect")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.autoReconnect {
+		t.Fatal("auto reconnect was restored while fake client remained connected")
+	}
+}
+
+func TestSyncFollowIgnoresKeepAliveTimeoutFromPreviousConnection(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+	f.connected = true
+
+	var messagesStored atomic.Int64
+	var connectionEpoch atomic.Int64
+	connectionEpoch.Store(nowUTC().UnixNano())
+	disconnected := make(chan struct{}, 1)
+	staleReconnect := make(chan staleReconnectRequest, 1)
+	staleReconnect <- staleReconnectRequest{
+		threshold:   200 * time.Millisecond,
+		idle:        time.Minute,
+		errorCount:  2,
+		lastSuccess: time.Unix(0, connectionEpoch.Load()).Add(-time.Minute),
+		source:      "keepalive_timeout",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	_, err := a.runSyncFollow(ctx, time.Second, &messagesStored, &connectionEpoch, disconnected, staleReconnect)
+	if err != nil {
+		t.Fatalf("runSyncFollow: %v", err)
+	}
+
+	if !f.IsConnected() {
+		t.Fatal("previous-connection keepalive timeout closed current connection")
+	}
+	f.mu.Lock()
+	connectCalls := f.connectCalls
+	f.mu.Unlock()
+	if connectCalls != 0 {
+		t.Fatalf("previous-connection keepalive timeout reconnected, connect calls = %d", connectCalls)
+	}
+}
+
+func TestSyncFollowDoesNotReconnectWhenKeepAliveFailureIsRecent(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				f.emit(&events.KeepAliveTimeout{ErrorCount: 1, LastSuccess: nowUTC()})
+			}
+		}
+	}()
+
+	time.AfterFunc(600*time.Millisecond, func() {
+		f.mu.Lock()
+		connectCalls := f.connectCalls
+		f.mu.Unlock()
+		if connectCalls > 1 {
+			cancel()
+			t.Errorf("unexpected reconnect with recent keepalive failure, connect calls = %d", connectCalls)
+			return
+		}
+		cancel()
+	})
+
+	_, err := a.Sync(ctx, SyncOptions{
+		Mode:           SyncModeFollow,
+		AllowQR:        false,
+		StaleThreshold: time.Minute,
+	})
+	if err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("Sync: %v", err)
+	}
+}
+
+func TestSyncRejectsIneffectiveStaleThreshold(t *testing.T) {
+	a := newTestApp(t)
+
+	_, err := a.Sync(context.Background(), SyncOptions{
+		Mode:           SyncModeFollow,
+		StaleThreshold: MaxStaleThreshold(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "upstream auto-reconnect threshold") {
+		t.Fatalf("expected stale threshold validation error, got %v", err)
 	}
 }
 
