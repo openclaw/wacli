@@ -170,7 +170,7 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 
 	var err error
 	if opts.Mode == SyncModeFollow {
-		_, err = a.runSyncFollow(syncCtx, opts.MaxReconnect, opts.StaleThreshold, &messagesStored, &lastActivity, disconnected)
+		_, err = a.runSyncFollow(syncCtx, opts.MaxReconnect, opts.StaleThreshold, &messagesStored, &lastEvent, &lastActivity, disconnected)
 	} else {
 		_, err = a.runSyncUntilIdle(syncCtx, opts.IdleExit, opts.MaxReconnect, &messagesStored, &lastEvent, disconnected)
 	}

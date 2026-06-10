@@ -1939,6 +1939,51 @@ func TestSyncFollowDoesNotReconnectWhenConnectionActivityIsRecent(t *testing.T) 
 	}
 }
 
+func TestSyncFollowDoesNotReconnectWhenProcessingProgressIsRecent(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	var messagesStored atomic.Int64
+	var lastProgress atomic.Int64
+	var lastActivity atomic.Int64
+	lastActivity.Store(nowUTC().Add(-time.Minute).UnixNano())
+	lastProgress.Store(nowUTC().UnixNano())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				lastProgress.Store(nowUTC().UnixNano())
+			}
+		}
+	}()
+
+	time.AfterFunc(600*time.Millisecond, func() {
+		f.mu.Lock()
+		connectCalls := f.connectCalls
+		f.mu.Unlock()
+		if connectCalls > 0 {
+			cancel()
+			t.Errorf("unexpected reconnect while processing progresses, connect calls = %d", connectCalls)
+			return
+		}
+		cancel()
+	})
+
+	_, err := a.runSyncFollow(ctx, time.Second, 200*time.Millisecond, &messagesStored, &lastProgress, &lastActivity, make(chan struct{}, 1))
+	if err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("runSyncFollow: %v", err)
+	}
+}
+
 func TestSyncRetriesTransientAuthConnectFailure(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
