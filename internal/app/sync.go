@@ -12,15 +12,19 @@ import (
 
 	"github.com/openclaw/wacli/internal/store"
 	"github.com/openclaw/wacli/internal/wa"
+	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/appstate"
 	"go.mau.fi/whatsmeow/types"
 )
 
 const maxAuthConnectAttempts = 3
 
-// MaxStaleThreshold is the exclusive upper bound for keepalive-failure thresholds.
-// whatsmeow force-reconnects after 3 minutes of failed keepalives.
-const MaxStaleThreshold = 3 * time.Minute
+// MaxStaleThreshold returns the exclusive upper bound for keepalive-failure thresholds.
+// It reserves one maximum keepalive probe interval plus response deadline before
+// whatsmeow's own failed-keepalive auto-reconnect window.
+func MaxStaleThreshold() time.Duration {
+	return whatsmeow.KeepAliveMaxFailTime - whatsmeow.KeepAliveIntervalMax - whatsmeow.KeepAliveResponseDeadline
+}
 
 type SyncMode string
 
@@ -67,8 +71,8 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	if (opts.Mode == SyncModeBootstrap || opts.Mode == SyncModeOnce) && opts.IdleExit <= 0 {
 		opts.IdleExit = 30 * time.Second
 	}
-	if opts.StaleThreshold >= MaxStaleThreshold {
-		return SyncResult{}, fmt.Errorf("stale threshold %s must be less than upstream auto-reconnect threshold %s", opts.StaleThreshold, MaxStaleThreshold)
+	if maxStaleThreshold := MaxStaleThreshold(); opts.StaleThreshold >= maxStaleThreshold {
+		return SyncResult{}, fmt.Errorf("stale threshold %s must be less than upstream auto-reconnect threshold %s", opts.StaleThreshold, maxStaleThreshold)
 	}
 	if opts.WarnNoLimits && opts.MaxMessages <= 0 && opts.MaxDBSizeBytes <= 0 {
 		a.emitWarning(

@@ -91,7 +91,7 @@ Immediately after QR pairing success, `wacli auth` runs a bootstrap sync:
 - persists new messages as they arrive
 - performs safe reconnect with backoff on disconnect
 - continues best-effort history catch-up when WhatsApp emits it
-- optional `--stale-threshold` detects keepalive failures and force-reconnects when the last successful keepalive is older than the given duration; accepted values are `1s` up to but not including `3m` because whatsmeow auto-reconnects after 3 minutes of failed keepalives
+- optional `--stale-threshold` detects keepalive failures and force-reconnects when the last successful keepalive is older than the given duration; accepted values are `1s` up to but not including `2m20s`, reserving one maximum keepalive probe interval plus response deadline before whatsmeow auto-reconnects after 3 minutes of failed keepalives
 
 ## Database schema (wacli.db)
 
