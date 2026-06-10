@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/openclaw/wacli/internal/fsutil"
@@ -115,6 +116,7 @@ type App struct {
 	db              *store.DB
 	statusMu        sync.Mutex
 	status          *syncStatus
+	heartbeatLast   atomic.Int64
 }
 
 func New(opts Options) (*App, error) {

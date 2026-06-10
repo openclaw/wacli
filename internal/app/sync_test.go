@@ -125,11 +125,13 @@ func TestSyncEventHandlerClearsUnreadCountOnReadSelfReceipt(t *testing.T) {
 
 	var messagesStored atomic.Int64
 	var lastEvent atomic.Int64
+	var lastActivity atomic.Int64
 	a.addSyncEventHandler(
 		context.Background(),
 		SyncOptions{},
 		&messagesStored,
 		&lastEvent,
+		&lastActivity,
 		make(chan struct{}, 1),
 		func(string, string) {},
 		nil,
@@ -165,11 +167,13 @@ func TestSyncEventHandlerIgnoresRegularReadReceiptsForUnreadCount(t *testing.T) 
 
 	var messagesStored atomic.Int64
 	var lastEvent atomic.Int64
+	var lastActivity atomic.Int64
 	a.addSyncEventHandler(
 		context.Background(),
 		SyncOptions{},
 		&messagesStored,
 		&lastEvent,
+		&lastActivity,
 		make(chan struct{}, 1),
 		func(string, string) {},
 		nil,
@@ -1767,6 +1771,68 @@ func TestSyncFollowReconnectsWhenStaleThresholdExceeded(t *testing.T) {
 	}
 }
 
+func TestSyncFollowReconnectsWhenOnlyKeepAliveTimeoutsArrive(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	go func() {
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				f.emit(&events.KeepAliveTimeout{ErrorCount: 1, LastSuccess: nowUTC().Add(-time.Minute)})
+			}
+		}
+	}()
+
+	reconnected := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(10 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				f.mu.Lock()
+				connectCalls := f.connectCalls
+				f.mu.Unlock()
+				if connectCalls >= 2 {
+					close(reconnected)
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+
+	_, err := a.Sync(ctx, SyncOptions{
+		Mode:           SyncModeFollow,
+		AllowQR:        false,
+		MaxReconnect:   time.Second,
+		StaleThreshold: 300 * time.Millisecond,
+	})
+	if err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	select {
+	case <-reconnected:
+	default:
+		f.mu.Lock()
+		connectCalls := f.connectCalls
+		f.mu.Unlock()
+		t.Fatalf("expected stale threshold to trigger reconnect despite keepalive timeouts, connect calls = %d", connectCalls)
+	}
+}
+
 func TestSyncFollowDoesNotReconnectWhenActivityIsRecent(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
@@ -1815,6 +1881,49 @@ func TestSyncFollowDoesNotReconnectWhenActivityIsRecent(t *testing.T) {
 		if connectCalls > 1 {
 			cancel()
 			t.Errorf("unexpected reconnect with active messages, connect calls = %d", connectCalls)
+			return
+		}
+		cancel()
+	})
+
+	_, err := a.Sync(ctx, SyncOptions{
+		Mode:           SyncModeFollow,
+		AllowQR:        false,
+		StaleThreshold: 200 * time.Millisecond,
+	})
+	if err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("Sync: %v", err)
+	}
+}
+
+func TestSyncFollowDoesNotReconnectWhenConnectionActivityIsRecent(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				f.emit(&events.Connected{})
+			}
+		}
+	}()
+
+	time.AfterFunc(600*time.Millisecond, func() {
+		f.mu.Lock()
+		connectCalls := f.connectCalls
+		f.mu.Unlock()
+		if connectCalls > 1 {
+			cancel()
+			t.Errorf("unexpected reconnect with connection events, connect calls = %d", connectCalls)
 			return
 		}
 		cancel()

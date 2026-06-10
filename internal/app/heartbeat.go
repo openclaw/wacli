@@ -3,13 +3,10 @@ package app
 import (
 	"os"
 	"path/filepath"
-	"sync/atomic"
 	"time"
 
 	"github.com/openclaw/wacli/internal/fsutil"
 )
-
-var lastHeartbeatWrite atomic.Int64
 
 const heartbeatMinInterval = time.Minute
 
@@ -18,11 +15,11 @@ const heartbeatMinInterval = time.Minute
 // lets external processes (e.g. wacli doctor) detect stale sync sessions.
 func (a *App) writeHeartbeat() {
 	now := nowUTC()
-	last := time.Unix(0, lastHeartbeatWrite.Load())
+	last := time.Unix(0, a.heartbeatLast.Load())
 	if now.Sub(last) < heartbeatMinInterval {
 		return
 	}
-	lastHeartbeatWrite.Store(now.UnixNano())
+	a.heartbeatLast.Store(now.UnixNano())
 	path := filepath.Join(a.opts.StoreDir, "HEARTBEAT")
 	_ = fsutil.WritePrivateFile(path, []byte(now.Format(time.RFC3339)))
 }

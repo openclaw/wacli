@@ -6,14 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/openclaw/wacli/internal/out"
-	waProto "go.mau.fi/whatsmeow/binary/proto"
-	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
-	"google.golang.org/protobuf/proto"
 )
 
 func TestSyncWritesHeartbeatFileOnActivity(t *testing.T) {
@@ -21,35 +19,23 @@ func TestSyncWritesHeartbeatFileOnActivity(t *testing.T) {
 	f := newFakeWA()
 	a.wa = f
 
-	// Reset the throttle so the first event writes immediately.
-	lastHeartbeatWrite.Store(0)
+	var messagesStored atomic.Int64
+	var lastEvent atomic.Int64
+	var lastActivity atomic.Int64
+	handlerID := a.addSyncEventHandler(
+		context.Background(),
+		SyncOptions{Mode: SyncModeFollow},
+		&messagesStored,
+		&lastEvent,
+		&lastActivity,
+		make(chan struct{}, 1),
+		func(string, string) {},
+		nil,
+		nil,
+	)
+	defer f.RemoveEventHandler(handlerID)
 
-	chat := types.JID{User: "123", Server: types.DefaultUserServer}
-	f.connectEvents = []interface{}{&events.Message{
-		Info: types.MessageInfo{
-			MessageSource: types.MessageSource{
-				Chat:     chat,
-				Sender:   chat,
-				IsFromMe: false,
-			},
-			ID:        "heartbeat-msg-1",
-			Timestamp: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
-			PushName:  "Alice",
-		},
-		Message: &waProto.Message{Conversation: proto.String("hello")},
-	}}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	_, err := a.Sync(ctx, SyncOptions{
-		Mode:     SyncModeOnce,
-		AllowQR:  false,
-		IdleExit: 100 * time.Millisecond,
-	})
-	if err != nil {
-		t.Fatalf("Sync: %v", err)
-	}
+	f.emit(&events.Connected{})
 
 	heartbeatPath := filepath.Join(a.opts.StoreDir, "HEARTBEAT")
 	data, err := os.ReadFile(heartbeatPath)
@@ -62,6 +48,64 @@ func TestSyncWritesHeartbeatFileOnActivity(t *testing.T) {
 	}
 	if time.Since(ts) > 10*time.Second {
 		t.Fatalf("heartbeat timestamp too old: %s", ts)
+	}
+}
+
+func TestSyncOnceDoesNotWriteHeartbeatFile(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	var messagesStored atomic.Int64
+	var lastEvent atomic.Int64
+	var lastActivity atomic.Int64
+	handlerID := a.addSyncEventHandler(
+		context.Background(),
+		SyncOptions{Mode: SyncModeOnce},
+		&messagesStored,
+		&lastEvent,
+		&lastActivity,
+		make(chan struct{}, 1),
+		func(string, string) {},
+		nil,
+		nil,
+	)
+	defer f.RemoveEventHandler(handlerID)
+
+	f.emit(&events.Connected{})
+
+	heartbeatPath := filepath.Join(a.opts.StoreDir, "HEARTBEAT")
+	if _, err := os.Stat(heartbeatPath); !os.IsNotExist(err) {
+		t.Fatalf("heartbeat stat err = %v, want not exist", err)
+	}
+}
+
+func TestSyncFollowDoesNotWriteHeartbeatOnKeepAliveTimeout(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	var messagesStored atomic.Int64
+	var lastEvent atomic.Int64
+	var lastActivity atomic.Int64
+	handlerID := a.addSyncEventHandler(
+		context.Background(),
+		SyncOptions{Mode: SyncModeFollow},
+		&messagesStored,
+		&lastEvent,
+		&lastActivity,
+		make(chan struct{}, 1),
+		func(string, string) {},
+		nil,
+		nil,
+	)
+	defer f.RemoveEventHandler(handlerID)
+
+	f.emit(&events.KeepAliveTimeout{ErrorCount: 1, LastSuccess: nowUTC().Add(-time.Minute)})
+
+	heartbeatPath := filepath.Join(a.opts.StoreDir, "HEARTBEAT")
+	if _, err := os.Stat(heartbeatPath); !os.IsNotExist(err) {
+		t.Fatalf("heartbeat stat err = %v, want not exist", err)
 	}
 }
 
@@ -81,6 +125,29 @@ func TestReadHeartbeatReturnsTimestampFromFile(t *testing.T) {
 	got := ReadHeartbeat(dir)
 	if !got.Equal(want) {
 		t.Fatalf("ReadHeartbeat = %s, want %s", got, want)
+	}
+}
+
+func TestHeartbeatThrottleIsPerApp(t *testing.T) {
+	a1 := newTestApp(t)
+	a2 := newTestApp(t)
+
+	a1.writeHeartbeat()
+	a2.writeHeartbeat()
+
+	for _, tc := range []struct {
+		name string
+		app  *App
+	}{
+		{name: "first app", app: a1},
+		{name: "second app", app: a2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			heartbeatPath := filepath.Join(tc.app.opts.StoreDir, "HEARTBEAT")
+			if _, err := os.Stat(heartbeatPath); err != nil {
+				t.Fatalf("stat heartbeat: %v", err)
+			}
+		})
 	}
 }
 
@@ -146,31 +213,8 @@ func TestSyncFollowStaleReconnectResetsIdleDuration(t *testing.T) {
 
 func TestHeartbeatFileHasOwnerOnlyPermissions(t *testing.T) {
 	a := newTestApp(t)
-	f := newFakeWA()
-	a.wa = f
 
-	lastHeartbeatWrite.Store(0)
-
-	f.connectEvents = []interface{}{&events.Message{
-		Info: types.MessageInfo{
-			MessageSource: types.MessageSource{
-				Chat:     types.JID{User: "123", Server: types.DefaultUserServer},
-				Sender:   types.JID{User: "123", Server: types.DefaultUserServer},
-				IsFromMe: false,
-			},
-			ID:        "perm-msg",
-			Timestamp: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
-			PushName:  "Alice",
-		},
-		Message: &waProto.Message{Conversation: proto.String("hello")},
-	}}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	_, err := a.Sync(ctx, SyncOptions{Mode: SyncModeOnce, AllowQR: false, IdleExit: 100 * time.Millisecond})
-	if err != nil {
-		t.Fatalf("Sync: %v", err)
-	}
+	a.writeHeartbeat()
 
 	heartbeatPath := filepath.Join(a.opts.StoreDir, "HEARTBEAT")
 	info, err := os.Stat(heartbeatPath)

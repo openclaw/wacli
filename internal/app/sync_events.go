@@ -33,11 +33,16 @@ func newMediaEnqueuer(ctx context.Context, jobs chan<- mediaJob) func(chatJID, m
 	}
 }
 
-func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, messagesStored, lastEvent *atomic.Int64, disconnected chan<- struct{}, enqueueMedia func(string, string), enqueueWebhook func(wa.ParsedMessage), limits *syncStorageLimits) uint32 {
+func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, messagesStored, lastEvent, lastActivity *atomic.Int64, disconnected chan<- struct{}, enqueueMedia func(string, string), enqueueWebhook func(wa.ParsedMessage), limits *syncStorageLimits) uint32 {
 	var panicCount atomic.Int64
 	var appStateRecoveries sync.Map
 	return a.wa.AddEventHandler(func(evt interface{}) {
-		a.writeHeartbeat()
+		if syncActivityEvent(evt) {
+			lastActivity.Store(nowUTC().UnixNano())
+			if opts.Mode == SyncModeFollow {
+				a.writeHeartbeat()
+			}
+		}
 
 		// Recover from panics so unexpected message structures do not crash the
 		// process. Include event type, stack trace, and a running counter.
@@ -109,6 +114,28 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 			a.handleAppStateSyncError(ctx, v, &appStateRecoveries)
 		}
 	})
+}
+
+func syncActivityEvent(evt interface{}) bool {
+	switch evt.(type) {
+	case nil,
+		*events.KeepAliveTimeout,
+		*events.PairError,
+		*events.LoggedOut,
+		*events.StreamReplaced,
+		*events.ManualLoginReconnect,
+		*events.TemporaryBan,
+		*events.ConnectFailure,
+		*events.ClientOutdated,
+		*events.CATRefreshError,
+		*events.StreamError,
+		*events.Disconnected,
+		*events.AppStateSyncError,
+		*events.MediaRetryError:
+		return false
+	default:
+		return true
+	}
 }
 
 func (a *App) handleReceiptEvent(ctx context.Context, evt *events.Receipt) {
