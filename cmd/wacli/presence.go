@@ -100,7 +100,9 @@ func runPresence(flags *rootFlags, to string, state types.ChatPresence, media st
 		return err
 	}
 
-	if err := a.WA().SendChatPresence(ctx, toJID, state, chatMedia); err != nil {
+	if err := sendPresenceWithRetry(ctx, reconnectForSend(a), func(ctx context.Context) error {
+		return a.WA().SendChatPresence(ctx, toJID, state, chatMedia)
+	}); err != nil {
 		return err
 	}
 
@@ -147,4 +149,11 @@ func presenceStateFromString(state string) (types.ChatPresence, error) {
 	default:
 		return "", fmt.Errorf("unsupported presence state %q", state)
 	}
+}
+
+func sendPresenceWithRetry(ctx context.Context, reconnect func(context.Context) error, send func(context.Context) error) error {
+	_, err := runSendOperation(ctx, reconnect, func(ctx context.Context) (struct{}, error) {
+		return struct{}{}, send(ctx)
+	})
+	return err
 }
