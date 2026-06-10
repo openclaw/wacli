@@ -13,6 +13,7 @@
 
 ### Fixed
 
+- Media: download synced WhatsApp GIF playback videos by treating their stored `gif` label as video-encrypted media. (#274 - thanks @larskluge)
 - Sync: reconnect after WhatsApp replaces the linked-device stream instead of leaving `sync --follow` offline. (#266 - thanks @ngutman)
 - Sync: clear chat unread state from `ReceiptTypeReadSelf` receipts so linked-device reads still update when `regular_high` app-state sync is unhealthy. (#269 - thanks @p-jackson1)
 
