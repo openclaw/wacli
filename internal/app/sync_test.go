@@ -1814,6 +1814,18 @@ func TestSyncFollowDoesNotReconnectWhenKeepAliveFailureIsRecent(t *testing.T) {
 	}
 }
 
+func TestSyncRejectsIneffectiveStaleThreshold(t *testing.T) {
+	a := newTestApp(t)
+
+	_, err := a.Sync(context.Background(), SyncOptions{
+		Mode:           SyncModeFollow,
+		StaleThreshold: MaxStaleThreshold + time.Second,
+	})
+	if err == nil || !strings.Contains(err.Error(), "maximum effective threshold") {
+		t.Fatalf("expected stale threshold validation error, got %v", err)
+	}
+}
+
 func TestSyncRetriesTransientAuthConnectFailure(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()

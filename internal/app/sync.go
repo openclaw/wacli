@@ -18,6 +18,10 @@ import (
 
 const maxAuthConnectAttempts = 3
 
+// MaxStaleThreshold is the highest effective keepalive-failure threshold.
+// whatsmeow force-reconnects after 3 minutes of failed keepalives.
+const MaxStaleThreshold = 3 * time.Minute
+
 type SyncMode string
 
 const (
@@ -62,6 +66,9 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	}
 	if (opts.Mode == SyncModeBootstrap || opts.Mode == SyncModeOnce) && opts.IdleExit <= 0 {
 		opts.IdleExit = 30 * time.Second
+	}
+	if opts.StaleThreshold > MaxStaleThreshold {
+		return SyncResult{}, fmt.Errorf("stale threshold %s exceeds maximum effective threshold %s", opts.StaleThreshold, MaxStaleThreshold)
 	}
 	if opts.WarnNoLimits && opts.MaxMessages <= 0 && opts.MaxDBSizeBytes <= 0 {
 		a.emitWarning(

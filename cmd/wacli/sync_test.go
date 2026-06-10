@@ -23,3 +23,13 @@ func TestSyncCommandRequiresWebhookForSecret(t *testing.T) {
 		t.Fatalf("expected webhook-secret validation error, got %v", err)
 	}
 }
+
+func TestSyncCommandRejectsIneffectiveStaleThreshold(t *testing.T) {
+	cmd := newSyncCmd(&rootFlags{})
+	cmd.SetArgs([]string{"--stale-threshold", "5m"})
+
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "--stale-threshold must be at most 3m0s") {
+		t.Fatalf("expected stale-threshold validation error, got %v", err)
+	}
+}

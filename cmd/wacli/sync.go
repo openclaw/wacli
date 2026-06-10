@@ -44,6 +44,9 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 			if staleThreshold != 0 && staleThreshold < time.Second {
 				return fmt.Errorf("--stale-threshold must be at least 1s, got %s", staleThreshold)
 			}
+			if staleThreshold > appPkg.MaxStaleThreshold {
+				return fmt.Errorf("--stale-threshold must be at most %s because whatsmeow auto-reconnects after that much keepalive failure, got %s", appPkg.MaxStaleThreshold, staleThreshold)
+			}
 			ctx, stop := signalContextWithEvents(out.NewEventWriter(os.Stderr, flags.events))
 			defer stop()
 
@@ -121,7 +124,7 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().BoolVar(&follow, "follow", true, "keep syncing until Ctrl+C")
 	cmd.Flags().DurationVar(&idleExit, "idle-exit", 30*time.Second, "exit after being idle (once mode)")
 	cmd.Flags().DurationVar(&maxReconnect, "max-reconnect", 5*time.Minute, "give up reconnecting after this duration (0 = unlimited)")
-	cmd.Flags().DurationVar(&staleThreshold, "stale-threshold", 0, "force reconnect when keepalive failures last this long in follow mode (0 = disabled)")
+	cmd.Flags().DurationVar(&staleThreshold, "stale-threshold", 0, "force reconnect when keepalive failures last this long in follow mode (1s-3m, 0 = disabled)")
 	cmd.Flags().BoolVar(&downloadMedia, "download-media", false, "download media in the background during sync")
 	cmd.Flags().BoolVar(&refreshContacts, "refresh-contacts", false, "refresh contacts from session store into local DB")
 	cmd.Flags().BoolVar(&refreshGroups, "refresh-groups", false, "refresh joined groups (live) into local DB")
