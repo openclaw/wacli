@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -27,6 +28,7 @@ func TestSyncWritesHeartbeatFileOnActivity(t *testing.T) {
 		&messagesStored,
 		&lastEvent,
 		make(chan struct{}, 1),
+		make(chan staleReconnectRequest, 1),
 		func(string, string) {},
 		nil,
 		nil,
@@ -62,6 +64,7 @@ func TestSyncOnceDoesNotWriteHeartbeatFile(t *testing.T) {
 		&messagesStored,
 		&lastEvent,
 		make(chan struct{}, 1),
+		make(chan staleReconnectRequest, 1),
 		func(string, string) {},
 		nil,
 		nil,
@@ -89,6 +92,7 @@ func TestSyncFollowDoesNotWriteHeartbeatOnKeepAliveTimeout(t *testing.T) {
 		&messagesStored,
 		&lastEvent,
 		make(chan struct{}, 1),
+		make(chan staleReconnectRequest, 1),
 		func(string, string) {},
 		nil,
 		nil,
@@ -181,12 +185,14 @@ func TestSyncFollowDoesNotReconnectOnFreshKeepAliveTimeout(t *testing.T) {
 	var messagesStored atomic.Int64
 	var lastEvent atomic.Int64
 	disconnected := make(chan struct{}, 1)
+	staleReconnect := make(chan staleReconnectRequest, 1)
 	handlerID := a.addSyncEventHandler(
 		context.Background(),
 		SyncOptions{Mode: SyncModeFollow, StaleThreshold: time.Minute},
 		&messagesStored,
 		&lastEvent,
 		disconnected,
+		staleReconnect,
 		func(string, string) {},
 		nil,
 		nil,
@@ -196,8 +202,8 @@ func TestSyncFollowDoesNotReconnectOnFreshKeepAliveTimeout(t *testing.T) {
 	f.emit(&events.KeepAliveTimeout{ErrorCount: 1, LastSuccess: nowUTC()})
 
 	select {
-	case <-disconnected:
-		t.Fatal("fresh keepalive timeout triggered reconnect")
+	case req := <-staleReconnect:
+		t.Fatalf("fresh keepalive timeout queued stale reconnect: %+v", req)
 	case <-time.After(50 * time.Millisecond):
 	}
 }
@@ -227,39 +233,75 @@ func TestSyncFollowEmitsStaleEvent(t *testing.T) {
 
 	var messagesStored atomic.Int64
 	var lastEvent atomic.Int64
+	var connectionEpoch atomic.Int64
 	disconnected := make(chan struct{}, 1)
+	staleReconnect := make(chan staleReconnectRequest, 1)
 	handlerID := a.addSyncEventHandler(
 		context.Background(),
 		SyncOptions{Mode: SyncModeFollow, StaleThreshold: 200 * time.Millisecond},
 		&messagesStored,
 		&lastEvent,
 		disconnected,
+		staleReconnect,
 		func(string, string) {},
 		nil,
 		nil,
 	)
 	defer f.RemoveEventHandler(handlerID)
 
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := a.runSyncFollow(ctx, time.Second, &messagesStored, &connectionEpoch, disconnected, staleReconnect)
+		done <- err
+	}()
+
 	f.emit(&events.KeepAliveTimeout{ErrorCount: 2, LastSuccess: nowUTC().Add(-time.Minute)})
 
-	select {
-	case <-disconnected:
-	default:
-		t.Fatal("expected stale event to trigger reconnect")
+	for {
+		f.mu.Lock()
+		connectCalls := f.connectCalls
+		f.mu.Unlock()
+		if connectCalls >= 1 {
+			cancel()
+			break
+		}
+		select {
+		case err := <-done:
+			if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("runSyncFollow: %v", err)
+			}
+			t.Fatal("expected stale event to reconnect")
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
-	if f.IsConnected() {
-		t.Fatal("expected stale event to close connection before reconnect")
-	}
+	<-done
 
 	var envelope struct {
 		Event string         `json:"event"`
 		Data  map[string]any `json:"data"`
 	}
-	if err := json.Unmarshal(bytes.TrimSpace(eventsOut.Bytes()), &envelope); err != nil {
-		t.Fatalf("parse stale event %q: %v", eventsOut.String(), err)
+	var found bool
+	for _, line := range bytes.Split(bytes.TrimSpace(eventsOut.Bytes()), []byte("\n")) {
+		if len(bytes.TrimSpace(line)) == 0 {
+			continue
+		}
+		var candidate struct {
+			Event string         `json:"event"`
+			Data  map[string]any `json:"data"`
+		}
+		if err := json.Unmarshal(line, &candidate); err != nil {
+			t.Fatalf("parse event line %q: %v\nfull events:\n%s", string(line), err, eventsOut.String())
+		}
+		if candidate.Event == "stale" {
+			envelope = candidate
+			found = true
+			break
+		}
 	}
-	if envelope.Event != "stale" {
-		t.Fatalf("event = %q, want stale", envelope.Event)
+	if !found {
+		t.Fatalf("missing stale event in:\n%s", eventsOut.String())
 	}
 	if envelope.Data["source"] != "keepalive_timeout" || envelope.Data["error_count"] != float64(2) {
 		t.Fatalf("unexpected stale event data: %#v", envelope.Data)

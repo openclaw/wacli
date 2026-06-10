@@ -24,9 +24,10 @@ import (
 type fakeWA struct {
 	mu sync.Mutex
 
-	authed    bool
-	connected bool
-	linkedLID string
+	authed        bool
+	connected     bool
+	autoReconnect bool
+	linkedLID     string
 
 	nextHandlerID uint32
 	handlers      map[uint32]func(interface{})
@@ -115,6 +116,7 @@ type fakeAppStateFetch struct {
 func newFakeWA() *fakeWA {
 	return &fakeWA{
 		authed:        true,
+		autoReconnect: true,
 		handlers:      map[uint32]func(interface{}){},
 		contacts:      map[types.JID]types.ContactInfo{},
 		groups:        map[types.JID]*types.GroupInfo{},
@@ -143,6 +145,17 @@ func (f *fakeWA) IsConnected() bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.connected
+}
+
+func (f *fakeWA) SetAutoReconnect(enabled bool) (bool, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	previous := f.autoReconnect
+	if f.connected {
+		return previous, false
+	}
+	f.autoReconnect = enabled
+	return previous, true
 }
 
 func (f *fakeWA) Connect(ctx context.Context, opts wa.ConnectOptions) error {

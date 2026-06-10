@@ -92,15 +92,28 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	if err := a.OpenWA(); err != nil {
 		return SyncResult{}, err
 	}
+	if opts.Mode == SyncModeFollow && opts.StaleThreshold > 0 {
+		restoreAutoReconnect, ok := a.wa.SetAutoReconnect(false)
+		if !ok {
+			return SyncResult{}, fmt.Errorf("could not configure stale-threshold reconnect on an already-connected WhatsApp client")
+		}
+		defer func() {
+			if !a.wa.IsConnected() {
+				a.wa.SetAutoReconnect(restoreAutoReconnect)
+			}
+		}()
+	}
 	a.wa.SetManualHistorySyncDownload(true)
 	defer a.wa.SetManualHistorySyncDownload(false)
 
 	var messagesStored atomic.Int64
 	lastEvent := atomic.Int64{}
+	connectionEpoch := atomic.Int64{}
 	now := nowUTC().UnixNano()
 	lastEvent.Store(now)
 
 	disconnected := make(chan struct{}, 1)
+	staleReconnect := make(chan staleReconnectRequest, 1)
 
 	var stopMedia func()
 	var mediaJobs chan mediaJob
@@ -129,9 +142,10 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 		defer stopWebhook()
 	}
 
-	handlerID := a.addSyncEventHandler(syncCtx, opts, &messagesStored, &lastEvent, disconnected, enqueueMedia, enqueueWebhook, limits)
+	handlerID := a.addSyncEventHandler(syncCtx, opts, &messagesStored, &lastEvent, disconnected, staleReconnect, enqueueMedia, enqueueWebhook, limits)
 	defer a.wa.RemoveEventHandler(handlerID)
 
+	connectionEpoch.Store(nowUTC().UnixNano())
 	if err := a.connectForSync(syncCtx, opts); err != nil {
 		return SyncResult{}, err
 	}
@@ -178,7 +192,7 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 
 	var err error
 	if opts.Mode == SyncModeFollow {
-		_, err = a.runSyncFollow(syncCtx, opts.MaxReconnect, &messagesStored, disconnected)
+		_, err = a.runSyncFollow(syncCtx, opts.MaxReconnect, &messagesStored, &connectionEpoch, disconnected, staleReconnect)
 	} else {
 		_, err = a.runSyncUntilIdle(syncCtx, opts.IdleExit, opts.MaxReconnect, &messagesStored, &lastEvent, disconnected)
 	}

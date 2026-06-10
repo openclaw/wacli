@@ -33,7 +33,15 @@ func newMediaEnqueuer(ctx context.Context, jobs chan<- mediaJob) func(chatJID, m
 	}
 }
 
-func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, messagesStored, lastEvent *atomic.Int64, disconnected chan<- struct{}, enqueueMedia func(string, string), enqueueWebhook func(wa.ParsedMessage), limits *syncStorageLimits) uint32 {
+type staleReconnectRequest struct {
+	threshold   time.Duration
+	idle        time.Duration
+	errorCount  int
+	lastSuccess time.Time
+	source      string
+}
+
+func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, messagesStored, lastEvent *atomic.Int64, disconnected chan<- struct{}, staleReconnect chan<- staleReconnectRequest, enqueueMedia func(string, string), enqueueWebhook func(wa.ParsedMessage), limits *syncStorageLimits) uint32 {
 	var panicCount atomic.Int64
 	var appStateRecoveries sync.Map
 	return a.wa.AddEventHandler(func(evt interface{}) {
@@ -93,7 +101,7 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 		case *events.Connected:
 			a.emitOrPrint("connected", nil, "\nConnected.\n")
 		case *events.KeepAliveTimeout:
-			a.handleKeepAliveTimeout(opts, v, disconnected)
+			a.handleKeepAliveTimeout(opts, v, staleReconnect)
 		case *events.Disconnected:
 			a.emitOrPrint("disconnected", nil, "\nDisconnected.\n")
 			select {
@@ -115,7 +123,7 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 	})
 }
 
-func (a *App) handleKeepAliveTimeout(opts SyncOptions, evt *events.KeepAliveTimeout, disconnected chan<- struct{}) {
+func (a *App) handleKeepAliveTimeout(opts SyncOptions, evt *events.KeepAliveTimeout, staleReconnect chan<- staleReconnectRequest) {
 	if opts.Mode != SyncModeFollow || opts.StaleThreshold <= 0 || evt == nil || evt.LastSuccess.IsZero() {
 		return
 	}
@@ -123,17 +131,15 @@ func (a *App) handleKeepAliveTimeout(opts SyncOptions, evt *events.KeepAliveTime
 	if idle < opts.StaleThreshold {
 		return
 	}
-	a.emitOrPrint("stale", map[string]any{
-		"threshold":     opts.StaleThreshold.String(),
-		"idle_duration": idle.String(),
-		"error_count":   evt.ErrorCount,
-		"source":        "keepalive_timeout",
-	}, "\nKeepalive has been failing for %s (threshold %s), reconnecting...\n", idle, opts.StaleThreshold)
-	// Force-close before reconnecting, matching StreamReplaced. Without this,
-	// Client.Connect can see the existing socket as still live and return nil.
-	a.wa.Close()
+	req := staleReconnectRequest{
+		threshold:   opts.StaleThreshold,
+		idle:        idle,
+		errorCount:  evt.ErrorCount,
+		lastSuccess: evt.LastSuccess,
+		source:      "keepalive_timeout",
+	}
 	select {
-	case disconnected <- struct{}{}:
+	case staleReconnect <- req:
 	default:
 	}
 }

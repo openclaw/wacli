@@ -26,6 +26,7 @@ type WAClient interface {
 	Close()
 	IsAuthed() bool
 	IsConnected() bool
+	SetAutoReconnect(enabled bool) (previous bool, ok bool)
 	Connect(ctx context.Context, opts wa.ConnectOptions) error
 
 	AddEventHandler(handler func(interface{})) uint32
