@@ -221,6 +221,10 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 }
 
 func executeDelegatedPresence(ctx context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {
+	state, err := presenceStateFromString(req.PresenceState)
+	if err != nil {
+		return sendDelegateResponse{}, err
+	}
 	toJID, err := wa.ParseUserOrJID(req.To)
 	if err != nil {
 		return sendDelegateResponse{}, err
@@ -230,7 +234,7 @@ func executeDelegatedPresence(ctx context.Context, a *app.App, req sendDelegateR
 	if err != nil {
 		return sendDelegateResponse{}, err
 	}
-	if err := a.WA().SendChatPresence(ctx, toJID, types.ChatPresence(req.PresenceState), chatMedia); err != nil {
+	if err := a.WA().SendChatPresence(ctx, toJID, state, chatMedia); err != nil {
 		return sendDelegateResponse{}, err
 	}
 	return sendDelegateResponse{OK: true, Sent: true, To: toJID.String()}, nil

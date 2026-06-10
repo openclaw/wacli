@@ -137,3 +137,14 @@ func presenceMediaFromString(media string) (types.ChatPresenceMedia, error) {
 		return "", fmt.Errorf("unsupported --media %q (supported: audio)", media)
 	}
 }
+
+func presenceStateFromString(state string) (types.ChatPresence, error) {
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case string(types.ChatPresenceComposing):
+		return types.ChatPresenceComposing, nil
+	case string(types.ChatPresencePaused):
+		return types.ChatPresencePaused, nil
+	default:
+		return "", fmt.Errorf("unsupported presence state %q", state)
+	}
+}

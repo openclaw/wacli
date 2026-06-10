@@ -6,6 +6,7 @@
 
 - Groups: add live admin commands for creating groups, setting descriptions, toggling announce-only and admin-only edits, and approving or rejecting join requests. (#265 - thanks @dovocoder)
 - Groups: include resolved phone numbers in pending join request output when LID mappings are available. (#273 - thanks @cielecki)
+- Presence: delegate typing and paused indicators through the sync daemon send socket when the store lock is held. (#272 - thanks @kidshaker)
 - Profile: add commands to remove the profile picture, set About text, set the profile display name, fetch profile picture metadata, fetch a user's About text, and fetch WhatsApp Business profile details. (#267 - thanks @dovocoder)
 - Sync: add opt-in keepalive-failure stale detection for `sync --follow` (`1s` to `<2m20s`), including forced reconnect, a `stale` NDJSON event, a private store `HEARTBEAT`, and `doctor --json` `last_activity_at`. (#278 - thanks @thedavidweng)
 
