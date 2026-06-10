@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -12,12 +13,13 @@ const heartbeatMinInterval = time.Minute
 
 // writeHeartbeat persists the current timestamp to {storeDir}/HEARTBEAT,
 // throttled to at most once per minute to avoid excessive I/O. The file
-// lets external processes (e.g. wacli doctor) observe sync follow activity.
+// lets external processes (e.g. wacli doctor) inspect observed sync activity.
 func (a *App) writeHeartbeat() {
 	now := nowUTC()
 	nowNanos := now.UnixNano()
+	var lastNanos int64
 	for {
-		lastNanos := a.heartbeatLast.Load()
+		lastNanos = a.heartbeatLast.Load()
 		last := time.Unix(0, lastNanos)
 		if now.Sub(last) < heartbeatMinInterval {
 			return
@@ -27,7 +29,13 @@ func (a *App) writeHeartbeat() {
 		}
 	}
 	path := filepath.Join(a.opts.StoreDir, "HEARTBEAT")
-	_ = fsutil.WritePrivateFileAtomic(path, []byte(now.Format(time.RFC3339)))
+	if err := fsutil.WritePrivateFileAtomic(path, []byte(now.Format(time.RFC3339))); err != nil {
+		a.emitWarning(
+			"heartbeat_write_failed",
+			fmt.Sprintf("warning: failed to write sync heartbeat: %v", err),
+			map[string]any{"error": err.Error()},
+		)
+	}
 }
 
 // ReadHeartbeat reads the last heartbeat timestamp from the store directory.

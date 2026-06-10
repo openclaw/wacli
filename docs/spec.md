@@ -35,7 +35,7 @@ Proposed files:
 - `<store>/wacli.db` — our SQLite DB (messages/chats, FTS, local metadata).
 - `<store>/media/...` — downloaded media (optional, on-demand or background).
 - `<store>/LOCK` — store lock to prevent concurrent access.
-- `<store>/HEARTBEAT` — last observed sync follow activity timestamp (RFC 3339), written by `sync --follow` at most once per minute. Permissions `0600`. Lets `doctor` and external watchdogs inspect local follow freshness.
+- `<store>/HEARTBEAT` — last observed sync follow activity timestamp (RFC 3339), written by `sync --follow` at most once per minute. Permissions `0600`. Lets `doctor` and external watchdogs inspect local follow activity; it is not a process-liveness or keepalive-health marker.
 
 Rationale for two SQLite files: reduce coupling and keep the `whatsmeow`-owned schema separate from `wacli`’s local schema. It’s still “one store directory” for the user.
 

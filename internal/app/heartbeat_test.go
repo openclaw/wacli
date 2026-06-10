@@ -145,6 +145,34 @@ func TestHeartbeatThrottleIsPerApp(t *testing.T) {
 	}
 }
 
+func TestHeartbeatRetriesAfterWriteFailureInterval(t *testing.T) {
+	a := newTestApp(t)
+	storeDir := filepath.Join(t.TempDir(), "missing", "store")
+	a.opts.StoreDir = storeDir
+
+	captureStderr(t, func() {
+		a.writeHeartbeat()
+	})
+	if got := a.heartbeatLast.Load(); got == 0 {
+		t.Fatalf("heartbeatLast after failed write = %d, want throttled attempt timestamp", got)
+	}
+	if err := os.MkdirAll(storeDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	a.writeHeartbeat()
+	if _, err := os.Stat(filepath.Join(storeDir, "HEARTBEAT")); !os.IsNotExist(err) {
+		t.Fatalf("stat immediate retry err = %v, want throttled missing heartbeat", err)
+	}
+
+	a.heartbeatLast.Store(nowUTC().Add(-heartbeatMinInterval).UnixNano())
+	a.writeHeartbeat()
+
+	if _, err := os.Stat(filepath.Join(storeDir, "HEARTBEAT")); err != nil {
+		t.Fatalf("stat heartbeat after retry: %v", err)
+	}
+}
+
 func TestSyncFollowDoesNotReconnectOnFreshKeepAliveTimeout(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
