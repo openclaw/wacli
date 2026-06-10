@@ -35,7 +35,7 @@ Proposed files:
 - `<store>/wacli.db` — our SQLite DB (messages/chats, FTS, local metadata).
 - `<store>/media/...` — downloaded media (optional, on-demand or background).
 - `<store>/LOCK` — store lock to prevent concurrent access.
-- `<store>/HEARTBEAT` — last sync activity timestamp (RFC 3339), written by `sync --follow` at most once per minute. Permissions `0600`. Lets `doctor` and external watchdogs detect stale sync sessions.
+- `<store>/HEARTBEAT` — last observed sync follow activity timestamp (RFC 3339), written by `sync --follow` at most once per minute. Permissions `0600`. Lets `doctor` and external watchdogs inspect local follow freshness.
 
 Rationale for two SQLite files: reduce coupling and keep the `whatsmeow`-owned schema separate from `wacli`’s local schema. It’s still “one store directory” for the user.
 
@@ -91,7 +91,7 @@ Immediately after QR pairing success, `wacli auth` runs a bootstrap sync:
 - persists new messages as they arrive
 - performs safe reconnect with backoff on disconnect
 - continues best-effort history catch-up when WhatsApp emits it
-- optional `--stale-threshold` detects silent stream stalls and force-reconnects when no events arrive for the given duration
+- optional `--stale-threshold` detects keepalive failures and force-reconnects when the last successful keepalive is older than the given duration
 
 ## Database schema (wacli.db)
 

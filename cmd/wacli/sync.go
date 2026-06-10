@@ -121,7 +121,7 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().BoolVar(&follow, "follow", true, "keep syncing until Ctrl+C")
 	cmd.Flags().DurationVar(&idleExit, "idle-exit", 30*time.Second, "exit after being idle (once mode)")
 	cmd.Flags().DurationVar(&maxReconnect, "max-reconnect", 5*time.Minute, "give up reconnecting after this duration (0 = unlimited)")
-	cmd.Flags().DurationVar(&staleThreshold, "stale-threshold", 0, "force reconnect when no events arrive for this long in follow mode (0 = disabled)")
+	cmd.Flags().DurationVar(&staleThreshold, "stale-threshold", 0, "force reconnect when keepalive failures last this long in follow mode (0 = disabled)")
 	cmd.Flags().BoolVar(&downloadMedia, "download-media", false, "download media in the background during sync")
 	cmd.Flags().BoolVar(&refreshContacts, "refresh-contacts", false, "refresh contacts from session store into local DB")
 	cmd.Flags().BoolVar(&refreshGroups, "refresh-groups", false, "refresh joined groups (live) into local DB")

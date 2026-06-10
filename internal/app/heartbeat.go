@@ -12,7 +12,7 @@ const heartbeatMinInterval = time.Minute
 
 // writeHeartbeat persists the current timestamp to {storeDir}/HEARTBEAT,
 // throttled to at most once per minute to avoid excessive I/O. The file
-// lets external processes (e.g. wacli doctor) detect stale sync sessions.
+// lets external processes (e.g. wacli doctor) observe sync follow activity.
 func (a *App) writeHeartbeat() {
 	now := nowUTC()
 	last := time.Unix(0, a.heartbeatLast.Load())

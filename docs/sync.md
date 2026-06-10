@@ -34,9 +34,9 @@ wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--stale-t
 - Sync stores WhatsApp call signaling and call-log metadata in `call_events`; inspect it with `wacli calls list`.
 - Sync stores WhatsApp status broadcasts in `status_messages`, separate from normal chat `messages`.
 - In an interactive terminal, routine connected/history/progress updates share one updating stderr status line. Warnings and errors still print as separate lines so they remain visible.
-- `--stale-threshold DURATION` in follow mode detects silent stream stalls. If no WhatsApp events arrive for this duration, sync force-closes the connection and reconnects. Disabled by default (`0`).
-- A `stale` NDJSON event is emitted when the threshold is exceeded, containing `threshold` and `idle_duration` fields.
-- While `sync --follow` is running, a `HEARTBEAT` file is written to the store directory (at most once per minute) with the last activity timestamp in RFC 3339 format. External watchdogs or `wacli doctor` can read this to detect stale sync sessions.
+- `--stale-threshold DURATION` in follow mode detects keepalive failures. If whatsmeow reports that the last successful keepalive is older than this duration, sync force-closes the connection and reconnects. Healthy quiet sessions are not reconnected just because no chat events arrive. Disabled by default (`0`).
+- A `stale` NDJSON event is emitted when the threshold is exceeded, containing `threshold`, `idle_duration`, `error_count`, and `source` fields.
+- While `sync --follow` is running, a `HEARTBEAT` file is written to the store directory (at most once per minute) with the last observed follow activity timestamp in RFC 3339 format. External watchdogs or `wacli doctor` can read this as a freshness signal; it is separate from keepalive health.
 - `--events` emits one NDJSON lifecycle event per stderr line for machine consumers. Routine human progress/status lines, interrupt prompts, and command errors are emitted as events while events are enabled.
 
 ## Examples

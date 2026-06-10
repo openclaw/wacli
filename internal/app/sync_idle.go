@@ -7,14 +7,7 @@ import (
 	"time"
 )
 
-func (a *App) runSyncFollow(ctx context.Context, maxReconnect, staleThreshold time.Duration, messagesStored, lastProgress, lastActivity *atomic.Int64, disconnected <-chan struct{}) (SyncResult, error) {
-	var staleTicker *time.Ticker
-	var staleC <-chan time.Time
-	if staleThreshold > 0 {
-		staleTicker = time.NewTicker(staleThreshold / 2)
-		staleC = staleTicker.C
-		defer staleTicker.Stop()
-	}
+func (a *App) runSyncFollow(ctx context.Context, maxReconnect time.Duration, messagesStored *atomic.Int64, disconnected <-chan struct{}) (SyncResult, error) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -25,40 +18,8 @@ func (a *App) runSyncFollow(ctx context.Context, maxReconnect, staleThreshold ti
 			if err := a.reconnect(ctx, maxReconnect); err != nil {
 				return SyncResult{MessagesStored: messagesStored.Load()}, err
 			}
-			lastActivity.Store(nowUTC().UnixNano())
-		case <-staleC:
-			last := latestSyncActivity(lastProgress, lastActivity)
-			idle := time.Since(last)
-			if idle >= staleThreshold {
-				a.emitOrPrint("stale", map[string]any{
-					"threshold":     staleThreshold.String(),
-					"idle_duration": idle.String(),
-				}, "\nNo events for %s (threshold %s), reconnecting...\n", idle, staleThreshold)
-				// Force-close the stale stream before reconnecting, matching
-				// the StreamReplaced handler. Without this, Client.Connect sees
-				// the existing connection as still live and returns nil.
-				a.wa.Close()
-				if err := a.reconnect(ctx, maxReconnect); err != nil {
-					return SyncResult{MessagesStored: messagesStored.Load()}, err
-				}
-				lastActivity.Store(nowUTC().UnixNano())
-				staleTicker.Reset(staleThreshold / 2)
-			}
 		}
 	}
-}
-
-func latestSyncActivity(times ...*atomic.Int64) time.Time {
-	var latest int64
-	for _, ts := range times {
-		if ts == nil {
-			continue
-		}
-		if v := ts.Load(); v > latest {
-			latest = v
-		}
-	}
-	return time.Unix(0, latest)
 }
 
 func (a *App) runSyncUntilIdle(ctx context.Context, idleExit, maxReconnect time.Duration, messagesStored, lastEvent *atomic.Int64, disconnected <-chan struct{}) (SyncResult, error) {

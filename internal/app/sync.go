@@ -39,7 +39,7 @@ type SyncOptions struct {
 	RefreshChannels     bool
 	IdleExit            time.Duration // only used for bootstrap/once
 	MaxReconnect        time.Duration // max time to attempt reconnection before giving up (0 = unlimited)
-	StaleThreshold      time.Duration // force reconnect when no events arrive for this long in follow mode (0 = disabled)
+	StaleThreshold      time.Duration // force reconnect when keepalive failures last this long in follow mode (0 = disabled)
 	MaxMessages         int64         // 0 = unlimited
 	MaxDBSizeBytes      int64         // 0 = unlimited
 	WarnNoLimits        bool
@@ -86,10 +86,8 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 
 	var messagesStored atomic.Int64
 	lastEvent := atomic.Int64{}
-	lastActivity := atomic.Int64{}
 	now := nowUTC().UnixNano()
 	lastEvent.Store(now)
-	lastActivity.Store(now)
 
 	disconnected := make(chan struct{}, 1)
 
@@ -120,7 +118,7 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 		defer stopWebhook()
 	}
 
-	handlerID := a.addSyncEventHandler(syncCtx, opts, &messagesStored, &lastEvent, &lastActivity, disconnected, enqueueMedia, enqueueWebhook, limits)
+	handlerID := a.addSyncEventHandler(syncCtx, opts, &messagesStored, &lastEvent, disconnected, enqueueMedia, enqueueWebhook, limits)
 	defer a.wa.RemoveEventHandler(handlerID)
 
 	if err := a.connectForSync(syncCtx, opts); err != nil {
@@ -128,7 +126,6 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	}
 	now = nowUTC().UnixNano()
 	lastEvent.Store(now)
-	lastActivity.Store(now)
 	if err := a.migrateHistoricalLIDs(syncCtx); err != nil {
 		return SyncResult{MessagesStored: messagesStored.Load()}, err
 	}
@@ -170,7 +167,7 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 
 	var err error
 	if opts.Mode == SyncModeFollow {
-		_, err = a.runSyncFollow(syncCtx, opts.MaxReconnect, opts.StaleThreshold, &messagesStored, &lastEvent, &lastActivity, disconnected)
+		_, err = a.runSyncFollow(syncCtx, opts.MaxReconnect, &messagesStored, disconnected)
 	} else {
 		_, err = a.runSyncUntilIdle(syncCtx, opts.IdleExit, opts.MaxReconnect, &messagesStored, &lastEvent, disconnected)
 	}

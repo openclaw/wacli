@@ -33,15 +33,12 @@ func newMediaEnqueuer(ctx context.Context, jobs chan<- mediaJob) func(chatJID, m
 	}
 }
 
-func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, messagesStored, lastEvent, lastActivity *atomic.Int64, disconnected chan<- struct{}, enqueueMedia func(string, string), enqueueWebhook func(wa.ParsedMessage), limits *syncStorageLimits) uint32 {
+func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, messagesStored, lastEvent *atomic.Int64, disconnected chan<- struct{}, enqueueMedia func(string, string), enqueueWebhook func(wa.ParsedMessage), limits *syncStorageLimits) uint32 {
 	var panicCount atomic.Int64
 	var appStateRecoveries sync.Map
 	return a.wa.AddEventHandler(func(evt interface{}) {
-		if syncActivityEvent(evt) {
-			lastActivity.Store(nowUTC().UnixNano())
-			if opts.Mode == SyncModeFollow {
-				a.writeHeartbeat()
-			}
+		if opts.Mode == SyncModeFollow && syncActivityEvent(evt) {
+			a.writeHeartbeat()
 		}
 
 		// Recover from panics so unexpected message structures do not crash the
@@ -95,6 +92,8 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 			a.handleChatStateEvent(ctx, v)
 		case *events.Connected:
 			a.emitOrPrint("connected", nil, "\nConnected.\n")
+		case *events.KeepAliveTimeout:
+			a.handleKeepAliveTimeout(opts, v, disconnected)
 		case *events.Disconnected:
 			a.emitOrPrint("disconnected", nil, "\nDisconnected.\n")
 			select {
@@ -114,6 +113,29 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 			a.handleAppStateSyncError(ctx, v, &appStateRecoveries)
 		}
 	})
+}
+
+func (a *App) handleKeepAliveTimeout(opts SyncOptions, evt *events.KeepAliveTimeout, disconnected chan<- struct{}) {
+	if opts.Mode != SyncModeFollow || opts.StaleThreshold <= 0 || evt == nil || evt.LastSuccess.IsZero() {
+		return
+	}
+	idle := nowUTC().Sub(evt.LastSuccess)
+	if idle < opts.StaleThreshold {
+		return
+	}
+	a.emitOrPrint("stale", map[string]any{
+		"threshold":     opts.StaleThreshold.String(),
+		"idle_duration": idle.String(),
+		"error_count":   evt.ErrorCount,
+		"source":        "keepalive_timeout",
+	}, "\nKeepalive has been failing for %s (threshold %s), reconnecting...\n", idle, opts.StaleThreshold)
+	// Force-close before reconnecting, matching StreamReplaced. Without this,
+	// Client.Connect can see the existing socket as still live and return nil.
+	a.wa.Close()
+	select {
+	case disconnected <- struct{}{}:
+	default:
+	}
 }
 
 func syncActivityEvent(evt interface{}) bool {

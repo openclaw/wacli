@@ -1,11 +1,11 @@
 package app
 
 import (
+	"bytes"
 	"context"
-	"errors"
+	"encoding/json"
 	"os"
 	"path/filepath"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -21,13 +21,11 @@ func TestSyncWritesHeartbeatFileOnActivity(t *testing.T) {
 
 	var messagesStored atomic.Int64
 	var lastEvent atomic.Int64
-	var lastActivity atomic.Int64
 	handlerID := a.addSyncEventHandler(
 		context.Background(),
 		SyncOptions{Mode: SyncModeFollow},
 		&messagesStored,
 		&lastEvent,
-		&lastActivity,
 		make(chan struct{}, 1),
 		func(string, string) {},
 		nil,
@@ -58,13 +56,11 @@ func TestSyncOnceDoesNotWriteHeartbeatFile(t *testing.T) {
 
 	var messagesStored atomic.Int64
 	var lastEvent atomic.Int64
-	var lastActivity atomic.Int64
 	handlerID := a.addSyncEventHandler(
 		context.Background(),
 		SyncOptions{Mode: SyncModeOnce},
 		&messagesStored,
 		&lastEvent,
-		&lastActivity,
 		make(chan struct{}, 1),
 		func(string, string) {},
 		nil,
@@ -87,13 +83,11 @@ func TestSyncFollowDoesNotWriteHeartbeatOnKeepAliveTimeout(t *testing.T) {
 
 	var messagesStored atomic.Int64
 	var lastEvent atomic.Int64
-	var lastActivity atomic.Int64
 	handlerID := a.addSyncEventHandler(
 		context.Background(),
 		SyncOptions{Mode: SyncModeFollow},
 		&messagesStored,
 		&lastEvent,
-		&lastActivity,
 		make(chan struct{}, 1),
 		func(string, string) {},
 		nil,
@@ -151,63 +145,32 @@ func TestHeartbeatThrottleIsPerApp(t *testing.T) {
 	}
 }
 
-func TestSyncFollowStaleReconnectResetsIdleDuration(t *testing.T) {
+func TestSyncFollowDoesNotReconnectOnFreshKeepAliveTimeout(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
 	a.wa = f
-	a.opts.Events = out.NewEventWriter(os.Stderr, true)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
+	var messagesStored atomic.Int64
+	var lastEvent atomic.Int64
+	disconnected := make(chan struct{}, 1)
+	handlerID := a.addSyncEventHandler(
+		context.Background(),
+		SyncOptions{Mode: SyncModeFollow, StaleThreshold: time.Minute},
+		&messagesStored,
+		&lastEvent,
+		disconnected,
+		func(string, string) {},
+		nil,
+		nil,
+	)
+	defer f.RemoveEventHandler(handlerID)
 
-	// Capture stale events. After the first stale reconnect, subsequent stale
-	// events should report idle_duration close to the threshold (not an
-	// accumulated value from before the reconnect).
-	var staleEvents []time.Duration
-	var mu sync.Mutex
+	f.emit(&events.KeepAliveTimeout{ErrorCount: 1, LastSuccess: nowUTC()})
 
-	go func() {
-		ticker := time.NewTicker(10 * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				f.mu.Lock()
-				calls := f.connectCalls
-				f.mu.Unlock()
-				mu.Lock()
-				n := len(staleEvents)
-				mu.Unlock()
-				if n >= 3 || calls >= 4 {
-					cancel()
-					return
-				}
-			}
-		}
-	}()
-
-	_, err := a.Sync(ctx, SyncOptions{
-		Mode:           SyncModeFollow,
-		AllowQR:        false,
-		MaxReconnect:   time.Second,
-		StaleThreshold: 200 * time.Millisecond,
-	})
-	if err != nil && !errors.Is(err, context.Canceled) {
-		t.Fatalf("Sync: %v", err)
-	}
-
-	// The NDJSON stale events are written to stderr, which we can't easily
-	// capture here. Instead verify the reconnect count is bounded: with a
-	// 200ms threshold and a 2s timeout, we expect at most ~10 reconnects.
-	// Without the timer reset, idle_duration would accumulate and trigger
-	// on every single tick, producing far more reconnects.
-	f.mu.Lock()
-	calls := f.connectCalls
-	f.mu.Unlock()
-	if calls > 15 {
-		t.Fatalf("connect calls = %d, expected timer reset to bound reconnect rate", calls)
+	select {
+	case <-disconnected:
+		t.Fatal("fresh keepalive timeout triggered reconnect")
+	case <-time.After(50 * time.Millisecond):
 	}
 }
 
@@ -230,45 +193,47 @@ func TestSyncFollowEmitsStaleEvent(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
 	a.wa = f
-	a.opts.Events = out.NewEventWriter(os.Stderr, true)
+	var eventsOut bytes.Buffer
+	a.opts.Events = out.NewEventWriter(&eventsOut, true)
+	f.connected = true
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
+	var messagesStored atomic.Int64
+	var lastEvent atomic.Int64
+	disconnected := make(chan struct{}, 1)
+	handlerID := a.addSyncEventHandler(
+		context.Background(),
+		SyncOptions{Mode: SyncModeFollow, StaleThreshold: 200 * time.Millisecond},
+		&messagesStored,
+		&lastEvent,
+		disconnected,
+		func(string, string) {},
+		nil,
+		nil,
+	)
+	defer f.RemoveEventHandler(handlerID)
 
-	staleEmitted := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(10 * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				f.mu.Lock()
-				calls := f.connectCalls
-				f.mu.Unlock()
-				if calls >= 2 {
-					close(staleEmitted)
-					cancel()
-					return
-				}
-			}
-		}
-	}()
-
-	_, err := a.Sync(ctx, SyncOptions{
-		Mode:           SyncModeFollow,
-		AllowQR:        false,
-		MaxReconnect:   time.Second,
-		StaleThreshold: 200 * time.Millisecond,
-	})
-	if err != nil && !errors.Is(err, context.Canceled) {
-		t.Fatalf("Sync: %v", err)
-	}
+	f.emit(&events.KeepAliveTimeout{ErrorCount: 2, LastSuccess: nowUTC().Add(-time.Minute)})
 
 	select {
-	case <-staleEmitted:
+	case <-disconnected:
 	default:
 		t.Fatal("expected stale event to trigger reconnect")
+	}
+	if f.IsConnected() {
+		t.Fatal("expected stale event to close connection before reconnect")
+	}
+
+	var envelope struct {
+		Event string         `json:"event"`
+		Data  map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(eventsOut.Bytes()), &envelope); err != nil {
+		t.Fatalf("parse stale event %q: %v", eventsOut.String(), err)
+	}
+	if envelope.Event != "stale" {
+		t.Fatalf("event = %q, want stale", envelope.Event)
+	}
+	if envelope.Data["source"] != "keepalive_timeout" || envelope.Data["error_count"] != float64(2) {
+		t.Fatalf("unexpected stale event data: %#v", envelope.Data)
 	}
 }
