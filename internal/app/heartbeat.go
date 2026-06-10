@@ -21,7 +21,7 @@ func (a *App) writeHeartbeat() {
 	}
 	a.heartbeatLast.Store(now.UnixNano())
 	path := filepath.Join(a.opts.StoreDir, "HEARTBEAT")
-	_ = fsutil.WritePrivateFile(path, []byte(now.Format(time.RFC3339)))
+	_ = fsutil.WritePrivateFileAtomic(path, []byte(now.Format(time.RFC3339)))
 }
 
 // ReadHeartbeat reads the last heartbeat timestamp from the store directory.
