@@ -41,6 +41,9 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 			if webhookSecret != "" && webhookURL == "" {
 				return fmt.Errorf("--webhook-secret requires --webhook")
 			}
+			if staleThreshold != 0 && staleThreshold < time.Second {
+				return fmt.Errorf("--stale-threshold must be at least 1s, got %s", staleThreshold)
+			}
 			ctx, stop := signalContextWithEvents(out.NewEventWriter(os.Stderr, flags.events))
 			defer stop()
 

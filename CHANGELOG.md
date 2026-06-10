@@ -6,8 +6,6 @@
 
 - Groups: add live admin commands for creating groups, setting descriptions, toggling announce-only and admin-only edits, and approving or rejecting join requests. (#265 - thanks @dovocoder)
 - Profile: add commands to remove the profile picture, set About text, set the profile display name, fetch profile picture metadata, fetch a user's About text, and fetch WhatsApp Business profile details. (#267 - thanks @dovocoder)
-- Sync: add `--stale-threshold` flag for `sync --follow` to detect silent stream stalls and force-reconnect when no events arrive for the given duration. Emits a `stale` NDJSON event and writes a `HEARTBEAT` file to the store directory. (#278)
-- Doctor: report `last_activity_at` from the sync heartbeat file in `--json` output. (#278)
 
 ### Security
 
@@ -18,7 +16,6 @@
 - Media: download synced WhatsApp GIF playback videos by treating their stored `gif` label as video-encrypted media. (#274 - thanks @larskluge)
 - Sync: reconnect after WhatsApp replaces the linked-device stream instead of leaving `sync --follow` offline. (#266 - thanks @ngutman)
 - Sync: clear chat unread state from `ReceiptTypeReadSelf` receipts so linked-device reads still update when `regular_high` app-state sync is unhealthy. (#269 - thanks @p-jackson1)
-- Sync: force-close stale stream before reconnecting so the connected no-op path in `Client.Connect` does not silently skip the reconnect. (#278)
 
 ## 0.11.0 - 2026-05-22
 
