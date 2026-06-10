@@ -119,7 +119,7 @@ func (a *App) handleKeepAliveTimeout(opts SyncOptions, evt *events.KeepAliveTime
 	if opts.Mode != SyncModeFollow || opts.StaleThreshold <= 0 || evt == nil || evt.LastSuccess.IsZero() {
 		return
 	}
-	idle := nowUTC().Sub(evt.LastSuccess)
+	idle := time.Since(evt.LastSuccess)
 	if idle < opts.StaleThreshold {
 		return
 	}
