@@ -202,6 +202,9 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	if err != nil {
 		return SyncResult{MessagesStored: messagesStored.Load()}, err
 	}
+	// Mark the linked device as inactive again after a successful sync so the
+	// phone continues to receive push notifications for new messages.
+	a.sendPresence(context.WithoutCancel(ctx), types.PresenceUnavailable)
 	return SyncResult{MessagesStored: messagesStored.Load()}, nil
 }
 

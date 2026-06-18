@@ -9,7 +9,7 @@
 ### Fixed
 
 - WhatsApp connectivity: update `whatsmeow` for the current WhatsApp protocol and fix `405 (Client Outdated)` failures. (#280)
-- Sync: send available presence on reconnect and when the server sends the pushname after the initial connect, so the linked device shows as active even when the pushname arrives late. (#282 - thanks @dovocoder)
+- Sync: send available presence on reconnect and when the server sends the pushname after the initial connect, and send unavailable presence after a successful sync so the phone continues to receive push notifications. (#282 - thanks @dovocoder)
 
 ## 0.11.1 - 2026-06-11
 

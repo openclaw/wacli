@@ -14,9 +14,9 @@ import (
 )
 
 // TestSyncSendsAvailablePresenceOnConnected ensures that when a sync session
-// connects, wacli broadcasts types.PresenceAvailable. WhatsApp uses this node to
-// update the linked device's "last active" status; without it the connection is
-// alive but the app still shows a stale timestamp.
+// connects, wacli broadcasts types.PresenceAvailable, and that it sends
+// types.PresenceUnavailable again when the session ends so the phone still
+// receives push notifications.
 func TestSyncSendsAvailablePresenceOnConnected(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
@@ -40,22 +40,14 @@ func TestSyncSendsAvailablePresenceOnConnected(t *testing.T) {
 		t.Fatalf("missing connected line in stderr:\n%s", raw)
 	}
 
-	waitForPresenceCalls(t, f, 1)
-
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if len(f.presenceCalls) != 1 {
-		t.Fatalf("got %d presence calls, want 1", len(f.presenceCalls))
-	}
-	if f.presenceCalls[0] != types.PresenceAvailable {
-		t.Fatalf("presence call = %v, want Available", f.presenceCalls[0])
-	}
+	assertPresenceCalls(t, f, types.PresenceAvailable, types.PresenceUnavailable)
 }
 
 // TestSyncSendsAvailablePresenceOnPushNameSetting ensures that once the
 // server tells us our pushname, wacli sends another presence update. This
 // mirrors the behavior of go-whatsapp-web-multidevice and is important because
-// whatsmeow's SendPresence requires a pushname to be set.
+// whatsmeow's SendPresence requires a pushname to be set. When the sync
+// session ends, PresenceUnavailable is sent as well.
 func TestSyncSendsAvailablePresenceOnPushNameSetting(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
@@ -82,18 +74,7 @@ func TestSyncSendsAvailablePresenceOnPushNameSetting(t *testing.T) {
 		t.Fatalf("missing connected line in stderr:\n%s", raw)
 	}
 
-	waitForPresenceCalls(t, f, 2)
-
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if len(f.presenceCalls) != 2 {
-		t.Fatalf("got %d presence calls, want 2", len(f.presenceCalls))
-	}
-	for i, p := range f.presenceCalls {
-		if p != types.PresenceAvailable {
-			t.Fatalf("presence call %d = %v, want Available", i, p)
-		}
-	}
+	assertPresenceCalls(t, f, types.PresenceAvailable, types.PresenceAvailable, types.PresenceUnavailable)
 }
 
 // TestSyncPresenceFailureWarnsAndContinues verifies that a failed presence
@@ -120,7 +101,7 @@ func TestSyncPresenceFailureWarnsAndContinues(t *testing.T) {
 		}
 	})
 
-	waitForPresenceCalls(t, f, 1)
+	waitForPresenceCalls(t, f, 2)
 
 	if !strings.Contains(raw, "send_presence_failed") {
 		t.Fatalf("missing send_presence_failed warning event in stderr:\n%s", raw)
@@ -152,7 +133,23 @@ func TestSyncSendsAvailablePresenceOnConnectedIsSynchronous(t *testing.T) {
 		}
 	})
 
-	waitForPresenceCalls(t, f, 1)
+	waitForPresenceCalls(t, f, 2)
+}
+
+func assertPresenceCalls(t *testing.T, f *fakeWA, want ...types.Presence) {
+	t.Helper()
+	waitForPresenceCalls(t, f, len(want))
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.presenceCalls) != len(want) {
+		t.Fatalf("got %d presence calls, want %d", len(f.presenceCalls), len(want))
+	}
+	for i, got := range f.presenceCalls {
+		if got != want[i] {
+			t.Fatalf("presence call %d = %v, want %v", i, got, want[i])
+		}
+	}
 }
 
 func waitForPresenceCalls(t *testing.T, f *fakeWA, want int) {
