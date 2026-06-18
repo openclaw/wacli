@@ -83,6 +83,9 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 			a.handleChatStateEvent(ctx, v)
 		case *events.Connected:
 			a.emitOrPrint("connected", nil, "\nConnected.\n")
+			go a.sendPresence(context.WithoutCancel(ctx), types.PresenceAvailable)
+		case *events.PushNameSetting:
+			go a.sendPresence(context.WithoutCancel(ctx), types.PresenceAvailable)
 		case *events.Disconnected:
 			a.emitOrPrint("disconnected", nil, "\nDisconnected.\n")
 			select {
@@ -366,5 +369,20 @@ func (a *App) decryptEncryptedReaction(ctx context.Context, pm *wa.ParsedMessage
 		if key := reaction.GetKey(); key != nil {
 			pm.ReactionToID = key.GetID()
 		}
+	}
+}
+
+// sendPresence sends a global presence update if the WhatsApp client is ready.
+// Errors are logged as warnings but never stop sync.
+func (a *App) sendPresence(ctx context.Context, presence types.Presence) {
+	if a.wa == nil {
+		return
+	}
+	if err := a.wa.SendPresence(ctx, presence); err != nil {
+		a.emitWarning(
+			"send_presence_failed",
+			fmt.Sprintf("warning: failed to send %s presence: %v", presence, err),
+			map[string]any{"presence": string(presence), "error": err.Error()},
+		)
 	}
 }
