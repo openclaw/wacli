@@ -8,6 +8,8 @@
 
 ### Fixed
 
+- WhatsApp connectivity: update `whatsmeow` for the current WhatsApp protocol and fix `405 (Client Outdated)` failures. (#279 - thanks @Cybercountry)
+
 ## 0.11.1 - 2026-06-11
 
 ### Added

@@ -92,13 +92,12 @@ func (c *Client) DownloadMediaToFile(ctx context.Context, directPath string, enc
 		}
 	}()
 
-	length, err := mediaDownloadLength(fileLength)
-	if err != nil {
+	if _, err := mediaDownloadLength(fileLength); err != nil {
 		return 0, err
 	}
 
 	limitedFile := &limitedDownloadFile{File: tmpFile, max: MaxMediaDownloadSize + maxEncryptedMediaDownloadOverhead, userMax: MaxMediaDownloadSize}
-	if err := cli.DownloadMediaWithPathToFile(ctx, directPath, encFileHash, fileHash, mediaKey, length, mt, mmsType, limitedFile); err != nil {
+	if err := cli.DownloadMediaWithPathToFile(ctx, directPath, encFileHash, fileHash, mediaKey, mt, mmsType, false, limitedFile); err != nil {
 		return 0, err
 	}
 	info, err := tmpFile.Stat()
