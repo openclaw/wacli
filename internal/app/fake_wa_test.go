@@ -63,10 +63,12 @@ type fakeWA struct {
 	pinCalls                    []fakePinCall
 	muteCalls                   []fakeMuteCall
 	markReadCalls               []fakeMarkReadCall
+	manualHistorySyncCalls      []bool
+	appStateRecoveries          []string
+	appStateFetches             []fakeAppStateFetch
 
-	manualHistorySyncCalls []bool
-	appStateRecoveries     []string
-	appStateFetches        []fakeAppStateFetch
+	presenceCalls   []types.Presence
+	sendPresenceErr error
 }
 
 type fakeArchiveCall struct {
@@ -555,6 +557,13 @@ func (f *fakeWA) UploadNewsletter(ctx context.Context, data []byte, mediaType wh
 
 func (f *fakeWA) SendChatPresence(ctx context.Context, jid types.JID, state types.ChatPresence, media types.ChatPresenceMedia) error {
 	return nil
+}
+
+func (f *fakeWA) SendPresence(ctx context.Context, presence types.Presence) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.presenceCalls = append(f.presenceCalls, presence)
+	return f.sendPresenceErr
 }
 
 func (f *fakeWA) DecryptReaction(ctx context.Context, reaction *events.Message) (*waProto.ReactionMessage, error) {

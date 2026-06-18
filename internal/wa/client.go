@@ -811,6 +811,17 @@ func sendInitialAvailablePresence(ctx context.Context, cli *whatsmeow.Client) {
 	}
 }
 
+// SendPresence updates the authenticated account's global presence status.
+func (c *Client) SendPresence(ctx context.Context, presence types.Presence) error {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || !cli.IsConnected() {
+		return fmt.Errorf("not connected")
+	}
+	return cli.SendPresence(ctx, presence)
+}
+
 func (c *Client) Logout(ctx context.Context) error {
 	c.mu.Lock()
 	cli := c.client
