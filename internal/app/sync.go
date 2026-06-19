@@ -142,13 +142,25 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 		defer stopWebhook()
 	}
 
-	handlerID := a.addSyncEventHandler(syncCtx, opts, &messagesStored, &lastEvent, disconnected, staleReconnect, enqueueMedia, enqueueWebhook, limits)
+	ps := &syncPresence{}
+	handlerID := a.addSyncEventHandler(syncCtx, opts, &messagesStored, &lastEvent, disconnected, staleReconnect, enqueueMedia, enqueueWebhook, limits, ps)
 	defer a.wa.RemoveEventHandler(handlerID)
 
 	connectionEpoch.Store(nowUTC().UnixNano())
 	if err := a.connectForSync(syncCtx, opts); err != nil {
 		return SyncResult{}, err
 	}
+	// Ensure unavailable presence is sent on ALL post-connect exits
+	// (success, error, storage limit, reconnect failure), not just the
+	// success path. The websocket stays alive via DetachSocket, so the
+	// send can complete even after the sync context is cancelled.
+	defer func() {
+		ps.mu.Lock()
+		ps.cleanupStarted = true
+		ps.mu.Unlock()
+		a.wa.RemoveEventHandler(handlerID)
+		a.sendPresenceBounded(types.PresenceUnavailable)
+	}()
 	now = nowUTC().UnixNano()
 	lastEvent.Store(now)
 	if err := a.migrateHistoricalLIDs(syncCtx); err != nil {
@@ -224,6 +236,10 @@ func (a *App) connectForSync(ctx context.Context, opts SyncOptions) error {
 		OnQRCode:        opts.OnQRCode,
 		PairPhoneNumber: opts.PairPhoneNumber,
 		OnPairCode:      opts.OnPairCode,
+		// Only detach for already-authenticated sync, not for auth
+		// bootstrap (AllowQR / phone pairing) where caller
+		// cancellation must bound the QR/pairing flow.
+		DetachSocket: opts.AllowQR == false && opts.PairPhoneNumber == "",
 	}
 
 	attempts := 1
