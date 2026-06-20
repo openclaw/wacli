@@ -135,6 +135,7 @@ func TestSyncEventHandlerClearsUnreadCountOnReadSelfReceipt(t *testing.T) {
 		func(string, string) {},
 		nil,
 		nil,
+		&syncPresence{},
 	)
 	f.emit(&events.Receipt{
 		MessageSource: types.MessageSource{Chat: chat},
@@ -176,6 +177,7 @@ func TestSyncEventHandlerIgnoresRegularReadReceiptsForUnreadCount(t *testing.T) 
 		func(string, string) {},
 		nil,
 		nil,
+		&syncPresence{},
 	)
 	f.emit(&events.Receipt{
 		MessageSource: types.MessageSource{Chat: chat},

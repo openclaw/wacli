@@ -110,6 +110,13 @@ type ConnectOptions struct {
 	OnQRCode        func(code string)
 	PairPhoneNumber string
 	OnPairCode      func(code string)
+	// DetachSocket, when true, connects the websocket with a detached
+	// context so it is not closed when the caller's context is cancelled.
+	// This allows graceful shutdown to send a final PresenceUnavailable
+	// stanza before the client is disconnected. Only sync uses this;
+	// other commands keep the default (false) so --timeout and signal
+	// cancellation still bound the connection.
+	DetachSocket bool
 }
 
 func (c *Client) Connect(ctx context.Context, opts ConnectOptions) error {
@@ -138,8 +145,44 @@ func (c *Client) Connect(ctx context.Context, opts ConnectOptions) error {
 		qrChan = ch
 	}
 
-	if err := cli.ConnectContext(ctx); err != nil {
+	// When DetachSocket is set (sync), connect with a detached context that
+	// has a 30-second dial timeout. The dial is bounded so a hanging connect
+	// cannot outlive SIGTERM indefinitely; after the dial succeeds the timer
+	// is stopped so the websocket stays open until Disconnect()/Close().
+	// Other commands keep the caller's context so --timeout and signal
+	// cancellation still bound the connection.
+	connCtx := ctx
+	var dialCancel context.CancelFunc
+	var dialTimer *time.Timer
+	var dialStop func() bool
+	if opts.DetachSocket {
+		// Use a detached context so the websocket survives signal
+		// cancellation, but also cancel the dial if the caller's
+		// context fires (--max-reconnect, SIGTERM) so an in-flight
+		// connect cannot outlive caller cancellation.
+		connCtx, dialCancel = context.WithCancel(context.Background())
+		dialTimer = time.AfterFunc(30*time.Second, dialCancel)
+		dialStop = context.AfterFunc(ctx, dialCancel)
+	}
+	if err := cli.ConnectContext(connCtx); err != nil {
+		if dialCancel != nil {
+			dialCancel()
+		}
+		if dialTimer != nil {
+			dialTimer.Stop()
+		}
+		if dialStop != nil {
+			dialStop()
+		}
 		return err
+	}
+	// Dial succeeded — stop the timer and unregister the caller
+	// cancellation hook so the websocket stays alive until Close().
+	if dialTimer != nil {
+		dialTimer.Stop()
+	}
+	if dialStop != nil {
+		dialStop()
 	}
 
 	if authed {
@@ -811,6 +854,17 @@ func sendInitialAvailablePresence(ctx context.Context, cli *whatsmeow.Client) {
 	}
 }
 
+// SendPresence updates the authenticated account's global presence status.
+func (c *Client) SendPresence(ctx context.Context, presence types.Presence) error {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || !cli.IsConnected() {
+		return fmt.Errorf("not connected")
+	}
+	return cli.SendPresence(ctx, presence)
+}
+
 func (c *Client) Logout(ctx context.Context) error {
 	c.mu.Lock()
 	cli := c.client
@@ -920,7 +974,7 @@ func (c *Client) ReconnectWithBackoff(ctx context.Context, minDelay, maxDelay ti
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if err := c.Connect(ctx, ConnectOptions{AllowQR: false}); err == nil {
+		if err := c.Connect(ctx, ConnectOptions{AllowQR: false, DetachSocket: true}); err == nil {
 			return nil
 		}
 		select {

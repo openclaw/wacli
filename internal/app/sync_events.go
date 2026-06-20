@@ -41,7 +41,15 @@ type staleReconnectRequest struct {
 	source      string
 }
 
-func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, messagesStored, lastEvent *atomic.Int64, disconnected chan<- struct{}, staleReconnect chan<- staleReconnectRequest, enqueueMedia func(string, string), enqueueWebhook func(wa.ParsedMessage), limits *syncStorageLimits) uint32 {
+// syncPresence serializes available presence sends with the final
+// unavailable cleanup so an in-flight Connected or PushNameSetting
+// callback cannot mark the device available after the cleanup send.
+type syncPresence struct {
+	mu             sync.Mutex
+	cleanupStarted bool
+}
+
+func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, messagesStored, lastEvent *atomic.Int64, disconnected chan<- struct{}, staleReconnect chan<- staleReconnectRequest, enqueueMedia func(string, string), enqueueWebhook func(wa.ParsedMessage), limits *syncStorageLimits, ps *syncPresence) uint32 {
 	var panicCount atomic.Int64
 	var appStateRecoveries sync.Map
 	return a.wa.AddEventHandler(func(evt interface{}) {
@@ -100,8 +108,19 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 			a.handleChatStateEvent(ctx, v)
 		case *events.Connected:
 			a.emitOrPrint("connected", nil, "\nConnected.\n")
+			ps.mu.Lock()
+			if !ps.cleanupStarted {
+				a.sendPresenceBounded(types.PresenceAvailable)
+			}
+			ps.mu.Unlock()
 		case *events.KeepAliveTimeout:
 			a.handleKeepAliveTimeout(opts, v, staleReconnect)
+		case *events.PushNameSetting:
+			ps.mu.Lock()
+			if !ps.cleanupStarted {
+				a.sendPresenceBounded(types.PresenceAvailable)
+			}
+			ps.mu.Unlock()
 		case *events.Disconnected:
 			a.emitOrPrint("disconnected", nil, "\nDisconnected.\n")
 			select {
@@ -562,4 +581,28 @@ func (a *App) decryptEncryptedReaction(ctx context.Context, pm *wa.ParsedMessage
 			pm.ReactionToID = key.GetID()
 		}
 	}
+}
+
+// sendPresence sends a global presence update if the WhatsApp client is ready.
+// Errors are logged as warnings but never stop sync.
+func (a *App) sendPresence(ctx context.Context, presence types.Presence) {
+	if a.wa == nil {
+		return
+	}
+	if err := a.wa.SendPresence(ctx, presence); err != nil {
+		a.emitWarning(
+			"send_presence_failed",
+			fmt.Sprintf("warning: failed to send %s presence: %v", presence, err),
+			map[string]any{"presence": string(presence), "error": err.Error()},
+		)
+	}
+}
+
+// sendPresenceBounded sends a presence update with a 5-second timeout so a
+// stalled WhatsApp write cannot hold the event handler dispatch lock or
+// block shutdown from reaching the final unavailable cleanup send.
+func (a *App) sendPresenceBounded(presence types.Presence) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	a.sendPresence(ctx, presence)
 }
