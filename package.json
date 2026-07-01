@@ -1,7 +1,7 @@
 {
   "name": "wacli",
   "private": true,
-  "packageManager": "pnpm@10.33.3",
+  "packageManager": "pnpm@10.34.4",
   "scripts": {
     "wacli": "bash -lc 'pnpm -s build >/dev/null && exec ./dist/wacli \"$@\"' _",
     "build": "mkdir -p dist && CGO_ENABLED=1 CGO_CFLAGS=\"${CGO_CFLAGS:+$CGO_CFLAGS }-Wno-error=missing-braces\" go build -tags sqlite_fts5 -o dist/wacli ./cmd/wacli",
