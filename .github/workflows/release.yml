@@ -33,14 +33,37 @@ jobs:
           go-version-file: go.mod
 
       - name: Stash GoReleaser config
-        run: cp .goreleaser.yaml /tmp/.goreleaser.yaml
+        run: |
+          cp .goreleaser.yaml /tmp/.goreleaser.yaml
+          if ! grep -q '^release:' /tmp/.goreleaser.yaml; then
+            printf '\nrelease:\n  mode: replace\n' >> /tmp/.goreleaser.yaml
+          fi
+
+      - name: Generate release notes from changelog
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            release_tag="$INPUT_TAG"
+          else
+            release_tag="$REF_NAME"
+          fi
+          helper=scripts/extract-release-notes.mjs
+          if [ ! -f "$helper" ]; then
+            git fetch --no-tags --depth=1 origin main
+            git show origin/main:scripts/extract-release-notes.mjs > /tmp/extract-release-notes.mjs
+            helper=/tmp/extract-release-notes.mjs
+          fi
+          node "$helper" --tag "$release_tag" --output /tmp/release-notes.md
 
       - name: GoReleaser (macOS universal)
         uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6.4.0
         with:
           distribution: goreleaser
           version: v2.15.4
-          args: release --clean --config /tmp/.goreleaser.yaml
+          args: release --clean --config /tmp/.goreleaser.yaml --release-notes /tmp/release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

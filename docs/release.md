@@ -8,12 +8,13 @@ Read when: cutting a release, debugging release artifacts, or updating the Homeb
 
 To cut a release:
 
-1. Tag and push:
+1. Replace the target `Unreleased` heading in `CHANGELOG.md` with the release date. The workflow refuses to publish while the matching version section is still `Unreleased`.
+2. Tag and push:
    - `git tag vX.Y.Z`
    - `git push origin vX.Y.Z`
-2. Wait for the GitHub Actions “release” workflow to publish the release artifacts.
+3. Wait for the GitHub Actions “release” workflow to publish the release artifacts and use that version's complete `CHANGELOG.md` section as the GitHub Release body.
 
-To re-release an existing tag, run the workflow manually and pass the tag (e.g. `v0.1.0`).
+To re-release an existing tag, run the workflow manually and pass the tag (e.g. `v0.1.0`). The workflow replaces stale release notes with the tagged changelog section.
 
 Expected macOS artifact names (used by the tap updater):
 
