@@ -52,7 +52,7 @@ jobs:
           fi
           helper=scripts/extract-release-notes.mjs
           if [ ! -f "$helper" ]; then
-            git fetch --no-tags --depth=1 origin main
+            git fetch --no-tags origin main
             git show origin/main:scripts/extract-release-notes.mjs > /tmp/extract-release-notes.mjs
             helper=/tmp/extract-release-notes.mjs
           fi
