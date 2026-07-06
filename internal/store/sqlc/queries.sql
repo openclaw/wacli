@@ -374,6 +374,30 @@ WHERE m.chat_jid = ? AND m.msg_id = ?;
 -- name: MarkMediaDownloaded :exec
 UPDATE messages SET local_path = ?, downloaded_at = ? WHERE chat_jid = ? AND msg_id = ?;
 
+-- name: CountPendingMediaDownloads :one
+SELECT COUNT(*)
+FROM messages m
+WHERE COALESCE(m.media_type,'') != ''
+  AND COALESCE(m.direct_path,'') != ''
+  AND m.media_key IS NOT NULL AND length(m.media_key) > 0
+  AND COALESCE(m.local_path,'') = ''
+  AND m.revoked = 0
+  AND m.deleted_for_me = 0
+  AND (sqlc.arg(chat_jid) = '' OR m.chat_jid = sqlc.arg(chat_jid));
+
+-- name: ListPendingMediaDownloads :many
+SELECT m.chat_jid, m.msg_id
+FROM messages m
+WHERE COALESCE(m.media_type,'') != ''
+  AND COALESCE(m.direct_path,'') != ''
+  AND m.media_key IS NOT NULL AND length(m.media_key) > 0
+  AND COALESCE(m.local_path,'') = ''
+  AND m.revoked = 0
+  AND m.deleted_for_me = 0
+  AND (sqlc.arg(chat_jid) = '' OR m.chat_jid = sqlc.arg(chat_jid))
+ORDER BY m.ts DESC, m.rowid DESC
+LIMIT CASE WHEN sqlc.arg(limit_count) <= 0 THEN -1 ELSE sqlc.arg(limit_count) END;
+
 -- name: UpsertPoll :exec
 INSERT INTO polls (chat_jid, msg_id, sender_jid, question, options_json, selectable_count, created_ts)
 VALUES (?, ?, ?, ?, ?, ?, ?)

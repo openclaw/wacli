@@ -204,7 +204,7 @@ func (a *App) runMediaWorkers(ctx context.Context, queue *mediaQueue, workers in
 						if strings.TrimSpace(job.chatJID) == "" || strings.TrimSpace(job.msgID) == "" {
 							return
 						}
-						if err := a.downloadMediaJob(ctx, job); err != nil {
+						if _, err := a.downloadMediaJob(ctx, job); err != nil {
 							a.emitWarning(
 								"media_download_failed",
 								fmt.Sprintf("media download failed for %s/%s: %v", job.chatJID, job.msgID, err),
@@ -220,33 +220,40 @@ func (a *App) runMediaWorkers(ctx context.Context, queue *mediaQueue, workers in
 	return wg.Wait, cancelWorkers, nil
 }
 
-func (a *App) downloadMediaJob(ctx context.Context, job mediaJob) error {
+// downloadMediaJob fetches the media for a single message to disk and records
+// the local path. It returns downloaded=true only when a file was actually
+// fetched; a job that is already downloaded or lacks the metadata needed to
+// download is skipped with downloaded=false and a nil error.
+func (a *App) downloadMediaJob(ctx context.Context, job mediaJob) (downloaded bool, err error) {
 	info, err := a.db.GetMediaDownloadInfo(job.chatJID, job.msgID)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil
+			return false, nil
 		}
-		return err
+		return false, err
 	}
 	if strings.TrimSpace(info.LocalPath) != "" {
-		return nil
+		return false, nil
 	}
 	if strings.TrimSpace(info.MediaType) == "" || strings.TrimSpace(info.DirectPath) == "" || len(info.MediaKey) == 0 {
-		return nil
+		return false, nil
 	}
 
 	targetPath, err := a.ResolveMediaOutputPath(info, "")
 	if err != nil {
-		return err
+		return false, err
 	}
 	if err := fsutil.EnsurePrivateDir(filepath.Dir(targetPath)); err != nil {
-		return err
+		return false, err
 	}
 
 	if _, err := a.wa.DownloadMediaToFile(ctx, info.DirectPath, info.FileEncSHA256, info.FileSHA256, info.MediaKey, info.FileLength, info.MediaType, "", targetPath); err != nil {
-		return err
+		return false, err
 	}
 
 	now := nowUTC()
-	return a.db.MarkMediaDownloaded(info.ChatJID, info.MsgID, targetPath, now)
+	if err := a.db.MarkMediaDownloaded(info.ChatJID, info.MsgID, targetPath, now); err != nil {
+		return false, err
+	}
+	return true, nil
 }

@@ -4,6 +4,8 @@
 
 ### Added
 
+- Media: add `media backfill` to download media for already-synced messages that have metadata but no local copy. (thanks @njt)
+
 ### Security
 
 - Store: replace dynamic schema-inspection SQL with fixed allowlisted queries. (thanks @dovocoder)

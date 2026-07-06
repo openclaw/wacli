@@ -72,8 +72,12 @@ func TestDownloadMediaJobMarksDownloaded(t *testing.T) {
 		t.Fatalf("UpsertMessage: %v", err)
 	}
 
-	if err := a.downloadMediaJob(context.Background(), mediaJob{chatJID: chat, msgID: "mid"}); err != nil {
+	downloaded, err := a.downloadMediaJob(context.Background(), mediaJob{chatJID: chat, msgID: "mid"})
+	if err != nil {
 		t.Fatalf("downloadMediaJob: %v", err)
+	}
+	if !downloaded {
+		t.Fatalf("expected downloaded=true")
 	}
 
 	info, err := a.db.GetMediaDownloadInfo(chat, "mid")
