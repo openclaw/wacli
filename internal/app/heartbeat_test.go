@@ -33,6 +33,7 @@ func TestSyncWritesHeartbeatFileOnActivity(t *testing.T) {
 		nil,
 		nil,
 		&syncPresence{},
+		nil,
 	)
 	defer f.RemoveEventHandler(handlerID)
 
@@ -70,6 +71,7 @@ func TestSyncOnceDoesNotWriteHeartbeatFile(t *testing.T) {
 		nil,
 		nil,
 		&syncPresence{},
+		nil,
 	)
 	defer f.RemoveEventHandler(handlerID)
 
@@ -99,6 +101,7 @@ func TestSyncFollowDoesNotWriteHeartbeatOnKeepAliveTimeout(t *testing.T) {
 		nil,
 		nil,
 		&syncPresence{},
+		nil,
 	)
 	defer f.RemoveEventHandler(handlerID)
 
@@ -200,6 +203,7 @@ func TestSyncFollowDoesNotReconnectOnFreshKeepAliveTimeout(t *testing.T) {
 		nil,
 		nil,
 		&syncPresence{},
+		nil,
 	)
 	defer f.RemoveEventHandler(handlerID)
 
@@ -251,6 +255,7 @@ func TestSyncFollowEmitsStaleEvent(t *testing.T) {
 		nil,
 		nil,
 		&syncPresence{},
+		nil,
 	)
 	defer f.RemoveEventHandler(handlerID)
 

@@ -21,15 +21,12 @@ import (
 	"go.mau.fi/whatsmeow/types/events"
 )
 
-func newMediaEnqueuer(ctx context.Context, jobs chan<- mediaJob) func(chatJID, msgID string) {
+func newMediaEnqueuer(ctx context.Context, queue *mediaQueue) func(chatJID, msgID string) {
 	return func(chatJID, msgID string) {
 		if strings.TrimSpace(chatJID) == "" || strings.TrimSpace(msgID) == "" {
 			return
 		}
-		select {
-		case jobs <- mediaJob{chatJID: chatJID, msgID: msgID}:
-		case <-ctx.Done():
-		}
+		queue.enqueue(ctx, mediaJob{chatJID: chatJID, msgID: msgID})
 	}
 }
 
@@ -49,10 +46,16 @@ type syncPresence struct {
 	cleanupStarted bool
 }
 
-func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, messagesStored, lastEvent *atomic.Int64, disconnected chan<- struct{}, staleReconnect chan<- staleReconnectRequest, enqueueMedia func(string, string), enqueueWebhook func(wa.ParsedMessage), limits *syncStorageLimits, ps *syncPresence) uint32 {
+func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, messagesStored, lastEvent *atomic.Int64, disconnected chan<- struct{}, staleReconnect chan<- staleReconnectRequest, enqueueMedia func(string, string), enqueueWebhook func(wa.ParsedMessage), limits *syncStorageLimits, ps *syncPresence, mediaQ *mediaQueue) uint32 {
 	var panicCount atomic.Int64
 	var appStateRecoveries sync.Map
 	return a.wa.AddEventHandler(func(evt interface{}) {
+		if mediaQ != nil {
+			if !mediaQ.beginProducer() {
+				return
+			}
+			defer mediaQ.endProducer()
+		}
 		if opts.Mode == SyncModeFollow && syncActivityEvent(evt) {
 			a.writeHeartbeat()
 		}

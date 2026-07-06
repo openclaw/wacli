@@ -18,7 +18,7 @@ wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--stale-t
 - `--max-reconnect 0` keeps reconnecting indefinitely.
 - `--max-messages N` stops before storing more than `N` total messages locally.
 - `--max-db-size SIZE` stops when `wacli.db` plus SQLite sidecars reaches `SIZE` (`500MB`, `2GB`, etc.).
-- `--download-media` runs a bounded media downloader for sync events.
+- `--download-media` runs a bounded media downloader for sync events. Clean one-shot and bootstrap runs finish queued downloads before exiting; cancellation, errors, and storage-limit exits stop immediately.
 - `--refresh-contacts` imports contacts from the session store.
 - `--refresh-groups` fetches joined groups live and updates the local DB.
 - `--refresh-channels` fetches subscribed WhatsApp Channels live and updates local chat rows.

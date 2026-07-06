@@ -61,14 +61,18 @@ func TestMediaWorkerSurvivesPanic(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	jobs := make(chan mediaJob, 2)
-	stop, err := a.runMediaWorkers(ctx, jobs, 1)
+	queue := newMediaQueue(2)
+	wait, cancelWorkers, err := a.runMediaWorkers(ctx, queue, 1)
 	if err != nil {
 		t.Fatalf("runMediaWorkers: %v", err)
 	}
+	defer func() {
+		cancelWorkers()
+		wait()
+	}()
 
-	jobs <- mediaJob{chatJID: chat, msgID: "boom"}
-	jobs <- mediaJob{chatJID: chat, msgID: "ok"}
+	queue.enqueue(ctx, mediaJob{chatJID: chat, msgID: "boom"})
+	queue.enqueue(ctx, mediaJob{chatJID: chat, msgID: "ok"})
 
 	// Poll until the benign job is persisted. DownloadMediaToFile returning only
 	// proves the worker reached the second job; MarkMediaDownloaded can still be
@@ -97,5 +101,4 @@ func TestMediaWorkerSurvivesPanic(t *testing.T) {
 		t.Fatalf("expected LocalPath for benign job to be set after panic survival")
 	}
 
-	stop()
 }

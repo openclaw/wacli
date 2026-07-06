@@ -136,6 +136,7 @@ func TestSyncEventHandlerClearsUnreadCountOnReadSelfReceipt(t *testing.T) {
 		nil,
 		nil,
 		&syncPresence{},
+		nil,
 	)
 	f.emit(&events.Receipt{
 		MessageSource: types.MessageSource{Chat: chat},
@@ -178,6 +179,7 @@ func TestSyncEventHandlerIgnoresRegularReadReceiptsForUnreadCount(t *testing.T) 
 		nil,
 		nil,
 		&syncPresence{},
+		nil,
 	)
 	f.emit(&events.Receipt{
 		MessageSource: types.MessageSource{Chat: chat},
@@ -1587,6 +1589,69 @@ func TestSyncMediaEnqueueUsesBoundedBackpressure(t *testing.T) {
 	}
 	if leaked := during - before; leaked > 20 {
 		t.Fatalf("expected bounded media enqueue goroutines, saw +%d (before=%d during=%d)", leaked, before, during)
+	}
+}
+
+// TestSyncOnceDrainsMediaBeforeExit guards the fix where once-mode idle-exit
+// used to cancel media downloads still queued or in flight. Each download takes
+// far longer than IdleExit, so without the graceful drain the sync would exit
+// and cancel most of them, leaving local_path empty.
+func TestSyncOnceDrainsMediaBeforeExit(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+	// Download work (12 jobs / 4 workers * 150ms ≈ 450ms) exceeds the 250ms idle
+	// poll inside runSyncUntilIdle, making premature worker cancellation deterministic.
+	f.downloadDelay = 150 * time.Millisecond
+
+	chat := types.JID{User: "123", Server: types.DefaultUserServer}
+	f.contacts[chat.ToNonAD()] = types.ContactInfo{Found: true, FullName: "Alice", PushName: "Alice"}
+
+	const n = 12
+	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	ids := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		id := fmt.Sprintf("media-%02d", i)
+		ids = append(ids, id)
+		f.connectEvents = append(f.connectEvents, &events.Message{
+			Info: types.MessageInfo{
+				MessageSource: types.MessageSource{Chat: chat, Sender: chat, IsFromMe: false},
+				ID:            id,
+				Timestamp:     base.Add(time.Duration(i) * time.Second),
+				PushName:      "Alice",
+			},
+			Message: &waProto.Message{
+				ImageMessage: &waProto.ImageMessage{
+					Mimetype:      proto.String("image/jpeg"),
+					DirectPath:    proto.String("/direct"),
+					MediaKey:      []byte{1, 2, 3},
+					FileSHA256:    []byte{4, 5, 6},
+					FileEncSHA256: []byte{7, 8, 9},
+					FileLength:    proto.Uint64(4),
+				},
+			},
+		})
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := a.Sync(ctx, SyncOptions{
+		Mode:          SyncModeOnce,
+		AllowQR:       false,
+		DownloadMedia: true,
+		IdleExit:      10 * time.Millisecond,
+	}); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	for _, id := range ids {
+		msg, err := a.db.GetMessage(chat.String(), id)
+		if err != nil {
+			t.Fatalf("GetMessage %s: %v", id, err)
+		}
+		if msg.LocalPath == "" {
+			t.Fatalf("expected media %s downloaded before exit, got empty local_path", id)
+		}
 	}
 }
 

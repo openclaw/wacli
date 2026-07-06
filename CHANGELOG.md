@@ -8,6 +8,8 @@
 
 ### Fixed
 
+- Sync: finish queued media downloads before clean one-shot and bootstrap exits instead of canceling them at idle. (thanks @njt)
+
 ## 0.11.2 - 2026-07-02
 
 ### Added

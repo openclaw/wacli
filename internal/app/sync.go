@@ -115,21 +115,24 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	disconnected := make(chan struct{}, 1)
 	staleReconnect := make(chan staleReconnectRequest, 1)
 
-	var stopMedia func()
-	var mediaJobs chan mediaJob
+	var waitMedia func(context.Context) bool
+	var mediaQ *mediaQueue
 	enqueueMedia := func(chatJID, msgID string) {}
 	if opts.DownloadMedia {
-		mediaJobs = make(chan mediaJob, 512)
-		enqueueMedia = newMediaEnqueuer(syncCtx, mediaJobs)
+		mediaQ = newMediaQueue(512)
+		enqueueMedia = newMediaEnqueuer(syncCtx, mediaQ)
 	}
 
 	if opts.DownloadMedia {
-		var err error
-		stopMedia, err = a.runMediaWorkers(syncCtx, mediaJobs, 4)
+		wait, cancelMedia, err := a.runMediaWorkers(syncCtx, mediaQ, 4)
 		if err != nil {
 			return SyncResult{}, err
 		}
-		defer stopMedia()
+		defer func() {
+			cancelMedia()
+			wait()
+		}()
+		waitMedia = mediaQ.waitIdle
 	}
 
 	var stopWebhook func()
@@ -143,7 +146,7 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	}
 
 	ps := &syncPresence{}
-	handlerID := a.addSyncEventHandler(syncCtx, opts, &messagesStored, &lastEvent, disconnected, staleReconnect, enqueueMedia, enqueueWebhook, limits, ps)
+	handlerID := a.addSyncEventHandler(syncCtx, opts, &messagesStored, &lastEvent, disconnected, staleReconnect, enqueueMedia, enqueueWebhook, limits, ps, mediaQ)
 	defer a.wa.RemoveEventHandler(handlerID)
 
 	connectionEpoch.Store(nowUTC().UnixNano())
@@ -208,7 +211,15 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	} else {
 		_, err = a.runSyncUntilIdle(syncCtx, opts.IdleExit, opts.MaxReconnect, &messagesStored, &lastEvent, disconnected)
 	}
-	if limitErr := limits.Err(); limitErr != nil {
+	limitErr := limits.Err()
+	// Successful one-shot modes must finish queued downloads before cleanup
+	// cancels the worker context. Follow mode keeps the queue open; error,
+	// cancellation, and storage-limit exits retain immediate cancellation.
+	if waitMedia != nil && opts.Mode != SyncModeFollow && err == nil && limitErr == nil && syncCtx.Err() == nil {
+		waitMedia(syncCtx)
+		limitErr = limits.Err()
+	}
+	if limitErr != nil {
 		return SyncResult{MessagesStored: messagesStored.Load()}, limitErr
 	}
 	if err != nil {
