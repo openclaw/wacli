@@ -94,6 +94,25 @@ func (q *Queries) CountMessages(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const countPendingMediaDownloads = `-- name: CountPendingMediaDownloads :one
+SELECT COUNT(*)
+FROM messages m
+WHERE COALESCE(m.media_type,'') != ''
+  AND COALESCE(m.direct_path,'') != ''
+  AND m.media_key IS NOT NULL AND length(m.media_key) > 0
+  AND COALESCE(m.local_path,'') = ''
+  AND m.revoked = 0
+  AND m.deleted_for_me = 0
+  AND (?1 = '' OR m.chat_jid = ?1)
+`
+
+func (q *Queries) CountPendingMediaDownloads(ctx context.Context, chatJid interface{}) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countPendingMediaDownloads, chatJid)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countSystemNames = `-- name: CountSystemNames :one
 SELECT COUNT(1) FROM contacts WHERE system_name IS NOT NULL AND system_name != ''
 `
@@ -719,6 +738,53 @@ func (q *Queries) ListLeftGroups(ctx context.Context) ([]ListLeftGroupsRow, erro
 			&i.LeftAt,
 			&i.UpdatedAt,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingMediaDownloads = `-- name: ListPendingMediaDownloads :many
+SELECT m.chat_jid, m.msg_id
+FROM messages m
+WHERE COALESCE(m.media_type,'') != ''
+  AND COALESCE(m.direct_path,'') != ''
+  AND m.media_key IS NOT NULL AND length(m.media_key) > 0
+  AND COALESCE(m.local_path,'') = ''
+  AND m.revoked = 0
+  AND m.deleted_for_me = 0
+  AND (?1 = '' OR m.chat_jid = ?1)
+ORDER BY m.ts DESC, m.rowid DESC
+LIMIT CASE WHEN ?2 <= 0 THEN -1 ELSE ?2 END
+`
+
+type ListPendingMediaDownloadsParams struct {
+	ChatJid    interface{}
+	LimitCount interface{}
+}
+
+type ListPendingMediaDownloadsRow struct {
+	ChatJid string
+	MsgID   string
+}
+
+func (q *Queries) ListPendingMediaDownloads(ctx context.Context, arg ListPendingMediaDownloadsParams) ([]ListPendingMediaDownloadsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listPendingMediaDownloads, arg.ChatJid, arg.LimitCount)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPendingMediaDownloadsRow
+	for rows.Next() {
+		var i ListPendingMediaDownloadsRow
+		if err := rows.Scan(&i.ChatJid, &i.MsgID); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

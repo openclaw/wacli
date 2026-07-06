@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openclaw/wacli/internal/app"
 	"github.com/openclaw/wacli/internal/out"
 	"github.com/openclaw/wacli/internal/wa"
 	"github.com/spf13/cobra"
@@ -18,7 +19,100 @@ func newMediaCmd(flags *rootFlags) *cobra.Command {
 		Short: "Media download",
 	}
 	cmd.AddCommand(newMediaDownloadCmd(flags))
+	cmd.AddCommand(newMediaBackfillCmd(flags))
 	return cmd
+}
+
+func newMediaBackfillCmd(flags *rootFlags) *cobra.Command {
+	var chat string
+	var limit int
+	var workers int
+
+	cmd := &cobra.Command{
+		Use:   "backfill",
+		Short: "Download media for already-synced messages missing a local copy",
+		Long: "Fetch media for messages already stored in the local database that have\n" +
+			"downloadable metadata but no local file yet. Unlike `sync --download-media`,\n" +
+			"which only downloads media for messages arriving during the sync, this scans\n" +
+			"existing rows and downloads them over a single connection.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if limit < 0 {
+				return fmt.Errorf("--limit must be >= 0")
+			}
+			if workers < 0 {
+				return fmt.Errorf("--workers must be >= 0")
+			}
+			if err := flags.requireWritable(); err != nil {
+				return err
+			}
+
+			ctx, cancel := mediaBackfillContext(cmd, flags)
+			defer cancel()
+
+			a, lk, err := newApp(ctx, flags, true, false)
+			if err != nil {
+				return err
+			}
+			defer closeApp(a, lk)
+
+			if err := a.EnsureAuthed(); err != nil {
+				return err
+			}
+			if err := a.Connect(ctx, false, nil); err != nil {
+				return err
+			}
+
+			res, err := a.BackfillMedia(ctx, app.BackfillMediaOptions{
+				ChatJID: chat,
+				Limit:   limit,
+				Workers: workers,
+			})
+			if err != nil {
+				return err
+			}
+
+			if flags.asJSON {
+				return out.WriteJSON(os.Stdout, map[string]any{
+					"pending":    res.Pending,
+					"attempted":  res.Attempted,
+					"downloaded": res.Downloaded,
+					"skipped":    res.Skipped,
+					"failed":     res.Failed,
+				})
+			}
+			fmt.Fprintf(os.Stdout, "Pending: %d  Attempted: %d  Downloaded: %d  Skipped: %d  Failed: %d\n",
+				res.Pending, res.Attempted, res.Downloaded, res.Skipped, res.Failed)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&chat, "chat", "", "limit backfill to a single chat JID")
+	cmd.Flags().IntVar(&limit, "limit", 0, "maximum number of media files to download (0 = all)")
+	cmd.Flags().IntVar(&workers, "workers", 4, "number of concurrent downloads")
+	return cmd
+}
+
+func mediaBackfillContext(cmd *cobra.Command, flags *rootFlags) (context.Context, context.CancelFunc) {
+	ctx, stop := signalContextWithEvents(out.NewEventWriter(os.Stderr, flags.events))
+	if !mediaBackfillTimeoutEnabled(cmd, flags) {
+		return ctx, stop
+	}
+	timedCtx, cancel := withTimeout(ctx, flags)
+	return timedCtx, func() {
+		cancel()
+		stop()
+	}
+}
+
+func mediaBackfillTimeoutEnabled(cmd *cobra.Command, flags *rootFlags) bool {
+	if cmd == nil || flags == nil || flags.timeout <= 0 {
+		return false
+	}
+	if flag := cmd.Flags().Lookup("timeout"); flag != nil && flag.Changed {
+		return true
+	}
+	flag := cmd.InheritedFlags().Lookup("timeout")
+	return flag != nil && flag.Changed
 }
 
 func newMediaDownloadCmd(flags *rootFlags) *cobra.Command {
