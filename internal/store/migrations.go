@@ -596,12 +596,14 @@ func (d *DB) tableExists(table string) (bool, error) {
 }
 
 func (d *DB) tableHasColumn(table, column string) (bool, error) {
-	// table is always a hardcoded identifier at call sites; validate to prevent
-	// accidental misuse with user-controlled input (#58).
-	if table == "" {
-		return false, fmt.Errorf("tableHasColumn: table name is required")
+	query, err := tableInfoPragma(table)
+	if err != nil {
+		return false, fmt.Errorf("tableHasColumn table: %w", err)
 	}
-	rows, err := d.sql.Query("PRAGMA table_info(" + table + ")")
+	if !isSQLiteIdentifier(column) {
+		return false, fmt.Errorf("tableHasColumn column: invalid SQLite identifier %q", column)
+	}
+	rows, err := d.sql.Query(query)
 	if err != nil {
 		return false, err
 	}
@@ -624,4 +626,40 @@ func (d *DB) tableHasColumn(table, column string) (bool, error) {
 		}
 	}
 	return false, rows.Err()
+}
+
+func tableInfoPragma(table string) (string, error) {
+	switch table {
+	case "chats":
+		return `PRAGMA table_info("chats")`, nil
+	case "contacts":
+		return `PRAGMA table_info("contacts")`, nil
+	case "groups":
+		return `PRAGMA table_info("groups")`, nil
+	case "messages":
+		return `PRAGMA table_info("messages")`, nil
+	case "messages_fts":
+		return `PRAGMA table_info("messages_fts")`, nil
+	case "status_messages":
+		return `PRAGMA table_info("status_messages")`, nil
+	default:
+		return "", fmt.Errorf("unsupported table %q", table)
+	}
+}
+
+func isSQLiteIdentifier(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c == '_' || ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') {
+			continue
+		}
+		if i > 0 && '0' <= c && c <= '9' {
+			continue
+		}
+		return false
+	}
+	return true
 }

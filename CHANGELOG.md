@@ -6,6 +6,8 @@
 
 ### Security
 
+- Store: replace dynamic schema-inspection SQL with fixed allowlisted queries. (thanks @dovocoder)
+
 ### Fixed
 
 - Sync: finish queued media downloads before clean one-shot and bootstrap exits instead of canceling them at idle. (thanks @njt)

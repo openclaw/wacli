@@ -111,6 +111,33 @@ func TestOpenCreatesExpectedSchema(t *testing.T) {
 	}
 }
 
+func TestTableHasColumnRejectsUnsafeIdentifier(t *testing.T) {
+	db := openTestDB(t)
+
+	if _, err := db.tableHasColumn(`messages); DROP TABLE messages; --`, "msg_id"); err == nil {
+		t.Fatalf("expected unsafe table identifier to be rejected")
+	}
+	if _, err := db.tableHasColumn("messages", `msg_id); DROP TABLE messages; --`); err == nil {
+		t.Fatalf("expected unsafe column identifier to be rejected")
+	}
+
+	if got := countRows(t, db.sql, "SELECT COUNT(*) FROM messages"); got != 0 {
+		t.Fatalf("messages table was unexpectedly modified, row count = %d", got)
+	}
+}
+
+func TestTableHasColumnAllowsSchemaIdentifiers(t *testing.T) {
+	db := openTestDB(t)
+
+	hasColumn, err := db.tableHasColumn("messages", "display_text")
+	if err != nil {
+		t.Fatalf("tableHasColumn: %v", err)
+	}
+	if !hasColumn {
+		t.Fatalf("expected messages.display_text to exist")
+	}
+}
+
 func TestOpenMigratesLegacyUnreadCounts(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "wacli.db")
