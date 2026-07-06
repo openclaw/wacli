@@ -5,6 +5,7 @@
 ### Added
 
 - Media: add `media backfill` to download media for already-synced messages that have metadata but no local copy. (thanks @njt)
+- Media: add `media retry` to recover CDN-expired media from the primary device. (thanks @njt)
 
 ### Security
 

@@ -68,6 +68,34 @@ func (d *DB) ListPendingMediaDownloads(ctx context.Context, chatJID string, limi
 	return pending, nil
 }
 
+// ListPendingMediaBefore is like ListPendingMediaDownloads but only returns
+// messages older than beforeUnix (seconds). Used to sample pending media by age.
+func (d *DB) ListPendingMediaBefore(ctx context.Context, chatJID string, beforeUnix int64, limit int) ([]PendingMediaDownload, error) {
+	rows, err := d.q.ListPendingMediaBefore(ctx, storedb.ListPendingMediaBeforeParams{
+		BeforeTs:   beforeUnix,
+		ChatJid:    chatJID,
+		LimitCount: int64(limit),
+	})
+	if err != nil {
+		return nil, err
+	}
+	pending := make([]PendingMediaDownload, 0, len(rows))
+	for _, row := range rows {
+		pending = append(pending, PendingMediaDownload{ChatJID: row.ChatJid, MsgID: row.MsgID})
+	}
+	return pending, nil
+}
+
+// MarkMediaUnavailable records that a message's media is no longer retrievable
+// (the phone reported it gone via media retry), so pending queries skip it.
+func (d *DB) MarkMediaUnavailable(ctx context.Context, chatJID, msgID string, at time.Time) error {
+	return d.q.MarkMediaUnavailable(ctx, storedb.MarkMediaUnavailableParams{
+		MediaUnavailableAt: sqlNullInt64(unix(at)),
+		ChatJid:            chatJID,
+		MsgID:              msgID,
+	})
+}
+
 func (d *DB) MarkMediaDownloaded(chatJID, msgID, localPath string, downloadedAt time.Time) error {
 	return d.q.MarkMediaDownloaded(storeCtx(), storedb.MarkMediaDownloadedParams{
 		LocalPath:    nullStringIfEmpty(localPath),

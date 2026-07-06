@@ -35,6 +35,7 @@ func TestOpenCreatesExpectedSchema(t *testing.T) {
 		"reaction_emoji",
 		"local_path",
 		"downloaded_at",
+		"media_unavailable_at",
 		"revoked",
 		"deleted_for_me",
 		"edited",
@@ -135,6 +136,47 @@ func TestTableHasColumnAllowsSchemaIdentifiers(t *testing.T) {
 	}
 	if !hasColumn {
 		t.Fatalf("expected messages.display_text to exist")
+	}
+}
+
+func TestOpenRepairsRecordedMediaUnavailableMigrationMissingColumn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "wacli.db")
+	raw, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	legacySchema := strings.Replace(coreSchemaSQL, "    media_unavailable_at INTEGER,\n", "", 1)
+	if _, err := raw.Exec(legacySchema + `
+		CREATE TABLE schema_migrations (
+			version INTEGER PRIMARY KEY,
+			name TEXT NOT NULL,
+			applied_at INTEGER NOT NULL
+		);
+	`); err != nil {
+		_ = raw.Close()
+		t.Fatalf("create legacy schema: %v", err)
+	}
+	for _, migration := range schemaMigrations {
+		if _, err := raw.Exec(`INSERT INTO schema_migrations(version, name, applied_at) VALUES(?, ?, 1)`, migration.version, migration.name); err != nil {
+			_ = raw.Close()
+			t.Fatalf("record migration %d: %v", migration.version, err)
+		}
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("raw close: %v", err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open repaired DB: %v", err)
+	}
+	defer db.Close()
+	hasColumn, err := db.tableHasColumn("messages", "media_unavailable_at")
+	if err != nil {
+		t.Fatalf("tableHasColumn: %v", err)
+	}
+	if !hasColumn {
+		t.Fatalf("expected media_unavailable_at repair")
 	}
 }
 

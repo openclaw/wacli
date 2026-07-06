@@ -208,6 +208,7 @@ ON CONFLICT(chat_jid, msg_id) DO UPDATE SET
     file_length=CASE WHEN messages.revoked != 0 OR messages.deleted_for_me != 0 OR excluded.revoked != 0 OR excluded.deleted_for_me != 0 THEN NULL WHEN (messages.edited != 0 AND excluded.edited = 0) OR (messages.edited != 0 AND excluded.edited != 0 AND excluded.edited_ts < messages.edited_ts) OR (messages.edited = 0 AND excluded.edited = 0 AND excluded.ts < messages.ts) THEN messages.file_length WHEN excluded.file_length>0 THEN excluded.file_length ELSE messages.file_length END,
     local_path=CASE WHEN messages.revoked != 0 OR messages.deleted_for_me != 0 OR excluded.revoked != 0 OR excluded.deleted_for_me != 0 THEN NULL ELSE messages.local_path END,
     downloaded_at=CASE WHEN messages.revoked != 0 OR messages.deleted_for_me != 0 OR excluded.revoked != 0 OR excluded.deleted_for_me != 0 THEN NULL ELSE messages.downloaded_at END,
+    media_unavailable_at=CASE WHEN (messages.edited != 0 AND excluded.edited = 0) OR (messages.edited != 0 AND excluded.edited != 0 AND excluded.edited_ts < messages.edited_ts) OR (messages.edited = 0 AND excluded.edited = 0 AND excluded.ts < messages.ts) THEN messages.media_unavailable_at WHEN COALESCE(excluded.direct_path,'') != '' AND excluded.direct_path != COALESCE(messages.direct_path,'') THEN NULL ELSE messages.media_unavailable_at END,
     revoked=CASE WHEN excluded.revoked != 0 THEN 1 ELSE messages.revoked END,
     deleted_for_me=CASE WHEN excluded.deleted_for_me != 0 THEN 1 ELSE messages.deleted_for_me END,
     edited=CASE WHEN excluded.revoked != 0 OR excluded.deleted_for_me != 0 THEN 0 WHEN excluded.edited != 0 THEN 1 WHEN messages.edited != 0 THEN messages.edited ELSE 0 END,
@@ -372,7 +373,10 @@ LEFT JOIN chats c ON c.jid = m.chat_jid
 WHERE m.chat_jid = ? AND m.msg_id = ?;
 
 -- name: MarkMediaDownloaded :exec
-UPDATE messages SET local_path = ?, downloaded_at = ? WHERE chat_jid = ? AND msg_id = ?;
+UPDATE messages SET local_path = ?, downloaded_at = ?, media_unavailable_at = NULL WHERE chat_jid = ? AND msg_id = ?;
+
+-- name: MarkMediaUnavailable :exec
+UPDATE messages SET media_unavailable_at = ? WHERE chat_jid = ? AND msg_id = ?;
 
 -- name: CountPendingMediaDownloads :one
 SELECT COUNT(*)
@@ -383,6 +387,7 @@ WHERE COALESCE(m.media_type,'') != ''
   AND COALESCE(m.local_path,'') = ''
   AND m.revoked = 0
   AND m.deleted_for_me = 0
+  AND m.media_unavailable_at IS NULL
   AND (sqlc.arg(chat_jid) = '' OR m.chat_jid = sqlc.arg(chat_jid));
 
 -- name: ListPendingMediaDownloads :many
@@ -394,6 +399,22 @@ WHERE COALESCE(m.media_type,'') != ''
   AND COALESCE(m.local_path,'') = ''
   AND m.revoked = 0
   AND m.deleted_for_me = 0
+  AND m.media_unavailable_at IS NULL
+  AND (sqlc.arg(chat_jid) = '' OR m.chat_jid = sqlc.arg(chat_jid))
+ORDER BY m.ts DESC, m.rowid DESC
+LIMIT CASE WHEN sqlc.arg(limit_count) <= 0 THEN -1 ELSE sqlc.arg(limit_count) END;
+
+-- name: ListPendingMediaBefore :many
+SELECT m.chat_jid, m.msg_id
+FROM messages m
+WHERE COALESCE(m.media_type,'') != ''
+  AND COALESCE(m.direct_path,'') != ''
+  AND m.media_key IS NOT NULL AND length(m.media_key) > 0
+  AND COALESCE(m.local_path,'') = ''
+  AND m.revoked = 0
+  AND m.deleted_for_me = 0
+  AND m.media_unavailable_at IS NULL
+  AND m.ts < sqlc.arg(before_ts)
   AND (sqlc.arg(chat_jid) = '' OR m.chat_jid = sqlc.arg(chat_jid))
 ORDER BY m.ts DESC, m.rowid DESC
 LIMIT CASE WHEN sqlc.arg(limit_count) <= 0 THEN -1 ELSE sqlc.arg(limit_count) END;
