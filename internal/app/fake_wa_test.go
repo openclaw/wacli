@@ -37,6 +37,10 @@ type fakeWA struct {
 	connectCalls  int
 	connectDelay  time.Duration
 	downloadDelay time.Duration
+	downloadErr   error
+
+	onMediaRetry       func(info *types.MessageInfo, mediaKey []byte) interface{}
+	mediaRetryReceipts []string
 
 	contacts map[types.JID]types.ContactInfo
 	groups   map[types.JID]*types.GroupInfo
@@ -644,6 +648,9 @@ func (f *fakeWA) DownloadMediaToFile(ctx context.Context, directPath string, enc
 			return 0, ctx.Err()
 		}
 	}
+	if f.downloadErr != nil {
+		return 0, f.downloadErr
+	}
 	if err := os.MkdirAll(filepath.Dir(targetPath), 0o700); err != nil {
 		return 0, err
 	}
@@ -655,6 +662,19 @@ func (f *fakeWA) DownloadMediaToFile(ctx context.Context, directPath string, enc
 		return 0, err
 	}
 	return st.Size(), nil
+}
+
+func (f *fakeWA) SendMediaRetryReceipt(ctx context.Context, info *types.MessageInfo, mediaKey []byte) error {
+	f.mu.Lock()
+	f.mediaRetryReceipts = append(f.mediaRetryReceipts, string(info.ID))
+	hook := f.onMediaRetry
+	f.mu.Unlock()
+	if hook != nil {
+		if evt := hook(info, mediaKey); evt != nil {
+			f.emit(evt)
+		}
+	}
+	return nil
 }
 
 func (f *fakeWA) RequestHistorySyncOnDemand(ctx context.Context, lastKnown types.MessageInfo, count int) (types.MessageID, error) {

@@ -33,6 +33,27 @@ var schemaMigrations = []migration{
 	{version: 17, name: "status messages", up: migrateStatusMessages},
 	{version: 18, name: "chat unread count column", up: migrateChatUnreadCountColumn},
 	{version: 19, name: "messages quoted columns", up: migrateMessagesQuotedColumns},
+	{version: 20, name: "messages media_unavailable_at column", up: migrateMessagesMediaUnavailableColumn},
+}
+
+func migrateMessagesMediaUnavailableColumn(d *DB) error {
+	hasTable, err := d.tableExists("messages")
+	if err != nil {
+		return err
+	}
+	if !hasTable {
+		return nil
+	}
+	has, err := d.tableHasColumn("messages", "media_unavailable_at")
+	if err != nil {
+		return err
+	}
+	if !has {
+		if _, err := d.sql.Exec(`ALTER TABLE messages ADD COLUMN media_unavailable_at INTEGER`); err != nil {
+			return fmt.Errorf("add messages.media_unavailable_at column: %w", err)
+		}
+	}
+	return nil
 }
 
 func (d *DB) ensureSchema() error {
@@ -105,6 +126,9 @@ func (d *DB) ensureCurrentSchema() error {
 	}
 	if err := migrateMessagesQuotedColumns(d); err != nil {
 		return fmt.Errorf("ensure current messages quoted columns: %w", err)
+	}
+	if err := migrateMessagesMediaUnavailableColumn(d); err != nil {
+		return fmt.Errorf("ensure current messages media unavailable column: %w", err)
 	}
 	return nil
 }

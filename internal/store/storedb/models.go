@@ -82,38 +82,39 @@ type GroupParticipant struct {
 }
 
 type Message struct {
-	Rowid           int64
-	ChatJid         string
-	ChatName        sql.NullString
-	MsgID           string
-	SenderJid       sql.NullString
-	SenderName      sql.NullString
-	Ts              int64
-	FromMe          int64
-	Text            sql.NullString
-	DisplayText     sql.NullString
-	QuotedMsgID     sql.NullString
-	QuotedSenderJid sql.NullString
-	IsForwarded     int64
-	ForwardingScore int64
-	ReactionToID    sql.NullString
-	ReactionEmoji   sql.NullString
-	MediaType       sql.NullString
-	MediaCaption    sql.NullString
-	Filename        sql.NullString
-	MimeType        sql.NullString
-	DirectPath      sql.NullString
-	MediaKey        []byte
-	FileSha256      []byte
-	FileEncSha256   []byte
-	FileLength      sql.NullInt64
-	LocalPath       sql.NullString
-	DownloadedAt    sql.NullInt64
-	Revoked         int64
-	DeletedForMe    int64
-	Edited          int64
-	EditedTs        int64
-	Buttons         sql.NullString
+	Rowid              int64
+	ChatJid            string
+	ChatName           sql.NullString
+	MsgID              string
+	SenderJid          sql.NullString
+	SenderName         sql.NullString
+	Ts                 int64
+	FromMe             int64
+	Text               sql.NullString
+	DisplayText        sql.NullString
+	QuotedMsgID        sql.NullString
+	QuotedSenderJid    sql.NullString
+	IsForwarded        int64
+	ForwardingScore    int64
+	ReactionToID       sql.NullString
+	ReactionEmoji      sql.NullString
+	MediaType          sql.NullString
+	MediaCaption       sql.NullString
+	Filename           sql.NullString
+	MimeType           sql.NullString
+	DirectPath         sql.NullString
+	MediaKey           []byte
+	FileSha256         []byte
+	FileEncSha256      []byte
+	FileLength         sql.NullInt64
+	LocalPath          sql.NullString
+	DownloadedAt       sql.NullInt64
+	MediaUnavailableAt sql.NullInt64
+	Revoked            int64
+	DeletedForMe       int64
+	Edited             int64
+	EditedTs           int64
+	Buttons            sql.NullString
 }
 
 type MessagesFt struct {

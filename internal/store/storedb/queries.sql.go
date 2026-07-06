@@ -103,6 +103,7 @@ WHERE COALESCE(m.media_type,'') != ''
   AND COALESCE(m.local_path,'') = ''
   AND m.revoked = 0
   AND m.deleted_for_me = 0
+  AND m.media_unavailable_at IS NULL
   AND (?1 = '' OR m.chat_jid = ?1)
 `
 
@@ -751,6 +752,56 @@ func (q *Queries) ListLeftGroups(ctx context.Context) ([]ListLeftGroupsRow, erro
 	return items, nil
 }
 
+const listPendingMediaBefore = `-- name: ListPendingMediaBefore :many
+SELECT m.chat_jid, m.msg_id
+FROM messages m
+WHERE COALESCE(m.media_type,'') != ''
+  AND COALESCE(m.direct_path,'') != ''
+  AND m.media_key IS NOT NULL AND length(m.media_key) > 0
+  AND COALESCE(m.local_path,'') = ''
+  AND m.revoked = 0
+  AND m.deleted_for_me = 0
+  AND m.media_unavailable_at IS NULL
+  AND m.ts < ?1
+  AND (?2 = '' OR m.chat_jid = ?2)
+ORDER BY m.ts DESC, m.rowid DESC
+LIMIT CASE WHEN ?3 <= 0 THEN -1 ELSE ?3 END
+`
+
+type ListPendingMediaBeforeParams struct {
+	BeforeTs   int64
+	ChatJid    interface{}
+	LimitCount interface{}
+}
+
+type ListPendingMediaBeforeRow struct {
+	ChatJid string
+	MsgID   string
+}
+
+func (q *Queries) ListPendingMediaBefore(ctx context.Context, arg ListPendingMediaBeforeParams) ([]ListPendingMediaBeforeRow, error) {
+	rows, err := q.db.QueryContext(ctx, listPendingMediaBefore, arg.BeforeTs, arg.ChatJid, arg.LimitCount)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPendingMediaBeforeRow
+	for rows.Next() {
+		var i ListPendingMediaBeforeRow
+		if err := rows.Scan(&i.ChatJid, &i.MsgID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPendingMediaDownloads = `-- name: ListPendingMediaDownloads :many
 SELECT m.chat_jid, m.msg_id
 FROM messages m
@@ -760,6 +811,7 @@ WHERE COALESCE(m.media_type,'') != ''
   AND COALESCE(m.local_path,'') = ''
   AND m.revoked = 0
   AND m.deleted_for_me = 0
+  AND m.media_unavailable_at IS NULL
   AND (?1 = '' OR m.chat_jid = ?1)
 ORDER BY m.ts DESC, m.rowid DESC
 LIMIT CASE WHEN ?2 <= 0 THEN -1 ELSE ?2 END
@@ -946,7 +998,7 @@ func (q *Queries) MarkGroupLeft(ctx context.Context, arg MarkGroupLeftParams) er
 }
 
 const markMediaDownloaded = `-- name: MarkMediaDownloaded :exec
-UPDATE messages SET local_path = ?, downloaded_at = ? WHERE chat_jid = ? AND msg_id = ?
+UPDATE messages SET local_path = ?, downloaded_at = ?, media_unavailable_at = NULL WHERE chat_jid = ? AND msg_id = ?
 `
 
 type MarkMediaDownloadedParams struct {
@@ -963,6 +1015,21 @@ func (q *Queries) MarkMediaDownloaded(ctx context.Context, arg MarkMediaDownload
 		arg.ChatJid,
 		arg.MsgID,
 	)
+	return err
+}
+
+const markMediaUnavailable = `-- name: MarkMediaUnavailable :exec
+UPDATE messages SET media_unavailable_at = ? WHERE chat_jid = ? AND msg_id = ?
+`
+
+type MarkMediaUnavailableParams struct {
+	MediaUnavailableAt sql.NullInt64
+	ChatJid            string
+	MsgID              string
+}
+
+func (q *Queries) MarkMediaUnavailable(ctx context.Context, arg MarkMediaUnavailableParams) error {
+	_, err := q.db.ExecContext(ctx, markMediaUnavailable, arg.MediaUnavailableAt, arg.ChatJid, arg.MsgID)
 	return err
 }
 
@@ -1706,6 +1773,7 @@ ON CONFLICT(chat_jid, msg_id) DO UPDATE SET
     file_length=CASE WHEN messages.revoked != 0 OR messages.deleted_for_me != 0 OR excluded.revoked != 0 OR excluded.deleted_for_me != 0 THEN NULL WHEN (messages.edited != 0 AND excluded.edited = 0) OR (messages.edited != 0 AND excluded.edited != 0 AND excluded.edited_ts < messages.edited_ts) OR (messages.edited = 0 AND excluded.edited = 0 AND excluded.ts < messages.ts) THEN messages.file_length WHEN excluded.file_length>0 THEN excluded.file_length ELSE messages.file_length END,
     local_path=CASE WHEN messages.revoked != 0 OR messages.deleted_for_me != 0 OR excluded.revoked != 0 OR excluded.deleted_for_me != 0 THEN NULL ELSE messages.local_path END,
     downloaded_at=CASE WHEN messages.revoked != 0 OR messages.deleted_for_me != 0 OR excluded.revoked != 0 OR excluded.deleted_for_me != 0 THEN NULL ELSE messages.downloaded_at END,
+    media_unavailable_at=CASE WHEN (messages.edited != 0 AND excluded.edited = 0) OR (messages.edited != 0 AND excluded.edited != 0 AND excluded.edited_ts < messages.edited_ts) OR (messages.edited = 0 AND excluded.edited = 0 AND excluded.ts < messages.ts) THEN messages.media_unavailable_at WHEN COALESCE(excluded.direct_path,'') != '' AND excluded.direct_path != COALESCE(messages.direct_path,'') THEN NULL ELSE messages.media_unavailable_at END,
     revoked=CASE WHEN excluded.revoked != 0 THEN 1 ELSE messages.revoked END,
     deleted_for_me=CASE WHEN excluded.deleted_for_me != 0 THEN 1 ELSE messages.deleted_for_me END,
     edited=CASE WHEN excluded.revoked != 0 OR excluded.deleted_for_me != 0 THEN 0 WHEN excluded.edited != 0 THEN 1 WHEN messages.edited != 0 THEN messages.edited ELSE 0 END,

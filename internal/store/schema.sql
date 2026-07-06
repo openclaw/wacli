@@ -83,6 +83,7 @@ CREATE TABLE IF NOT EXISTS messages (
     file_length INTEGER,
     local_path TEXT,
     downloaded_at INTEGER,
+    media_unavailable_at INTEGER,
     revoked INTEGER NOT NULL DEFAULT 0,
     deleted_for_me INTEGER NOT NULL DEFAULT 0,
     edited INTEGER NOT NULL DEFAULT 0,
