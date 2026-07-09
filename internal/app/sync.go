@@ -269,10 +269,11 @@ func (a *App) syncAppStateDeltas(ctx context.Context) {
 
 func (a *App) connectForSync(ctx context.Context, opts SyncOptions) error {
 	connectOpts := wa.ConnectOptions{
-		AllowQR:         opts.AllowQR,
-		OnQRCode:        opts.OnQRCode,
-		PairPhoneNumber: opts.PairPhoneNumber,
-		OnPairCode:      opts.OnPairCode,
+		AllowQR:                          opts.AllowQR,
+		OnQRCode:                         opts.OnQRCode,
+		PairPhoneNumber:                  opts.PairPhoneNumber,
+		OnPairCode:                       opts.OnPairCode,
+		SuppressInitialAvailablePresence: !opts.PresenceMode.SendsAvailablePresence(),
 		// Only detach for already-authenticated sync, not for auth
 		// bootstrap (AllowQR / phone pairing) where caller
 		// cancellation must bound the QR/pairing flow.

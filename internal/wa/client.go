@@ -110,6 +110,10 @@ type ConnectOptions struct {
 	OnQRCode        func(code string)
 	PairPhoneNumber string
 	OnPairCode      func(code string)
+	// SuppressInitialAvailablePresence skips the post-connect available
+	// presence update for callers that need a quiet linked-device session.
+	// The default false preserves normal WhatsApp linked-device behavior.
+	SuppressInitialAvailablePresence bool
 	// DetachSocket, when true, connects the websocket with a detached
 	// context so it is not closed when the caller's context is cancelled.
 	// This allows graceful shutdown to send a final PresenceUnavailable
@@ -186,6 +190,9 @@ func (c *Client) Connect(ctx context.Context, opts ConnectOptions) error {
 	}
 
 	if authed {
+		if opts.SuppressInitialAvailablePresence {
+			return nil
+		}
 		sendInitialAvailablePresence(ctx, cli)
 		return nil
 	}

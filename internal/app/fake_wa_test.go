@@ -200,6 +200,9 @@ func (f *fakeWA) Connect(ctx context.Context, opts wa.ConnectOptions) error {
 			return ctx.Err()
 		}
 	}
+	if authed && !opts.SuppressInitialAvailablePresence {
+		_ = f.SendPresence(ctx, types.PresenceAvailable)
+	}
 	f.emit(&events.Connected{})
 	for _, e := range eventsToEmit {
 		f.emit(e)
