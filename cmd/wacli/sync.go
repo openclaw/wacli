@@ -17,6 +17,7 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 	var idleExit time.Duration
 	var maxReconnect time.Duration
 	var staleThreshold time.Duration
+	var presenceModeFlag string
 	var downloadMedia bool
 	var refreshContacts bool
 	var refreshGroups bool
@@ -46,6 +47,10 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 			}
 			if maxStaleThreshold := appPkg.MaxStaleThreshold(); staleThreshold >= maxStaleThreshold {
 				return fmt.Errorf("--stale-threshold must be less than %s because whatsmeow auto-reconnects after that much keepalive failure, got %s", maxStaleThreshold, staleThreshold)
+			}
+			presenceMode, err := appPkg.ParseSyncPresenceMode(presenceModeFlag)
+			if err != nil {
+				return err
 			}
 			ctx, stop := signalContextWithEvents(out.NewEventWriter(os.Stderr, flags.events))
 			defer stop()
@@ -89,6 +94,7 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 
 			res, err := a.Sync(ctx, appPkg.SyncOptions{
 				Mode:                mode,
+				PresenceMode:        presenceMode,
 				AllowQR:             false,
 				AfterConnect:        afterConnect,
 				DownloadMedia:       downloadMedia,
@@ -125,6 +131,7 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().DurationVar(&idleExit, "idle-exit", 30*time.Second, "exit after being idle (once mode)")
 	cmd.Flags().DurationVar(&maxReconnect, "max-reconnect", 5*time.Minute, "give up reconnecting after this duration (0 = unlimited)")
 	cmd.Flags().DurationVar(&staleThreshold, "stale-threshold", 0, "force reconnect when keepalive failures last this long in follow mode (1s-<2m20s, 0 = disabled)")
+	cmd.Flags().StringVar(&presenceModeFlag, "presence-mode", string(appPkg.SyncPresenceModeNormal), "global sync presence behavior: normal or quiet")
 	cmd.Flags().BoolVar(&downloadMedia, "download-media", false, "download media in the background during sync")
 	cmd.Flags().BoolVar(&refreshContacts, "refresh-contacts", false, "refresh contacts from session store into local DB")
 	cmd.Flags().BoolVar(&refreshGroups, "refresh-groups", false, "refresh joined groups (live) into local DB")

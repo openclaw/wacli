@@ -34,8 +34,31 @@ const (
 	SyncModeFollow    SyncMode = "follow"
 )
 
+type SyncPresenceMode string
+
+const (
+	SyncPresenceModeNormal SyncPresenceMode = "normal"
+	SyncPresenceModeQuiet  SyncPresenceMode = "quiet"
+)
+
+func ParseSyncPresenceMode(value string) (SyncPresenceMode, error) {
+	switch SyncPresenceMode(strings.TrimSpace(value)) {
+	case "", SyncPresenceModeNormal:
+		return SyncPresenceModeNormal, nil
+	case SyncPresenceModeQuiet:
+		return SyncPresenceModeQuiet, nil
+	default:
+		return "", fmt.Errorf("--presence-mode must be one of: normal, quiet")
+	}
+}
+
+func (m SyncPresenceMode) SendsAvailablePresence() bool {
+	return m != SyncPresenceModeQuiet
+}
+
 type SyncOptions struct {
 	Mode                SyncMode
+	PresenceMode        SyncPresenceMode
 	AllowQR             bool
 	OnQRCode            func(string)
 	PairPhoneNumber     string
@@ -67,6 +90,9 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 
 	if opts.Mode == "" {
 		opts.Mode = SyncModeFollow
+	}
+	if opts.PresenceMode == "" {
+		opts.PresenceMode = SyncPresenceModeNormal
 	}
 	if (opts.Mode == SyncModeBootstrap || opts.Mode == SyncModeOnce) && opts.IdleExit <= 0 {
 		opts.IdleExit = 30 * time.Second

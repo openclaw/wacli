@@ -77,6 +77,56 @@ func TestSyncSendsAvailablePresenceOnPushNameSetting(t *testing.T) {
 	assertPresenceCalls(t, f, types.PresenceAvailable, types.PresenceAvailable, types.PresenceUnavailable)
 }
 
+// TestSyncQuietPresenceModeSkipsAvailablePresence verifies the personal-mirror
+// mode does not mark the linked device globally available while sync is live,
+// but still sends unavailable on cleanup as a safe final state.
+func TestSyncQuietPresenceModeSkipsAvailablePresence(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	captureStderr(t, func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_, err := a.Sync(ctx, SyncOptions{
+			Mode:         SyncModeOnce,
+			AllowQR:      false,
+			IdleExit:     time.Millisecond,
+			WarnNoLimits: false,
+			PresenceMode: SyncPresenceModeQuiet,
+		})
+		if err != nil {
+			t.Fatalf("Sync: %v", err)
+		}
+	})
+
+	assertPresenceCalls(t, f, types.PresenceUnavailable)
+}
+
+func TestSyncQuietPresenceModeSkipsPushNameAvailablePresence(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+	f.connectEvents = []interface{}{&events.PushNameSetting{}}
+
+	captureStderr(t, func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_, err := a.Sync(ctx, SyncOptions{
+			Mode:         SyncModeOnce,
+			AllowQR:      false,
+			IdleExit:     time.Millisecond,
+			WarnNoLimits: false,
+			PresenceMode: SyncPresenceModeQuiet,
+		})
+		if err != nil {
+			t.Fatalf("Sync: %v", err)
+		}
+	})
+
+	assertPresenceCalls(t, f, types.PresenceUnavailable)
+}
+
 // TestSyncPresenceFailureWarnsAndContinues verifies that a failed presence
 // update is logged as a warning and does not abort the sync loop.
 func TestSyncPresenceFailureWarnsAndContinues(t *testing.T) {

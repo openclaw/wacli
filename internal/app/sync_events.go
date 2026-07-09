@@ -112,7 +112,7 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 		case *events.Connected:
 			a.emitOrPrint("connected", nil, "\nConnected.\n")
 			ps.mu.Lock()
-			if !ps.cleanupStarted {
+			if !ps.cleanupStarted && opts.PresenceMode.SendsAvailablePresence() {
 				a.sendPresenceBounded(types.PresenceAvailable)
 			}
 			ps.mu.Unlock()
@@ -120,7 +120,7 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 			a.handleKeepAliveTimeout(opts, v, staleReconnect)
 		case *events.PushNameSetting:
 			ps.mu.Lock()
-			if !ps.cleanupStarted {
+			if !ps.cleanupStarted && opts.PresenceMode.SendsAvailablePresence() {
 				a.sendPresenceBounded(types.PresenceAvailable)
 			}
 			ps.mu.Unlock()

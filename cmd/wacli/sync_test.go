@@ -33,3 +33,13 @@ func TestSyncCommandRejectsIneffectiveStaleThreshold(t *testing.T) {
 		t.Fatalf("expected stale-threshold validation error, got %v", err)
 	}
 }
+
+func TestSyncCommandRejectsInvalidPresenceMode(t *testing.T) {
+	cmd := newSyncCmd(&rootFlags{})
+	cmd.SetArgs([]string{"--presence-mode", "loud"})
+
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "--presence-mode must be one of: normal, quiet") {
+		t.Fatalf("expected presence-mode validation error, got %v", err)
+	}
+}
