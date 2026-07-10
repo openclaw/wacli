@@ -31,7 +31,7 @@ type WAClient interface {
 
 	AddEventHandler(handler func(interface{})) uint32
 	RemoveEventHandler(id uint32)
-	ReconnectWithBackoff(ctx context.Context, minDelay, maxDelay time.Duration) error
+	ReconnectWithBackoff(ctx context.Context, minDelay, maxDelay time.Duration, opts wa.ConnectOptions) error
 
 	ResolveChatName(ctx context.Context, chat types.JID, pushName string) string
 	ResolveLIDToPN(ctx context.Context, jid types.JID) types.JID

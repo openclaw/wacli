@@ -263,7 +263,7 @@ func TestSyncFollowEmitsStaleEvent(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		_, err := a.runSyncFollow(ctx, time.Second, &messagesStored, &connectionEpoch, disconnected, staleReconnect)
+		_, err := a.runSyncFollow(ctx, time.Second, SyncPresenceModeNormal, &messagesStored, &connectionEpoch, disconnected, staleReconnect)
 		done <- err
 	}()
 

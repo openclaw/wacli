@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"sync/atomic"
 	"time"
+
+	"github.com/openclaw/wacli/internal/wa"
 )
 
-func (a *App) runSyncFollow(ctx context.Context, maxReconnect time.Duration, messagesStored, connectionEpoch *atomic.Int64, disconnected <-chan struct{}, staleReconnect <-chan staleReconnectRequest) (SyncResult, error) {
+func (a *App) runSyncFollow(ctx context.Context, maxReconnect time.Duration, presenceMode SyncPresenceMode, messagesStored, connectionEpoch *atomic.Int64, disconnected <-chan struct{}, staleReconnect <-chan staleReconnectRequest) (SyncResult, error) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -27,20 +29,20 @@ func (a *App) runSyncFollow(ctx context.Context, maxReconnect time.Duration, mes
 			// Client.Connect can see the existing socket as still live and return nil.
 			a.wa.Close()
 			connectionEpoch.Store(nowUTC().UnixNano())
-			if err := a.reconnect(ctx, maxReconnect); err != nil {
+			if err := a.reconnect(ctx, maxReconnect, presenceMode); err != nil {
 				return SyncResult{MessagesStored: messagesStored.Load()}, err
 			}
 		case <-disconnected:
 			a.emitOrPrint("reconnecting", nil, "Reconnecting...\n")
 			connectionEpoch.Store(nowUTC().UnixNano())
-			if err := a.reconnect(ctx, maxReconnect); err != nil {
+			if err := a.reconnect(ctx, maxReconnect, presenceMode); err != nil {
 				return SyncResult{MessagesStored: messagesStored.Load()}, err
 			}
 		}
 	}
 }
 
-func (a *App) runSyncUntilIdle(ctx context.Context, idleExit, maxReconnect time.Duration, messagesStored, lastEvent *atomic.Int64, disconnected <-chan struct{}) (SyncResult, error) {
+func (a *App) runSyncUntilIdle(ctx context.Context, idleExit, maxReconnect time.Duration, presenceMode SyncPresenceMode, messagesStored, lastEvent *atomic.Int64, disconnected <-chan struct{}) (SyncResult, error) {
 	poll := 250 * time.Millisecond
 	if idleExit >= 2*time.Second {
 		poll = 1 * time.Second
@@ -54,7 +56,7 @@ func (a *App) runSyncUntilIdle(ctx context.Context, idleExit, maxReconnect time.
 			return SyncResult{MessagesStored: messagesStored.Load()}, nil
 		case <-disconnected:
 			a.emitOrPrint("reconnecting", nil, "Reconnecting...\n")
-			if err := a.reconnect(ctx, maxReconnect); err != nil {
+			if err := a.reconnect(ctx, maxReconnect, presenceMode); err != nil {
 				return SyncResult{MessagesStored: messagesStored.Load()}, err
 			}
 		case <-ticker.C:
@@ -73,14 +75,16 @@ func (a *App) runSyncUntilIdle(ctx context.Context, idleExit, maxReconnect time.
 // reconnect wraps ReconnectWithBackoff with an optional deadline. If maxDuration
 // is positive, reconnection gives up after that long; otherwise it retries until
 // ctx is cancelled.
-func (a *App) reconnect(ctx context.Context, maxDuration time.Duration) error {
+func (a *App) reconnect(ctx context.Context, maxDuration time.Duration, presenceMode SyncPresenceMode) error {
 	rctx := ctx
 	var cancel context.CancelFunc
 	if maxDuration > 0 {
 		rctx, cancel = context.WithTimeout(ctx, maxDuration)
 		defer cancel()
 	}
-	err := a.wa.ReconnectWithBackoff(rctx, 2*time.Second, 30*time.Second)
+	err := a.wa.ReconnectWithBackoff(rctx, 2*time.Second, 30*time.Second, wa.ConnectOptions{
+		SuppressInitialAvailablePresence: !presenceMode.SendsAvailablePresence(),
+	})
 	if err != nil && ctx.Err() == nil {
 		return fmt.Errorf("could not reconnect after %s: %w", maxDuration, err)
 	}

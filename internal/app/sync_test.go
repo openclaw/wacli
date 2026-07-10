@@ -1897,7 +1897,7 @@ func TestSyncFollowIgnoresKeepAliveTimeoutFromPreviousConnection(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
-	_, err := a.runSyncFollow(ctx, time.Second, &messagesStored, &connectionEpoch, disconnected, staleReconnect)
+	_, err := a.runSyncFollow(ctx, time.Second, SyncPresenceModeNormal, &messagesStored, &connectionEpoch, disconnected, staleReconnect)
 	if err != nil {
 		t.Fatalf("runSyncFollow: %v", err)
 	}

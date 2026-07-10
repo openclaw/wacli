@@ -116,6 +116,59 @@ func TestSyncQuietPresenceModeSkipsAvailablePresence(t *testing.T) {
 	}
 }
 
+func TestSyncQuietPresenceModeSkipsAvailablePresenceAfterReconnect(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	reconnected := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(10 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				f.mu.Lock()
+				connectCalls := f.connectCalls
+				f.mu.Unlock()
+				if connectCalls >= 2 {
+					close(reconnected)
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+
+	captureStderr(t, func() {
+		_, err := a.Sync(ctx, SyncOptions{
+			Mode:         SyncModeFollow,
+			AllowQR:      false,
+			MaxReconnect: time.Second,
+			PresenceMode: SyncPresenceModeQuiet,
+			AfterConnect: func(context.Context) error {
+				f.emit(&events.StreamReplaced{})
+				return nil
+			},
+		})
+		if err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatalf("Sync: %v", err)
+		}
+	})
+
+	select {
+	case <-reconnected:
+	default:
+		t.Fatal("expected StreamReplaced to trigger reconnect")
+	}
+	assertPresenceCalls(t, f, types.PresenceUnavailable)
+}
+
 // TestSyncPresenceFailureWarnsAndContinues verifies that a failed presence
 // update is logged as a warning and does not abort the sync loop.
 func TestSyncPresenceFailureWarnsAndContinues(t *testing.T) {
