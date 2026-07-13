@@ -17,7 +17,10 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-const appStateKeyRetryDelay = 250 * time.Millisecond
+const (
+	appStateRetryInitialDelay = 250 * time.Millisecond
+	appStateRetryMaxDelay     = 5 * time.Second
+)
 
 func (a *App) ArchiveChat(ctx context.Context, jid types.JID, archive bool) error {
 	if err := a.syncChatStateBeforeWrite(ctx); err != nil {
@@ -66,23 +69,41 @@ func (a *App) MarkChatRead(ctx context.Context, jid types.JID, read bool) error 
 }
 
 func (a *App) syncChatStateBeforeWrite(ctx context.Context) error {
+	recoveryRequested := false
+	retryDelay := appStateRetryInitialDelay
 	for {
 		err := a.wa.FetchAppState(ctx, string(appstate.WAPatchRegularLow), false, false)
 		if err == nil {
 			return nil
 		}
-		if !errors.Is(err, appstate.ErrKeyNotFound) {
+
+		waitErr := "wait for missing WhatsApp app state key"
+		if errors.Is(err, appstate.ErrMismatchingLTHash) {
+			waitErr = "wait for WhatsApp app state recovery"
+			if !recoveryRequested {
+				if _, recoveryErr := a.wa.RequestAppStateRecovery(ctx, string(appstate.WAPatchRegularLow)); recoveryErr != nil {
+					return fmt.Errorf("request WhatsApp app state recovery: %w", recoveryErr)
+				}
+				recoveryRequested = true
+			}
+		} else if !errors.Is(err, appstate.ErrKeyNotFound) {
 			return fmt.Errorf("sync WhatsApp chat state before update: %w", err)
 		}
 
-		// whatsmeow requests missing keys asynchronously, so keep the client alive
-		// while the primary device responds and retry the state fetch.
-		timer := time.NewTimer(appStateKeyRetryDelay)
+		// Missing keys and recovery snapshots arrive asynchronously from the
+		// primary device, so keep the connection alive and retry the state fetch.
+		timer := time.NewTimer(retryDelay)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return fmt.Errorf("wait for missing WhatsApp app state key: %w", ctx.Err())
+			return fmt.Errorf("%s: %w", waitErr, ctx.Err())
 		case <-timer.C:
+		}
+		if retryDelay < appStateRetryMaxDelay {
+			retryDelay *= 2
+			if retryDelay > appStateRetryMaxDelay {
+				retryDelay = appStateRetryMaxDelay
+			}
 		}
 	}
 }

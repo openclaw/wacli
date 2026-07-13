@@ -970,6 +970,66 @@ func TestArchiveChatWaitsForMissingAppStateKey(t *testing.T) {
 	}
 }
 
+func TestArchiveChatBacksOffWhileWaitingForAppStateKey(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+	f.appStateFetchErr = fmt.Errorf("failed to decode regular_low patch: %w", appstate.ErrKeyNotFound)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1100*time.Millisecond)
+	defer cancel()
+	err := a.ArchiveChat(ctx, types.JID{User: "456", Server: types.DefaultUserServer}, true)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("ArchiveChat error = %v, want context deadline", err)
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.appStateFetches) > 3 {
+		t.Fatalf("app state fetches = %d, want at most 3 with exponential backoff", len(f.appStateFetches))
+	}
+}
+
+func TestArchiveChatRequestsRecoveryForMismatchingAppStateHash(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	chat := types.JID{User: "456", Server: types.DefaultUserServer}
+	when := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+	if err := a.db.UpsertChat(chat.String(), "dm", "Bob", when); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	f.appStateFetchErrs = []error{
+		fmt.Errorf("failed to verify regular_low patch: %w", appstate.ErrMismatchingLTHash),
+		fmt.Errorf("failed to verify regular_low patch: %w", appstate.ErrMismatchingLTHash),
+		nil,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := a.ArchiveChat(ctx, chat, true); err != nil {
+		t.Fatalf("ArchiveChat: %v", err)
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.appStateFetches) != 3 {
+		t.Fatalf("app state fetches = %d, want 3", len(f.appStateFetches))
+	}
+	for _, fetch := range f.appStateFetches {
+		if fetch.name != string(appstate.WAPatchRegularLow) || fetch.fullSync || fetch.onlyIfNotSynced {
+			t.Fatalf("app state fetch = %+v", fetch)
+		}
+	}
+	if len(f.appStateRecoveries) != 1 || f.appStateRecoveries[0] != string(appstate.WAPatchRegularLow) {
+		t.Fatalf("app state recoveries = %v, want [regular_low]", f.appStateRecoveries)
+	}
+	if len(f.archiveCalls) != 1 {
+		t.Fatalf("archive calls = %d, want 1", len(f.archiveCalls))
+	}
+}
+
 func TestHistorySyncDecryptsEncryptedReaction(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
