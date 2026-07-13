@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/openclaw/wacli/internal/store"
+	"go.mau.fi/whatsmeow/appstate"
 	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waSyncAction"
 	"go.mau.fi/whatsmeow/types"
@@ -16,7 +17,12 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+const appStateKeyRetryDelay = 250 * time.Millisecond
+
 func (a *App) ArchiveChat(ctx context.Context, jid types.JID, archive bool) error {
+	if err := a.syncChatStateBeforeWrite(ctx); err != nil {
+		return err
+	}
 	chatJID := canonicalJIDString(a.canonicalStoreJID(ctx, jid))
 	lastTS, lastKey := a.latestMessageRange(chatJID)
 	if err := a.wa.ArchiveChat(ctx, jid, archive, lastTS, lastKey); err != nil {
@@ -26,6 +32,9 @@ func (a *App) ArchiveChat(ctx context.Context, jid types.JID, archive bool) erro
 }
 
 func (a *App) PinChat(ctx context.Context, jid types.JID, pin bool) error {
+	if err := a.syncChatStateBeforeWrite(ctx); err != nil {
+		return err
+	}
 	chatJID := canonicalJIDString(a.canonicalStoreJID(ctx, jid))
 	if err := a.wa.PinChat(ctx, jid, pin); err != nil {
 		return err
@@ -34,6 +43,9 @@ func (a *App) PinChat(ctx context.Context, jid types.JID, pin bool) error {
 }
 
 func (a *App) MuteChat(ctx context.Context, jid types.JID, mute bool, duration time.Duration) error {
+	if err := a.syncChatStateBeforeWrite(ctx); err != nil {
+		return err
+	}
 	chatJID := canonicalJIDString(a.canonicalStoreJID(ctx, jid))
 	if err := a.wa.MuteChat(ctx, jid, mute, duration); err != nil {
 		return err
@@ -42,12 +54,37 @@ func (a *App) MuteChat(ctx context.Context, jid types.JID, mute bool, duration t
 }
 
 func (a *App) MarkChatRead(ctx context.Context, jid types.JID, read bool) error {
+	if err := a.syncChatStateBeforeWrite(ctx); err != nil {
+		return err
+	}
 	chatJID := canonicalJIDString(a.canonicalStoreJID(ctx, jid))
 	lastTS, lastKey := a.latestMessageRange(chatJID)
 	if err := a.wa.MarkChatAsRead(ctx, jid, read, lastTS, lastKey); err != nil {
 		return err
 	}
 	return a.db.SetChatUnread(chatJID, !read)
+}
+
+func (a *App) syncChatStateBeforeWrite(ctx context.Context) error {
+	for {
+		err := a.wa.FetchAppState(ctx, string(appstate.WAPatchRegularLow), false, false)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, appstate.ErrKeyNotFound) {
+			return fmt.Errorf("sync WhatsApp chat state before update: %w", err)
+		}
+
+		// whatsmeow requests missing keys asynchronously, so keep the client alive
+		// while the primary device responds and retry the state fetch.
+		timer := time.NewTimer(appStateKeyRetryDelay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return fmt.Errorf("wait for missing WhatsApp app state key: %w", ctx.Err())
+		case <-timer.C:
+		}
+	}
 }
 
 func (a *App) latestMessageRange(chatJID string) (time.Time, *waCommon.MessageKey) {

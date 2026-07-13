@@ -62,6 +62,7 @@ type fakeWA struct {
 	deleteHistoryCalls          []*waE2E.HistorySyncNotification
 	appStateRecoveryErr         error
 	appStateFetchErr            error
+	appStateFetchErrs           []error
 	appStateFetchEvent          func(name string, fullSync, onlyIfNotSynced bool) interface{}
 	archiveCalls                []fakeArchiveCall
 	pinCalls                    []fakePinCall
@@ -744,6 +745,10 @@ func (f *fakeWA) FetchAppState(ctx context.Context, name string, fullSync, onlyI
 		onlyIfNotSynced: onlyIfNotSynced,
 	})
 	err := f.appStateFetchErr
+	if len(f.appStateFetchErrs) > 0 {
+		err = f.appStateFetchErrs[0]
+		f.appStateFetchErrs = f.appStateFetchErrs[1:]
+	}
 	eventCB := f.appStateFetchEvent
 	f.mu.Unlock()
 	if err != nil {

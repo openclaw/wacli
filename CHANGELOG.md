@@ -12,6 +12,7 @@
 
 ### Fixed
 
+- Chats: keep state commands connected while missing app-state keys are requested so archive, pin, mute, and read-state changes can catch up before writing.
 - Release: move official publication to a local draft-first flow with authenticated cross-build provenance, separate protected-main native verification, a signed annotated exact tag, verified public-release and Homebrew manifests, and credential-free CI builds.
 
 ## 0.12.0 - 2026-07-06

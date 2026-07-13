@@ -932,6 +932,44 @@ func TestArchiveChatUsesLatestMessageRange(t *testing.T) {
 	}
 }
 
+func TestArchiveChatWaitsForMissingAppStateKey(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	chat := types.JID{User: "456", Server: types.DefaultUserServer}
+	when := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+	if err := a.db.UpsertChat(chat.String(), "dm", "Bob", when); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	f.appStateFetchErrs = []error{
+		fmt.Errorf("failed to decode regular_low patch: %w", appstate.ErrKeyNotFound),
+		nil,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := a.ArchiveChat(ctx, chat, true); err != nil {
+		t.Fatalf("ArchiveChat: %v", err)
+	}
+
+	f.mu.Lock()
+	fetches := append([]fakeAppStateFetch(nil), f.appStateFetches...)
+	archiveCalls := len(f.archiveCalls)
+	f.mu.Unlock()
+	if len(fetches) != 2 {
+		t.Fatalf("app state fetches = %d, want 2", len(fetches))
+	}
+	for _, fetch := range fetches {
+		if fetch.name != string(appstate.WAPatchRegularLow) || fetch.fullSync || fetch.onlyIfNotSynced {
+			t.Fatalf("app state fetch = %+v", fetch)
+		}
+	}
+	if archiveCalls != 1 {
+		t.Fatalf("archive calls = %d, want 1", archiveCalls)
+	}
+}
+
 func TestHistorySyncDecryptsEncryptedReaction(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
