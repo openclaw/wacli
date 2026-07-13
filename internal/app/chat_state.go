@@ -23,7 +23,7 @@ const (
 )
 
 func (a *App) ArchiveChat(ctx context.Context, jid types.JID, archive bool) error {
-	if err := a.syncChatStateBeforeWrite(ctx); err != nil {
+	if err := a.syncChatStateBeforeWrite(ctx, appstate.WAPatchRegularLow); err != nil {
 		return err
 	}
 	chatJID := canonicalJIDString(a.canonicalStoreJID(ctx, jid))
@@ -35,7 +35,7 @@ func (a *App) ArchiveChat(ctx context.Context, jid types.JID, archive bool) erro
 }
 
 func (a *App) PinChat(ctx context.Context, jid types.JID, pin bool) error {
-	if err := a.syncChatStateBeforeWrite(ctx); err != nil {
+	if err := a.syncChatStateBeforeWrite(ctx, appstate.WAPatchRegularLow); err != nil {
 		return err
 	}
 	chatJID := canonicalJIDString(a.canonicalStoreJID(ctx, jid))
@@ -46,7 +46,7 @@ func (a *App) PinChat(ctx context.Context, jid types.JID, pin bool) error {
 }
 
 func (a *App) MuteChat(ctx context.Context, jid types.JID, mute bool, duration time.Duration) error {
-	if err := a.syncChatStateBeforeWrite(ctx); err != nil {
+	if err := a.syncChatStateBeforeWrite(ctx, appstate.WAPatchRegularHigh); err != nil {
 		return err
 	}
 	chatJID := canonicalJIDString(a.canonicalStoreJID(ctx, jid))
@@ -57,7 +57,7 @@ func (a *App) MuteChat(ctx context.Context, jid types.JID, mute bool, duration t
 }
 
 func (a *App) MarkChatRead(ctx context.Context, jid types.JID, read bool) error {
-	if err := a.syncChatStateBeforeWrite(ctx); err != nil {
+	if err := a.syncChatStateBeforeWrite(ctx, appstate.WAPatchRegularLow); err != nil {
 		return err
 	}
 	chatJID := canonicalJIDString(a.canonicalStoreJID(ctx, jid))
@@ -68,11 +68,16 @@ func (a *App) MarkChatRead(ctx context.Context, jid types.JID, read bool) error 
 	return a.db.SetChatUnread(chatJID, !read)
 }
 
-func (a *App) syncChatStateBeforeWrite(ctx context.Context) error {
+func (a *App) syncChatStateBeforeWrite(ctx context.Context, collection appstate.WAPatchName) error {
+	handlerID := a.wa.AddEventHandler(func(evt interface{}) {
+		a.handleAppStatePersistenceEvent(ctx, evt)
+	})
+	defer a.wa.RemoveEventHandler(handlerID)
+
 	recoveryRequested := false
 	retryDelay := appStateRetryInitialDelay
 	for {
-		err := a.wa.FetchAppState(ctx, string(appstate.WAPatchRegularLow), false, false)
+		err := a.wa.FetchAppState(ctx, string(collection), false, false)
 		if err == nil {
 			return nil
 		}
@@ -81,7 +86,7 @@ func (a *App) syncChatStateBeforeWrite(ctx context.Context) error {
 		if errors.Is(err, appstate.ErrMismatchingLTHash) {
 			waitErr = "wait for WhatsApp app state recovery"
 			if !recoveryRequested {
-				if _, recoveryErr := a.wa.RequestAppStateRecovery(ctx, string(appstate.WAPatchRegularLow)); recoveryErr != nil {
+				if _, recoveryErr := a.wa.RequestAppStateRecovery(ctx, string(collection)); recoveryErr != nil {
 					return fmt.Errorf("request WhatsApp app state recovery: %w", recoveryErr)
 				}
 				recoveryRequested = true

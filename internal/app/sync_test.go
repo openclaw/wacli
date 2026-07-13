@@ -932,6 +932,138 @@ func TestArchiveChatUsesLatestMessageRange(t *testing.T) {
 	}
 }
 
+func TestMuteChatRecoversRegularHighBeforeWrite(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mute bool
+	}{
+		{name: "mute", mute: true},
+		{name: "unmute", mute: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := newTestApp(t)
+			f := newFakeWA()
+			a.wa = f
+
+			chat := types.JID{User: "456", Server: types.DefaultUserServer}
+			if err := a.db.UpsertChat(chat.String(), "dm", "Bob", time.Now()); err != nil {
+				t.Fatalf("UpsertChat: %v", err)
+			}
+			f.appStateFetchErrs = []error{
+				fmt.Errorf("failed to verify regular_high patch: %w", appstate.ErrMismatchingLTHash),
+				nil,
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if err := a.MuteChat(ctx, chat, tc.mute, 0); err != nil {
+				t.Fatalf("MuteChat: %v", err)
+			}
+
+			f.mu.Lock()
+			fetches := append([]fakeAppStateFetch(nil), f.appStateFetches...)
+			recoveries := append([]string(nil), f.appStateRecoveries...)
+			muteCalls := append([]fakeMuteCall(nil), f.muteCalls...)
+			f.mu.Unlock()
+			if len(fetches) != 2 {
+				t.Fatalf("app state fetches = %+v, want two regular_high delta fetches", fetches)
+			}
+			for _, fetch := range fetches {
+				if fetch.name != string(appstate.WAPatchRegularHigh) || fetch.fullSync || fetch.onlyIfNotSynced {
+					t.Fatalf("app state fetch = %+v, want regular_high delta fetch", fetch)
+				}
+			}
+			if len(recoveries) != 1 || recoveries[0] != string(appstate.WAPatchRegularHigh) {
+				t.Fatalf("app state recoveries = %v, want [regular_high]", recoveries)
+			}
+			if len(muteCalls) != 1 || muteCalls[0].mute != tc.mute {
+				t.Fatalf("mute calls = %+v, want mute=%t", muteCalls, tc.mute)
+			}
+		})
+	}
+}
+
+func TestArchiveChatPersistsAppStateDeltasFetchedBeforeWrite(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	target := types.JID{User: "456", Server: types.DefaultUserServer}
+	pending := types.JID{User: "789", Server: types.DefaultUserServer}
+	when := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+	for _, chat := range []types.JID{target, pending} {
+		if err := a.db.UpsertChat(chat.String(), "dm", "Bob", when); err != nil {
+			t.Fatalf("UpsertChat: %v", err)
+		}
+	}
+	f.appStateFetchEvent = func(name string, fullSync, onlyIfNotSynced bool) interface{} {
+		return &events.Archive{
+			JID:    pending,
+			Action: &waSyncAction.ArchiveChatAction{Archived: proto.Bool(true)},
+		}
+	}
+
+	if err := a.ArchiveChat(context.Background(), target, true); err != nil {
+		t.Fatalf("ArchiveChat: %v", err)
+	}
+
+	chat, err := a.db.GetChat(pending.String())
+	if err != nil {
+		t.Fatalf("GetChat: %v", err)
+	}
+	if !chat.Archived {
+		t.Fatalf("pending app-state archive was not persisted: %+v", chat)
+	}
+	f.mu.Lock()
+	handlers := len(f.handlers)
+	f.mu.Unlock()
+	if handlers != 0 {
+		t.Fatalf("event handlers after chat-state catch-up = %d, want 0", handlers)
+	}
+}
+
+func TestMuteChatPersistsOtherAppStateDeltasFetchedBeforeWrite(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	target := types.JID{User: "456", Server: types.DefaultUserServer}
+	pending := types.JID{User: "789", Server: types.DefaultUserServer}
+	when := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+	for _, chat := range []types.JID{target, pending} {
+		if err := a.db.UpsertChat(chat.String(), "dm", "Bob", when); err != nil {
+			t.Fatalf("UpsertChat: %v", err)
+		}
+	}
+	if err := a.db.UpsertMessage(store.UpsertMessageParams{
+		ChatJID:   pending.String(),
+		MsgID:     "pending-delete",
+		SenderJID: pending.String(),
+		Timestamp: when,
+		Text:      "delete locally",
+	}); err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+	f.appStateFetchEvent = func(name string, fullSync, onlyIfNotSynced bool) interface{} {
+		return &events.DeleteForMe{
+			ChatJID:   pending,
+			MessageID: "pending-delete",
+			Timestamp: when.Add(time.Minute),
+		}
+	}
+
+	if err := a.MuteChat(context.Background(), target, true, 0); err != nil {
+		t.Fatalf("MuteChat: %v", err)
+	}
+
+	msg, err := a.db.GetMessage(pending.String(), "pending-delete")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if !msg.DeletedForMe {
+		t.Fatalf("pending delete-for-me app state was not persisted: %+v", msg)
+	}
+}
+
 func TestArchiveChatWaitsForMissingAppStateKey(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()

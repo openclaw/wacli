@@ -90,25 +90,19 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 			}
 			a.handleLiveSyncMessage(ctx, opts, v, messagesStored, enqueueMedia, enqueueWebhook, limits)
 		case *events.CallOffer, *events.CallAccept, *events.CallPreAccept, *events.CallTransport,
-			*events.CallOfferNotice, *events.CallRelayLatency, *events.CallTerminate, *events.CallReject,
-			*events.AppState:
+			*events.CallOfferNotice, *events.CallRelayLatency, *events.CallTerminate, *events.CallReject:
 			lastEvent.Store(nowUTC().UnixNano())
 			a.handleLiveCallEvent(ctx, v)
+		case *events.AppState, *events.Star, *events.DeleteForMe,
+			*events.Archive, *events.Pin, *events.Mute, *events.MarkChatAsRead:
+			lastEvent.Store(nowUTC().UnixNano())
+			a.handleAppStatePersistenceEvent(ctx, v)
 		case *events.HistorySync:
 			lastEvent.Store(nowUTC().UnixNano())
 			a.handleHistorySync(ctx, opts, v, messagesStored, lastEvent, enqueueMedia, limits)
-		case *events.Star:
-			lastEvent.Store(nowUTC().UnixNano())
-			a.handleStarEvent(ctx, v)
 		case *events.Receipt:
 			lastEvent.Store(nowUTC().UnixNano())
 			a.handleReceiptEvent(ctx, v)
-		case *events.DeleteForMe:
-			lastEvent.Store(nowUTC().UnixNano())
-			a.handleDeleteForMeEvent(ctx, v)
-		case *events.Archive, *events.Pin, *events.Mute, *events.MarkChatAsRead:
-			lastEvent.Store(nowUTC().UnixNano())
-			a.handleChatStateEvent(ctx, v)
 		case *events.Connected:
 			a.emitOrPrint("connected", nil, "\nConnected.\n")
 			ps.mu.Lock()
@@ -185,6 +179,19 @@ func syncActivityEvent(evt interface{}) bool {
 		return false
 	default:
 		return true
+	}
+}
+
+func (a *App) handleAppStatePersistenceEvent(ctx context.Context, evt interface{}) {
+	switch v := evt.(type) {
+	case *events.AppState:
+		a.handleLiveCallEvent(ctx, v)
+	case *events.Star:
+		a.handleStarEvent(ctx, v)
+	case *events.DeleteForMe:
+		a.handleDeleteForMeEvent(ctx, v)
+	case *events.Archive, *events.Pin, *events.Mute, *events.MarkChatAsRead:
+		a.handleChatStateEvent(ctx, v)
 	}
 }
 
