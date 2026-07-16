@@ -201,6 +201,7 @@ type textMessageSender interface {
 	SendText(ctx context.Context, to types.JID, text string) (types.MessageID, error)
 	SendProtoMessage(ctx context.Context, to types.JID, msg *waProto.Message) (types.MessageID, error)
 	GetGroupInfo(ctx context.Context, jid types.JID) (*types.GroupInfo, error)
+	ResolvePNToLID(ctx context.Context, jid types.JID) types.JID
 	LinkedJID() string
 }
 
@@ -223,7 +224,11 @@ func sendTextMessage(ctx context.Context, a sendTextApp, to types.JID, text, rep
 }
 
 func sendTextMessageWithSender(ctx context.Context, sender textMessageSender, db *store.DB, to types.JID, text, replyTo, replyToSender string, preview *linkpreview.Preview, mentionedJIDs []string, ephemeral textEphemeralOptions) (types.MessageID, error) {
-	msg, plainText, err := buildTextMessageWithSelf(db, to, text, replyTo, replyToSender, sender.LinkedJID(), preview, mentionedJIDs)
+	selfJID, err := textReplySelfJID(ctx, sender, db, to, replyTo)
+	if err != nil {
+		return "", err
+	}
+	msg, plainText, err := buildTextMessageWithSelf(db, to, text, replyTo, replyToSender, selfJID, preview, mentionedJIDs)
 	if err != nil {
 		return "", err
 	}
@@ -245,6 +250,40 @@ func sendTextMessageWithSender(ctx context.Context, sender textMessageSender, db
 		applyEphemeralContext(msg, resolved.expiration)
 	}
 	return sender.SendProtoMessage(ctx, to, msg)
+}
+
+func textReplySelfJID(ctx context.Context, sender textMessageSender, db *store.DB, chat types.JID, replyTo string) (string, error) {
+	linked := strings.TrimSpace(sender.LinkedJID())
+	replyTo = strings.TrimSpace(replyTo)
+	if replyTo == "" {
+		return linked, nil
+	}
+	quoted, err := db.GetMessage(chat.String(), replyTo)
+	if err != nil || !quoted.FromMe {
+		return linked, nil
+	}
+
+	useLID := chat.Server == types.HiddenUserServer
+	if chat.Server == types.GroupServer {
+		info, infoErr := sender.GetGroupInfo(ctx, chat)
+		if infoErr != nil {
+			return "", fmt.Errorf("get group info for quoted outgoing message: %w", infoErr)
+		}
+		useLID = info != nil && info.AddressingMode == types.AddressingModeLID
+	}
+	if !useLID {
+		return linked, nil
+	}
+
+	linkedJID, err := types.ParseJID(linked)
+	if err != nil || linkedJID.IsEmpty() {
+		return "", fmt.Errorf("linked account JID is unavailable for quoted outgoing message %s", replyTo)
+	}
+	lid := sender.ResolvePNToLID(ctx, linkedJID)
+	if lid.IsEmpty() || lid.Server != types.HiddenUserServer {
+		return "", fmt.Errorf("linked account LID is unavailable for quoted outgoing message %s", replyTo)
+	}
+	return lid.ToNonAD().String(), nil
 }
 
 func resolveTextEphemeral(ctx context.Context, sender textMessageSender, to types.JID, opts textEphemeralOptions) (resolvedTextEphemeral, error) {
