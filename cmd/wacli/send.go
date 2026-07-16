@@ -224,7 +224,7 @@ func sendTextMessage(ctx context.Context, a sendTextApp, to types.JID, text, rep
 }
 
 func sendTextMessageWithSender(ctx context.Context, sender textMessageSender, db *store.DB, to types.JID, text, replyTo, replyToSender string, preview *linkpreview.Preview, mentionedJIDs []string, ephemeral textEphemeralOptions) (types.MessageID, error) {
-	selfJID, err := textReplySelfJID(ctx, sender, db, to, replyTo)
+	selfJID, err := textReplySelfJID(ctx, sender, db, to, replyTo, replyToSender)
 	if err != nil {
 		return "", err
 	}
@@ -252,10 +252,10 @@ func sendTextMessageWithSender(ctx context.Context, sender textMessageSender, db
 	return sender.SendProtoMessage(ctx, to, msg)
 }
 
-func textReplySelfJID(ctx context.Context, sender textMessageSender, db *store.DB, chat types.JID, replyTo string) (string, error) {
+func textReplySelfJID(ctx context.Context, sender textMessageSender, db *store.DB, chat types.JID, replyTo, replyToSender string) (string, error) {
 	linked := strings.TrimSpace(sender.LinkedJID())
 	replyTo = strings.TrimSpace(replyTo)
-	if replyTo == "" {
+	if replyTo == "" || strings.TrimSpace(replyToSender) != "" {
 		return linked, nil
 	}
 	quoted, err := db.GetMessage(chat.String(), replyTo)
@@ -534,7 +534,7 @@ func resolveTextReplyParticipant(chat types.JID, msg store.Message, override, se
 		if err != nil {
 			return types.JID{}, fmt.Errorf("invalid --reply-to-sender: %w", err)
 		}
-		return jid, nil
+		return jid.ToNonAD(), nil
 	}
 	if msg.FromMe {
 		jid, err := types.ParseJID(strings.TrimSpace(selfJID))
@@ -548,7 +548,7 @@ func resolveTextReplyParticipant(chat types.JID, msg store.Message, override, se
 		if err != nil {
 			return types.JID{}, fmt.Errorf("stored quoted sender is invalid: %w", err)
 		}
-		return jid, nil
+		return jid.ToNonAD(), nil
 	}
 	if chat.Server != types.GroupServer {
 		return chat, nil

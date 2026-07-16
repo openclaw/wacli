@@ -430,6 +430,39 @@ func TestSendTextMessageRejectsUnconstructableQuotesBeforeSending(t *testing.T) 
 	}
 }
 
+func TestSendTextMessageReplySenderBypassesSelfLIDLookup(t *testing.T) {
+	db := openSendTestDB(t)
+	chat := types.JID{User: "12345", Server: types.GroupServer}
+	if err := db.UpsertChat(chat.String(), "group", "Group", time.Now()); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	if err := db.UpsertMessage(store.UpsertMessageParams{
+		ChatJID:   chat.String(),
+		MsgID:     "quoted",
+		Timestamp: time.Now(),
+		FromMe:    true,
+		Text:      "quoted text",
+	}); err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+	sender := &recordingTextSender{
+		linkedJID: "15550000000@s.whatsapp.net",
+		groupInfo: &types.GroupInfo{AddressingMode: types.AddressingModeLID},
+	}
+
+	_, err := sendTextMessageWithSender(context.Background(), sender, db, chat, "reply", "quoted", "15551234567:4@s.whatsapp.net", nil, nil, textEphemeralOptions{})
+	if err != nil {
+		t.Fatalf("sendTextMessageWithSender: %v", err)
+	}
+	info := requireExtendedText(t, sender.protoMsg).GetContextInfo()
+	if got := info.GetParticipant(); got != "15551234567@s.whatsapp.net" {
+		t.Fatalf("participant = %q", got)
+	}
+	if sender.groupInfoCalls != 0 || sender.resolveLIDCalls != 0 {
+		t.Fatalf("identity calls: GetGroupInfo=%d ResolvePNToLID=%d, want 0/0", sender.groupInfoCalls, sender.resolveLIDCalls)
+	}
+}
+
 func TestSendTextMessageAllowsUnsyncedGroupReplyWithSender(t *testing.T) {
 	db := openSendTestDB(t)
 	chat := types.JID{User: "12345", Server: types.GroupServer}
@@ -491,7 +524,8 @@ func TestSendTextMessageUsesLinkedLIDForOutgoingQuoteInLIDGroup(t *testing.T) {
 func TestSendTextMessageKeepsStoredSenderForIncomingQuoteInLIDGroup(t *testing.T) {
 	db := openSendTestDB(t)
 	chat := types.JID{User: "12345", Server: types.GroupServer}
-	senderJID := "987654321@lid"
+	senderJID := "987654321:4@lid"
+	wantSenderJID := "987654321@lid"
 	if err := db.UpsertChat(chat.String(), "group", "Group", time.Now()); err != nil {
 		t.Fatalf("UpsertChat: %v", err)
 	}
@@ -515,8 +549,8 @@ func TestSendTextMessageKeepsStoredSenderForIncomingQuoteInLIDGroup(t *testing.T
 		t.Fatalf("sendTextMessageWithSender: %v", err)
 	}
 	info := requireExtendedText(t, sender.protoMsg).GetContextInfo()
-	if got := info.GetParticipant(); got != senderJID {
-		t.Fatalf("participant = %q, want %q", got, senderJID)
+	if got := info.GetParticipant(); got != wantSenderJID {
+		t.Fatalf("participant = %q, want %q", got, wantSenderJID)
 	}
 	if sender.groupInfoCalls != 0 || sender.resolveLIDCalls != 0 {
 		t.Fatalf("identity calls: GetGroupInfo=%d ResolvePNToLID=%d, want 0/0", sender.groupInfoCalls, sender.resolveLIDCalls)
