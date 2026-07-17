@@ -21,6 +21,7 @@ import (
 const (
 	appStateRetryInitialDelay = 250 * time.Millisecond
 	appStateRetryMaxDelay     = 5 * time.Second
+	appStateRecoveryMaxWait   = 5 * time.Minute
 )
 
 func (a *App) ArchiveChat(ctx context.Context, jid types.JID, archive bool) error {
@@ -170,6 +171,8 @@ func (a *App) syncChatStateBeforeWrite(ctx context.Context, collection appstate.
 }
 
 func (a *App) replayRequiredAppState(ctx context.Context, collection appstate.WAPatchName, markerGeneration int64, tracker *appStatePersistenceTracker) error {
+	ctx, cancel := context.WithTimeout(ctx, appStateRecoveryMaxWait)
+	defer cancel()
 	retryDelay := appStateRetryInitialDelay
 	for {
 		fetchErr, persistenceErr := a.fetchAndPersistAppState(ctx, collection, true, tracker)
@@ -182,6 +185,9 @@ func (a *App) replayRequiredAppState(ctx context.Context, collection appstate.WA
 		if !errors.Is(fetchErr, appstate.ErrKeyNotFound) {
 			return fmt.Errorf("replay WhatsApp app state recovery for %s: %w", collection, fetchErr)
 		}
+		// whatsmeow requests the missing keys when patch decoding returns
+		// ErrKeyNotFound. Keep the connection alive for that delivery, bounded
+		// so one absent key cannot hold all chat-state writes forever.
 
 		timer := time.NewTimer(retryDelay)
 		select {
