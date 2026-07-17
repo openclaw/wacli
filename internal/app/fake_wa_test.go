@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"github.com/openclaw/wacli/internal/fsutil"
 	"github.com/openclaw/wacli/internal/wa"
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/appstate"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waE2E"
@@ -70,6 +72,7 @@ type fakeWA struct {
 	pinCalls                    []fakePinCall
 	muteCalls                   []fakeMuteCall
 	markReadCalls               []fakeMarkReadCall
+	markReadBeforeApply         func()
 	manualHistorySyncCalls      []bool
 	appStateRecoveries          []string
 	appStateFetches             []fakeAppStateFetch
@@ -743,8 +746,12 @@ func (f *fakeWA) MuteChat(ctx context.Context, target types.JID, mute bool, dura
 
 func (f *fakeWA) MarkChatAsRead(ctx context.Context, target types.JID, read bool, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey, beforeApply func()) ([]interface{}, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.markReadCalls = append(f.markReadCalls, fakeMarkReadCall{target: target, read: read, lastMsgTS: lastMsgTS, lastMsgKey: lastMsgKey})
+	hook := f.markReadBeforeApply
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	beforeApply()
 	return nil, nil
 }
@@ -789,6 +796,9 @@ func (f *fakeWA) FetchAppStateEvents(ctx context.Context, name string, fullSync,
 	eventCB := f.appStateFetchEvent
 	f.mu.Unlock()
 	if err != nil {
+		if !errors.Is(err, appstate.ErrKeyNotFound) {
+			f.emit(&events.AppStateSyncError{Name: appstate.WAPatchName(name), FullSync: fullSync, Error: err})
+		}
 		return nil, err
 	}
 	if eventCB == nil {

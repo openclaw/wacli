@@ -303,14 +303,34 @@ func (a *App) handleReceiptPersistenceEvent(ctx context.Context, evt *events.Rec
 		return
 	}
 	ticket := a.appStatePersist.reserveLive()
+	generation, err := a.db.MarkAppStateRecoveryGeneration(string(appstate.WAPatchRegularLow))
+	if err != nil {
+		a.emitWarning(
+			"receipt_recovery_marker_failed",
+			fmt.Sprintf("warning: failed to mark read receipt recovery: %v", err),
+			map[string]any{"error": err.Error()},
+		)
+		a.appStatePersist.completeOne(ticket, func() {
+			_ = a.handleReceiptEvent(context.WithoutCancel(ctx), evt)
+		})
+		return
+	}
 	a.appStatePersist.completeOne(ticket, func() {
-		a.handleReceiptEvent(context.WithoutCancel(ctx), evt)
+		if a.handleReceiptEvent(context.WithoutCancel(ctx), evt) == nil {
+			if err := a.db.ClearAppStateRecoveryIntent(string(appstate.WAPatchRegularLow), generation); err != nil {
+				a.emitWarning(
+					"receipt_recovery_marker_clear_failed",
+					fmt.Sprintf("warning: failed to clear read receipt recovery: %v", err),
+					map[string]any{"error": err.Error()},
+				)
+			}
+		}
 	})
 }
 
-func (a *App) handleReceiptEvent(ctx context.Context, evt *events.Receipt) {
+func (a *App) handleReceiptEvent(ctx context.Context, evt *events.Receipt) error {
 	if evt == nil || evt.Type != types.ReceiptTypeReadSelf || evt.Chat.IsEmpty() {
-		return
+		return nil
 	}
 	chat := a.canonicalStoreJID(ctx, evt.Chat)
 	if err := a.db.SetChatUnreadCount(canonicalJIDString(chat), 0); err != nil {
@@ -319,7 +339,9 @@ func (a *App) handleReceiptEvent(ctx context.Context, evt *events.Receipt) {
 			fmt.Sprintf("warning: failed to clear unread count from read-self receipt for chat %s: %v", chat, err),
 			map[string]any{"chat_jid": chat.String(), "error": err.Error()},
 		)
+		return err
 	}
+	return nil
 }
 
 func (a *App) handleDeleteForMeEvent(ctx context.Context, evt *events.DeleteForMe) error {
@@ -449,6 +471,9 @@ func (a *App) handleStarEvent(ctx context.Context, evt *events.Star) error {
 
 func (a *App) handleAppStateSyncError(ctx context.Context, evt *events.AppStateSyncError, recoveries *sync.Map) {
 	if evt == nil || !errors.Is(evt.Error, appstate.ErrMismatchingLTHash) {
+		return
+	}
+	if a.ownsManualAppStateFetch(evt.Name) {
 		return
 	}
 	name := strings.TrimSpace(string(evt.Name))

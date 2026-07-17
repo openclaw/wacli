@@ -36,16 +36,14 @@ func (a *App) ArchiveChat(ctx context.Context, jid types.JID, archive bool) erro
 	if err != nil {
 		return err
 	}
-	var postSend postSendAppStateReservation
-	postSendEvents, err := a.wa.ArchiveChat(ctx, jid, archive, lastTS, lastKey, func() { postSend.reserve(a) })
+	postSendEvents, err := a.wa.ArchiveChat(ctx, jid, archive, lastTS, lastKey, func() { pending.reserve(a) })
 	if err != nil {
-		return errors.Join(err, a.failLocalAppStateWrite(ctx, pending, &postSend, postSendEvents))
+		return errors.Join(err, a.failLocalAppStateWrite(ctx, &pending, postSendEvents))
 	}
-	if !postSend.reserved {
-		a.abandonLocalAppStateWrite(pending)
+	if !pending.reserved {
 		return fmt.Errorf("WhatsApp app state send completed without an apply boundary")
 	}
-	return a.completeLocalAppStateWrite(ctx, pending, postSend.ticket, postSendEvents, func() error {
+	return a.completeLocalAppStateWrite(ctx, &pending, postSendEvents, func() error {
 		return a.db.SetChatArchived(chatJID, archive)
 	})
 }
@@ -61,16 +59,14 @@ func (a *App) PinChat(ctx context.Context, jid types.JID, pin bool) error {
 	if err != nil {
 		return err
 	}
-	var postSend postSendAppStateReservation
-	postSendEvents, err := a.wa.PinChat(ctx, jid, pin, func() { postSend.reserve(a) })
+	postSendEvents, err := a.wa.PinChat(ctx, jid, pin, func() { pending.reserve(a) })
 	if err != nil {
-		return errors.Join(err, a.failLocalAppStateWrite(ctx, pending, &postSend, postSendEvents))
+		return errors.Join(err, a.failLocalAppStateWrite(ctx, &pending, postSendEvents))
 	}
-	if !postSend.reserved {
-		a.abandonLocalAppStateWrite(pending)
+	if !pending.reserved {
 		return fmt.Errorf("WhatsApp app state send completed without an apply boundary")
 	}
-	return a.completeLocalAppStateWrite(ctx, pending, postSend.ticket, postSendEvents, func() error {
+	return a.completeLocalAppStateWrite(ctx, &pending, postSendEvents, func() error {
 		return a.db.SetChatPinned(chatJID, pin)
 	})
 }
@@ -87,16 +83,14 @@ func (a *App) MuteChat(ctx context.Context, jid types.JID, mute bool, duration t
 	if err != nil {
 		return err
 	}
-	var postSend postSendAppStateReservation
-	postSendEvents, err := a.wa.MuteChat(ctx, jid, mute, duration, func() { postSend.reserve(a) })
+	postSendEvents, err := a.wa.MuteChat(ctx, jid, mute, duration, func() { pending.reserve(a) })
 	if err != nil {
-		return errors.Join(err, a.failLocalAppStateWrite(ctx, pending, &postSend, postSendEvents))
+		return errors.Join(err, a.failLocalAppStateWrite(ctx, &pending, postSendEvents))
 	}
-	if !postSend.reserved {
-		a.abandonLocalAppStateWrite(pending)
+	if !pending.reserved {
 		return fmt.Errorf("WhatsApp app state send completed without an apply boundary")
 	}
-	return a.completeLocalAppStateWrite(ctx, pending, postSend.ticket, postSendEvents, func() error {
+	return a.completeLocalAppStateWrite(ctx, &pending, postSendEvents, func() error {
 		return a.db.SetChatMutedUntil(chatJID, mutedUntil)
 	})
 }
@@ -113,16 +107,14 @@ func (a *App) MarkChatRead(ctx context.Context, jid types.JID, read bool) error 
 	if err != nil {
 		return err
 	}
-	var postSend postSendAppStateReservation
-	postSendEvents, err := a.wa.MarkChatAsRead(ctx, jid, read, lastTS, lastKey, func() { postSend.reserve(a) })
+	postSendEvents, err := a.wa.MarkChatAsRead(ctx, jid, read, lastTS, lastKey, func() { pending.reserve(a) })
 	if err != nil {
-		return errors.Join(err, a.failLocalAppStateWrite(ctx, pending, &postSend, postSendEvents))
+		return errors.Join(err, a.failLocalAppStateWrite(ctx, &pending, postSendEvents))
 	}
-	if !postSend.reserved {
-		a.abandonLocalAppStateWrite(pending)
+	if !pending.reserved {
 		return fmt.Errorf("WhatsApp app state send completed without an apply boundary")
 	}
-	return a.completeLocalAppStateWrite(ctx, pending, postSend.ticket, postSendEvents, func() error {
+	return a.completeLocalAppStateWrite(ctx, &pending, postSendEvents, func() error {
 		return a.db.SetChatUnread(chatJID, !read)
 	})
 }
@@ -207,7 +199,12 @@ func (a *App) replayRequiredAppState(ctx context.Context, collection appstate.WA
 
 func (a *App) fetchAndPersistAppState(ctx context.Context, collection appstate.WAPatchName, fullSync bool, tracker *appStatePersistenceTracker) (fetchErr, persistenceErr error) {
 	ticket := a.appStatePersist.reserve()
-	eventsToPersist, fetchErr := a.wa.FetchAppStateEvents(ctx, string(collection), fullSync, false)
+	var eventsToPersist []interface{}
+	func() {
+		releaseFetch := a.beginManualAppStateFetch(collection)
+		defer releaseFetch()
+		eventsToPersist, fetchErr = a.wa.FetchAppStateEvents(ctx, string(collection), fullSync, false)
+	}()
 	result := make(chan error, 1)
 	frontier := a.appStatePersist.complete(ticket, func() {
 		result <- a.persistFetchedAppStateEvents(ctx, eventsToPersist, tracker)
@@ -216,6 +213,30 @@ func (a *App) fetchAndPersistAppState(ctx context.Context, collection appstate.W
 		return fetchErr, waitErr
 	}
 	return fetchErr, <-result
+}
+
+func (a *App) beginManualAppStateFetch(collection appstate.WAPatchName) func() {
+	name := string(collection)
+	a.manualFetchMu.Lock()
+	if a.manualFetches == nil {
+		a.manualFetches = make(map[string]int)
+	}
+	a.manualFetches[name]++
+	a.manualFetchMu.Unlock()
+	return func() {
+		a.manualFetchMu.Lock()
+		a.manualFetches[name]--
+		if a.manualFetches[name] == 0 {
+			delete(a.manualFetches, name)
+		}
+		a.manualFetchMu.Unlock()
+	}
+}
+
+func (a *App) ownsManualAppStateFetch(collection appstate.WAPatchName) bool {
+	a.manualFetchMu.Lock()
+	defer a.manualFetchMu.Unlock()
+	return a.manualFetches[string(collection)] > 0
 }
 
 func (a *App) clearCompletedAppStateRecovery(collection appstate.WAPatchName, markerGeneration int64) error {
@@ -236,16 +257,14 @@ func (a *App) clearCompletedAppStateRecovery(collection appstate.WAPatchName, ma
 }
 
 type pendingLocalAppStateWrite struct {
-	ticket uint64
+	collection appstate.WAPatchName
+	generation int64
+	once       sync.Once
+	ticket     uint64
+	reserved   bool
 }
 
-type postSendAppStateReservation struct {
-	once     sync.Once
-	ticket   uint64
-	reserved bool
-}
-
-func (p *postSendAppStateReservation) reserve(a *App) {
+func (p *pendingLocalAppStateWrite) reserve(a *App) {
 	p.once.Do(func() {
 		p.ticket = a.appStatePersist.reserve()
 		p.reserved = true
@@ -253,32 +272,22 @@ func (p *postSendAppStateReservation) reserve(a *App) {
 }
 
 func (a *App) beginLocalAppStateWrite(collection appstate.WAPatchName) (pendingLocalAppStateWrite, error) {
-	pending := pendingLocalAppStateWrite{
-		ticket: a.appStatePersist.reserve(),
-	}
-	err := a.db.MarkAppStateRecoveryRequired(string(collection))
+	generation, err := a.db.MarkAppStateRecoveryGeneration(string(collection))
 	if err != nil {
-		a.appStatePersist.completeOne(pending.ticket, func() {})
 		return pendingLocalAppStateWrite{}, fmt.Errorf("mark local WhatsApp app state recovery for %s: %w", collection, err)
 	}
-	return pending, nil
+	// Keep this exact intent until a later pre-write replay. Other queued work
+	// clears only its own generation and cannot erase an unfinished send.
+	return pendingLocalAppStateWrite{collection: collection, generation: generation}, nil
 }
 
-func (a *App) abandonLocalAppStateWrite(pending pendingLocalAppStateWrite) {
-	// A send error is ambiguous: whatsmeow may already have advanced its app
-	// state cursor. Leave the durable intent for the next full replay.
-	a.appStatePersist.completeOne(pending.ticket, func() {})
-}
-
-func (a *App) failLocalAppStateWrite(ctx context.Context, pending pendingLocalAppStateWrite, postSend *postSendAppStateReservation, postSendEvents []interface{}) error {
-	if !postSend.reserved {
-		a.abandonLocalAppStateWrite(pending)
+func (a *App) failLocalAppStateWrite(ctx context.Context, pending *pendingLocalAppStateWrite, postSendEvents []interface{}) error {
+	if !pending.reserved {
 		return nil
 	}
-	a.appStatePersist.completeOne(pending.ticket, func() {})
 	result := make(chan error, 1)
 	persistCtx := context.WithoutCancel(ctx)
-	frontier := a.appStatePersist.complete(postSend.ticket, func() {
+	frontier := a.appStatePersist.complete(pending.ticket, func() {
 		tracker := &appStatePersistenceTracker{}
 		result <- a.persistFetchedAppStateEvents(persistCtx, postSendEvents, tracker)
 	})
@@ -288,14 +297,11 @@ func (a *App) failLocalAppStateWrite(ctx context.Context, pending pendingLocalAp
 	return <-result
 }
 
-func (a *App) completeLocalAppStateWrite(ctx context.Context, pending pendingLocalAppStateWrite, postSendTicket uint64, postSendEvents []interface{}, persist func() error) error {
+func (a *App) completeLocalAppStateWrite(ctx context.Context, pending *pendingLocalAppStateWrite, postSendEvents []interface{}, persist func() error) error {
 	result := make(chan error, 1)
 	persistCtx := context.WithoutCancel(ctx)
-	var localErr error
-	a.appStatePersist.completeOne(pending.ticket, func() {
-		localErr = persist()
-	})
-	frontier := a.appStatePersist.complete(postSendTicket, func() {
+	frontier := a.appStatePersist.complete(pending.ticket, func() {
+		localErr := persist()
 		tracker := &appStatePersistenceTracker{}
 		eventsErr := a.persistFetchedAppStateEvents(persistCtx, postSendEvents, tracker)
 		persistErr := localErr

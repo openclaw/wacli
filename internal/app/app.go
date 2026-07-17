@@ -122,6 +122,8 @@ type App struct {
 	status          *syncStatus
 	chatStateSync   chan struct{}
 	appStatePersist appStatePersistenceSequencer
+	manualFetchMu   sync.Mutex
+	manualFetches   map[string]int
 	heartbeatLast   atomic.Int64
 }
 

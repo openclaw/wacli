@@ -1279,6 +1279,107 @@ func TestArchiveChatOrdersRecoveredMarkReadBeforeNewerReceipt(t *testing.T) {
 	}
 }
 
+func TestMarkChatReadOrdersPreSendReceiptBeforeLocalMutation(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+	handlerID := f.AddEventHandler(func(evt interface{}) {
+		if receipt, ok := evt.(*events.Receipt); ok {
+			a.handleReceiptPersistenceEvent(context.Background(), receipt)
+		}
+	})
+	defer f.RemoveEventHandler(handlerID)
+
+	target := types.JID{User: "456", Server: types.DefaultUserServer}
+	if err := a.db.UpsertChat(target.String(), "dm", "Alice", nowUTC()); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	f.markReadBeforeApply = func() {
+		f.emit(&events.Receipt{
+			MessageSource: types.MessageSource{Chat: target},
+			Type:          types.ReceiptTypeReadSelf,
+		})
+	}
+
+	if err := a.MarkChatRead(context.Background(), target, false); err != nil {
+		t.Fatalf("MarkChatRead: %v", err)
+	}
+	stored, err := a.db.GetChat(target.String())
+	if err != nil {
+		t.Fatalf("GetChat: %v", err)
+	}
+	if !stored.Unread {
+		t.Fatalf("pre-send receipt overwrote local mark-unread: %+v", stored)
+	}
+}
+
+func TestQueuedReadReceiptKeepsDurableRecoveryIntent(t *testing.T) {
+	a := newTestApp(t)
+	a.wa = newFakeWA()
+	target := types.JID{User: "456", Server: types.DefaultUserServer}
+	if err := a.db.UpsertChat(target.String(), "dm", "Alice", nowUTC()); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	if err := a.db.SetChatUnreadCount(target.String(), 2); err != nil {
+		t.Fatalf("SetChatUnreadCount: %v", err)
+	}
+	blocker := a.appStatePersist.reserve()
+	a.handleReceiptPersistenceEvent(context.Background(), &events.Receipt{
+		MessageSource: types.MessageSource{Chat: target},
+		Type:          types.ReceiptTypeReadSelf,
+	})
+	required, err := a.db.AppStateRecoveryRequired(string(appstate.WAPatchRegularLow))
+	if err != nil {
+		t.Fatalf("AppStateRecoveryRequired: %v", err)
+	}
+	if !required {
+		t.Fatal("queued receipt had no durable recovery intent")
+	}
+	a.appStatePersist.completeOne(blocker, func() {})
+	waitForCondition(t, time.Second, func() bool {
+		stored, getErr := a.db.GetChat(target.String())
+		if getErr != nil || stored.Unread || stored.UnreadCount != 0 {
+			return false
+		}
+		required, markerErr := a.db.AppStateRecoveryRequired(string(appstate.WAPatchRegularLow))
+		return markerErr == nil && !required
+	})
+}
+
+func TestReadReceiptDoesNotClearPendingLocalRecoveryIntent(t *testing.T) {
+	a := newTestApp(t)
+	a.wa = newFakeWA()
+	target := types.JID{User: "456", Server: types.DefaultUserServer}
+	if err := a.db.UpsertChat(target.String(), "dm", "Alice", nowUTC()); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	pending, err := a.beginLocalAppStateWrite(appstate.WAPatchRegularLow)
+	if err != nil {
+		t.Fatalf("beginLocalAppStateWrite: %v", err)
+	}
+	a.handleReceiptPersistenceEvent(context.Background(), &events.Receipt{
+		MessageSource: types.MessageSource{Chat: target},
+		Type:          types.ReceiptTypeReadSelf,
+	})
+	required, err := a.db.AppStateRecoveryRequired(string(appstate.WAPatchRegularLow))
+	if err != nil {
+		t.Fatalf("AppStateRecoveryRequired: %v", err)
+	}
+	if !required {
+		t.Fatal("receipt cleared the pending local-write recovery intent")
+	}
+	if err := a.db.ClearAppStateRecoveryIntent(string(pending.collection), pending.generation); err != nil {
+		t.Fatalf("ClearAppStateRecoveryIntent: %v", err)
+	}
+	required, err = a.db.AppStateRecoveryRequired(string(appstate.WAPatchRegularLow))
+	if err != nil {
+		t.Fatalf("AppStateRecoveryRequired after local clear: %v", err)
+	}
+	if required {
+		t.Fatal("receipt recovery intent remained after successful persistence")
+	}
+}
+
 func TestArchiveChatOrdersPostSendEventsBeforeNewerLiveEventDuringApply(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
@@ -1550,10 +1651,10 @@ func TestLocalAppStateWriteFinishesAfterRequestCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	persisted := false
-	postSendTicket := a.appStatePersist.reserve()
+	pending.reserve(a)
 	done := make(chan error, 1)
 	go func() {
-		done <- a.completeLocalAppStateWrite(ctx, pending, postSendTicket, nil, func() error {
+		done <- a.completeLocalAppStateWrite(ctx, &pending, nil, func() error {
 			persisted = true
 			return nil
 		})
@@ -1985,6 +2086,13 @@ func TestArchiveChatUsesSynchronousFullReplayForMismatch(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
 	a.wa = f
+	var recoveries sync.Map
+	handlerID := f.AddEventHandler(func(evt interface{}) {
+		if syncErr, ok := evt.(*events.AppStateSyncError); ok {
+			a.handleAppStateSyncError(context.Background(), syncErr, &recoveries)
+		}
+	})
+	defer f.RemoveEventHandler(handlerID)
 	f.appStateFetchErrs = []error{
 		fmt.Errorf("failed to verify regular_low patch: %w", appstate.ErrMismatchingLTHash),
 		nil,
@@ -1998,6 +2106,7 @@ func TestArchiveChatUsesSynchronousFullReplayForMismatch(t *testing.T) {
 	f.mu.Lock()
 	fetches := append([]fakeAppStateFetch(nil), f.appStateFetches...)
 	archiveCalls := len(f.archiveCalls)
+	legacyRecoveries := append([]string(nil), f.appStateRecoveries...)
 	f.mu.Unlock()
 	if len(fetches) != 2 {
 		t.Fatalf("app state fetches = %+v, want delta then synchronous full replay", fetches)
@@ -2007,6 +2116,9 @@ func TestArchiveChatUsesSynchronousFullReplayForMismatch(t *testing.T) {
 	}
 	if archiveCalls != 1 {
 		t.Fatalf("archive calls = %d, want 1 after full replay", archiveCalls)
+	}
+	if len(legacyRecoveries) != 0 {
+		t.Fatalf("legacy async recoveries = %v, want synchronous replay only", legacyRecoveries)
 	}
 	required, err := a.db.AppStateRecoveryRequired(string(appstate.WAPatchRegularLow))
 	if err != nil {
