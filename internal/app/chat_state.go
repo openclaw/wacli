@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/openclaw/wacli/internal/store"
@@ -34,12 +35,16 @@ func (a *App) ArchiveChat(ctx context.Context, jid types.JID, archive bool) erro
 	if err != nil {
 		return err
 	}
-	postSendEvents, err := a.wa.ArchiveChat(ctx, jid, archive, lastTS, lastKey)
+	var postSend postSendAppStateReservation
+	postSendEvents, err := a.wa.ArchiveChat(ctx, jid, archive, lastTS, lastKey, func() { postSend.reserve(a) })
 	if err != nil {
-		a.abandonLocalAppStateWrite(pending)
-		return err
+		return errors.Join(err, a.failLocalAppStateWrite(ctx, pending, &postSend, postSendEvents))
 	}
-	return a.completeLocalAppStateWrite(ctx, pending, postSendEvents, func() error {
+	if !postSend.reserved {
+		a.abandonLocalAppStateWrite(pending)
+		return fmt.Errorf("WhatsApp app state send completed without an apply boundary")
+	}
+	return a.completeLocalAppStateWrite(ctx, pending, postSend.ticket, postSendEvents, func() error {
 		return a.db.SetChatArchived(chatJID, archive)
 	})
 }
@@ -55,12 +60,16 @@ func (a *App) PinChat(ctx context.Context, jid types.JID, pin bool) error {
 	if err != nil {
 		return err
 	}
-	postSendEvents, err := a.wa.PinChat(ctx, jid, pin)
+	var postSend postSendAppStateReservation
+	postSendEvents, err := a.wa.PinChat(ctx, jid, pin, func() { postSend.reserve(a) })
 	if err != nil {
-		a.abandonLocalAppStateWrite(pending)
-		return err
+		return errors.Join(err, a.failLocalAppStateWrite(ctx, pending, &postSend, postSendEvents))
 	}
-	return a.completeLocalAppStateWrite(ctx, pending, postSendEvents, func() error {
+	if !postSend.reserved {
+		a.abandonLocalAppStateWrite(pending)
+		return fmt.Errorf("WhatsApp app state send completed without an apply boundary")
+	}
+	return a.completeLocalAppStateWrite(ctx, pending, postSend.ticket, postSendEvents, func() error {
 		return a.db.SetChatPinned(chatJID, pin)
 	})
 }
@@ -77,12 +86,16 @@ func (a *App) MuteChat(ctx context.Context, jid types.JID, mute bool, duration t
 	if err != nil {
 		return err
 	}
-	postSendEvents, err := a.wa.MuteChat(ctx, jid, mute, duration)
+	var postSend postSendAppStateReservation
+	postSendEvents, err := a.wa.MuteChat(ctx, jid, mute, duration, func() { postSend.reserve(a) })
 	if err != nil {
-		a.abandonLocalAppStateWrite(pending)
-		return err
+		return errors.Join(err, a.failLocalAppStateWrite(ctx, pending, &postSend, postSendEvents))
 	}
-	return a.completeLocalAppStateWrite(ctx, pending, postSendEvents, func() error {
+	if !postSend.reserved {
+		a.abandonLocalAppStateWrite(pending)
+		return fmt.Errorf("WhatsApp app state send completed without an apply boundary")
+	}
+	return a.completeLocalAppStateWrite(ctx, pending, postSend.ticket, postSendEvents, func() error {
 		return a.db.SetChatMutedUntil(chatJID, mutedUntil)
 	})
 }
@@ -99,12 +112,16 @@ func (a *App) MarkChatRead(ctx context.Context, jid types.JID, read bool) error 
 	if err != nil {
 		return err
 	}
-	postSendEvents, err := a.wa.MarkChatAsRead(ctx, jid, read, lastTS, lastKey)
+	var postSend postSendAppStateReservation
+	postSendEvents, err := a.wa.MarkChatAsRead(ctx, jid, read, lastTS, lastKey, func() { postSend.reserve(a) })
 	if err != nil {
-		a.abandonLocalAppStateWrite(pending)
-		return err
+		return errors.Join(err, a.failLocalAppStateWrite(ctx, pending, &postSend, postSendEvents))
 	}
-	return a.completeLocalAppStateWrite(ctx, pending, postSendEvents, func() error {
+	if !postSend.reserved {
+		a.abandonLocalAppStateWrite(pending)
+		return fmt.Errorf("WhatsApp app state send completed without an apply boundary")
+	}
+	return a.completeLocalAppStateWrite(ctx, pending, postSend.ticket, postSendEvents, func() error {
 		return a.db.SetChatUnread(chatJID, !read)
 	})
 }
@@ -216,6 +233,19 @@ type pendingLocalAppStateWrite struct {
 	ticket uint64
 }
 
+type postSendAppStateReservation struct {
+	once     sync.Once
+	ticket   uint64
+	reserved bool
+}
+
+func (p *postSendAppStateReservation) reserve(a *App) {
+	p.once.Do(func() {
+		p.ticket = a.appStatePersist.reserve()
+		p.reserved = true
+	})
+}
+
 func (a *App) beginLocalAppStateWrite(collection appstate.WAPatchName) (pendingLocalAppStateWrite, error) {
 	pending := pendingLocalAppStateWrite{
 		ticket: a.appStatePersist.reserve(),
@@ -234,8 +264,25 @@ func (a *App) abandonLocalAppStateWrite(pending pendingLocalAppStateWrite) {
 	a.appStatePersist.completeOne(pending.ticket, func() {})
 }
 
-func (a *App) completeLocalAppStateWrite(ctx context.Context, pending pendingLocalAppStateWrite, postSendEvents []interface{}, persist func() error) error {
-	postSendTicket := a.appStatePersist.reserve()
+func (a *App) failLocalAppStateWrite(ctx context.Context, pending pendingLocalAppStateWrite, postSend *postSendAppStateReservation, postSendEvents []interface{}) error {
+	if !postSend.reserved {
+		a.abandonLocalAppStateWrite(pending)
+		return nil
+	}
+	a.appStatePersist.completeOne(pending.ticket, func() {})
+	result := make(chan error, 1)
+	persistCtx := context.WithoutCancel(ctx)
+	frontier := a.appStatePersist.complete(postSend.ticket, func() {
+		tracker := &appStatePersistenceTracker{}
+		result <- a.persistFetchedAppStateEvents(persistCtx, postSendEvents, tracker)
+	})
+	if err := a.appStatePersist.waitThrough(persistCtx, frontier); err != nil {
+		return err
+	}
+	return <-result
+}
+
+func (a *App) completeLocalAppStateWrite(ctx context.Context, pending pendingLocalAppStateWrite, postSendTicket uint64, postSendEvents []interface{}, persist func() error) error {
 	result := make(chan error, 1)
 	persistCtx := context.WithoutCancel(ctx)
 	var localErr error

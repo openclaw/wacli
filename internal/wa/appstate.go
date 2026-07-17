@@ -22,7 +22,7 @@ func (c *Client) SendAppState(ctx context.Context, patch appstate.PatchInfo) err
 	return cli.SendAppState(ctx, patch)
 }
 
-func (c *Client) sendAppStateEvents(ctx context.Context, patch appstate.PatchInfo, allowRetry bool) ([]interface{}, error) {
+func (c *Client) sendAppStateEvents(ctx context.Context, patch appstate.PatchInfo, allowRetry bool, beforeApply func()) ([]interface{}, error) {
 	c.mu.Lock()
 	cli := c.client
 	c.mu.Unlock()
@@ -87,13 +87,15 @@ func (c *Client) sendAppStateEvents(ctx context.Context, patch appstate.PatchInf
 			return nil, fmt.Errorf("%w (also, parsing patches in the response failed: %w)", mainErr, parseErr)
 		}
 		var conflictEvents []interface{}
+		beforeApply()
 		if _, applyErr := cli.DangerousInternals().ApplyAppStatePatches(ctx, patch.Type, state, patches, false, &conflictEvents); applyErr != nil {
 			return conflictEvents, fmt.Errorf("%w (also, applying patches in the response failed: %w)", mainErr, applyErr)
 		}
-		retryEvents, retryErr := c.sendAppStateEvents(ctx, patch, false)
+		retryEvents, retryErr := c.sendAppStateEvents(ctx, patch, false, beforeApply)
 		return append(conflictEvents, retryEvents...), retryErr
 	}
 
+	beforeApply()
 	eventsToPersist, err := cli.DangerousInternals().FetchAppState(ctx, patch.Type, false, false)
 	if err != nil {
 		return eventsToPersist, fmt.Errorf("failed to fetch app state after sending update: %w", err)
@@ -101,18 +103,18 @@ func (c *Client) sendAppStateEvents(ctx context.Context, patch appstate.PatchInf
 	return eventsToPersist, nil
 }
 
-func (c *Client) ArchiveChat(ctx context.Context, target types.JID, archive bool, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey) ([]interface{}, error) {
-	return c.sendAppStateEvents(ctx, appstate.BuildArchive(target, archive, lastMsgTS, lastMsgKey), true)
+func (c *Client) ArchiveChat(ctx context.Context, target types.JID, archive bool, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey, beforeApply func()) ([]interface{}, error) {
+	return c.sendAppStateEvents(ctx, appstate.BuildArchive(target, archive, lastMsgTS, lastMsgKey), true, beforeApply)
 }
 
-func (c *Client) PinChat(ctx context.Context, target types.JID, pin bool) ([]interface{}, error) {
-	return c.sendAppStateEvents(ctx, appstate.BuildPin(target, pin), true)
+func (c *Client) PinChat(ctx context.Context, target types.JID, pin bool, beforeApply func()) ([]interface{}, error) {
+	return c.sendAppStateEvents(ctx, appstate.BuildPin(target, pin), true, beforeApply)
 }
 
-func (c *Client) MuteChat(ctx context.Context, target types.JID, mute bool, duration time.Duration) ([]interface{}, error) {
-	return c.sendAppStateEvents(ctx, appstate.BuildMute(target, mute, duration), true)
+func (c *Client) MuteChat(ctx context.Context, target types.JID, mute bool, duration time.Duration, beforeApply func()) ([]interface{}, error) {
+	return c.sendAppStateEvents(ctx, appstate.BuildMute(target, mute, duration), true, beforeApply)
 }
 
-func (c *Client) MarkChatAsRead(ctx context.Context, target types.JID, read bool, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey) ([]interface{}, error) {
-	return c.sendAppStateEvents(ctx, appstate.BuildMarkChatAsRead(target, read, lastMsgTS, lastMsgKey), true)
+func (c *Client) MarkChatAsRead(ctx context.Context, target types.JID, read bool, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey, beforeApply func()) ([]interface{}, error) {
+	return c.sendAppStateEvents(ctx, appstate.BuildMarkChatAsRead(target, read, lastMsgTS, lastMsgKey), true, beforeApply)
 }

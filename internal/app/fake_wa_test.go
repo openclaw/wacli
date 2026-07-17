@@ -711,11 +711,12 @@ func (f *fakeWA) DeleteMessageForMe(ctx context.Context, info types.MessageInfo,
 	return nil
 }
 
-func (f *fakeWA) ArchiveChat(ctx context.Context, target types.JID, archive bool, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey) ([]interface{}, error) {
+func (f *fakeWA) ArchiveChat(ctx context.Context, target types.JID, archive bool, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey, beforeApply func()) ([]interface{}, error) {
 	f.mu.Lock()
 	f.archiveCalls = append(f.archiveCalls, fakeArchiveCall{target: target, archive: archive, lastMsgTS: lastMsgTS, lastMsgKey: lastMsgKey})
 	eventCB := f.archiveEvent
 	f.mu.Unlock()
+	beforeApply()
 	if eventCB != nil {
 		if evt := eventCB(); evt != nil {
 			return []interface{}{evt}, f.archiveErr
@@ -724,24 +725,27 @@ func (f *fakeWA) ArchiveChat(ctx context.Context, target types.JID, archive bool
 	return nil, f.archiveErr
 }
 
-func (f *fakeWA) PinChat(ctx context.Context, target types.JID, pin bool) ([]interface{}, error) {
+func (f *fakeWA) PinChat(ctx context.Context, target types.JID, pin bool, beforeApply func()) ([]interface{}, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.pinCalls = append(f.pinCalls, fakePinCall{target: target, pin: pin})
+	beforeApply()
 	return nil, nil
 }
 
-func (f *fakeWA) MuteChat(ctx context.Context, target types.JID, mute bool, duration time.Duration) ([]interface{}, error) {
+func (f *fakeWA) MuteChat(ctx context.Context, target types.JID, mute bool, duration time.Duration, beforeApply func()) ([]interface{}, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.muteCalls = append(f.muteCalls, fakeMuteCall{target: target, mute: mute, duration: duration})
+	beforeApply()
 	return nil, nil
 }
 
-func (f *fakeWA) MarkChatAsRead(ctx context.Context, target types.JID, read bool, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey) ([]interface{}, error) {
+func (f *fakeWA) MarkChatAsRead(ctx context.Context, target types.JID, read bool, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey, beforeApply func()) ([]interface{}, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.markReadCalls = append(f.markReadCalls, fakeMarkReadCall{target: target, read: read, lastMsgTS: lastMsgTS, lastMsgKey: lastMsgKey})
+	beforeApply()
 	return nil, nil
 }
 

@@ -1279,7 +1279,7 @@ func TestArchiveChatOrdersRecoveredMarkReadBeforeNewerReceipt(t *testing.T) {
 	}
 }
 
-func TestArchiveChatReservesLocalWriteBeforeLiveEventDuringSend(t *testing.T) {
+func TestArchiveChatOrdersPostSendEventsBeforeNewerLiveEventDuringApply(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
 	a.wa = f
@@ -1294,13 +1294,16 @@ func TestArchiveChatReservesLocalWriteBeforeLiveEventDuringSend(t *testing.T) {
 		t.Fatalf("UpsertChat: %v", err)
 	}
 	f.archiveEvent = func() interface{} {
-		evt := &events.Archive{
+		f.emit(&events.Archive{
 			JID:       target,
 			Timestamp: nowUTC().Add(time.Minute),
 			Action:    &waSyncAction.ArchiveChatAction{Archived: proto.Bool(false)},
+		})
+		return &events.Archive{
+			JID:       target,
+			Timestamp: nowUTC(),
+			Action:    &waSyncAction.ArchiveChatAction{Archived: proto.Bool(true)},
 		}
-		f.emit(evt)
-		return evt
 	}
 
 	if err := a.ArchiveChat(context.Background(), target, true); err != nil {
@@ -1474,9 +1477,10 @@ func TestLocalAppStateWriteFinishesAfterRequestCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	persisted := false
+	postSendTicket := a.appStatePersist.reserve()
 	done := make(chan error, 1)
 	go func() {
-		done <- a.completeLocalAppStateWrite(ctx, pending, nil, func() error {
+		done <- a.completeLocalAppStateWrite(ctx, pending, postSendTicket, nil, func() error {
 			persisted = true
 			return nil
 		})
