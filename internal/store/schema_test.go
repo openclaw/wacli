@@ -97,6 +97,11 @@ func TestOpenCreatesExpectedSchema(t *testing.T) {
 	if !chatCols["unread_count"] {
 		t.Fatalf("expected chats unread_count column to exist")
 	}
+	if exists, err := db.tableExists("app_state_recovery_required"); err != nil {
+		t.Fatalf("app_state_recovery_required tableExists: %v", err)
+	} else if !exists {
+		t.Fatal("expected app_state_recovery_required table to exist")
+	}
 
 	statusCols, err := tableColumns(db.sql, "status_messages")
 	if err != nil {

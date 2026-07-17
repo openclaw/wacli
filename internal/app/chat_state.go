@@ -69,12 +69,26 @@ func (a *App) MarkChatRead(ctx context.Context, jid types.JID, read bool) error 
 }
 
 func (a *App) syncChatStateBeforeWrite(ctx context.Context, collection appstate.WAPatchName) error {
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("wait for chat state synchronization: %w", ctx.Err())
+	case <-a.chatStateSync:
+	}
+	defer func() { a.chatStateSync <- struct{}{} }()
+
+	tracker := &appStatePersistenceTracker{}
 	handlerID := a.wa.AddEventHandler(func(evt interface{}) {
-		a.handleAppStatePersistenceEvent(ctx, evt)
+		a.handleAppStatePersistenceEvent(ctx, evt, tracker)
 	})
 	defer a.wa.RemoveEventHandler(handlerID)
+	recoveryRequired, err := a.db.AppStateRecoveryRequired(string(collection))
+	if err != nil {
+		return fmt.Errorf("check WhatsApp app state recovery for %s: %w", collection, err)
+	}
+	if recoveryRequired {
+		return a.replayRequiredAppState(ctx, collection, tracker)
+	}
 
-	recoveryRequested := false
 	retryDelay := appStateRetryInitialDelay
 	for {
 		err := a.wa.FetchAppState(ctx, string(collection), false, false)
@@ -84,13 +98,10 @@ func (a *App) syncChatStateBeforeWrite(ctx context.Context, collection appstate.
 
 		waitErr := "wait for missing WhatsApp app state key"
 		if errors.Is(err, appstate.ErrMismatchingLTHash) {
-			waitErr = "wait for WhatsApp app state recovery"
-			if !recoveryRequested {
-				if _, recoveryErr := a.wa.RequestAppStateRecovery(ctx, string(collection)); recoveryErr != nil {
-					return fmt.Errorf("request WhatsApp app state recovery: %w", recoveryErr)
-				}
-				recoveryRequested = true
+			if err := a.db.MarkAppStateRecoveryRequired(string(collection)); err != nil {
+				return fmt.Errorf("mark WhatsApp app state recovery for %s: %w", collection, err)
 			}
+			return a.replayRequiredAppState(ctx, collection, tracker)
 		} else if !errors.Is(err, appstate.ErrKeyNotFound) {
 			return fmt.Errorf("sync WhatsApp chat state before update: %w", err)
 		}
@@ -102,6 +113,41 @@ func (a *App) syncChatStateBeforeWrite(ctx context.Context, collection appstate.
 		case <-ctx.Done():
 			timer.Stop()
 			return fmt.Errorf("%s: %w", waitErr, ctx.Err())
+		case <-timer.C:
+		}
+		if retryDelay < appStateRetryMaxDelay {
+			retryDelay *= 2
+			if retryDelay > appStateRetryMaxDelay {
+				retryDelay = appStateRetryMaxDelay
+			}
+		}
+	}
+}
+
+func (a *App) replayRequiredAppState(ctx context.Context, collection appstate.WAPatchName, tracker *appStatePersistenceTracker) error {
+	retryDelay := appStateRetryInitialDelay
+	for {
+		tracker.begin()
+		fetchErr := a.wa.FetchAppState(ctx, string(collection), true, false)
+		persistenceErr := tracker.end()
+		if persistenceErr != nil {
+			return fmt.Errorf("persist replayed app state %s: %w", collection, persistenceErr)
+		}
+		if fetchErr == nil {
+			if err := a.db.ClearAppStateRecoveryRequired(string(collection)); err != nil {
+				return fmt.Errorf("clear WhatsApp app state recovery for %s: %w", collection, err)
+			}
+			return nil
+		}
+		if !errors.Is(fetchErr, appstate.ErrKeyNotFound) {
+			return fmt.Errorf("replay WhatsApp app state recovery for %s: %w", collection, fetchErr)
+		}
+
+		timer := time.NewTimer(retryDelay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return fmt.Errorf("wait for missing WhatsApp app state key during %s recovery: %w", collection, ctx.Err())
 		case <-timer.C:
 		}
 		if retryDelay < appStateRetryMaxDelay {
@@ -143,41 +189,46 @@ func messageKeyFromStore(info store.MessageInfo) *waCommon.MessageKey {
 	return key
 }
 
-func (a *App) handleChatStateEvent(ctx context.Context, evt interface{}) {
+func (a *App) handleChatStateEvent(ctx context.Context, evt interface{}) error {
 	switch v := evt.(type) {
 	case *events.Archive:
 		if v == nil || v.JID.IsEmpty() || v.Action == nil {
-			return
+			return nil
 		}
 		chat := a.canonicalStoreJID(ctx, v.JID)
 		if err := a.db.SetChatArchived(canonicalJIDString(chat), v.Action.GetArchived()); err != nil {
 			a.emitChatStateWarning("archive", v.JID, err)
+			return err
 		}
 	case *events.Pin:
 		if v == nil || v.JID.IsEmpty() || v.Action == nil {
-			return
+			return nil
 		}
 		chat := a.canonicalStoreJID(ctx, v.JID)
 		if err := a.db.SetChatPinned(canonicalJIDString(chat), v.Action.GetPinned()); err != nil {
 			a.emitChatStateWarning("pin", v.JID, err)
+			return err
 		}
 	case *events.Mute:
 		if v == nil || v.JID.IsEmpty() || v.Action == nil {
-			return
+			return nil
 		}
 		chat := a.canonicalStoreJID(ctx, v.JID)
 		if err := a.db.SetChatMutedUntil(canonicalJIDString(chat), mutedUntilFromAction(v.Action)); err != nil {
 			a.emitChatStateWarning("mute", v.JID, err)
+			return err
 		}
 	case *events.MarkChatAsRead:
 		if v == nil || v.JID.IsEmpty() || v.Action == nil {
-			return
+			return nil
 		}
 		chat := a.canonicalStoreJID(ctx, v.JID)
 		if err := a.db.SetChatUnread(canonicalJIDString(chat), !v.Action.GetRead()); err != nil {
 			a.emitChatStateWarning("mark_read", v.JID, err)
+			return err
 		}
 	}
+	return nil
 }
 
 func mutedUntilFromAction(action *waSyncAction.MuteAction) int64 {

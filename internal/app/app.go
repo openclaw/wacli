@@ -119,6 +119,7 @@ type App struct {
 	db              *store.DB
 	statusMu        sync.Mutex
 	status          *syncStatus
+	chatStateSync   chan struct{}
 	heartbeatLast   atomic.Int64
 }
 
@@ -145,7 +146,9 @@ func New(opts Options) (*App, error) {
 		return nil, err
 	}
 
-	return &App{opts: opts, db: db}, nil
+	chatStateSync := make(chan struct{}, 1)
+	chatStateSync <- struct{}{}
+	return &App{opts: opts, db: db, chatStateSync: chatStateSync}, nil
 }
 
 func (a *App) OpenWA() error {

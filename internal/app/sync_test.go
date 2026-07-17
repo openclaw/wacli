@@ -965,15 +965,16 @@ func TestMuteChatRecoversRegularHighBeforeWrite(t *testing.T) {
 			muteCalls := append([]fakeMuteCall(nil), f.muteCalls...)
 			f.mu.Unlock()
 			if len(fetches) != 2 {
-				t.Fatalf("app state fetches = %+v, want two regular_high delta fetches", fetches)
+				t.Fatalf("app state fetches = %+v, want delta then full replay", fetches)
 			}
-			for _, fetch := range fetches {
-				if fetch.name != string(appstate.WAPatchRegularHigh) || fetch.fullSync || fetch.onlyIfNotSynced {
-					t.Fatalf("app state fetch = %+v, want regular_high delta fetch", fetch)
-				}
+			if fetch := fetches[0]; fetch.name != string(appstate.WAPatchRegularHigh) || fetch.fullSync || fetch.onlyIfNotSynced {
+				t.Fatalf("app state fetch = %+v, want regular_high delta fetch", fetch)
 			}
-			if len(recoveries) != 1 || recoveries[0] != string(appstate.WAPatchRegularHigh) {
-				t.Fatalf("app state recoveries = %v, want [regular_high]", recoveries)
+			if fetch := fetches[1]; fetch.name != string(appstate.WAPatchRegularHigh) || !fetch.fullSync || fetch.onlyIfNotSynced {
+				t.Fatalf("replay app state fetch = %+v, want regular_high full replay", fetch)
+			}
+			if len(recoveries) != 0 {
+				t.Fatalf("async app state recoveries = %v, want none", recoveries)
 			}
 			if len(muteCalls) != 1 || muteCalls[0].mute != tc.mute {
 				t.Fatalf("mute calls = %+v, want mute=%t", muteCalls, tc.mute)
@@ -1122,43 +1123,275 @@ func TestArchiveChatBacksOffWhileWaitingForAppStateKey(t *testing.T) {
 	}
 }
 
-func TestArchiveChatRequestsRecoveryForMismatchingAppStateHash(t *testing.T) {
+func TestArchiveChatWaitsForFullReplayPersistence(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
 	a.wa = f
 
 	chat := types.JID{User: "456", Server: types.DefaultUserServer}
+	remoteChat := types.JID{User: "123", Server: types.DefaultUserServer}
 	when := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
 	if err := a.db.UpsertChat(chat.String(), "dm", "Bob", when); err != nil {
 		t.Fatalf("UpsertChat: %v", err)
 	}
+	if err := a.db.UpsertChat(remoteChat.String(), "dm", "Alice", when); err != nil {
+		t.Fatalf("UpsertChat remote: %v", err)
+	}
 	f.appStateFetchErrs = []error{
 		fmt.Errorf("failed to verify regular_low patch: %w", appstate.ErrMismatchingLTHash),
+		nil,
+	}
+	replayStarted := make(chan struct{})
+	releaseReplay := make(chan struct{})
+	f.appStateFetchEvent = func(name string, fullSync, onlyIfNotSynced bool) interface{} {
+		if !fullSync {
+			return nil
+		}
+		close(replayStarted)
+		<-releaseReplay
+		return &events.Archive{
+			JID:       remoteChat,
+			Timestamp: when.Add(time.Minute),
+			Action:    &waSyncAction.ArchiveChatAction{Archived: proto.Bool(true)},
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- a.ArchiveChat(ctx, chat, true)
+	}()
+	<-replayStarted
+	select {
+	case err := <-done:
+		t.Fatalf("ArchiveChat returned before full replay persisted: %v", err)
+	default:
+	}
+	close(releaseReplay)
+	if err := <-done; err != nil {
+		t.Fatalf("ArchiveChat: %v", err)
+	}
+
+	f.mu.Lock()
+	if len(f.appStateFetches) != 2 {
+		t.Fatalf("app state fetches = %d, want delta then full replay", len(f.appStateFetches))
+	}
+	if fetch := f.appStateFetches[0]; fetch.name != string(appstate.WAPatchRegularLow) || fetch.fullSync || fetch.onlyIfNotSynced {
+		t.Fatalf("app state fetch = %+v", fetch)
+	}
+	if fetch := f.appStateFetches[1]; fetch.name != string(appstate.WAPatchRegularLow) || !fetch.fullSync || fetch.onlyIfNotSynced {
+		t.Fatalf("replay app state fetch = %+v", fetch)
+	}
+	if len(f.appStateRecoveries) != 0 {
+		t.Fatalf("async app state recoveries = %v, want none", f.appStateRecoveries)
+	}
+	if len(f.archiveCalls) != 1 {
+		t.Fatalf("archive calls = %d, want 1", len(f.archiveCalls))
+	}
+	f.mu.Unlock()
+	stored, err := a.db.GetChat(remoteChat.String())
+	if err != nil {
+		t.Fatalf("GetChat remote: %v", err)
+	}
+	if !stored.Archived {
+		t.Fatalf("recovery event was not persisted before write returned: %+v", stored)
+	}
+	required, err := a.db.AppStateRecoveryRequired(string(appstate.WAPatchRegularLow))
+	if err != nil {
+		t.Fatalf("AppStateRecoveryRequired: %v", err)
+	}
+	if required {
+		t.Fatal("recovery marker remained after full replay persistence")
+	}
+}
+
+func TestArchiveChatReplaysAfterRecoveryPersistenceFailure(t *testing.T) {
+	storeDir := t.TempDir()
+	a, err := New(Options{StoreDir: storeDir})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	f := newFakeWA()
+	a.wa = f
+	target := types.JID{User: "456", Server: types.DefaultUserServer}
+	remoteChat := types.JID{User: "123", Server: types.DefaultUserServer}
+	when := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+	for _, chat := range []types.JID{target, remoteChat} {
+		if err := a.db.UpsertChat(chat.String(), "dm", "Alice", when); err != nil {
+			t.Fatalf("UpsertChat: %v", err)
+		}
+	}
+	f.appStateFetchErrs = []error{
+		fmt.Errorf("failed to verify regular_low patch: %w", appstate.ErrMismatchingLTHash),
+		nil,
+	}
+	f.appStateFetchEvent = func(name string, fullSync, onlyIfNotSynced bool) interface{} {
+		if !fullSync {
+			return nil
+		}
+		if err := a.db.Close(); err != nil {
+			t.Fatalf("close DB during replay: %v", err)
+		}
+		return &events.Archive{
+			JID:    remoteChat,
+			Action: &waSyncAction.ArchiveChatAction{Archived: proto.Bool(true)},
+		}
+	}
+
+	err = a.ArchiveChat(context.Background(), target, true)
+	if err == nil || !strings.Contains(err.Error(), "persist replayed app state regular_low") {
+		t.Fatalf("ArchiveChat error = %v, want replay persistence failure", err)
+	}
+	f.mu.Lock()
+	archiveCalls := len(f.archiveCalls)
+	f.mu.Unlock()
+	if archiveCalls != 0 {
+		t.Fatalf("archive calls = %d, want 0 after recovery persistence failure", archiveCalls)
+	}
+	a.Close()
+
+	reopened, err := New(Options{StoreDir: storeDir})
+	if err != nil {
+		t.Fatalf("New reopened: %v", err)
+	}
+	defer reopened.Close()
+	replay := newFakeWA()
+	replay.appStateFetchEvent = func(name string, fullSync, onlyIfNotSynced bool) interface{} {
+		if name != string(appstate.WAPatchRegularLow) || !fullSync || onlyIfNotSynced {
+			return nil
+		}
+		return &events.Archive{
+			JID:       remoteChat,
+			Timestamp: when.Add(time.Minute),
+			Action:    &waSyncAction.ArchiveChatAction{Archived: proto.Bool(true)},
+		}
+	}
+	reopened.wa = replay
+	if err := reopened.ArchiveChat(context.Background(), target, true); err != nil {
+		t.Fatalf("ArchiveChat replay: %v", err)
+	}
+	replay.mu.Lock()
+	if len(replay.appStateFetches) != 1 {
+		t.Fatalf("app state fetches = %+v, want one full replay", replay.appStateFetches)
+	}
+	fetch := replay.appStateFetches[0]
+	replay.mu.Unlock()
+	if fetch.name != string(appstate.WAPatchRegularLow) || !fetch.fullSync || fetch.onlyIfNotSynced {
+		t.Fatalf("recovery replay fetch = %+v", fetch)
+	}
+	stored, err := reopened.db.GetChat(remoteChat.String())
+	if err != nil {
+		t.Fatalf("GetChat remote: %v", err)
+	}
+	if !stored.Archived {
+		t.Fatalf("replayed recovery was not persisted: %+v", stored)
+	}
+	required, err := reopened.db.AppStateRecoveryRequired(string(appstate.WAPatchRegularLow))
+	if err != nil {
+		t.Fatalf("AppStateRecoveryRequired: %v", err)
+	}
+	if required {
+		t.Fatal("recovery marker remained after successful replay")
+	}
+}
+
+func TestArchiveChatUsesSynchronousFullReplayForMismatch(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+	f.appStateFetchErrs = []error{
 		fmt.Errorf("failed to verify regular_low patch: %w", appstate.ErrMismatchingLTHash),
 		nil,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if err := a.ArchiveChat(ctx, chat, true); err != nil {
+	if err := a.ArchiveChat(ctx, types.JID{User: "456", Server: types.DefaultUserServer}, true); err != nil {
 		t.Fatalf("ArchiveChat: %v", err)
 	}
-
 	f.mu.Lock()
-	defer f.mu.Unlock()
-	if len(f.appStateFetches) != 3 {
-		t.Fatalf("app state fetches = %d, want 3", len(f.appStateFetches))
+	fetches := append([]fakeAppStateFetch(nil), f.appStateFetches...)
+	archiveCalls := len(f.archiveCalls)
+	f.mu.Unlock()
+	if len(fetches) != 2 {
+		t.Fatalf("app state fetches = %+v, want delta then synchronous full replay", fetches)
 	}
-	for _, fetch := range f.appStateFetches {
-		if fetch.name != string(appstate.WAPatchRegularLow) || fetch.fullSync || fetch.onlyIfNotSynced {
-			t.Fatalf("app state fetch = %+v", fetch)
+	if fetch := fetches[1]; fetch.name != string(appstate.WAPatchRegularLow) || !fetch.fullSync || fetch.onlyIfNotSynced {
+		t.Fatalf("recovery fetch = %+v, want regular_low full replay", fetch)
+	}
+	if archiveCalls != 1 {
+		t.Fatalf("archive calls = %d, want 1 after full replay", archiveCalls)
+	}
+	required, err := a.db.AppStateRecoveryRequired(string(appstate.WAPatchRegularLow))
+	if err != nil {
+		t.Fatalf("AppStateRecoveryRequired: %v", err)
+	}
+	if required {
+		t.Fatal("recovery marker remained after synchronous full replay")
+	}
+}
+
+func TestArchiveChatWaitsForMissingKeyDuringFullReplay(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+	f.appStateFetchErrs = []error{
+		fmt.Errorf("failed to verify regular_low patch: %w", appstate.ErrMismatchingLTHash),
+		fmt.Errorf("failed to decode regular_low snapshot: %w", appstate.ErrKeyNotFound),
+		nil,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := a.ArchiveChat(ctx, types.JID{User: "456", Server: types.DefaultUserServer}, true); err != nil {
+		t.Fatalf("ArchiveChat: %v", err)
+	}
+	f.mu.Lock()
+	fetches := append([]fakeAppStateFetch(nil), f.appStateFetches...)
+	f.mu.Unlock()
+	if len(fetches) != 3 {
+		t.Fatalf("app state fetches = %+v, want delta then two full replays", fetches)
+	}
+	for i, fetch := range fetches[1:] {
+		if fetch.name != string(appstate.WAPatchRegularLow) || !fetch.fullSync || fetch.onlyIfNotSynced {
+			t.Fatalf("full replay fetch %d = %+v", i+1, fetch)
 		}
 	}
-	if len(f.appStateRecoveries) != 1 || f.appStateRecoveries[0] != string(appstate.WAPatchRegularLow) {
-		t.Fatalf("app state recoveries = %v, want [regular_low]", f.appStateRecoveries)
+}
+
+func TestChatStateSerializationRespectsContextCancellation(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+	f.appStateFetchErrs = []error{
+		fmt.Errorf("failed to verify regular_low patch: %w", appstate.ErrMismatchingLTHash),
+		nil,
 	}
-	if len(f.archiveCalls) != 1 {
-		t.Fatalf("archive calls = %d, want 1", len(f.archiveCalls))
+	replayStarted := make(chan struct{})
+	releaseReplay := make(chan struct{})
+	f.appStateFetchEvent = func(name string, fullSync, onlyIfNotSynced bool) interface{} {
+		if fullSync {
+			close(replayStarted)
+			<-releaseReplay
+		}
+		return nil
+	}
+
+	firstDone := make(chan error, 1)
+	go func() {
+		firstDone <- a.ArchiveChat(context.Background(), types.JID{User: "123", Server: types.DefaultUserServer}, true)
+	}()
+	<-replayStarted
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	err := a.ArchiveChat(ctx, types.JID{User: "456", Server: types.DefaultUserServer}, true)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("second ArchiveChat error = %v, want context deadline", err)
+	}
+	close(releaseReplay)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first ArchiveChat: %v", err)
 	}
 }
 

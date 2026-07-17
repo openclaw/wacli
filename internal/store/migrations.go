@@ -34,6 +34,19 @@ var schemaMigrations = []migration{
 	{version: 18, name: "chat unread count column", up: migrateChatUnreadCountColumn},
 	{version: 19, name: "messages quoted columns", up: migrateMessagesQuotedColumns},
 	{version: 20, name: "messages media_unavailable_at column", up: migrateMessagesMediaUnavailableColumn},
+	{version: 21, name: "app state recovery markers", up: migrateAppStateRecoveryMarkers},
+}
+
+func migrateAppStateRecoveryMarkers(d *DB) error {
+	if _, err := d.sql.Exec(`
+		CREATE TABLE IF NOT EXISTS app_state_recovery_required (
+			collection TEXT PRIMARY KEY,
+			marked_at INTEGER NOT NULL
+		)
+	`); err != nil {
+		return fmt.Errorf("create app state recovery marker table: %w", err)
+	}
+	return nil
 }
 
 func migrateMessagesMediaUnavailableColumn(d *DB) error {
@@ -129,6 +142,9 @@ func (d *DB) ensureCurrentSchema() error {
 	}
 	if err := migrateMessagesMediaUnavailableColumn(d); err != nil {
 		return fmt.Errorf("ensure current messages media unavailable column: %w", err)
+	}
+	if err := migrateAppStateRecoveryMarkers(d); err != nil {
+		return fmt.Errorf("ensure current app state recovery markers: %w", err)
 	}
 	return nil
 }

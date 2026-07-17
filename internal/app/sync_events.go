@@ -96,7 +96,7 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 		case *events.AppState, *events.Star, *events.DeleteForMe,
 			*events.Archive, *events.Pin, *events.Mute, *events.MarkChatAsRead:
 			lastEvent.Store(nowUTC().UnixNano())
-			a.handleAppStatePersistenceEvent(ctx, v)
+			a.handleAppStatePersistenceEvent(ctx, v, nil)
 		case *events.HistorySync:
 			lastEvent.Store(nowUTC().UnixNano())
 			a.handleHistorySync(ctx, opts, v, messagesStored, lastEvent, enqueueMedia, limits)
@@ -182,16 +182,20 @@ func syncActivityEvent(evt interface{}) bool {
 	}
 }
 
-func (a *App) handleAppStatePersistenceEvent(ctx context.Context, evt interface{}) {
+func (a *App) handleAppStatePersistenceEvent(ctx context.Context, evt interface{}, tracker *appStatePersistenceTracker) {
+	var err error
 	switch v := evt.(type) {
 	case *events.AppState:
-		a.handleLiveCallEvent(ctx, v)
+		err = a.handleLiveCallEvent(ctx, v)
 	case *events.Star:
-		a.handleStarEvent(ctx, v)
+		err = a.handleStarEvent(ctx, v)
 	case *events.DeleteForMe:
-		a.handleDeleteForMeEvent(ctx, v)
+		err = a.handleDeleteForMeEvent(ctx, v)
 	case *events.Archive, *events.Pin, *events.Mute, *events.MarkChatAsRead:
-		a.handleChatStateEvent(ctx, v)
+		err = a.handleChatStateEvent(ctx, v)
+	}
+	if tracker != nil {
+		tracker.record(err)
 	}
 }
 
@@ -209,9 +213,9 @@ func (a *App) handleReceiptEvent(ctx context.Context, evt *events.Receipt) {
 	}
 }
 
-func (a *App) handleDeleteForMeEvent(ctx context.Context, evt *events.DeleteForMe) {
+func (a *App) handleDeleteForMeEvent(ctx context.Context, evt *events.DeleteForMe) error {
 	if evt == nil || evt.ChatJID.IsEmpty() || strings.TrimSpace(evt.MessageID) == "" {
-		return
+		return nil
 	}
 	chat := a.canonicalStoreJID(ctx, evt.ChatJID)
 	chatJID := canonicalJIDString(chat)
@@ -221,7 +225,7 @@ func (a *App) handleDeleteForMeEvent(ctx context.Context, evt *events.DeleteForM
 			fmt.Sprintf("warning: failed to store chat for delete-for-me message %s: %v", evt.MessageID, err),
 			map[string]any{"message_id": evt.MessageID, "error": err.Error()},
 		)
-		return
+		return err
 	}
 
 	senderJID := ""
@@ -239,10 +243,12 @@ func (a *App) handleDeleteForMeEvent(ctx context.Context, evt *events.DeleteForM
 			fmt.Sprintf("warning: failed to store delete-for-me state for message %s: %v", evt.MessageID, err),
 			map[string]any{"message_id": evt.MessageID, "error": err.Error()},
 		)
+		return err
 	}
+	return nil
 }
 
-func (a *App) handleLiveCallEvent(ctx context.Context, evt interface{}) {
+func (a *App) handleLiveCallEvent(ctx context.Context, evt interface{}) error {
 	self := a.linkedLiveCallIdentity()
 	var alternateSelf []types.JID
 	if _, ok := evt.(*events.AppState); ok {
@@ -252,6 +258,8 @@ func (a *App) handleLiveCallEvent(ctx context.Context, evt interface{}) {
 			alternateSelf = identities[1:]
 		}
 	}
+	// Each whatsmeow app-state event carries one call-log action; this parser
+	// returns one call record, while that record may contain many participants.
 	call, ok := wa.ParseLiveCallEvent(evt, self, alternateSelf...)
 	if ok {
 		if err := a.storeParsedCallEvent(ctx, call, "", ""); err != nil {
@@ -260,13 +268,14 @@ func (a *App) handleLiveCallEvent(ctx context.Context, evt interface{}) {
 				fmt.Sprintf("warning: failed to store call event %s: %v", call.EventType, err),
 				map[string]any{"event_type": call.EventType, "call_id": call.CallID, "error": err.Error()},
 			)
+			return err
 		}
-		return
+		return nil
 	}
 
 	deleted, ok := wa.ParseCallLogDeleteEvent(evt)
 	if !ok {
-		return
+		return nil
 	}
 	if err := a.deleteParsedCallEvents(ctx, deleted); err != nil {
 		a.emitWarning(
@@ -274,7 +283,9 @@ func (a *App) handleLiveCallEvent(ctx context.Context, evt interface{}) {
 			fmt.Sprintf("warning: failed to delete call log events: %v", err),
 			map[string]any{"chat_jid": deleted.Chat.String(), "direction": deleted.Direction, "error": err.Error()},
 		)
+		return err
 	}
+	return nil
 }
 
 func (a *App) linkedCallIdentities() []types.JID {
@@ -301,9 +312,9 @@ func (a *App) linkedLiveCallIdentity() types.JID {
 	return types.JID{}
 }
 
-func (a *App) handleStarEvent(ctx context.Context, evt *events.Star) {
+func (a *App) handleStarEvent(ctx context.Context, evt *events.Star) error {
 	if evt == nil || evt.ChatJID.IsEmpty() || strings.TrimSpace(evt.MessageID) == "" || evt.Action == nil {
-		return
+		return nil
 	}
 	senderJID := ""
 	if !evt.SenderJID.IsEmpty() {
@@ -322,7 +333,9 @@ func (a *App) handleStarEvent(ctx context.Context, evt *events.Star) {
 			fmt.Sprintf("warning: failed to store starred state for message %s: %v", evt.MessageID, err),
 			map[string]any{"message_id": evt.MessageID, "error": err.Error()},
 		)
+		return err
 	}
+	return nil
 }
 
 func (a *App) handleAppStateSyncError(ctx context.Context, evt *events.AppStateSyncError, recoveries *sync.Map) {

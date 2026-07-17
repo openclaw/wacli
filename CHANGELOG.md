@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- Chat state: durably full-replay corrupted app-state and persist recovered events before applying writes. (#299 - thanks @TomySpagnoletti)
 - Store: normalize Windows drive paths before generating SQLite file URIs to prevent invalid URI authority errors. (#304 - thanks @goutamadwant)
 
 ## 0.12.1 - 2026-07-09
