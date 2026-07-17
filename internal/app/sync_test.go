@@ -1148,6 +1148,7 @@ func TestArchiveChatDoesNotClearConcurrentSameCollectionFailure(t *testing.T) {
 	if _, err := raw.Exec(`
 		CREATE TRIGGER fail_concurrent_archive_persistence
 		BEFORE UPDATE OF archived ON chats
+		WHEN NEW.jid = '123@s.whatsapp.net'
 		BEGIN
 			SELECT RAISE(FAIL, 'injected concurrent archive persistence failure');
 		END
@@ -1170,7 +1171,7 @@ func TestArchiveChatDoesNotClearConcurrentSameCollectionFailure(t *testing.T) {
 	archiveCalls := len(f.archiveCalls)
 	f.mu.Unlock()
 	if archiveCalls != 0 {
-		t.Fatalf("archive calls = %d, want 0 after concurrent persistence failure", archiveCalls)
+		t.Fatalf("archive calls = %d, want 0 after queued persistence failure", archiveCalls)
 	}
 	required, err := a.db.AppStateRecoveryRequired(string(appstate.WAPatchRegularLow))
 	if err != nil {
@@ -1178,6 +1179,48 @@ func TestArchiveChatDoesNotClearConcurrentSameCollectionFailure(t *testing.T) {
 	}
 	if !required {
 		t.Fatal("concurrent same-collection failure marker was cleared")
+	}
+}
+
+func TestArchiveChatOrdersFetchedEventsBeforeNewerLiveEvents(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	target := types.JID{User: "456", Server: types.DefaultUserServer}
+	remoteArchive := types.JID{User: "123", Server: types.DefaultUserServer}
+	when := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+	for _, chat := range []types.JID{target, remoteArchive} {
+		if err := a.db.UpsertChat(chat.String(), "dm", "Alice", when); err != nil {
+			t.Fatalf("UpsertChat: %v", err)
+		}
+	}
+	handlerID := f.AddEventHandler(func(evt interface{}) {
+		a.handleAppStatePersistenceEvent(context.Background(), evt, nil)
+	})
+	defer f.RemoveEventHandler(handlerID)
+	f.appStateFetchEvent = func(name string, fullSync, onlyIfNotSynced bool) interface{} {
+		f.emit(&events.Archive{
+			JID:       remoteArchive,
+			Timestamp: when.Add(2 * time.Minute),
+			Action:    &waSyncAction.ArchiveChatAction{Archived: proto.Bool(false)},
+		})
+		return &events.Archive{
+			JID:       remoteArchive,
+			Timestamp: when.Add(time.Minute),
+			Action:    &waSyncAction.ArchiveChatAction{Archived: proto.Bool(true)},
+		}
+	}
+
+	if err := a.ArchiveChat(context.Background(), target, true); err != nil {
+		t.Fatalf("ArchiveChat: %v", err)
+	}
+	stored, err := a.db.GetChat(remoteArchive.String())
+	if err != nil {
+		t.Fatalf("GetChat: %v", err)
+	}
+	if stored.Archived {
+		t.Fatalf("older fetched event overwrote newer live event: %+v", stored)
 	}
 }
 

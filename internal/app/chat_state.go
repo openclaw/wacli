@@ -86,8 +86,7 @@ func (a *App) syncChatStateBeforeWrite(ctx context.Context, collection appstate.
 	}
 
 	for {
-		eventsToPersist, err := a.wa.FetchAppStateEvents(ctx, string(collection), false, false)
-		persistenceErr := a.persistFetchedAppStateEvents(ctx, eventsToPersist, tracker)
+		err, persistenceErr := a.fetchAndPersistAppState(ctx, collection, false, tracker)
 		if persistenceErr != nil {
 			return fmt.Errorf("persist fetched app state %s: %w", collection, persistenceErr)
 		}
@@ -108,8 +107,7 @@ func (a *App) syncChatStateBeforeWrite(ctx context.Context, collection appstate.
 func (a *App) replayRequiredAppState(ctx context.Context, collection appstate.WAPatchName, markerGeneration int64, tracker *appStatePersistenceTracker) error {
 	retryDelay := appStateRetryInitialDelay
 	for {
-		eventsToPersist, fetchErr := a.wa.FetchAppStateEvents(ctx, string(collection), true, false)
-		persistenceErr := a.persistFetchedAppStateEvents(ctx, eventsToPersist, tracker)
+		fetchErr, persistenceErr := a.fetchAndPersistAppState(ctx, collection, true, tracker)
 		if persistenceErr != nil {
 			return fmt.Errorf("persist replayed app state %s: %w", collection, persistenceErr)
 		}
@@ -134,6 +132,19 @@ func (a *App) replayRequiredAppState(ctx context.Context, collection appstate.WA
 			}
 		}
 	}
+}
+
+func (a *App) fetchAndPersistAppState(ctx context.Context, collection appstate.WAPatchName, fullSync bool, tracker *appStatePersistenceTracker) (fetchErr, persistenceErr error) {
+	ticket := a.appStatePersist.reserve()
+	eventsToPersist, fetchErr := a.wa.FetchAppStateEvents(ctx, string(collection), fullSync, false)
+	result := make(chan error, 1)
+	frontier := a.appStatePersist.complete(ticket, func() {
+		result <- a.persistFetchedAppStateEvents(ctx, eventsToPersist, tracker)
+	})
+	if waitErr := a.appStatePersist.waitThrough(ctx, frontier); waitErr != nil {
+		return fetchErr, waitErr
+	}
+	return fetchErr, <-result
 }
 
 func (a *App) clearCompletedAppStateRecovery(collection appstate.WAPatchName, markerGeneration int64) error {

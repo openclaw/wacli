@@ -121,6 +121,7 @@ type App struct {
 	statusMu        sync.Mutex
 	status          *syncStatus
 	chatStateSync   chan struct{}
+	appStatePersist appStatePersistenceSequencer
 	heartbeatLast   atomic.Int64
 }
 

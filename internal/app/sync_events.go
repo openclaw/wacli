@@ -183,6 +183,17 @@ func syncActivityEvent(evt interface{}) bool {
 }
 
 func (a *App) handleAppStatePersistenceEvent(ctx context.Context, evt interface{}, tracker *appStatePersistenceTracker) {
+	if tracker != nil {
+		a.persistAppStateEvent(ctx, evt, tracker)
+		return
+	}
+	persistCtx := context.WithoutCancel(ctx)
+	a.appStatePersist.enqueue(func() {
+		a.persistAppStateEvent(persistCtx, evt, nil)
+	})
+}
+
+func (a *App) persistAppStateEvent(ctx context.Context, evt interface{}, tracker *appStatePersistenceTracker) {
 	var err error
 	switch v := evt.(type) {
 	case *events.AppState:
