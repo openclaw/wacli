@@ -196,6 +196,41 @@ func (a *App) handleAppStatePersistenceEvent(ctx context.Context, evt interface{
 	}
 	if tracker != nil {
 		tracker.record(err)
+	} else if err != nil {
+		a.markAppStateRecoveryForEvent(evt)
+	}
+}
+
+func (a *App) markAppStateRecoveryForEvent(evt interface{}) {
+	for _, collection := range appStateCollectionsForEvent(evt) {
+		if err := a.db.MarkAppStateRecoveryRequired(string(collection)); err != nil {
+			a.emitWarning(
+				"app_state_recovery_marker_failed",
+				fmt.Sprintf("warning: failed to mark app state recovery for %s: %v", collection, err),
+				map[string]any{"collection": string(collection), "error": err.Error()},
+			)
+		}
+	}
+}
+
+func appStateCollectionsForEvent(evt interface{}) []appstate.WAPatchName {
+	switch v := evt.(type) {
+	case *events.Archive, *events.Pin, *events.MarkChatAsRead:
+		return []appstate.WAPatchName{appstate.WAPatchRegularLow}
+	case *events.Mute, *events.Star, *events.DeleteForMe:
+		return []appstate.WAPatchName{appstate.WAPatchRegularHigh}
+	case *events.AppState:
+		if v != nil && len(v.Index) > 0 {
+			switch v.Index[0] {
+			case appstate.IndexArchive, appstate.IndexPin, appstate.IndexMarkChatAsRead:
+				return []appstate.WAPatchName{appstate.WAPatchRegularLow}
+			case appstate.IndexMute, appstate.IndexStar, appstate.IndexDeleteMessageForMe:
+				return []appstate.WAPatchName{appstate.WAPatchRegularHigh}
+			}
+		}
+		return appstate.AllPatchNames[:]
+	default:
+		return nil
 	}
 }
 

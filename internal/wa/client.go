@@ -709,6 +709,23 @@ func (c *Client) FetchAppState(ctx context.Context, name string, fullSync, onlyI
 	return cli.FetchAppState(ctx, appstate.WAPatchName(name), fullSync, onlyIfNotSynced)
 }
 
+// FetchAppStateEvents fetches one collection without globally dispatching the
+// resulting events, so callers can persist that exact collection atomically
+// with their own recovery marker protocol.
+func (c *Client) FetchAppStateEvents(ctx context.Context, name string, fullSync, onlyIfNotSynced bool) ([]interface{}, error) {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || !cli.IsConnected() {
+		return nil, fmt.Errorf("not connected")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, fmt.Errorf("app state collection name is required")
+	}
+	return cli.DangerousInternals().FetchAppState(ctx, appstate.WAPatchName(name), fullSync, onlyIfNotSynced)
+}
+
 func (c *Client) GetUserInfo(ctx context.Context, jids []types.JID) (map[types.JID]types.UserInfo, error) {
 	c.mu.Lock()
 	cli := c.client

@@ -762,6 +762,33 @@ func (f *fakeWA) FetchAppState(ctx context.Context, name string, fullSync, onlyI
 	return nil
 }
 
+func (f *fakeWA) FetchAppStateEvents(ctx context.Context, name string, fullSync, onlyIfNotSynced bool) ([]interface{}, error) {
+	f.mu.Lock()
+	f.appStateFetches = append(f.appStateFetches, fakeAppStateFetch{
+		name:            name,
+		fullSync:        fullSync,
+		onlyIfNotSynced: onlyIfNotSynced,
+	})
+	err := f.appStateFetchErr
+	if len(f.appStateFetchErrs) > 0 {
+		err = f.appStateFetchErrs[0]
+		f.appStateFetchErrs = f.appStateFetchErrs[1:]
+	}
+	eventCB := f.appStateFetchEvent
+	f.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	if eventCB == nil {
+		return nil, nil
+	}
+	evt := eventCB(name, fullSync, onlyIfNotSynced)
+	if evt == nil {
+		return nil, nil
+	}
+	return []interface{}{evt}, nil
+}
+
 func (f *fakeWA) Logout(ctx context.Context) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

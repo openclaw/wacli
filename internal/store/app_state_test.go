@@ -102,3 +102,38 @@ func TestAppStateRecoveryMarkersAreCollectionScoped(t *testing.T) {
 		}
 	}
 }
+
+func TestAppStateRecoveryGenerationDoesNotClearNewFailure(t *testing.T) {
+	db := openTestDB(t)
+	generation, alreadyRequired, err := db.BeginAppStateRecovery("regular_low")
+	if err != nil {
+		t.Fatalf("BeginAppStateRecovery: %v", err)
+	}
+	if alreadyRequired || generation != 1 {
+		t.Fatalf("initial marker = (%d, %t), want (1, false)", generation, alreadyRequired)
+	}
+	if err := db.MarkAppStateRecoveryRequired("regular_low"); err != nil {
+		t.Fatalf("MarkAppStateRecoveryRequired: %v", err)
+	}
+	cleared, err := db.ClearAppStateRecoveryGeneration("regular_low", generation)
+	if err != nil {
+		t.Fatalf("ClearAppStateRecoveryGeneration stale: %v", err)
+	}
+	if cleared {
+		t.Fatal("stale recovery generation cleared a newer failure")
+	}
+	generation, alreadyRequired, err = db.BeginAppStateRecovery("regular_low")
+	if err != nil {
+		t.Fatalf("BeginAppStateRecovery existing: %v", err)
+	}
+	if !alreadyRequired || generation != 2 {
+		t.Fatalf("existing marker = (%d, %t), want (2, true)", generation, alreadyRequired)
+	}
+	cleared, err = db.ClearAppStateRecoveryGeneration("regular_low", generation)
+	if err != nil {
+		t.Fatalf("ClearAppStateRecoveryGeneration current: %v", err)
+	}
+	if !cleared {
+		t.Fatal("current recovery generation was not cleared")
+	}
+}
