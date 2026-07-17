@@ -723,6 +723,9 @@ func (c *Client) FetchAppStateEvents(ctx context.Context, name string, fullSync,
 	if name == "" {
 		return nil, fmt.Errorf("app state collection name is required")
 	}
+	if fullSync && !cli.EmitAppStateEventsOnFullSync {
+		return nil, fmt.Errorf("full app state replay mutation emission is disabled")
+	}
 	return cli.DangerousInternals().FetchAppState(ctx, appstate.WAPatchName(name), fullSync, onlyIfNotSynced)
 }
 

@@ -1050,7 +1050,7 @@ func TestArchiveChatMarksRecoveryBeforeCursorAdvancingFetch(t *testing.T) {
 		t.Fatalf("AppStateRecoveryRequired after fetch: %v", err)
 	}
 	if !required {
-		t.Fatal("outbound recovery intent was cleared before post-send replay")
+		t.Fatal("outbound recovery intent was cleared before a later full replay")
 	}
 }
 
@@ -1121,7 +1121,7 @@ func TestArchiveChatDoesNotAttributeConcurrentCollectionEvents(t *testing.T) {
 		t.Fatalf("AppStateRecoveryRequired: %v", err)
 	}
 	if !required {
-		t.Fatal("outbound recovery intent was cleared before post-send replay")
+		t.Fatal("outbound recovery intent was cleared before a later full replay")
 	}
 	required, err = a.db.AppStateRecoveryRequired(string(appstate.WAPatchRegularHigh))
 	if err != nil {
@@ -1294,11 +1294,13 @@ func TestArchiveChatReservesLocalWriteBeforeLiveEventDuringSend(t *testing.T) {
 		t.Fatalf("UpsertChat: %v", err)
 	}
 	f.archiveEvent = func() interface{} {
-		return &events.Archive{
+		evt := &events.Archive{
 			JID:       target,
-			Timestamp: when.Add(time.Minute),
+			Timestamp: nowUTC().Add(time.Minute),
 			Action:    &waSyncAction.ArchiveChatAction{Archived: proto.Bool(false)},
 		}
+		f.emit(evt)
+		return evt
 	}
 
 	if err := a.ArchiveChat(context.Background(), target, true); err != nil {
@@ -1407,31 +1409,51 @@ func TestArchiveChatKeepsRecoveryIntentOnAmbiguousSendError(t *testing.T) {
 	}
 }
 
-func TestArchiveChatPostSendIntentForcesNextFullReplay(t *testing.T) {
+func TestArchiveChatPersistsPostSendEventsBeforeClearingIntent(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
 	a.wa = f
 
 	target := types.JID{User: "456", Server: types.DefaultUserServer}
+	remote := types.JID{User: "789", Server: types.DefaultUserServer}
+	when := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+	for _, chat := range []types.JID{target, remote} {
+		if err := a.db.UpsertChat(chat.String(), "dm", "Alice", when); err != nil {
+			t.Fatalf("UpsertChat: %v", err)
+		}
+	}
+	markerSeen := false
+	f.archiveEvent = func() interface{} {
+		var err error
+		markerSeen, err = a.db.AppStateRecoveryRequired(string(appstate.WAPatchRegularLow))
+		if err != nil {
+			t.Fatalf("AppStateRecoveryRequired during send: %v", err)
+		}
+		return &events.Archive{
+			JID:       remote,
+			Timestamp: when.Add(time.Minute),
+			Action:    &waSyncAction.ArchiveChatAction{Archived: proto.Bool(true)},
+		}
+	}
 	if err := a.ArchiveChat(context.Background(), target, true); err != nil {
 		t.Fatalf("ArchiveChat: %v", err)
 	}
-	if err := a.syncChatStateBeforeWrite(context.Background(), appstate.WAPatchRegularLow); err != nil {
-		t.Fatalf("syncChatStateBeforeWrite: %v", err)
+	if !markerSeen {
+		t.Fatal("outbound recovery intent was not durable during send")
 	}
-
-	f.mu.Lock()
-	fetches := append([]fakeAppStateFetch(nil), f.appStateFetches...)
-	f.mu.Unlock()
-	if len(fetches) != 2 || fetches[0].fullSync || !fetches[1].fullSync {
-		t.Fatalf("app state fetches = %+v, want initial delta then post-send full replay", fetches)
+	stored, err := a.db.GetChat(remote.String())
+	if err != nil {
+		t.Fatalf("GetChat: %v", err)
+	}
+	if !stored.Archived {
+		t.Fatalf("post-send event was not persisted before return: %+v", stored)
 	}
 	required, err := a.db.AppStateRecoveryRequired(string(appstate.WAPatchRegularLow))
 	if err != nil {
 		t.Fatalf("AppStateRecoveryRequired: %v", err)
 	}
-	if required {
-		t.Fatal("outbound recovery intent remained after full replay")
+	if !required {
+		t.Fatal("outbound recovery intent was cleared before a later full replay")
 	}
 }
 
@@ -1454,7 +1476,7 @@ func TestLocalAppStateWriteFinishesAfterRequestCancellation(t *testing.T) {
 	persisted := false
 	done := make(chan error, 1)
 	go func() {
-		done <- a.completeLocalAppStateWrite(ctx, pending, func() error {
+		done <- a.completeLocalAppStateWrite(ctx, pending, nil, func() error {
 			persisted = true
 			return nil
 		})
@@ -1718,7 +1740,7 @@ func TestArchiveChatWaitsForFullReplayPersistence(t *testing.T) {
 		t.Fatalf("AppStateRecoveryRequired: %v", err)
 	}
 	if !required {
-		t.Fatal("outbound recovery intent was cleared before post-send replay")
+		t.Fatal("outbound recovery intent was cleared before a later full replay")
 	}
 }
 
@@ -1808,7 +1830,7 @@ func TestArchiveChatReplaysAfterRecoveryPersistenceFailure(t *testing.T) {
 		t.Fatalf("AppStateRecoveryRequired: %v", err)
 	}
 	if !required {
-		t.Fatal("new outbound recovery intent was cleared before post-send replay")
+		t.Fatal("new outbound recovery intent was cleared before a later full replay")
 	}
 }
 
@@ -1914,7 +1936,7 @@ func TestArchiveChatUsesSynchronousFullReplayForMismatch(t *testing.T) {
 		t.Fatalf("AppStateRecoveryRequired: %v", err)
 	}
 	if !required {
-		t.Fatal("outbound recovery intent was cleared before post-send replay")
+		t.Fatal("outbound recovery intent was cleared before a later full replay")
 	}
 }
 

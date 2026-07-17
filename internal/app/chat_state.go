@@ -34,11 +34,12 @@ func (a *App) ArchiveChat(ctx context.Context, jid types.JID, archive bool) erro
 	if err != nil {
 		return err
 	}
-	if err := a.wa.ArchiveChat(ctx, jid, archive, lastTS, lastKey); err != nil {
+	postSendEvents, err := a.wa.ArchiveChat(ctx, jid, archive, lastTS, lastKey)
+	if err != nil {
 		a.abandonLocalAppStateWrite(pending)
 		return err
 	}
-	return a.completeLocalAppStateWrite(ctx, pending, func() error {
+	return a.completeLocalAppStateWrite(ctx, pending, postSendEvents, func() error {
 		return a.db.SetChatArchived(chatJID, archive)
 	})
 }
@@ -54,11 +55,12 @@ func (a *App) PinChat(ctx context.Context, jid types.JID, pin bool) error {
 	if err != nil {
 		return err
 	}
-	if err := a.wa.PinChat(ctx, jid, pin); err != nil {
+	postSendEvents, err := a.wa.PinChat(ctx, jid, pin)
+	if err != nil {
 		a.abandonLocalAppStateWrite(pending)
 		return err
 	}
-	return a.completeLocalAppStateWrite(ctx, pending, func() error {
+	return a.completeLocalAppStateWrite(ctx, pending, postSendEvents, func() error {
 		return a.db.SetChatPinned(chatJID, pin)
 	})
 }
@@ -75,11 +77,12 @@ func (a *App) MuteChat(ctx context.Context, jid types.JID, mute bool, duration t
 	if err != nil {
 		return err
 	}
-	if err := a.wa.MuteChat(ctx, jid, mute, duration); err != nil {
+	postSendEvents, err := a.wa.MuteChat(ctx, jid, mute, duration)
+	if err != nil {
 		a.abandonLocalAppStateWrite(pending)
 		return err
 	}
-	return a.completeLocalAppStateWrite(ctx, pending, func() error {
+	return a.completeLocalAppStateWrite(ctx, pending, postSendEvents, func() error {
 		return a.db.SetChatMutedUntil(chatJID, mutedUntil)
 	})
 }
@@ -96,11 +99,12 @@ func (a *App) MarkChatRead(ctx context.Context, jid types.JID, read bool) error 
 	if err != nil {
 		return err
 	}
-	if err := a.wa.MarkChatAsRead(ctx, jid, read, lastTS, lastKey); err != nil {
+	postSendEvents, err := a.wa.MarkChatAsRead(ctx, jid, read, lastTS, lastKey)
+	if err != nil {
 		a.abandonLocalAppStateWrite(pending)
 		return err
 	}
-	return a.completeLocalAppStateWrite(ctx, pending, func() error {
+	return a.completeLocalAppStateWrite(ctx, pending, postSendEvents, func() error {
 		return a.db.SetChatUnread(chatJID, !read)
 	})
 }
@@ -230,16 +234,28 @@ func (a *App) abandonLocalAppStateWrite(pending pendingLocalAppStateWrite) {
 	a.appStatePersist.completeOne(pending.ticket, func() {})
 }
 
-func (a *App) completeLocalAppStateWrite(ctx context.Context, pending pendingLocalAppStateWrite, persist func() error) error {
+func (a *App) completeLocalAppStateWrite(ctx context.Context, pending pendingLocalAppStateWrite, postSendEvents []interface{}, persist func() error) error {
+	postSendTicket := a.appStatePersist.reserve()
 	result := make(chan error, 1)
+	persistCtx := context.WithoutCancel(ctx)
+	var localErr error
 	a.appStatePersist.completeOne(pending.ticket, func() {
-		result <- persist()
+		localErr = persist()
 	})
-	if err := a.appStatePersist.waitThrough(context.WithoutCancel(ctx), pending.ticket); err != nil {
+	frontier := a.appStatePersist.complete(postSendTicket, func() {
+		tracker := &appStatePersistenceTracker{}
+		eventsErr := a.persistFetchedAppStateEvents(persistCtx, postSendEvents, tracker)
+		persistErr := localErr
+		if persistErr == nil {
+			persistErr = eventsErr
+		}
+		result <- persistErr
+	})
+	if err := a.appStatePersist.waitThrough(persistCtx, frontier); err != nil {
 		return err
 	}
-	// whatsmeow dispatches the cursor-advancing post-send events asynchronously.
-	// Keep the durable intent until a later pre-write full replay captures them.
+	// Another whatsmeow fetch can advance the cursor and dispatch later. Keep
+	// replay debt durable until the next pre-write full replay.
 	return <-result
 }
 

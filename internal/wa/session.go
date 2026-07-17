@@ -40,6 +40,8 @@ func (c *Client) init() error {
 
 	logger := newWhatsmeowLogger("Client", "ERROR", os.Stderr)
 	c.client = whatsmeow.NewClient(deviceStore, logger)
+	// FetchAppStateEvents fails closed without this: recovery snapshots must
+	// return every mutation so wacli can rebuild its own database.
 	c.client.EmitAppStateEventsOnFullSync = true
 	// Persist recently-sent messages so whatsmeow can answer retry-receipts
 	// across process restarts. Without this, recipients whose Signal session
