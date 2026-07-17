@@ -1318,6 +1318,79 @@ func TestArchiveChatOrdersPostSendEventsBeforeNewerLiveEventDuringApply(t *testi
 	}
 }
 
+func TestArchiveChatReplaysEventDispatchedAfterWriteCompletion(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+	handlerID := f.AddEventHandler(func(evt interface{}) {
+		a.handleAppStatePersistenceEvent(context.Background(), evt, nil)
+	})
+	defer f.RemoveEventHandler(handlerID)
+
+	target := types.JID{User: "456", Server: types.DefaultUserServer}
+	when := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+	if err := a.db.UpsertChat(target.String(), "dm", "Alice", when); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	f.archiveEvent = func() interface{} {
+		return &events.Archive{
+			JID:       target,
+			Timestamp: when.Add(2 * time.Minute),
+			Action:    &waSyncAction.ArchiveChatAction{Archived: proto.Bool(true)},
+		}
+	}
+
+	if err := a.ArchiveChat(context.Background(), target, true); err != nil {
+		t.Fatalf("ArchiveChat: %v", err)
+	}
+	f.emit(&events.Archive{
+		JID:       target,
+		Timestamp: when.Add(time.Minute),
+		Action:    &waSyncAction.ArchiveChatAction{Archived: proto.Bool(false)},
+	})
+	stored, err := a.db.GetChat(target.String())
+	if err != nil {
+		t.Fatalf("GetChat after delayed dispatch: %v", err)
+	}
+	if stored.Archived {
+		t.Fatalf("delayed event did not reproduce stale cache: %+v", stored)
+	}
+	required, err := a.db.AppStateRecoveryRequired(string(appstate.WAPatchRegularLow))
+	if err != nil {
+		t.Fatalf("AppStateRecoveryRequired: %v", err)
+	}
+	if !required {
+		t.Fatal("post-write recovery debt was cleared before delayed dispatch")
+	}
+	f.appStateFetchEvent = func(name string, fullSync, onlyIfNotSynced bool) interface{} {
+		if !fullSync {
+			t.Errorf("recovery fetch fullSync = false")
+		}
+		return &events.Archive{
+			JID:       target,
+			Timestamp: when.Add(2 * time.Minute),
+			Action:    &waSyncAction.ArchiveChatAction{Archived: proto.Bool(true)},
+		}
+	}
+	if err := a.syncChatStateBeforeWrite(context.Background(), appstate.WAPatchRegularLow); err != nil {
+		t.Fatalf("syncChatStateBeforeWrite: %v", err)
+	}
+	stored, err = a.db.GetChat(target.String())
+	if err != nil {
+		t.Fatalf("GetChat after replay: %v", err)
+	}
+	if !stored.Archived {
+		t.Fatalf("full replay did not recover delayed dispatch: %+v", stored)
+	}
+	required, err = a.db.AppStateRecoveryRequired(string(appstate.WAPatchRegularLow))
+	if err != nil {
+		t.Fatalf("AppStateRecoveryRequired after replay: %v", err)
+	}
+	if required {
+		t.Fatal("successful replay left recovery debt")
+	}
+}
+
 func TestConcurrentChatStateWriteCannotReplaySnapshotFromBeforeEarlierWrite(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
