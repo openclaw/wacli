@@ -102,7 +102,7 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 			a.handleHistorySync(ctx, opts, v, messagesStored, lastEvent, enqueueMedia, limits)
 		case *events.Receipt:
 			lastEvent.Store(nowUTC().UnixNano())
-			a.handleReceiptEvent(ctx, v)
+			a.handleReceiptPersistenceEvent(ctx, v)
 		case *events.Connected:
 			a.emitOrPrint("connected", nil, "\nConnected.\n")
 			ps.mu.Lock()
@@ -296,6 +296,16 @@ func appStateCollectionsForEvent(evt interface{}) []appstate.WAPatchName {
 	default:
 		return nil
 	}
+}
+
+func (a *App) handleReceiptPersistenceEvent(ctx context.Context, evt *events.Receipt) {
+	if evt == nil || evt.Type != types.ReceiptTypeReadSelf || evt.Chat.IsEmpty() {
+		return
+	}
+	ticket := a.appStatePersist.reserveLive()
+	a.appStatePersist.completeOne(ticket, func() {
+		a.handleReceiptEvent(context.WithoutCancel(ctx), evt)
+	})
 }
 
 func (a *App) handleReceiptEvent(ctx context.Context, evt *events.Receipt) {

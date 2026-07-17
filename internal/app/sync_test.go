@@ -1233,6 +1233,52 @@ func TestArchiveChatOrdersFetchedEventsBeforeNewerLiveEvents(t *testing.T) {
 	}
 }
 
+func TestArchiveChatOrdersRecoveredMarkReadBeforeNewerReceipt(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+	handlerID := f.AddEventHandler(func(evt interface{}) {
+		switch v := evt.(type) {
+		case *events.MarkChatAsRead:
+			a.handleAppStatePersistenceEvent(context.Background(), v, nil)
+		case *events.Receipt:
+			a.handleReceiptPersistenceEvent(context.Background(), v)
+		}
+	})
+	defer f.RemoveEventHandler(handlerID)
+
+	target := types.JID{User: "456", Server: types.DefaultUserServer}
+	remote := types.JID{User: "123", Server: types.DefaultUserServer}
+	when := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+	for _, chat := range []types.JID{target, remote} {
+		if err := a.db.UpsertChat(chat.String(), "dm", "Alice", when); err != nil {
+			t.Fatalf("UpsertChat: %v", err)
+		}
+	}
+	f.appStateFetchEvent = func(name string, fullSync, onlyIfNotSynced bool) interface{} {
+		f.emit(&events.Receipt{
+			MessageSource: types.MessageSource{Chat: remote},
+			Type:          types.ReceiptTypeReadSelf,
+		})
+		return &events.MarkChatAsRead{
+			JID:       remote,
+			Timestamp: when,
+			Action:    &waSyncAction.MarkChatAsReadAction{Read: proto.Bool(false)},
+		}
+	}
+
+	if err := a.ArchiveChat(context.Background(), target, true); err != nil {
+		t.Fatalf("ArchiveChat: %v", err)
+	}
+	stored, err := a.db.GetChat(remote.String())
+	if err != nil {
+		t.Fatalf("GetChat: %v", err)
+	}
+	if stored.Unread || stored.UnreadCount != 0 {
+		t.Fatalf("older recovered mark-unread overwrote newer receipt: %+v", stored)
+	}
+}
+
 func TestArchiveChatReservesLocalWriteBeforeLiveEventDuringSend(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
