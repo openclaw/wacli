@@ -887,6 +887,67 @@ func TestChatStateEventsUpdateLocalStore(t *testing.T) {
 	}
 }
 
+func TestChatStatePersistenceHandlerCoversOtherCollectionDuringWrite(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	target := types.JID{User: "456", Server: types.DefaultUserServer}
+	remoteMute := types.JID{User: "789", Server: types.DefaultUserServer}
+	for _, chat := range []types.JID{target, remoteMute} {
+		if err := a.db.UpsertChat(chat.String(), "dm", "Bob", time.Now()); err != nil {
+			t.Fatalf("UpsertChat: %v", err)
+		}
+	}
+	f.connectEvents = []interface{}{&events.Mute{
+		JID:    remoteMute,
+		Action: &waSyncAction.MuteAction{Muted: proto.Bool(true), MuteEndTimestamp: proto.Int64(-1)},
+	}}
+
+	removeHandler, err := a.AddChatStatePersistenceHandler(context.Background())
+	if err != nil {
+		t.Fatalf("AddChatStatePersistenceHandler: %v", err)
+	}
+	if err := a.Connect(context.Background(), false, nil); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	if err := a.ArchiveChat(context.Background(), target, true); err != nil {
+		t.Fatalf("ArchiveChat: %v", err)
+	}
+	removeHandler()
+	if err := a.appStatePersist.waitIdle(context.Background()); err != nil {
+		t.Fatalf("waitIdle: %v", err)
+	}
+
+	stored, err := a.db.GetChat(remoteMute.String())
+	if err != nil {
+		t.Fatalf("GetChat remote mute: %v", err)
+	}
+	if stored.MutedUntil != -1 {
+		t.Fatalf("connect-time regular_high event was not persisted: %+v", stored)
+	}
+	stored, err = a.db.GetChat(target.String())
+	if err != nil {
+		t.Fatalf("GetChat archive target: %v", err)
+	}
+	if !stored.Archived {
+		t.Fatalf("regular_low write was not persisted: %+v", stored)
+	}
+	required, err := a.db.AppStateRecoveryRequired(string(appstate.WAPatchRegularHigh))
+	if err != nil {
+		t.Fatalf("AppStateRecoveryRequired: %v", err)
+	}
+	if required {
+		t.Fatal("successful connect-time persistence left replay debt")
+	}
+	f.mu.Lock()
+	handlerCount := len(f.handlers)
+	f.mu.Unlock()
+	if handlerCount != 0 {
+		t.Fatalf("event handlers after cleanup = %d, want 0", handlerCount)
+	}
+}
+
 func TestArchiveChatUsesLatestMessageRange(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
@@ -2178,6 +2239,228 @@ func TestArchiveChatUsesSynchronousFullReplayForMismatch(t *testing.T) {
 	}
 	if !required {
 		t.Fatal("outbound recovery intent was cleared before a later full replay")
+	}
+}
+
+func TestArchiveChatWaitsForPrimaryRecoveryAfterFullReplayMismatch(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+	target := types.JID{User: "456", Server: types.DefaultUserServer}
+	remote := types.JID{User: "123", Server: types.DefaultUserServer}
+	when := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+	for _, chat := range []types.JID{target, remote} {
+		if err := a.db.UpsertChat(chat.String(), "dm", "Alice", when); err != nil {
+			t.Fatalf("UpsertChat: %v", err)
+		}
+	}
+	mismatch := fmt.Errorf("failed to verify regular_low patch: %w", appstate.ErrMismatchingLTHash)
+	f.appStateFetchErrs = []error{mismatch, mismatch}
+	recoveryRequested := make(chan string, 1)
+	releaseRecovery := make(chan struct{})
+	f.onAppStateRecovery = func(name string) {
+		recoveryRequested <- name
+		go func() {
+			<-releaseRecovery
+			f.emit(&events.Archive{
+				JID:       remote,
+				Timestamp: when.Add(time.Minute),
+				Action:    &waSyncAction.ArchiveChatAction{Archived: proto.Bool(true)},
+			})
+			f.emit(&events.AppStateSyncComplete{
+				Name:     appstate.WAPatchRegularLow,
+				Version:  12,
+				Recovery: true,
+			})
+		}()
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- a.ArchiveChat(context.Background(), target, true)
+	}()
+	select {
+	case name := <-recoveryRequested:
+		if name != string(appstate.WAPatchRegularLow) {
+			t.Fatalf("recovery collection = %q, want regular_low", name)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("primary-device recovery was not requested")
+	}
+	f.mu.Lock()
+	archiveCallsBeforeRecovery := len(f.archiveCalls)
+	f.mu.Unlock()
+	if archiveCallsBeforeRecovery != 0 {
+		t.Fatalf("archive calls before recovery completion = %d, want 0", archiveCallsBeforeRecovery)
+	}
+	close(releaseRecovery)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("ArchiveChat: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("ArchiveChat did not continue after recovery completion")
+	}
+
+	f.mu.Lock()
+	fetches := append([]fakeAppStateFetch(nil), f.appStateFetches...)
+	recoveries := append([]string(nil), f.appStateRecoveries...)
+	archiveCalls := len(f.archiveCalls)
+	handlers := len(f.handlers)
+	f.mu.Unlock()
+	if len(fetches) != 2 || fetches[0].fullSync || !fetches[1].fullSync {
+		t.Fatalf("app state fetches = %+v, want delta then failed full replay", fetches)
+	}
+	if len(recoveries) != 1 || recoveries[0] != string(appstate.WAPatchRegularLow) {
+		t.Fatalf("app state recoveries = %v, want [regular_low]", recoveries)
+	}
+	if archiveCalls != 1 {
+		t.Fatalf("archive calls = %d, want 1 after recovery persistence", archiveCalls)
+	}
+	if handlers != 0 {
+		t.Fatalf("event handlers after primary recovery = %d, want 0", handlers)
+	}
+	stored, err := a.db.GetChat(remote.String())
+	if err != nil {
+		t.Fatalf("GetChat remote: %v", err)
+	}
+	if !stored.Archived {
+		t.Fatalf("primary-device recovery event was not persisted: %+v", stored)
+	}
+	required, err := a.db.AppStateRecoveryRequired(string(appstate.WAPatchRegularLow))
+	if err != nil {
+		t.Fatalf("AppStateRecoveryRequired: %v", err)
+	}
+	if !required {
+		t.Fatal("outbound recovery intent was cleared before a later full replay")
+	}
+}
+
+func TestArchiveChatKeepsRecoveryIntentWhenPrimaryRecoveryRequestFails(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+	mismatch := fmt.Errorf("failed to verify regular_low patch: %w", appstate.ErrMismatchingLTHash)
+	f.appStateFetchErrs = []error{mismatch, mismatch}
+	f.appStateRecoveryErr = errors.New("injected recovery request failure")
+
+	err := a.ArchiveChat(context.Background(), types.JID{User: "456", Server: types.DefaultUserServer}, true)
+	if !errors.Is(err, f.appStateRecoveryErr) {
+		t.Fatalf("ArchiveChat error = %v, want %v", err, f.appStateRecoveryErr)
+	}
+	f.mu.Lock()
+	archiveCalls := len(f.archiveCalls)
+	handlers := len(f.handlers)
+	f.mu.Unlock()
+	if archiveCalls != 0 {
+		t.Fatalf("archive calls = %d, want 0 after recovery request failure", archiveCalls)
+	}
+	if handlers != 0 {
+		t.Fatalf("event handlers after recovery request failure = %d, want 0", handlers)
+	}
+	required, markerErr := a.db.AppStateRecoveryRequired(string(appstate.WAPatchRegularLow))
+	if markerErr != nil {
+		t.Fatalf("AppStateRecoveryRequired: %v", markerErr)
+	}
+	if !required {
+		t.Fatal("recovery request failure cleared the durable recovery intent")
+	}
+}
+
+func TestArchiveChatBoundsPrimaryRecoveryWait(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+	mismatch := fmt.Errorf("failed to verify regular_low patch: %w", appstate.ErrMismatchingLTHash)
+	f.appStateFetchErrs = []error{mismatch, mismatch}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	err := a.ArchiveChat(ctx, types.JID{User: "456", Server: types.DefaultUserServer}, true)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("ArchiveChat error = %v, want context deadline", err)
+	}
+	f.mu.Lock()
+	recoveries := append([]string(nil), f.appStateRecoveries...)
+	archiveCalls := len(f.archiveCalls)
+	handlers := len(f.handlers)
+	f.mu.Unlock()
+	if len(recoveries) != 1 || recoveries[0] != string(appstate.WAPatchRegularLow) {
+		t.Fatalf("app state recoveries = %v, want one bounded regular_low request", recoveries)
+	}
+	if archiveCalls != 0 {
+		t.Fatalf("archive calls = %d, want 0 after recovery timeout", archiveCalls)
+	}
+	if handlers != 0 {
+		t.Fatalf("event handlers after recovery timeout = %d, want 0", handlers)
+	}
+	required, markerErr := a.db.AppStateRecoveryRequired(string(appstate.WAPatchRegularLow))
+	if markerErr != nil {
+		t.Fatalf("AppStateRecoveryRequired: %v", markerErr)
+	}
+	if !required {
+		t.Fatal("recovery timeout cleared the durable recovery intent")
+	}
+}
+
+func TestArchiveChatKeepsRecoveryIntentWhenPrimaryRecoveryPersistenceFails(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+	target := types.JID{User: "456", Server: types.DefaultUserServer}
+	remote := types.JID{User: "123", Server: types.DefaultUserServer}
+	when := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+	for _, chat := range []types.JID{target, remote} {
+		if err := a.db.UpsertChat(chat.String(), "dm", "Alice", when); err != nil {
+			t.Fatalf("UpsertChat: %v", err)
+		}
+	}
+	raw, err := sql.Open("sqlite3", filepath.Join(a.opts.StoreDir, "wacli.db"))
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer raw.Close()
+	if _, err := raw.Exec(`
+		CREATE TRIGGER fail_primary_recovery_persistence
+		BEFORE UPDATE OF archived ON chats
+		BEGIN
+			SELECT RAISE(FAIL, 'injected primary recovery persistence failure');
+		END
+	`); err != nil {
+		t.Fatalf("create failure trigger: %v", err)
+	}
+	mismatch := fmt.Errorf("failed to verify regular_low patch: %w", appstate.ErrMismatchingLTHash)
+	f.appStateFetchErrs = []error{mismatch, mismatch}
+	f.onAppStateRecovery = func(name string) {
+		f.emit(&events.Archive{
+			JID:       remote,
+			Timestamp: when.Add(time.Minute),
+			Action:    &waSyncAction.ArchiveChatAction{Archived: proto.Bool(true)},
+		})
+		f.emit(&events.AppStateSyncComplete{
+			Name:     appstate.WAPatchRegularLow,
+			Version:  12,
+			Recovery: true,
+		})
+	}
+
+	err = a.ArchiveChat(context.Background(), target, true)
+	if err == nil || !strings.Contains(err.Error(), "persist recovered app state regular_low") {
+		t.Fatalf("ArchiveChat error = %v, want recovery persistence failure", err)
+	}
+	f.mu.Lock()
+	archiveCalls := len(f.archiveCalls)
+	f.mu.Unlock()
+	if archiveCalls != 0 {
+		t.Fatalf("archive calls = %d, want 0 after recovery persistence failure", archiveCalls)
+	}
+	required, markerErr := a.db.AppStateRecoveryRequired(string(appstate.WAPatchRegularLow))
+	if markerErr != nil {
+		t.Fatalf("AppStateRecoveryRequired: %v", markerErr)
+	}
+	if !required {
+		t.Fatal("recovery persistence failure cleared the durable recovery intent")
 	}
 }
 

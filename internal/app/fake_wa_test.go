@@ -63,6 +63,7 @@ type fakeWA struct {
 	downloadHistory             func(notif *waE2E.HistorySyncNotification) (*waHistorySync.HistorySync, error)
 	deleteHistoryCalls          []*waE2E.HistorySyncNotification
 	appStateRecoveryErr         error
+	onAppStateRecovery          func(name string)
 	appStateFetchErr            error
 	appStateFetchErrs           []error
 	appStateFetchEvent          func(name string, fullSync, onlyIfNotSynced bool) interface{}
@@ -702,11 +703,17 @@ func (f *fakeWA) RequestHistorySyncOnDemand(ctx context.Context, lastKnown types
 
 func (f *fakeWA) RequestAppStateRecovery(ctx context.Context, name string) (types.MessageID, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	if f.appStateRecoveryErr != nil {
-		return "", f.appStateRecoveryErr
+		err := f.appStateRecoveryErr
+		f.mu.Unlock()
+		return "", err
 	}
 	f.appStateRecoveries = append(f.appStateRecoveries, name)
+	hook := f.onAppStateRecovery
+	f.mu.Unlock()
+	if hook != nil {
+		hook(name)
+	}
 	return types.MessageID("recovery-req"), nil
 }
 

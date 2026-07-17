@@ -123,6 +123,24 @@ func (s *appStatePersistenceSequencer) waitThrough(ctx context.Context, frontier
 	}
 }
 
+func (s *appStatePersistenceSequencer) waitIdle(ctx context.Context) error {
+	for {
+		s.mu.Lock()
+		s.initLocked()
+		if s.serving == s.next {
+			s.mu.Unlock()
+			return nil
+		}
+		changed := s.changed
+		s.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("wait for app state persistence queue: %w", ctx.Err())
+		case <-changed:
+		}
+	}
+}
+
 func (s *appStatePersistenceSequencer) drainThrough(frontier uint64) {
 	for {
 		s.mu.Lock()

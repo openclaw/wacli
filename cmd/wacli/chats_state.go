@@ -134,6 +134,16 @@ func runChatState(flags *rootFlags, opts chatStateOptions, action string, run fu
 	if err := a.EnsureAuthed(); err != nil {
 		return err
 	}
+	removePersistenceHandler, err := a.AddChatStatePersistenceHandler(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		// Keep the handler active until the socket is closed, then let App.Close
+		// drain every persistence task before it closes the local database.
+		a.WA().Close()
+		removePersistenceHandler()
+	}()
 	if err := a.Connect(ctx, false, nil); err != nil {
 		return err
 	}

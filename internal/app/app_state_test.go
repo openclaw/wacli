@@ -104,6 +104,66 @@ func TestAppStatePersistenceSequencerWaitsForFixedFrontier(t *testing.T) {
 	<-laterDone
 }
 
+func TestAppCloseDrainsHandedOffAppStatePersistence(t *testing.T) {
+	a := newTestApp(t)
+	a.wa = newFakeWA()
+
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	firstDone := make(chan struct{})
+	go func() {
+		a.appStatePersist.enqueue(func() {
+			close(firstStarted)
+			<-releaseFirst
+		})
+		close(firstDone)
+	}()
+	<-firstStarted
+
+	secondStarted := make(chan struct{})
+	releaseSecond := make(chan struct{})
+	writeErr := make(chan error, 1)
+	a.appStatePersist.enqueue(func() {
+		close(secondStarted)
+		<-releaseSecond
+		writeErr <- a.db.UpsertChat("123@s.whatsapp.net", "dm", "Alice", time.Now().UTC())
+	})
+
+	closeDone := make(chan struct{})
+	go func() {
+		a.Close()
+		close(closeDone)
+	}()
+	select {
+	case <-closeDone:
+		t.Fatal("App.Close returned while the initial persistence task was blocked")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(releaseFirst)
+	select {
+	case <-secondStarted:
+	case <-time.After(time.Second):
+		t.Fatal("handed-off persistence task did not start")
+	}
+	select {
+	case <-closeDone:
+		t.Fatal("App.Close returned while the handed-off persistence task was blocked")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(releaseSecond)
+	select {
+	case <-closeDone:
+	case <-time.After(time.Second):
+		t.Fatal("App.Close did not finish after the persistence queue drained")
+	}
+	if err := <-writeErr; err != nil {
+		t.Fatalf("handed-off persistence write: %v", err)
+	}
+	<-firstDone
+}
+
 func TestAppStatePersistenceSequencerSkipsLaterUnreadyReservation(t *testing.T) {
 	var sequencer appStatePersistenceSequencer
 	first := sequencer.reserve()

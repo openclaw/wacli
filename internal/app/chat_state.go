@@ -24,6 +24,29 @@ const (
 	appStateRecoveryMaxWait   = 5 * time.Minute
 )
 
+// AddChatStatePersistenceHandler captures app-state events that arrive while a
+// one-shot chat-state command is connected. Remove it only after closing the
+// connection so whatsmeow cannot advance another collection without persisting it.
+func (a *App) AddChatStatePersistenceHandler(ctx context.Context) (func(), error) {
+	if err := a.OpenWA(); err != nil {
+		return nil, err
+	}
+	waClient := a.WA()
+	handlerID := waClient.AddEventHandler(func(evt interface{}) {
+		switch evt.(type) {
+		case *events.AppState, *events.Star, *events.DeleteForMe,
+			*events.Archive, *events.Pin, *events.Mute, *events.MarkChatAsRead:
+			a.handleAppStatePersistenceEvent(ctx, evt, nil)
+		}
+	})
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			waClient.RemoveEventHandler(handlerID)
+		})
+	}, nil
+}
+
 func (a *App) ArchiveChat(ctx context.Context, jid types.JID, archive bool) error {
 	release, err := a.beginChatStateWrite(ctx, appstate.WAPatchRegularLow)
 	if err != nil {
@@ -174,6 +197,9 @@ func (a *App) replayRequiredAppState(ctx context.Context, collection appstate.WA
 		if fetchErr == nil {
 			return a.clearCompletedAppStateRecovery(collection, markerGeneration)
 		}
+		if errors.Is(fetchErr, appstate.ErrMismatchingLTHash) {
+			return a.recoverMismatchingAppState(ctx, collection, markerGeneration, tracker)
+		}
 		if !errors.Is(fetchErr, appstate.ErrKeyNotFound) {
 			return fmt.Errorf("replay WhatsApp app state recovery for %s: %w", collection, fetchErr)
 		}
@@ -194,6 +220,76 @@ func (a *App) replayRequiredAppState(ctx context.Context, collection appstate.WA
 				retryDelay = appStateRetryMaxDelay
 			}
 		}
+	}
+}
+
+func (a *App) recoverMismatchingAppState(ctx context.Context, collection appstate.WAPatchName, markerGeneration int64, tracker *appStatePersistenceTracker) error {
+	ticket := a.appStatePersist.reserve()
+	eventsToPersist, recoveryErr := a.waitForPrimaryAppStateRecovery(ctx, collection)
+	persistCtx := context.WithoutCancel(ctx)
+	result := make(chan error, 1)
+	frontier := a.appStatePersist.complete(ticket, func() {
+		if recoveryErr != nil {
+			result <- nil
+			return
+		}
+		result <- a.persistFetchedAppStateEvents(persistCtx, eventsToPersist, tracker)
+	})
+	if err := a.appStatePersist.waitThrough(persistCtx, frontier); err != nil {
+		return err
+	}
+	if persistenceErr := <-result; persistenceErr != nil {
+		return fmt.Errorf("persist recovered app state %s: %w", collection, persistenceErr)
+	}
+	if recoveryErr != nil {
+		return recoveryErr
+	}
+	return a.clearCompletedAppStateRecovery(collection, markerGeneration)
+}
+
+func (a *App) waitForPrimaryAppStateRecovery(ctx context.Context, collection appstate.WAPatchName) ([]interface{}, error) {
+	completed := make(chan []interface{}, 1)
+	var mu sync.Mutex
+	var captured []interface{}
+	finished := false
+	// whatsmeow dispatches recovery mutations synchronously and emits this
+	// collection's AppStateSyncComplete last, so the sentinel closes the drain.
+	handlerID := a.wa.AddEventHandler(func(evt interface{}) {
+		mu.Lock()
+		defer mu.Unlock()
+		if finished {
+			return
+		}
+		if syncComplete, ok := evt.(*events.AppStateSyncComplete); ok {
+			if syncComplete != nil && syncComplete.Recovery && syncComplete.Name == collection {
+				finished = true
+				completed <- append([]interface{}(nil), captured...)
+			}
+			return
+		}
+		for _, eventCollection := range appStateCollectionsForEvent(evt) {
+			if eventCollection == collection {
+				captured = append(captured, evt)
+				break
+			}
+		}
+	})
+	defer a.wa.RemoveEventHandler(handlerID)
+
+	if _, err := a.wa.RequestAppStateRecovery(ctx, string(collection)); err != nil {
+		mu.Lock()
+		finished = true
+		mu.Unlock()
+		return nil, fmt.Errorf("request WhatsApp app state recovery for %s: %w", collection, err)
+	}
+	select {
+	case eventsToPersist := <-completed:
+		return eventsToPersist, nil
+	case <-ctx.Done():
+		mu.Lock()
+		finished = true
+		mu.Unlock()
+		return nil, fmt.Errorf("wait for WhatsApp app state recovery for %s: %w", collection, ctx.Err())
 	}
 }
 

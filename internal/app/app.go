@@ -184,6 +184,9 @@ func (a *App) Close() {
 	if waClient != nil {
 		waClient.Close()
 	}
+	// A completed command frontier may hand later ready tasks to a background
+	// drainer. Keep SQLite open until that drainer has finished every write.
+	_ = a.appStatePersist.waitIdle(context.Background())
 	if sessionResolver != nil {
 		_ = sessionResolver.Close()
 	}
