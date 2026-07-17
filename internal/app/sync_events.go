@@ -302,36 +302,10 @@ func (a *App) handleReceiptPersistenceEvent(ctx context.Context, evt *events.Rec
 	if evt == nil || evt.Type != types.ReceiptTypeReadSelf || evt.Chat.IsEmpty() {
 		return
 	}
-	ticket := a.appStatePersist.reserveLive()
-	generation, err := a.db.MarkAppStateRecoveryGeneration(string(appstate.WAPatchRegularLow))
-	if err != nil {
-		a.emitWarning(
-			"receipt_recovery_marker_failed",
-			fmt.Sprintf("warning: failed to mark read receipt recovery: %v", err),
-			map[string]any{"error": err.Error()},
-		)
-		a.appStatePersist.completeOne(ticket, func() {
-			_ = a.handleReceiptEvent(context.WithoutCancel(ctx), evt)
-		})
-		return
-	}
-	a.appStatePersist.completeOne(ticket, func() {
-		if a.handleReceiptEvent(context.WithoutCancel(ctx), evt) == nil {
-			if err := a.db.ClearAppStateRecoveryIntent(string(appstate.WAPatchRegularLow), generation); err != nil {
-				a.emitWarning(
-					"receipt_recovery_marker_clear_failed",
-					fmt.Sprintf("warning: failed to clear read receipt recovery: %v", err),
-					map[string]any{"error": err.Error()},
-				)
-			}
-		}
-	})
+	a.handleReceiptEvent(ctx, evt)
 }
 
-func (a *App) handleReceiptEvent(ctx context.Context, evt *events.Receipt) error {
-	if evt == nil || evt.Type != types.ReceiptTypeReadSelf || evt.Chat.IsEmpty() {
-		return nil
-	}
+func (a *App) handleReceiptEvent(ctx context.Context, evt *events.Receipt) {
 	chat := a.canonicalStoreJID(ctx, evt.Chat)
 	if err := a.db.SetChatUnreadCount(canonicalJIDString(chat), 0); err != nil {
 		a.emitWarning(
@@ -339,9 +313,7 @@ func (a *App) handleReceiptEvent(ctx context.Context, evt *events.Receipt) error
 			fmt.Sprintf("warning: failed to clear unread count from read-self receipt for chat %s: %v", chat, err),
 			map[string]any{"chat_jid": chat.String(), "error": err.Error()},
 		)
-		return err
 	}
-	return nil
 }
 
 func (a *App) handleDeleteForMeEvent(ctx context.Context, evt *events.DeleteForMe) error {

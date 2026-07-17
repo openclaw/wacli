@@ -1233,7 +1233,7 @@ func TestArchiveChatOrdersFetchedEventsBeforeNewerLiveEvents(t *testing.T) {
 	}
 }
 
-func TestArchiveChatOrdersRecoveredMarkReadBeforeNewerReceipt(t *testing.T) {
+func TestArchiveChatPersistsRecoveredMarkUnread(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
 	a.wa = f
@@ -1256,10 +1256,6 @@ func TestArchiveChatOrdersRecoveredMarkReadBeforeNewerReceipt(t *testing.T) {
 		}
 	}
 	f.appStateFetchEvent = func(name string, fullSync, onlyIfNotSynced bool) interface{} {
-		f.emit(&events.Receipt{
-			MessageSource: types.MessageSource{Chat: remote},
-			Type:          types.ReceiptTypeReadSelf,
-		})
 		return &events.MarkChatAsRead{
 			JID:       remote,
 			Timestamp: when,
@@ -1274,8 +1270,8 @@ func TestArchiveChatOrdersRecoveredMarkReadBeforeNewerReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetChat: %v", err)
 	}
-	if stored.Unread || stored.UnreadCount != 0 {
-		t.Fatalf("older recovered mark-unread overwrote newer receipt: %+v", stored)
+	if !stored.Unread {
+		t.Fatalf("recovered mark-unread was not persisted: %+v", stored)
 	}
 }
 
@@ -1313,7 +1309,71 @@ func TestMarkChatReadOrdersPreSendReceiptBeforeLocalMutation(t *testing.T) {
 	}
 }
 
-func TestQueuedReadReceiptKeepsDurableRecoveryIntent(t *testing.T) {
+func TestReadReceiptPersistsBeforeClose(t *testing.T) {
+	storeDir := t.TempDir()
+	a, err := New(Options{StoreDir: storeDir})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	a.wa = newFakeWA()
+	target := types.JID{User: "456", Server: types.DefaultUserServer}
+	if err := a.db.UpsertChat(target.String(), "dm", "Alice", nowUTC()); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	if err := a.db.SetChatUnreadCount(target.String(), 2); err != nil {
+		t.Fatalf("SetChatUnreadCount: %v", err)
+	}
+	a.handleReceiptPersistenceEvent(context.Background(), &events.Receipt{
+		MessageSource: types.MessageSource{Chat: target},
+		Type:          types.ReceiptTypeReadSelf,
+	})
+	a.Close()
+	db, err := store.Open(filepath.Join(storeDir, "wacli.db"))
+	if err != nil {
+		t.Fatalf("Open persisted store: %v", err)
+	}
+	defer db.Close()
+	stored, err := db.GetChat(target.String())
+	if err != nil {
+		t.Fatalf("GetChat: %v", err)
+	}
+	if stored.Unread || stored.UnreadCount != 0 {
+		t.Fatalf("receipt was not persisted before close: %+v", stored)
+	}
+}
+
+func TestReadReceiptResolvesCanonicalJID(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+	lid := types.JID{User: "456", Server: types.HiddenUserServer}
+	pn := types.JID{User: "123", Server: types.DefaultUserServer}
+	if err := a.db.UpsertChat(pn.String(), "dm", "Alice", nowUTC()); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	if err := a.db.SetChatUnreadCount(pn.String(), 2); err != nil {
+		t.Fatalf("SetChatUnreadCount: %v", err)
+	}
+	f.mu.Lock()
+	f.lids[lid.ToNonAD()] = pn
+	f.mu.Unlock()
+	a.handleReceiptPersistenceEvent(context.Background(), &events.Receipt{
+		MessageSource: types.MessageSource{Chat: lid},
+		Type:          types.ReceiptTypeReadSelf,
+	})
+	chat, err := a.db.GetChat(pn.String())
+	if err != nil {
+		t.Fatalf("GetChat PN: %v", err)
+	}
+	if chat.Unread || chat.UnreadCount != 0 {
+		t.Fatalf("canonical receipt was not persisted: %+v", chat)
+	}
+	if _, err := a.db.GetChat(lid.String()); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("stale LID chat was created: %v", err)
+	}
+}
+
+func TestReadReceiptDoesNotWaitForAppStateQueue(t *testing.T) {
 	a := newTestApp(t)
 	a.wa = newFakeWA()
 	target := types.JID{User: "456", Server: types.DefaultUserServer}
@@ -1328,22 +1388,14 @@ func TestQueuedReadReceiptKeepsDurableRecoveryIntent(t *testing.T) {
 		MessageSource: types.MessageSource{Chat: target},
 		Type:          types.ReceiptTypeReadSelf,
 	})
-	required, err := a.db.AppStateRecoveryRequired(string(appstate.WAPatchRegularLow))
+	stored, err := a.db.GetChat(target.String())
 	if err != nil {
-		t.Fatalf("AppStateRecoveryRequired: %v", err)
+		t.Fatalf("GetChat: %v", err)
 	}
-	if !required {
-		t.Fatal("queued receipt had no durable recovery intent")
+	if stored.Unread || stored.UnreadCount != 0 {
+		t.Fatalf("receipt waited for unrelated app-state work: %+v", stored)
 	}
 	a.appStatePersist.completeOne(blocker, func() {})
-	waitForCondition(t, time.Second, func() bool {
-		stored, getErr := a.db.GetChat(target.String())
-		if getErr != nil || stored.Unread || stored.UnreadCount != 0 {
-			return false
-		}
-		required, markerErr := a.db.AppStateRecoveryRequired(string(appstate.WAPatchRegularLow))
-		return markerErr == nil && !required
-	})
 }
 
 func TestReadReceiptDoesNotClearPendingLocalRecoveryIntent(t *testing.T) {
