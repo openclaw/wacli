@@ -91,7 +91,15 @@ func (a *App) syncChatStateBeforeWrite(ctx context.Context, collection appstate.
 
 	retryDelay := appStateRetryInitialDelay
 	for {
+		tracker.begin()
 		err := a.wa.FetchAppState(ctx, string(collection), false, false)
+		persistenceErr := tracker.end()
+		if persistenceErr != nil {
+			if markerErr := a.db.MarkAppStateRecoveryRequired(string(collection)); markerErr != nil {
+				return fmt.Errorf("persist fetched app state %s: %v; mark recovery: %w", collection, persistenceErr, markerErr)
+			}
+			return fmt.Errorf("persist fetched app state %s: %w", collection, persistenceErr)
+		}
 		if err == nil {
 			return nil
 		}

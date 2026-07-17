@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -1293,6 +1294,76 @@ func TestArchiveChatReplaysAfterRecoveryPersistenceFailure(t *testing.T) {
 	}
 	if required {
 		t.Fatal("recovery marker remained after successful replay")
+	}
+}
+
+func TestArchiveChatMarksReplayAfterDeltaPersistenceFailure(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+	target := types.JID{User: "456", Server: types.DefaultUserServer}
+	remoteChat := types.JID{User: "123", Server: types.DefaultUserServer}
+	when := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+	for _, chat := range []types.JID{target, remoteChat} {
+		if err := a.db.UpsertChat(chat.String(), "dm", "Alice", when); err != nil {
+			t.Fatalf("UpsertChat: %v", err)
+		}
+	}
+	raw, err := sql.Open("sqlite3", filepath.Join(a.opts.StoreDir, "wacli.db"))
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer raw.Close()
+	if _, err := raw.Exec(`
+		CREATE TRIGGER fail_archive_persistence
+		BEFORE UPDATE OF archived ON chats
+		BEGIN
+			SELECT RAISE(FAIL, 'injected archive persistence failure');
+		END
+	`); err != nil {
+		t.Fatalf("create failure trigger: %v", err)
+	}
+	f.appStateFetchEvent = func(name string, fullSync, onlyIfNotSynced bool) interface{} {
+		return &events.Archive{
+			JID:       remoteChat,
+			Timestamp: when.Add(time.Minute),
+			Action:    &waSyncAction.ArchiveChatAction{Archived: proto.Bool(true)},
+		}
+	}
+
+	err = a.ArchiveChat(context.Background(), target, true)
+	if err == nil || !strings.Contains(err.Error(), "persist fetched app state regular_low") {
+		t.Fatalf("ArchiveChat error = %v, want delta persistence failure", err)
+	}
+	required, err := a.db.AppStateRecoveryRequired(string(appstate.WAPatchRegularLow))
+	if err != nil {
+		t.Fatalf("AppStateRecoveryRequired: %v", err)
+	}
+	if !required {
+		t.Fatal("delta persistence failure did not leave a recovery marker")
+	}
+	if _, err := raw.Exec(`DROP TRIGGER fail_archive_persistence`); err != nil {
+		t.Fatalf("drop failure trigger: %v", err)
+	}
+	if err := a.ArchiveChat(context.Background(), target, true); err != nil {
+		t.Fatalf("ArchiveChat replay: %v", err)
+	}
+	f.mu.Lock()
+	fetches := append([]fakeAppStateFetch(nil), f.appStateFetches...)
+	archiveCalls := len(f.archiveCalls)
+	f.mu.Unlock()
+	if len(fetches) != 2 || fetches[0].fullSync || !fetches[1].fullSync {
+		t.Fatalf("app state fetches = %+v, want failed delta then full replay", fetches)
+	}
+	if archiveCalls != 1 {
+		t.Fatalf("archive calls = %d, want 1 after successful replay", archiveCalls)
+	}
+	stored, err := a.db.GetChat(remoteChat.String())
+	if err != nil {
+		t.Fatalf("GetChat remote: %v", err)
+	}
+	if !stored.Archived {
+		t.Fatalf("full replay was not persisted: %+v", stored)
 	}
 }
 
