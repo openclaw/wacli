@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.12.2 - Unreleased
+
+### Added
+
+- Sync: add opt-in quiet presence mode to suppress initial available-presence and reconnect updates during long-running sync sessions. (#298 - thanks @GodsBoy)
+
+### Fixed
+
+- Store: normalize Windows drive paths before generating SQLite file URIs to prevent invalid URI authority errors. (#304 - thanks @goutamadwant)
 ## Unreleased
 
 ### Fixed

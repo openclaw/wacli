@@ -134,6 +134,16 @@ func TestReadOnlyAuthStatusReadsLiveWALSidecars(t *testing.T) {
 	}
 }
 
+func TestReadOnlySessionSQLiteURIWindowsPath(t *testing.T) {
+	uri := readOnlySessionSQLiteURI(`C:\Users\me\.wacli\session.db`)
+	if !strings.HasPrefix(uri, "file:///C:/Users/me/.wacli/session.db?") {
+		t.Fatalf("readOnlySessionSQLiteURI = %q, want absolute Windows file URI", uri)
+	}
+	if !strings.Contains(uri, "mode=ro") {
+		t.Fatalf("readOnlySessionSQLiteURI = %q, want read-only query parameter", uri)
+	}
+}
+
 func TestReadOnlySessionSQLiteURIUsesLockingForLiveState(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.db")
 	if err := os.WriteFile(path, []byte(""), 0o600); err != nil {
