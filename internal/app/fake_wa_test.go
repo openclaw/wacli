@@ -65,6 +65,7 @@ type fakeWA struct {
 	appStateFetchErrs           []error
 	appStateFetchEvent          func(name string, fullSync, onlyIfNotSynced bool) interface{}
 	archiveEvent                func() interface{}
+	archiveErr                  error
 	archiveCalls                []fakeArchiveCall
 	pinCalls                    []fakePinCall
 	muteCalls                   []fakeMuteCall
@@ -720,7 +721,7 @@ func (f *fakeWA) ArchiveChat(ctx context.Context, target types.JID, archive bool
 			f.emit(evt)
 		}
 	}
-	return nil
+	return f.archiveErr
 }
 
 func (f *fakeWA) PinChat(ctx context.Context, target types.JID, pin bool) error {

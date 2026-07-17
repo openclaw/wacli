@@ -35,7 +35,7 @@ func (a *App) ArchiveChat(ctx context.Context, jid types.JID, archive bool) erro
 		return err
 	}
 	if err := a.wa.ArchiveChat(ctx, jid, archive, lastTS, lastKey); err != nil {
-		a.cancelLocalAppStateWrite(pending)
+		a.abandonLocalAppStateWrite(pending)
 		return err
 	}
 	return a.completeLocalAppStateWrite(ctx, pending, func() error {
@@ -55,7 +55,7 @@ func (a *App) PinChat(ctx context.Context, jid types.JID, pin bool) error {
 		return err
 	}
 	if err := a.wa.PinChat(ctx, jid, pin); err != nil {
-		a.cancelLocalAppStateWrite(pending)
+		a.abandonLocalAppStateWrite(pending)
 		return err
 	}
 	return a.completeLocalAppStateWrite(ctx, pending, func() error {
@@ -76,7 +76,7 @@ func (a *App) MuteChat(ctx context.Context, jid types.JID, mute bool, duration t
 		return err
 	}
 	if err := a.wa.MuteChat(ctx, jid, mute, duration); err != nil {
-		a.cancelLocalAppStateWrite(pending)
+		a.abandonLocalAppStateWrite(pending)
 		return err
 	}
 	return a.completeLocalAppStateWrite(ctx, pending, func() error {
@@ -97,7 +97,7 @@ func (a *App) MarkChatRead(ctx context.Context, jid types.JID, read bool) error 
 		return err
 	}
 	if err := a.wa.MarkChatAsRead(ctx, jid, read, lastTS, lastKey); err != nil {
-		a.cancelLocalAppStateWrite(pending)
+		a.abandonLocalAppStateWrite(pending)
 		return err
 	}
 	return a.completeLocalAppStateWrite(ctx, pending, func() error {
@@ -209,49 +209,37 @@ func (a *App) clearCompletedAppStateRecovery(collection appstate.WAPatchName, ma
 }
 
 type pendingLocalAppStateWrite struct {
-	ticket     uint64
-	collection appstate.WAPatchName
-	intent     int64
+	ticket uint64
 }
 
 func (a *App) beginLocalAppStateWrite(collection appstate.WAPatchName) (pendingLocalAppStateWrite, error) {
 	pending := pendingLocalAppStateWrite{
-		ticket:     a.appStatePersist.reserve(),
-		collection: collection,
+		ticket: a.appStatePersist.reserve(),
 	}
-	intent, err := a.db.MarkAppStateRecoveryGeneration(string(collection))
+	err := a.db.MarkAppStateRecoveryRequired(string(collection))
 	if err != nil {
 		a.appStatePersist.completeOne(pending.ticket, func() {})
 		return pendingLocalAppStateWrite{}, fmt.Errorf("mark local WhatsApp app state recovery for %s: %w", collection, err)
 	}
-	pending.intent = intent
 	return pending, nil
 }
 
-func (a *App) cancelLocalAppStateWrite(pending pendingLocalAppStateWrite) {
-	a.appStatePersist.completeOne(pending.ticket, func() {
-		if err := a.db.ClearAppStateRecoveryIntent(string(pending.collection), pending.intent); err != nil {
-			a.emitWarning(
-				"app_state_recovery_marker_clear_failed",
-				fmt.Sprintf("warning: failed to clear canceled app state recovery for %s: %v", pending.collection, err),
-				map[string]any{"collection": string(pending.collection), "error": err.Error()},
-			)
-		}
-	})
+func (a *App) abandonLocalAppStateWrite(pending pendingLocalAppStateWrite) {
+	// A send error is ambiguous: whatsmeow may already have advanced its app
+	// state cursor. Leave the durable intent for the next full replay.
+	a.appStatePersist.completeOne(pending.ticket, func() {})
 }
 
 func (a *App) completeLocalAppStateWrite(ctx context.Context, pending pendingLocalAppStateWrite, persist func() error) error {
 	result := make(chan error, 1)
 	a.appStatePersist.completeOne(pending.ticket, func() {
-		err := persist()
-		if err == nil {
-			err = a.db.ClearAppStateRecoveryIntent(string(pending.collection), pending.intent)
-		}
-		result <- err
+		result <- persist()
 	})
 	if err := a.appStatePersist.waitThrough(context.WithoutCancel(ctx), pending.ticket); err != nil {
 		return err
 	}
+	// whatsmeow dispatches the cursor-advancing post-send events asynchronously.
+	// Keep the durable intent until a later pre-write full replay captures them.
 	return <-result
 }
 
