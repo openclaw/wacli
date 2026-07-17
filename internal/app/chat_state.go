@@ -23,9 +23,11 @@ const (
 )
 
 func (a *App) ArchiveChat(ctx context.Context, jid types.JID, archive bool) error {
-	if err := a.syncChatStateBeforeWrite(ctx, appstate.WAPatchRegularLow); err != nil {
+	release, err := a.beginChatStateWrite(ctx, appstate.WAPatchRegularLow)
+	if err != nil {
 		return err
 	}
+	defer release()
 	chatJID := canonicalJIDString(a.canonicalStoreJID(ctx, jid))
 	lastTS, lastKey := a.latestMessageRange(chatJID)
 	pending, err := a.beginLocalAppStateWrite(appstate.WAPatchRegularLow)
@@ -42,9 +44,11 @@ func (a *App) ArchiveChat(ctx context.Context, jid types.JID, archive bool) erro
 }
 
 func (a *App) PinChat(ctx context.Context, jid types.JID, pin bool) error {
-	if err := a.syncChatStateBeforeWrite(ctx, appstate.WAPatchRegularLow); err != nil {
+	release, err := a.beginChatStateWrite(ctx, appstate.WAPatchRegularLow)
+	if err != nil {
 		return err
 	}
+	defer release()
 	chatJID := canonicalJIDString(a.canonicalStoreJID(ctx, jid))
 	pending, err := a.beginLocalAppStateWrite(appstate.WAPatchRegularLow)
 	if err != nil {
@@ -60,9 +64,11 @@ func (a *App) PinChat(ctx context.Context, jid types.JID, pin bool) error {
 }
 
 func (a *App) MuteChat(ctx context.Context, jid types.JID, mute bool, duration time.Duration) error {
-	if err := a.syncChatStateBeforeWrite(ctx, appstate.WAPatchRegularHigh); err != nil {
+	release, err := a.beginChatStateWrite(ctx, appstate.WAPatchRegularHigh)
+	if err != nil {
 		return err
 	}
+	defer release()
 	chatJID := canonicalJIDString(a.canonicalStoreJID(ctx, jid))
 	mutedUntil := mutedUntilUnix(mute, duration, nowUTC())
 	pending, err := a.beginLocalAppStateWrite(appstate.WAPatchRegularHigh)
@@ -79,9 +85,11 @@ func (a *App) MuteChat(ctx context.Context, jid types.JID, mute bool, duration t
 }
 
 func (a *App) MarkChatRead(ctx context.Context, jid types.JID, read bool) error {
-	if err := a.syncChatStateBeforeWrite(ctx, appstate.WAPatchRegularLow); err != nil {
+	release, err := a.beginChatStateWrite(ctx, appstate.WAPatchRegularLow)
+	if err != nil {
 		return err
 	}
+	defer release()
 	chatJID := canonicalJIDString(a.canonicalStoreJID(ctx, jid))
 	lastTS, lastKey := a.latestMessageRange(chatJID)
 	pending, err := a.beginLocalAppStateWrite(appstate.WAPatchRegularLow)
@@ -97,14 +105,21 @@ func (a *App) MarkChatRead(ctx context.Context, jid types.JID, read bool) error 
 	})
 }
 
-func (a *App) syncChatStateBeforeWrite(ctx context.Context, collection appstate.WAPatchName) error {
+func (a *App) beginChatStateWrite(ctx context.Context, collection appstate.WAPatchName) (func(), error) {
 	select {
 	case <-ctx.Done():
-		return fmt.Errorf("wait for chat state synchronization: %w", ctx.Err())
+		return nil, fmt.Errorf("wait for chat state synchronization: %w", ctx.Err())
 	case <-a.chatStateSync:
 	}
-	defer func() { a.chatStateSync <- struct{}{} }()
+	release := func() { a.chatStateSync <- struct{}{} }
+	if err := a.syncChatStateBeforeWrite(ctx, collection); err != nil {
+		release()
+		return nil, err
+	}
+	return release, nil
+}
 
+func (a *App) syncChatStateBeforeWrite(ctx context.Context, collection appstate.WAPatchName) error {
 	markerGeneration, recoveryRequired, err := a.db.BeginAppStateRecovery(string(collection))
 	if err != nil {
 		return fmt.Errorf("begin WhatsApp app state recovery for %s: %w", collection, err)

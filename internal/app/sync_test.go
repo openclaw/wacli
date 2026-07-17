@@ -1267,6 +1267,81 @@ func TestArchiveChatReservesLocalWriteBeforeLiveEventDuringSend(t *testing.T) {
 	}
 }
 
+func TestConcurrentChatStateWriteCannotReplaySnapshotFromBeforeEarlierWrite(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	first := types.JID{User: "456", Server: types.DefaultUserServer}
+	second := types.JID{User: "789", Server: types.DefaultUserServer}
+	when := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+	for _, chat := range []types.JID{first, second} {
+		if err := a.db.UpsertChat(chat.String(), "dm", "Alice", when); err != nil {
+			t.Fatalf("UpsertChat: %v", err)
+		}
+	}
+
+	firstWriteStarted := make(chan struct{})
+	releaseFirstWrite := make(chan struct{})
+	var writeCount atomic.Int32
+	f.archiveEvent = func() interface{} {
+		if writeCount.Add(1) == 1 {
+			close(firstWriteStarted)
+			<-releaseFirstWrite
+		}
+		return nil
+	}
+
+	secondFetchStarted := make(chan struct{})
+	var fetchCount atomic.Int32
+	f.appStateFetchEvent = func(name string, fullSync, onlyIfNotSynced bool) interface{} {
+		if fetchCount.Add(1) != 2 {
+			return nil
+		}
+		stored, err := a.db.GetChat(first.String())
+		if err != nil {
+			t.Errorf("GetChat during second fetch: %v", err)
+			return nil
+		}
+		close(secondFetchStarted)
+		return &events.Archive{
+			JID:       first,
+			Timestamp: when.Add(time.Minute),
+			Action:    &waSyncAction.ArchiveChatAction{Archived: proto.Bool(stored.Archived)},
+		}
+	}
+
+	firstDone := make(chan error, 1)
+	go func() {
+		firstDone <- a.ArchiveChat(context.Background(), first, true)
+	}()
+	<-firstWriteStarted
+
+	secondDone := make(chan error, 1)
+	go func() {
+		secondDone <- a.ArchiveChat(context.Background(), second, true)
+	}()
+	select {
+	case <-secondFetchStarted:
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseFirstWrite)
+
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first ArchiveChat: %v", err)
+	}
+	if err := <-secondDone; err != nil {
+		t.Fatalf("second ArchiveChat: %v", err)
+	}
+	stored, err := a.db.GetChat(first.String())
+	if err != nil {
+		t.Fatalf("GetChat: %v", err)
+	}
+	if !stored.Archived {
+		t.Fatalf("stale concurrent replay overwrote earlier local write: %+v", stored)
+	}
+}
+
 func TestLocalAppStateWriteFinishesAfterRequestCancellation(t *testing.T) {
 	a := newTestApp(t)
 	blockerStarted := make(chan struct{})
