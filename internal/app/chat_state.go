@@ -31,7 +31,9 @@ func (a *App) ArchiveChat(ctx context.Context, jid types.JID, archive bool) erro
 	if err := a.wa.ArchiveChat(ctx, jid, archive, lastTS, lastKey); err != nil {
 		return err
 	}
-	return a.db.SetChatArchived(chatJID, archive)
+	return a.persistLocalAppState(ctx, func() error {
+		return a.db.SetChatArchived(chatJID, archive)
+	})
 }
 
 func (a *App) PinChat(ctx context.Context, jid types.JID, pin bool) error {
@@ -42,7 +44,9 @@ func (a *App) PinChat(ctx context.Context, jid types.JID, pin bool) error {
 	if err := a.wa.PinChat(ctx, jid, pin); err != nil {
 		return err
 	}
-	return a.db.SetChatPinned(chatJID, pin)
+	return a.persistLocalAppState(ctx, func() error {
+		return a.db.SetChatPinned(chatJID, pin)
+	})
 }
 
 func (a *App) MuteChat(ctx context.Context, jid types.JID, mute bool, duration time.Duration) error {
@@ -50,10 +54,13 @@ func (a *App) MuteChat(ctx context.Context, jid types.JID, mute bool, duration t
 		return err
 	}
 	chatJID := canonicalJIDString(a.canonicalStoreJID(ctx, jid))
+	mutedUntil := mutedUntilUnix(mute, duration, nowUTC())
 	if err := a.wa.MuteChat(ctx, jid, mute, duration); err != nil {
 		return err
 	}
-	return a.db.SetChatMutedUntil(chatJID, mutedUntilUnix(mute, duration, nowUTC()))
+	return a.persistLocalAppState(ctx, func() error {
+		return a.db.SetChatMutedUntil(chatJID, mutedUntil)
+	})
 }
 
 func (a *App) MarkChatRead(ctx context.Context, jid types.JID, read bool) error {
@@ -65,7 +72,9 @@ func (a *App) MarkChatRead(ctx context.Context, jid types.JID, read bool) error 
 	if err := a.wa.MarkChatAsRead(ctx, jid, read, lastTS, lastKey); err != nil {
 		return err
 	}
-	return a.db.SetChatUnread(chatJID, !read)
+	return a.persistLocalAppState(ctx, func() error {
+		return a.db.SetChatUnread(chatJID, !read)
+	})
 }
 
 func (a *App) syncChatStateBeforeWrite(ctx context.Context, collection appstate.WAPatchName) error {
@@ -153,9 +162,26 @@ func (a *App) clearCompletedAppStateRecovery(collection appstate.WAPatchName, ma
 		return fmt.Errorf("clear WhatsApp app state recovery for %s: %w", collection, err)
 	}
 	if !cleared {
-		return fmt.Errorf("WhatsApp app state recovery changed during %s synchronization; retry the command", collection)
+		required, checkErr := a.db.AppStateRecoveryRequired(string(collection))
+		if checkErr != nil {
+			return fmt.Errorf("check completed WhatsApp app state recovery for %s: %w", collection, checkErr)
+		}
+		if required {
+			return fmt.Errorf("WhatsApp app state recovery changed during %s synchronization; retry the command", collection)
+		}
 	}
 	return nil
+}
+
+func (a *App) persistLocalAppState(ctx context.Context, persist func() error) error {
+	result := make(chan error, 1)
+	ticket := a.appStatePersist.enqueue(func() {
+		result <- persist()
+	})
+	if err := a.appStatePersist.waitThrough(ctx, ticket); err != nil {
+		return err
+	}
+	return <-result
 }
 
 func (a *App) persistFetchedAppStateEvents(ctx context.Context, eventsToPersist []interface{}, tracker *appStatePersistenceTracker) error {

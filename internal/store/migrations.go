@@ -35,6 +35,7 @@ var schemaMigrations = []migration{
 	{version: 19, name: "messages quoted columns", up: migrateMessagesQuotedColumns},
 	{version: 20, name: "messages media_unavailable_at column", up: migrateMessagesMediaUnavailableColumn},
 	{version: 21, name: "app state recovery markers", up: migrateAppStateRecoveryMarkers},
+	{version: 22, name: "app state recovery intents", up: migrateAppStateRecoveryIntents},
 }
 
 func migrateAppStateRecoveryMarkers(d *DB) error {
@@ -45,6 +46,33 @@ func migrateAppStateRecoveryMarkers(d *DB) error {
 		)
 	`); err != nil {
 		return fmt.Errorf("create app state recovery marker table: %w", err)
+	}
+	return nil
+}
+
+func migrateAppStateRecoveryIntents(d *DB) error {
+	if err := ensureAppStateRecoveryIntents(d); err != nil {
+		return err
+	}
+	if _, err := d.sql.Exec(`
+		INSERT INTO app_state_recovery_intents(collection)
+		SELECT collection FROM app_state_recovery_required
+	`); err != nil {
+		return fmt.Errorf("copy app state recovery markers to intents: %w", err)
+	}
+	return nil
+}
+
+func ensureAppStateRecoveryIntents(d *DB) error {
+	if _, err := d.sql.Exec(`
+		CREATE TABLE IF NOT EXISTS app_state_recovery_intents (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			collection TEXT NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_app_state_recovery_intents_collection
+		ON app_state_recovery_intents(collection)
+	`); err != nil {
+		return fmt.Errorf("create app state recovery intent table: %w", err)
 	}
 	return nil
 }
@@ -145,6 +173,9 @@ func (d *DB) ensureCurrentSchema() error {
 	}
 	if err := migrateAppStateRecoveryMarkers(d); err != nil {
 		return fmt.Errorf("ensure current app state recovery markers: %w", err)
+	}
+	if err := ensureAppStateRecoveryIntents(d); err != nil {
+		return fmt.Errorf("ensure current app state recovery intents: %w", err)
 	}
 	return nil
 }

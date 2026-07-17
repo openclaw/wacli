@@ -187,13 +187,84 @@ func (a *App) handleAppStatePersistenceEvent(ctx context.Context, evt interface{
 		a.persistAppStateEvent(ctx, evt, tracker)
 		return
 	}
-	persistCtx := context.WithoutCancel(ctx)
-	a.appStatePersist.enqueue(func() {
+	ticket := a.appStatePersist.reserveLive()
+	markers, markerErr := a.markLiveAppStateRecovery(evt)
+	if markerErr != nil {
+		a.emitWarning(
+			"app_state_recovery_marker_failed",
+			fmt.Sprintf("warning: failed to mark live app state recovery: %v", markerErr),
+			map[string]any{"error": markerErr.Error()},
+		)
+		persistCtx := context.WithoutCancel(ctx)
 		a.persistAppStateEvent(persistCtx, evt, nil)
+		retryMarkers, retryErr := a.markLiveAppStateRecovery(evt)
+		if retryErr != nil {
+			a.emitWarning(
+				"app_state_recovery_marker_failed",
+				fmt.Sprintf("warning: failed to restore live app state recovery before ordered replay: %v", retryErr),
+				map[string]any{"error": retryErr.Error()},
+			)
+		}
+		a.appStatePersist.completeOne(ticket, func() {
+			orderedErr := a.persistAppStateEvent(persistCtx, evt, nil)
+			if orderedErr == nil {
+				a.clearLiveAppStateRecovery(retryMarkers)
+			} else if retryErr != nil {
+				if _, finalMarkerErr := a.markLiveAppStateRecovery(evt); finalMarkerErr != nil {
+					a.emitWarning(
+						"app_state_recovery_marker_failed",
+						fmt.Sprintf("warning: failed to restore live app state recovery after ordered replay failure: %v", finalMarkerErr),
+						map[string]any{"error": finalMarkerErr.Error()},
+					)
+				}
+			}
+		})
+		return
+	}
+	persistCtx := context.WithoutCancel(ctx)
+	a.appStatePersist.completeOne(ticket, func() {
+		persistenceErr := a.persistAppStateEvent(persistCtx, evt, nil)
+		if persistenceErr == nil {
+			a.clearLiveAppStateRecovery(markers)
+		}
 	})
 }
 
-func (a *App) persistAppStateEvent(ctx context.Context, evt interface{}, tracker *appStatePersistenceTracker) {
+type appStateRecoveryMarker struct {
+	collection appstate.WAPatchName
+	generation int64
+}
+
+func (a *App) markLiveAppStateRecovery(evt interface{}) ([]appStateRecoveryMarker, error) {
+	collections := appStateCollectionsForEvent(evt)
+	names := make([]string, len(collections))
+	for i, collection := range collections {
+		names[i] = string(collection)
+	}
+	generations, err := a.db.MarkAppStateRecoveryGenerations(names)
+	if err != nil {
+		return nil, err
+	}
+	markers := make([]appStateRecoveryMarker, 0, len(collections))
+	for i, collection := range collections {
+		markers = append(markers, appStateRecoveryMarker{collection: collection, generation: generations[i]})
+	}
+	return markers, nil
+}
+
+func (a *App) clearLiveAppStateRecovery(markers []appStateRecoveryMarker) {
+	for _, marker := range markers {
+		if err := a.db.ClearAppStateRecoveryIntent(string(marker.collection), marker.generation); err != nil {
+			a.emitWarning(
+				"app_state_recovery_marker_clear_failed",
+				fmt.Sprintf("warning: failed to clear live app state recovery for %s: %v", marker.collection, err),
+				map[string]any{"collection": string(marker.collection), "error": err.Error()},
+			)
+		}
+	}
+}
+
+func (a *App) persistAppStateEvent(ctx context.Context, evt interface{}, tracker *appStatePersistenceTracker) error {
 	var err error
 	switch v := evt.(type) {
 	case *events.AppState:
@@ -207,21 +278,8 @@ func (a *App) persistAppStateEvent(ctx context.Context, evt interface{}, tracker
 	}
 	if tracker != nil {
 		tracker.record(err)
-	} else if err != nil {
-		a.markAppStateRecoveryForEvent(evt)
 	}
-}
-
-func (a *App) markAppStateRecoveryForEvent(evt interface{}) {
-	for _, collection := range appStateCollectionsForEvent(evt) {
-		if err := a.db.MarkAppStateRecoveryRequired(string(collection)); err != nil {
-			a.emitWarning(
-				"app_state_recovery_marker_failed",
-				fmt.Sprintf("warning: failed to mark app state recovery for %s: %v", collection, err),
-				map[string]any{"collection": string(collection), "error": err.Error()},
-			)
-		}
-	}
+	return err
 }
 
 func appStateCollectionsForEvent(evt interface{}) []appstate.WAPatchName {
@@ -231,13 +289,8 @@ func appStateCollectionsForEvent(evt interface{}) []appstate.WAPatchName {
 	case *events.Mute, *events.Star, *events.DeleteForMe:
 		return []appstate.WAPatchName{appstate.WAPatchRegularHigh}
 	case *events.AppState:
-		if v != nil && len(v.Index) > 0 {
-			switch v.Index[0] {
-			case appstate.IndexArchive, appstate.IndexPin, appstate.IndexMarkChatAsRead:
-				return []appstate.WAPatchName{appstate.WAPatchRegularLow}
-			case appstate.IndexMute, appstate.IndexStar, appstate.IndexDeleteMessageForMe:
-				return []appstate.WAPatchName{appstate.WAPatchRegularHigh}
-			}
+		if v == nil || v.SyncActionValue == nil || (v.GetCallLogAction() == nil && v.GetDeleteIndividualCallLog() == nil) {
+			return nil
 		}
 		return appstate.AllPatchNames[:]
 	default:

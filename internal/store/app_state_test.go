@@ -45,6 +45,11 @@ func TestOpenMigratesAppStateRecoveryMarkers(t *testing.T) {
 	} else if !exists {
 		t.Fatal("app_state_recovery_required migration did not run")
 	}
+	if exists, err := db.tableExists("app_state_recovery_intents"); err != nil {
+		t.Fatalf("intent tableExists: %v", err)
+	} else if !exists {
+		t.Fatal("app_state_recovery_intents migration did not run")
+	}
 }
 
 func TestAppStateRecoveryMarkerPersistsAcrossReopen(t *testing.T) {
@@ -126,8 +131,8 @@ func TestAppStateRecoveryGenerationDoesNotClearNewFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginAppStateRecovery existing: %v", err)
 	}
-	if !alreadyRequired || generation != 2 {
-		t.Fatalf("existing marker = (%d, %t), want (2, true)", generation, alreadyRequired)
+	if !alreadyRequired || generation != 3 {
+		t.Fatalf("existing marker = (%d, %t), want (3, true)", generation, alreadyRequired)
 	}
 	cleared, err = db.ClearAppStateRecoveryGeneration("regular_low", generation)
 	if err != nil {
@@ -135,5 +140,51 @@ func TestAppStateRecoveryGenerationDoesNotClearNewFailure(t *testing.T) {
 	}
 	if !cleared {
 		t.Fatal("current recovery generation was not cleared")
+	}
+}
+
+func TestAppStateRecoveryIntentClearsOnlyItsOwnSuccess(t *testing.T) {
+	db := openTestDB(t)
+	failed, err := db.MarkAppStateRecoveryGeneration("regular_low")
+	if err != nil {
+		t.Fatalf("MarkAppStateRecoveryGeneration failed: %v", err)
+	}
+	succeeded, err := db.MarkAppStateRecoveryGeneration("regular_low")
+	if err != nil {
+		t.Fatalf("MarkAppStateRecoveryGeneration succeeded: %v", err)
+	}
+	if err := db.ClearAppStateRecoveryIntent("regular_low", succeeded); err != nil {
+		t.Fatalf("ClearAppStateRecoveryIntent succeeded: %v", err)
+	}
+	required, err := db.AppStateRecoveryRequired("regular_low")
+	if err != nil {
+		t.Fatalf("AppStateRecoveryRequired after success: %v", err)
+	}
+	if !required {
+		t.Fatal("successful live intent cleared an earlier failed intent")
+	}
+	if err := db.ClearAppStateRecoveryIntent("regular_low", failed); err != nil {
+		t.Fatalf("ClearAppStateRecoveryIntent failed: %v", err)
+	}
+	required, err = db.AppStateRecoveryRequired("regular_low")
+	if err != nil {
+		t.Fatalf("AppStateRecoveryRequired after all clears: %v", err)
+	}
+	if required {
+		t.Fatal("recovery intent remained after every intent cleared")
+	}
+}
+
+func TestAppStateRecoveryIntentBatchIsAtomic(t *testing.T) {
+	db := openTestDB(t)
+	if _, err := db.MarkAppStateRecoveryGenerations([]string{"regular_low", ""}); err == nil {
+		t.Fatal("MarkAppStateRecoveryGenerations accepted an empty collection")
+	}
+	required, err := db.AppStateRecoveryRequired("regular_low")
+	if err != nil {
+		t.Fatalf("AppStateRecoveryRequired: %v", err)
+	}
+	if required {
+		t.Fatal("failed marker batch committed a partial recovery intent")
 	}
 }

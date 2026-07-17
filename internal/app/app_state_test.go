@@ -120,3 +120,75 @@ func TestAppStatePersistenceSequencerSkipsLaterUnreadyReservation(t *testing.T) 
 		t.Fatalf("waitThrough second: %v", err)
 	}
 }
+
+func TestAppStatePersistenceSequencerIncludesStartedLiveReservation(t *testing.T) {
+	var sequencer appStatePersistenceSequencer
+	fetch := sequencer.reserve()
+	live := sequencer.reserveLive()
+	frontier := sequencer.complete(fetch, func() {})
+	if frontier != live {
+		t.Fatalf("fetch frontier = %d, want started live ticket %d", frontier, live)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if err := sequencer.waitThrough(ctx, frontier); err == nil {
+		t.Fatal("fetch crossed an uncompleted live reservation")
+	}
+	sequencer.completeOne(live, func() {})
+	if err := sequencer.waitThrough(context.Background(), frontier); err != nil {
+		t.Fatalf("waitThrough completed live reservation: %v", err)
+	}
+}
+
+func TestAppStatePersistenceSequencerDrainsOutOfOrderLiveCompletions(t *testing.T) {
+	var sequencer appStatePersistenceSequencer
+	var mu sync.Mutex
+	var order []int
+	first := sequencer.reserveLive()
+	second := sequencer.reserveLive()
+	sequencer.completeOne(second, func() {
+		mu.Lock()
+		order = append(order, 2)
+		mu.Unlock()
+	})
+	sequencer.completeOne(first, func() {
+		mu.Lock()
+		order = append(order, 1)
+		mu.Unlock()
+	})
+	if err := sequencer.waitThrough(context.Background(), second); err != nil {
+		t.Fatalf("waitThrough second: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !reflect.DeepEqual(order, []int{1, 2}) {
+		t.Fatalf("persistence order = %v, want [1 2]", order)
+	}
+}
+
+func TestAppStatePersistenceSequencerDoesNotDrainPastUnreadyLiveTask(t *testing.T) {
+	var sequencer appStatePersistenceSequencer
+	var mu sync.Mutex
+	var order []int
+	record := func(value int) func() {
+		return func() {
+			mu.Lock()
+			order = append(order, value)
+			mu.Unlock()
+		}
+	}
+	fetch := sequencer.reserve()
+	firstLive := sequencer.reserveLive()
+	secondLive := sequencer.reserveLive()
+	sequencer.completeOne(secondLive, record(3))
+	frontier := sequencer.complete(fetch, record(1))
+	sequencer.completeOne(firstLive, record(2))
+	if err := sequencer.waitThrough(context.Background(), frontier); err != nil {
+		t.Fatalf("waitThrough: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !reflect.DeepEqual(order, []int{1, 2, 3}) {
+		t.Fatalf("persistence order = %v, want [1 2 3]", order)
+	}
+}

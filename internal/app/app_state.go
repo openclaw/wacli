@@ -7,8 +7,9 @@ import (
 )
 
 type appStatePersistenceTask struct {
-	ready bool
-	run   func()
+	ready         bool
+	blocksEarlier bool
+	run           func()
 }
 
 type appStatePersistenceSequencer struct {
@@ -21,16 +22,24 @@ type appStatePersistenceSequencer struct {
 }
 
 func (s *appStatePersistenceSequencer) reserve() uint64 {
+	return s.reserveTask(false)
+}
+
+func (s *appStatePersistenceSequencer) reserveLive() uint64 {
+	return s.reserveTask(true)
+}
+
+func (s *appStatePersistenceSequencer) reserveTask(blocksEarlier bool) uint64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.initLocked()
 	ticket := s.next
 	s.next++
-	s.tasks[ticket] = &appStatePersistenceTask{}
+	s.tasks[ticket] = &appStatePersistenceTask{blocksEarlier: blocksEarlier}
 	return ticket
 }
 
-func (s *appStatePersistenceSequencer) enqueue(run func()) {
+func (s *appStatePersistenceSequencer) enqueue(run func()) uint64 {
 	s.mu.Lock()
 	s.initLocked()
 	ticket := s.next
@@ -44,21 +53,46 @@ func (s *appStatePersistenceSequencer) enqueue(run func()) {
 	if start {
 		s.drainThrough(ticket)
 	}
+	return ticket
 }
 
 func (s *appStatePersistenceSequencer) complete(ticket uint64, run func()) uint64 {
+	return s.completeTask(ticket, run, true)
+}
+
+func (s *appStatePersistenceSequencer) completeOne(ticket uint64, run func()) uint64 {
+	return s.completeTask(ticket, run, false)
+}
+
+func (s *appStatePersistenceSequencer) completeTask(ticket uint64, run func(), includeSuccessors bool) uint64 {
 	s.mu.Lock()
 	s.initLocked()
 	task := s.tasks[ticket]
 	task.ready = true
 	task.run = run
-	frontier := ticket
+	waitFrontier := ticket
+	drainFrontier := ticket
+	drainBlocked := false
 	for candidate := ticket + 1; candidate < s.next; candidate++ {
 		nextTask := s.tasks[candidate]
-		if nextTask == nil || !nextTask.ready {
+		if nextTask == nil {
 			break
 		}
-		frontier = candidate
+		if nextTask.ready {
+			if !drainBlocked {
+				drainFrontier = candidate
+			}
+			if includeSuccessors {
+				waitFrontier = candidate
+			}
+			continue
+		}
+		if includeSuccessors && nextTask.blocksEarlier {
+			waitFrontier = candidate
+			drainBlocked = true
+			continue
+		}
+		break
 	}
 	start := !s.running && ticket == s.serving
 	if start {
@@ -66,9 +100,9 @@ func (s *appStatePersistenceSequencer) complete(ticket uint64, run func()) uint6
 	}
 	s.mu.Unlock()
 	if start {
-		s.drainThrough(frontier)
+		s.drainThrough(drainFrontier)
 	}
-	return frontier
+	return waitFrontier
 }
 
 func (s *appStatePersistenceSequencer) waitThrough(ctx context.Context, frontier uint64) error {

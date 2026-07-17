@@ -1086,11 +1086,17 @@ func TestArchiveChatDoesNotAttributeConcurrentCollectionEvents(t *testing.T) {
 	`); err != nil {
 		t.Fatalf("create failure trigger: %v", err)
 	}
+	unrelatedMarkerSeen := false
 	f.appStateFetchEvent = func(name string, fullSync, onlyIfNotSynced bool) interface{} {
 		f.emit(&events.Mute{
 			JID:    remoteMute,
 			Action: &waSyncAction.MuteAction{Muted: proto.Bool(true)},
 		})
+		var err error
+		unrelatedMarkerSeen, err = a.db.AppStateRecoveryRequired(string(appstate.WAPatchRegularHigh))
+		if err != nil {
+			t.Fatalf("AppStateRecoveryRequired during queued event: %v", err)
+		}
 		return &events.Archive{
 			JID:    remoteArchive,
 			Action: &waSyncAction.ArchiveChatAction{Archived: proto.Bool(true)},
@@ -1099,6 +1105,9 @@ func TestArchiveChatDoesNotAttributeConcurrentCollectionEvents(t *testing.T) {
 
 	if err := a.ArchiveChat(context.Background(), target, true); err != nil {
 		t.Fatalf("ArchiveChat: %v", err)
+	}
+	if !unrelatedMarkerSeen {
+		t.Fatal("queued live event returned without a durable recovery intent")
 	}
 	stored, err := a.db.GetChat(remoteArchive.String())
 	if err != nil {
@@ -1221,6 +1230,65 @@ func TestArchiveChatOrdersFetchedEventsBeforeNewerLiveEvents(t *testing.T) {
 	}
 	if stored.Archived {
 		t.Fatalf("older fetched event overwrote newer live event: %+v", stored)
+	}
+}
+
+func TestArchiveChatMarkerFailureReplaysReentrantLiveEventInOrder(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+	handlerID := f.AddEventHandler(func(evt interface{}) {
+		a.handleAppStatePersistenceEvent(context.Background(), evt, nil)
+	})
+	defer f.RemoveEventHandler(handlerID)
+
+	target := types.JID{User: "456", Server: types.DefaultUserServer}
+	remoteArchive := types.JID{User: "123", Server: types.DefaultUserServer}
+	when := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+	for _, chat := range []types.JID{target, remoteArchive} {
+		if err := a.db.UpsertChat(chat.String(), "dm", "Alice", when); err != nil {
+			t.Fatalf("UpsertChat: %v", err)
+		}
+	}
+	raw, err := sql.Open("sqlite3", filepath.Join(a.opts.StoreDir, "wacli.db"))
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer raw.Close()
+	f.appStateFetchEvent = func(name string, fullSync, onlyIfNotSynced bool) interface{} {
+		if _, err := raw.Exec(`
+			CREATE TRIGGER fail_live_recovery_intent
+			BEFORE INSERT ON app_state_recovery_intents
+			BEGIN
+				SELECT RAISE(FAIL, 'injected live recovery intent failure');
+			END
+		`); err != nil {
+			t.Fatalf("create failure trigger: %v", err)
+		}
+		f.emit(&events.Archive{
+			JID:    remoteArchive,
+			Action: &waSyncAction.ArchiveChatAction{Archived: proto.Bool(false)},
+		})
+		if _, err := raw.Exec(`DROP TRIGGER fail_live_recovery_intent`); err != nil {
+			t.Fatalf("drop failure trigger: %v", err)
+		}
+		return &events.Archive{
+			JID:    remoteArchive,
+			Action: &waSyncAction.ArchiveChatAction{Archived: proto.Bool(true)},
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := a.ArchiveChat(ctx, target, true); err != nil {
+		t.Fatalf("ArchiveChat: %v", err)
+	}
+	stored, err := a.db.GetChat(remoteArchive.String())
+	if err != nil {
+		t.Fatalf("GetChat: %v", err)
+	}
+	if stored.Archived {
+		t.Fatalf("older fetched event overwrote unmarked reentrant live event: %+v", stored)
 	}
 }
 
