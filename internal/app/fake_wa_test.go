@@ -64,6 +64,7 @@ type fakeWA struct {
 	appStateFetchErr            error
 	appStateFetchErrs           []error
 	appStateFetchEvent          func(name string, fullSync, onlyIfNotSynced bool) interface{}
+	archiveEvent                func() interface{}
 	archiveCalls                []fakeArchiveCall
 	pinCalls                    []fakePinCall
 	muteCalls                   []fakeMuteCall
@@ -711,8 +712,14 @@ func (f *fakeWA) DeleteMessageForMe(ctx context.Context, info types.MessageInfo,
 
 func (f *fakeWA) ArchiveChat(ctx context.Context, target types.JID, archive bool, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.archiveCalls = append(f.archiveCalls, fakeArchiveCall{target: target, archive: archive, lastMsgTS: lastMsgTS, lastMsgKey: lastMsgKey})
+	eventCB := f.archiveEvent
+	f.mu.Unlock()
+	if eventCB != nil {
+		if evt := eventCB(); evt != nil {
+			f.emit(evt)
+		}
+	}
 	return nil
 }
 

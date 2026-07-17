@@ -1233,6 +1233,78 @@ func TestArchiveChatOrdersFetchedEventsBeforeNewerLiveEvents(t *testing.T) {
 	}
 }
 
+func TestArchiveChatReservesLocalWriteBeforeLiveEventDuringSend(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+	handlerID := f.AddEventHandler(func(evt interface{}) {
+		a.handleAppStatePersistenceEvent(context.Background(), evt, nil)
+	})
+	defer f.RemoveEventHandler(handlerID)
+
+	target := types.JID{User: "456", Server: types.DefaultUserServer}
+	when := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+	if err := a.db.UpsertChat(target.String(), "dm", "Alice", when); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	f.archiveEvent = func() interface{} {
+		return &events.Archive{
+			JID:       target,
+			Timestamp: when.Add(time.Minute),
+			Action:    &waSyncAction.ArchiveChatAction{Archived: proto.Bool(false)},
+		}
+	}
+
+	if err := a.ArchiveChat(context.Background(), target, true); err != nil {
+		t.Fatalf("ArchiveChat: %v", err)
+	}
+	stored, err := a.db.GetChat(target.String())
+	if err != nil {
+		t.Fatalf("GetChat: %v", err)
+	}
+	if stored.Archived {
+		t.Fatalf("local write reserved after newer live event: %+v", stored)
+	}
+}
+
+func TestLocalAppStateWriteFinishesAfterRequestCancellation(t *testing.T) {
+	a := newTestApp(t)
+	blockerStarted := make(chan struct{})
+	releaseBlocker := make(chan struct{})
+	go a.appStatePersist.enqueue(func() {
+		close(blockerStarted)
+		<-releaseBlocker
+	})
+	<-blockerStarted
+
+	pending, err := a.beginLocalAppStateWrite(appstate.WAPatchRegularLow)
+	if err != nil {
+		t.Fatalf("beginLocalAppStateWrite: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	persisted := false
+	done := make(chan error, 1)
+	go func() {
+		done <- a.completeLocalAppStateWrite(ctx, pending, func() error {
+			persisted = true
+			return nil
+		})
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("completeLocalAppStateWrite returned before queued persistence: %v", err)
+	default:
+	}
+	close(releaseBlocker)
+	if err := <-done; err != nil {
+		t.Fatalf("completeLocalAppStateWrite: %v", err)
+	}
+	if !persisted {
+		t.Fatal("local app state was not persisted after request cancellation")
+	}
+}
+
 func TestArchiveChatMarkerFailureReplaysReentrantLiveEventInOrder(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()

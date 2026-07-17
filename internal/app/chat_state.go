@@ -28,10 +28,15 @@ func (a *App) ArchiveChat(ctx context.Context, jid types.JID, archive bool) erro
 	}
 	chatJID := canonicalJIDString(a.canonicalStoreJID(ctx, jid))
 	lastTS, lastKey := a.latestMessageRange(chatJID)
-	if err := a.wa.ArchiveChat(ctx, jid, archive, lastTS, lastKey); err != nil {
+	pending, err := a.beginLocalAppStateWrite(appstate.WAPatchRegularLow)
+	if err != nil {
 		return err
 	}
-	return a.persistLocalAppState(ctx, func() error {
+	if err := a.wa.ArchiveChat(ctx, jid, archive, lastTS, lastKey); err != nil {
+		a.cancelLocalAppStateWrite(pending)
+		return err
+	}
+	return a.completeLocalAppStateWrite(ctx, pending, func() error {
 		return a.db.SetChatArchived(chatJID, archive)
 	})
 }
@@ -41,10 +46,15 @@ func (a *App) PinChat(ctx context.Context, jid types.JID, pin bool) error {
 		return err
 	}
 	chatJID := canonicalJIDString(a.canonicalStoreJID(ctx, jid))
-	if err := a.wa.PinChat(ctx, jid, pin); err != nil {
+	pending, err := a.beginLocalAppStateWrite(appstate.WAPatchRegularLow)
+	if err != nil {
 		return err
 	}
-	return a.persistLocalAppState(ctx, func() error {
+	if err := a.wa.PinChat(ctx, jid, pin); err != nil {
+		a.cancelLocalAppStateWrite(pending)
+		return err
+	}
+	return a.completeLocalAppStateWrite(ctx, pending, func() error {
 		return a.db.SetChatPinned(chatJID, pin)
 	})
 }
@@ -55,10 +65,15 @@ func (a *App) MuteChat(ctx context.Context, jid types.JID, mute bool, duration t
 	}
 	chatJID := canonicalJIDString(a.canonicalStoreJID(ctx, jid))
 	mutedUntil := mutedUntilUnix(mute, duration, nowUTC())
-	if err := a.wa.MuteChat(ctx, jid, mute, duration); err != nil {
+	pending, err := a.beginLocalAppStateWrite(appstate.WAPatchRegularHigh)
+	if err != nil {
 		return err
 	}
-	return a.persistLocalAppState(ctx, func() error {
+	if err := a.wa.MuteChat(ctx, jid, mute, duration); err != nil {
+		a.cancelLocalAppStateWrite(pending)
+		return err
+	}
+	return a.completeLocalAppStateWrite(ctx, pending, func() error {
 		return a.db.SetChatMutedUntil(chatJID, mutedUntil)
 	})
 }
@@ -69,10 +84,15 @@ func (a *App) MarkChatRead(ctx context.Context, jid types.JID, read bool) error 
 	}
 	chatJID := canonicalJIDString(a.canonicalStoreJID(ctx, jid))
 	lastTS, lastKey := a.latestMessageRange(chatJID)
-	if err := a.wa.MarkChatAsRead(ctx, jid, read, lastTS, lastKey); err != nil {
+	pending, err := a.beginLocalAppStateWrite(appstate.WAPatchRegularLow)
+	if err != nil {
 		return err
 	}
-	return a.persistLocalAppState(ctx, func() error {
+	if err := a.wa.MarkChatAsRead(ctx, jid, read, lastTS, lastKey); err != nil {
+		a.cancelLocalAppStateWrite(pending)
+		return err
+	}
+	return a.completeLocalAppStateWrite(ctx, pending, func() error {
 		return a.db.SetChatUnread(chatJID, !read)
 	})
 }
@@ -173,12 +193,48 @@ func (a *App) clearCompletedAppStateRecovery(collection appstate.WAPatchName, ma
 	return nil
 }
 
-func (a *App) persistLocalAppState(ctx context.Context, persist func() error) error {
-	result := make(chan error, 1)
-	ticket := a.appStatePersist.enqueue(func() {
-		result <- persist()
+type pendingLocalAppStateWrite struct {
+	ticket     uint64
+	collection appstate.WAPatchName
+	intent     int64
+}
+
+func (a *App) beginLocalAppStateWrite(collection appstate.WAPatchName) (pendingLocalAppStateWrite, error) {
+	pending := pendingLocalAppStateWrite{
+		ticket:     a.appStatePersist.reserve(),
+		collection: collection,
+	}
+	intent, err := a.db.MarkAppStateRecoveryGeneration(string(collection))
+	if err != nil {
+		a.appStatePersist.completeOne(pending.ticket, func() {})
+		return pendingLocalAppStateWrite{}, fmt.Errorf("mark local WhatsApp app state recovery for %s: %w", collection, err)
+	}
+	pending.intent = intent
+	return pending, nil
+}
+
+func (a *App) cancelLocalAppStateWrite(pending pendingLocalAppStateWrite) {
+	a.appStatePersist.completeOne(pending.ticket, func() {
+		if err := a.db.ClearAppStateRecoveryIntent(string(pending.collection), pending.intent); err != nil {
+			a.emitWarning(
+				"app_state_recovery_marker_clear_failed",
+				fmt.Sprintf("warning: failed to clear canceled app state recovery for %s: %v", pending.collection, err),
+				map[string]any{"collection": string(pending.collection), "error": err.Error()},
+			)
+		}
 	})
-	if err := a.appStatePersist.waitThrough(ctx, ticket); err != nil {
+}
+
+func (a *App) completeLocalAppStateWrite(ctx context.Context, pending pendingLocalAppStateWrite, persist func() error) error {
+	result := make(chan error, 1)
+	a.appStatePersist.completeOne(pending.ticket, func() {
+		err := persist()
+		if err == nil {
+			err = a.db.ClearAppStateRecoveryIntent(string(pending.collection), pending.intent)
+		}
+		result <- err
+	})
+	if err := a.appStatePersist.waitThrough(context.WithoutCancel(ctx), pending.ticket); err != nil {
 		return err
 	}
 	return <-result
