@@ -149,6 +149,16 @@ func TestReadOnlySessionURIEscapesPathDelimiters(t *testing.T) {
 	}
 }
 
+func TestReadOnlySessionURIWindowsPath(t *testing.T) {
+	uri := readOnlySessionURI(`C:\Users\me\.wacli\session.db`)
+	if !strings.HasPrefix(uri, "file:///C:/Users/me/.wacli/session.db?") {
+		t.Fatalf("readOnlySessionURI = %q, want absolute Windows file URI", uri)
+	}
+	if !strings.Contains(uri, "mode=ro") {
+		t.Fatalf("readOnlySessionURI = %q, want read-only query parameter", uri)
+	}
+}
+
 func TestReadOnlyLocalResolverUsesExactPercentEscapedStorePath(t *testing.T) {
 	storeDir := filepath.Join(t.TempDir(), "store%3fprod%23one")
 	writer, err := New(Options{StoreDir: storeDir})
