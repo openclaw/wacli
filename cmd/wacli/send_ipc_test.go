@@ -153,3 +153,19 @@ func TestRemoveStaleSendDelegateSocketRefusesRegularFile(t *testing.T) {
 		t.Fatalf("error = %v, want not a socket", err)
 	}
 }
+
+func TestExecuteDelegatedSendAcceptsEditKind(t *testing.T) {
+	// "edit" must route past the kind switch (reaching app use), not be
+	// rejected as an unsupported kind like unknown values are.
+	defer func() { _ = recover() }() // nil app panics after routing; that is fine
+	_, err := executeDelegatedSend(context.Background(), nil, sendDelegateRequest{
+		Version: sendDelegateVersion,
+		Kind:    "edit",
+		To:      "123@s.whatsapp.net",
+		ID:      "ABC",
+		Message: "edited",
+	})
+	if err != nil && strings.Contains(err.Error(), "unsupported send kind") {
+		t.Fatalf("edit rejected as unsupported kind: %v", err)
+	}
+}

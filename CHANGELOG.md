@@ -12,6 +12,7 @@
 
 ### Fixed
 
+- Send: delegate `messages edit` through a running `sync --follow` process like other send commands, so edits no longer always fail with `store is locked` while continuous sync owns the store.
 - Send: allow text replies to quote stored documents and other supported media by rebuilding their saved message content. (#307 - thanks @suifatt7799-oss)
 
 ## 0.13.0 - 2026-07-17
