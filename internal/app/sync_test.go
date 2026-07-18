@@ -717,8 +717,15 @@ func TestDeleteForMeEventMarksMessageDeletedForCurrentUser(t *testing.T) {
 	if msg.Revoked || !msg.DeletedForMe {
 		t.Fatalf("flags revoked=%v deleted_for_me=%v", msg.Revoked, msg.DeletedForMe)
 	}
-	if msg.Text != "" || msg.DisplayText != store.DeletedForMeMessageDisplayText {
+	if msg.Text != "secret local copy" || msg.DisplayText != "secret local copy" {
 		t.Fatalf("text=%q display=%q", msg.Text, msg.DisplayText)
+	}
+	wantDeletedAt := base.Add(time.Minute)
+	if msg.DeletedAt == nil || !msg.DeletedAt.Equal(wantDeletedAt) {
+		t.Fatalf("deleted_at=%v want %v", msg.DeletedAt, wantDeletedAt)
+	}
+	if msg.DeletionReason != store.MessageDeletionReasonWhatsAppDeleteForMe {
+		t.Fatalf("deletion_reason=%q", msg.DeletionReason)
 	}
 	listed, err := a.db.ListMessages(store.ListMessagesParams{ChatJID: chat.String(), Limit: 10})
 	if err != nil {

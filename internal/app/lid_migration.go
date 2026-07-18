@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"go.mau.fi/whatsmeow/types"
@@ -25,7 +26,20 @@ func (a *App) migrateHistoricalLIDs(ctx context.Context) error {
 		if pn.IsEmpty() || pn.Server != types.DefaultUserServer {
 			continue
 		}
-		if err := a.db.MigrateLIDToPN(raw, canonicalJIDString(pn)); err != nil {
+		pnJID := canonicalJIDString(pn)
+		pendingMedia, err := a.db.LIDMigrationPurgedMedia(raw, pnJID)
+		if err != nil {
+			return fmt.Errorf("load purged alias media for historical LID %s: %w", raw, err)
+		}
+		for _, media := range pendingMedia {
+			if err := os.Remove(media.LocalPath); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("remove purged alias media for historical LID %s: %w", raw, err)
+			}
+			if err := a.db.ClearMessageLocalMedia(media.ChatJID, media.MsgID); err != nil {
+				return fmt.Errorf("clear purged alias media for historical LID %s: %w", raw, err)
+			}
+		}
+		if err := a.db.MigrateLIDToPN(raw, pnJID); err != nil {
 			return fmt.Errorf("migrate historical LID %s: %w", raw, err)
 		}
 	}

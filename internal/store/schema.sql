@@ -86,6 +86,9 @@ CREATE TABLE IF NOT EXISTS messages (
     media_unavailable_at INTEGER,
     revoked INTEGER NOT NULL DEFAULT 0,
     deleted_for_me INTEGER NOT NULL DEFAULT 0,
+    deleted_at INTEGER,
+    deletion_reason TEXT,
+    payload_purged_at INTEGER,
     edited INTEGER NOT NULL DEFAULT 0,
     edited_ts INTEGER NOT NULL DEFAULT 0,
     buttons TEXT,
@@ -95,6 +98,15 @@ CREATE TABLE IF NOT EXISTS messages (
 
 CREATE INDEX IF NOT EXISTS idx_messages_chat_ts ON messages(chat_jid, ts);
 CREATE INDEX IF NOT EXISTS idx_messages_ts ON messages(ts);
+
+CREATE TABLE IF NOT EXISTS message_payload_purges (
+    chat_jid TEXT NOT NULL,
+    msg_id TEXT NOT NULL,
+    purged_at INTEGER NOT NULL,
+    deleted_at INTEGER NOT NULL,
+    deletion_reason TEXT NOT NULL,
+    PRIMARY KEY (chat_jid, msg_id)
+);
 
 CREATE TABLE IF NOT EXISTS status_messages (
     rowid INTEGER PRIMARY KEY AUTOINCREMENT,

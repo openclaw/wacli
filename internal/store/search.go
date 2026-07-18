@@ -60,7 +60,7 @@ func (d *DB) searchLIKE(p SearchMessagesParams) ([]Message, error) {
 		FROM messages m
 		LEFT JOIN chats c ON c.jid = m.chat_jid
 		LEFT JOIN starred s ON s.chat_jid = m.chat_jid AND s.msg_id = m.msg_id
-	WHERE m.revoked = 0 AND m.deleted_for_me = 0 AND (LOWER(m.text) LIKE LOWER(?) ESCAPE '\' OR LOWER(m.display_text) LIKE LOWER(?) ESCAPE '\' OR LOWER(m.media_caption) LIKE LOWER(?) ESCAPE '\' OR LOWER(m.filename) LIKE LOWER(?) ESCAPE '\' OR LOWER(COALESCE(m.chat_name,'')) LIKE LOWER(?) ESCAPE '\' OR LOWER(COALESCE(m.sender_name,'')) LIKE LOWER(?) ESCAPE '\' OR LOWER(COALESCE(c.name,'')) LIKE LOWER(?) ESCAPE '\')`
+	WHERE m.deleted_at IS NULL AND (LOWER(m.text) LIKE LOWER(?) ESCAPE '\' OR LOWER(m.display_text) LIKE LOWER(?) ESCAPE '\' OR LOWER(m.media_caption) LIKE LOWER(?) ESCAPE '\' OR LOWER(m.filename) LIKE LOWER(?) ESCAPE '\' OR LOWER(COALESCE(m.chat_name,'')) LIKE LOWER(?) ESCAPE '\' OR LOWER(COALESCE(m.sender_name,'')) LIKE LOWER(?) ESCAPE '\' OR LOWER(COALESCE(c.name,'')) LIKE LOWER(?) ESCAPE '\')`
 	// Escape wildcards before wrapping in % so user input is literal (#56).
 	needle := likeContains(p.Query)
 	args := []interface{}{needle, needle, needle, needle, needle, needle, needle}
@@ -95,7 +95,7 @@ func (d *DB) searchFTS(p SearchMessagesParams) ([]Message, error) {
 		JOIN messages m ON messages_fts.rowid = m.rowid
 		LEFT JOIN chats c ON c.jid = m.chat_jid
 		LEFT JOIN starred s ON s.chat_jid = m.chat_jid AND s.msg_id = m.msg_id
-		WHERE messages_fts MATCH ? AND m.revoked = 0 AND m.deleted_for_me = 0`
+		WHERE messages_fts MATCH ? AND m.deleted_at IS NULL`
 	// Sanitize to prevent FTS5 query-syntax injection (#57).
 	// Each token is individually quoted so multi-word queries still work
 	// as implicit AND (both words present, any order).

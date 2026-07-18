@@ -381,6 +381,54 @@ func TestPollQueriesHideDeletedMessages(t *testing.T) {
 	}
 }
 
+func TestPollPayloadCannotReturnAfterMessagePurge(t *testing.T) {
+	db := openTestDB(t)
+	chat := "chat@s.whatsapp.net"
+	now := time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)
+	if err := db.UpsertChat(chat, "dm", "Chat", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{ChatJID: chat, MsgID: "poll", Timestamp: now, Text: "Poll: secret?"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertPoll(Poll{ChatJID: chat, MsgID: "poll", Question: "secret?", Options: []string{"yes", "no"}, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertPollVote(PollVote{ChatJID: chat, PollMsgID: "poll", VoterJID: "voter@s.whatsapp.net", VoteMsgID: "vote", Selected: []string{"yes"}, VotedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.MarkMessageRevoked(chat, "poll"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.PurgeMessage(chat, "poll"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.sql.Exec(`DELETE FROM chats WHERE jid = ?`, chat); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertChat(chat, "dm", "Chat", now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{ChatJID: chat, MsgID: "poll", Timestamp: now.Add(time.Hour), Text: "restored poll"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertPoll(Poll{ChatJID: chat, MsgID: "poll", Question: "restored?", Options: []string{"secret"}, CreatedAt: now.Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertPollVote(PollVote{ChatJID: chat, PollMsgID: "poll", VoterJID: "voter@s.whatsapp.net", VoteMsgID: "vote-2", Selected: []string{"secret"}, VotedAt: now.Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if got := countRows(t, db.sql, `SELECT count(*) FROM polls WHERE chat_jid = 'chat@s.whatsapp.net' AND msg_id = 'poll'`); got != 0 {
+		t.Fatalf("restored poll rows = %d", got)
+	}
+	if got := countRows(t, db.sql, `SELECT count(*) FROM poll_votes WHERE chat_jid = 'chat@s.whatsapp.net' AND poll_msg_id = 'poll'`); got != 0 {
+		t.Fatalf("restored poll vote rows = %d", got)
+	}
+	if _, err := db.GetPoll(chat, "poll"); !IsPollNotFound(err) {
+		t.Fatalf("GetPoll after purge = %v", err)
+	}
+}
+
 func TestDeletePollRemovesVotes(t *testing.T) {
 	db := openTestDB(t)
 

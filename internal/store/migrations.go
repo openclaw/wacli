@@ -34,6 +34,91 @@ var schemaMigrations = []migration{
 	{version: 18, name: "chat unread count column", up: migrateChatUnreadCountColumn},
 	{version: 19, name: "messages quoted columns", up: migrateMessagesQuotedColumns},
 	{version: 20, name: "messages media_unavailable_at column", up: migrateMessagesMediaUnavailableColumn},
+	{version: 21, name: "message tombstone metadata", up: migrateMessageTombstoneMetadata},
+}
+
+func migrateMessageTombstoneMetadata(d *DB) error {
+	hasTable, err := d.tableExists("messages")
+	if err != nil {
+		return err
+	}
+	if !hasTable {
+		return nil
+	}
+	if err := ensureMessageTombstoneColumns(d); err != nil {
+		return err
+	}
+	if err := ensureMessagePayloadPurgesTable(d); err != nil {
+		return err
+	}
+	if _, err := d.sql.Exec(`
+		UPDATE messages
+		SET deleted_at = COALESCE(deleted_at, ts),
+			deletion_reason = COALESCE(deletion_reason, CASE
+				WHEN deleted_for_me != 0 THEN 'legacy-whatsapp-delete-for-me'
+				WHEN revoked != 0 THEN 'legacy-whatsapp-revoke'
+			END)
+		WHERE revoked != 0 OR deleted_for_me != 0
+	`); err != nil {
+		return fmt.Errorf("backfill message tombstone metadata: %w", err)
+	}
+	if _, err := d.sql.Exec(`
+		INSERT INTO message_payload_purges(chat_jid, msg_id, purged_at, deleted_at, deletion_reason)
+		SELECT chat_jid, msg_id, payload_purged_at, deleted_at, COALESCE(deletion_reason, 'explicit-payload-purge')
+		FROM messages
+		WHERE payload_purged_at IS NOT NULL
+		ON CONFLICT(chat_jid, msg_id) DO UPDATE SET
+			purged_at = min(message_payload_purges.purged_at, excluded.purged_at),
+			deleted_at = min(message_payload_purges.deleted_at, excluded.deleted_at),
+			deletion_reason = COALESCE(NULLIF(message_payload_purges.deletion_reason, ''), excluded.deletion_reason)
+	`); err != nil {
+		return fmt.Errorf("backfill message payload purge ledger: %w", err)
+	}
+	return migrateMessagesFTS(d)
+}
+
+func ensureMessageTombstoneColumns(d *DB) error {
+	hasTable, err := d.tableExists("messages")
+	if err != nil || !hasTable {
+		return err
+	}
+	if err := addMessageColumnIfMissing(d, "deleted_at", `ALTER TABLE messages ADD COLUMN deleted_at INTEGER`); err != nil {
+		return err
+	}
+	if err := addMessageColumnIfMissing(d, "deletion_reason", `ALTER TABLE messages ADD COLUMN deletion_reason TEXT`); err != nil {
+		return err
+	}
+	return addMessageColumnIfMissing(d, "payload_purged_at", `ALTER TABLE messages ADD COLUMN payload_purged_at INTEGER`)
+}
+
+func ensureMessagePayloadPurgesTable(d *DB) error {
+	if _, err := d.sql.Exec(`
+		CREATE TABLE IF NOT EXISTS message_payload_purges (
+			chat_jid TEXT NOT NULL,
+			msg_id TEXT NOT NULL,
+			purged_at INTEGER NOT NULL,
+			deleted_at INTEGER NOT NULL,
+			deletion_reason TEXT NOT NULL,
+			PRIMARY KEY (chat_jid, msg_id)
+		)
+	`); err != nil {
+		return fmt.Errorf("ensure message payload purge ledger: %w", err)
+	}
+	return nil
+}
+
+func addMessageColumnIfMissing(d *DB, column, ddl string) error {
+	has, err := d.tableHasColumn("messages", column)
+	if err != nil {
+		return err
+	}
+	if has {
+		return nil
+	}
+	if _, err := d.sql.Exec(ddl); err != nil {
+		return fmt.Errorf("add messages.%s column: %w", column, err)
+	}
+	return nil
 }
 
 func migrateMessagesMediaUnavailableColumn(d *DB) error {
@@ -129,6 +214,12 @@ func (d *DB) ensureCurrentSchema() error {
 	}
 	if err := migrateMessagesMediaUnavailableColumn(d); err != nil {
 		return fmt.Errorf("ensure current messages media unavailable column: %w", err)
+	}
+	if err := ensureMessageTombstoneColumns(d); err != nil {
+		return fmt.Errorf("ensure current message tombstone columns: %w", err)
+	}
+	if err := ensureMessagePayloadPurgesTable(d); err != nil {
+		return fmt.Errorf("ensure current message payload purge ledger: %w", err)
 	}
 	return nil
 }
@@ -565,7 +656,7 @@ func migrateMessagesFTS(d *DB) error {
 		DROP TRIGGER IF EXISTS messages_ad;
 		DROP TRIGGER IF EXISTS messages_au;
 
-		CREATE TRIGGER messages_ai AFTER INSERT ON messages WHEN new.revoked = 0 AND new.deleted_for_me = 0 BEGIN
+		CREATE TRIGGER messages_ai AFTER INSERT ON messages WHEN new.deleted_at IS NULL BEGIN
 			INSERT INTO messages_fts(rowid, text, media_caption, filename, chat_name, sender_name, display_text)
 			VALUES (new.rowid, COALESCE(new.text,''), COALESCE(new.media_caption,''), COALESCE(new.filename,''), COALESCE(new.chat_name,''), COALESCE(new.sender_name,''), COALESCE(new.display_text,''));
 		END;
@@ -578,7 +669,7 @@ func migrateMessagesFTS(d *DB) error {
 			DELETE FROM messages_fts WHERE rowid = old.rowid;
 			INSERT INTO messages_fts(rowid, text, media_caption, filename, chat_name, sender_name, display_text)
 			SELECT new.rowid, COALESCE(new.text,''), COALESCE(new.media_caption,''), COALESCE(new.filename,''), COALESCE(new.chat_name,''), COALESCE(new.sender_name,''), COALESCE(new.display_text,'')
-			WHERE new.revoked = 0 AND new.deleted_for_me = 0;
+			WHERE new.deleted_at IS NULL;
 		END;
 	`); err != nil {
 		d.ftsEnabled = false
@@ -596,7 +687,7 @@ func migrateMessagesFTS(d *DB) error {
 			       COALESCE(sender_name,''),
 			       COALESCE(display_text,'')
 			FROM messages
-			WHERE revoked = 0 AND deleted_for_me = 0
+			WHERE deleted_at IS NULL
 		`); err != nil {
 			d.ftsEnabled = false
 			return nil

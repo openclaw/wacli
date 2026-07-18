@@ -39,7 +39,7 @@ Open the database in SQLite read-only mode:
 sqlite3 "file:$HOME/.wacli/wacli.db?mode=ro" \
   "SELECT chat_jid, msg_id, datetime(ts, 'unixepoch') AS at, display_text
    FROM messages
-   WHERE revoked = 0 AND deleted_for_me = 0
+   WHERE deleted_at IS NULL
    ORDER BY ts DESC
    LIMIT 20"
 ```
@@ -57,7 +57,7 @@ conn.row_factory = sqlite3.Row
 rows = conn.execute("""
     SELECT chat_jid, msg_id, sender_jid, sender_name, ts, display_text
     FROM messages
-    WHERE revoked = 0 AND deleted_for_me = 0
+    WHERE deleted_at IS NULL
     ORDER BY ts DESC
     LIMIT ?
 """, (50,)).fetchall()
@@ -80,8 +80,7 @@ SELECT
   COALESCE(m.display_text, m.text, '') AS text
 FROM messages m
 LEFT JOIN chats c ON c.jid = m.chat_jid
-WHERE m.revoked = 0
-  AND m.deleted_for_me = 0
+WHERE m.deleted_at IS NULL
 ORDER BY m.ts DESC
 LIMIT 100;
 ```
@@ -91,10 +90,23 @@ Incremental scan cursor:
 ```sql
 SELECT rowid, chat_jid, msg_id, sender_jid, ts, display_text
 FROM messages
-WHERE rowid > ?
+WHERE rowid > ? AND deleted_at IS NULL
 ORDER BY rowid ASC
 LIMIT 1000;
 ```
+
+The `rowid` cursor discovers inserts only. Deletion is an in-place update, so this cursor must not be used as a deletion feed. A companion that retains payloads must periodically reconcile the complete tombstone and purge-key sets by `(chat_jid, msg_id)`:
+
+```sql
+SELECT chat_jid, msg_id, deleted_at, deletion_reason, payload_purged_at
+FROM messages
+WHERE deleted_at IS NOT NULL;
+
+SELECT chat_jid, msg_id, purged_at, deleted_at, deletion_reason
+FROM message_payload_purges;
+```
+
+The purge ledger intentionally survives chat cleanup cascades. Missing rows in any scan are never evidence of deletion.
 
 Recent WhatsApp call events:
 

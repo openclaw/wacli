@@ -68,6 +68,24 @@ func TestHistoricalLIDJIDsFindsChatAndMessageColumns(t *testing.T) {
 	}
 }
 
+func TestHistoricalLIDJIDsFindsPurgeLedgerOnlyIdentity(t *testing.T) {
+	db := openTestDB(t)
+	lid := "888123456789@lid"
+	if _, err := db.sql.Exec(`
+		INSERT INTO message_payload_purges(chat_jid, msg_id, purged_at, deleted_at, deletion_reason)
+		VALUES(?, 'mid', 3, 2, 'whatsapp-revoke')
+	`, lid); err != nil {
+		t.Fatal(err)
+	}
+	got, err := db.HistoricalLIDJIDs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{lid}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("HistoricalLIDJIDs = %#v, want %#v", got, want)
+	}
+}
+
 func TestMigrateLIDToPNMergesChatsAndMessages(t *testing.T) {
 	db := openTestDB(t)
 	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -341,7 +359,7 @@ func TestMigrateLIDToPNPreservesButtons(t *testing.T) {
 	}
 }
 
-func TestMigrateLIDToPNClearsQuotedMetadataOnDeletedMessages(t *testing.T) {
+func TestMigrateLIDToPNPreservesDeletedMessagePayload(t *testing.T) {
 	db := openTestDB(t)
 	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 
@@ -357,6 +375,9 @@ func TestMigrateLIDToPNClearsQuotedMetadataOnDeletedMessages(t *testing.T) {
 		Timestamp:       base,
 		QuotedMsgID:     "quoted",
 		QuotedSenderJID: lid,
+		Text:            "retained reply",
+		MediaType:       "document",
+		Filename:        "proof.pdf",
 		DeletedForMe:    true,
 	}); err != nil {
 		t.Fatalf("UpsertMessage: %v", err)
@@ -376,8 +397,90 @@ func TestMigrateLIDToPNClearsQuotedMetadataOnDeletedMessages(t *testing.T) {
 	if !msg.DeletedForMe {
 		t.Fatalf("DeletedForMe = false")
 	}
-	if msg.QuotedMsgID != "" || msg.QuotedSenderJID != "" {
+	if msg.QuotedMsgID != "quoted" || msg.QuotedSenderJID != pn {
 		t.Fatalf("deleted quoted metadata = id %q sender %q", msg.QuotedMsgID, msg.QuotedSenderJID)
+	}
+	if msg.Text != "retained reply" || msg.MediaType != "document" || msg.Filename != "proof.pdf" {
+		t.Fatalf("deleted payload = %+v", msg)
+	}
+	if msg.DeletedAt == nil || msg.DeletionReason != MessageDeletionReasonWhatsAppDeleteForMe {
+		t.Fatalf("deleted tombstone = %v %q", msg.DeletedAt, msg.DeletionReason)
+	}
+}
+
+func TestMigrateLIDToPNPreservesPayloadPurgeSuppression(t *testing.T) {
+	db := openTestDB(t)
+	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	pn := "15551234567@s.whatsapp.net"
+	lid := "999123456789@lid"
+	for _, chat := range []string{pn, lid} {
+		if err := db.UpsertChat(chat, "dm", "Alice", base); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, id := range []string{"purged-lid", "purged-pn", "ledger-lid", "ledger-pn"} {
+		if err := db.UpsertMessage(UpsertMessageParams{ChatJID: pn, MsgID: id, Timestamp: base, Text: "pn payload"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.UpsertMessage(UpsertMessageParams{ChatJID: lid, MsgID: id, Timestamp: base, Text: "lid payload"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.MarkMessageRevoked(lid, "purged-lid"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.PurgeMessage(lid, "purged-lid"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.MarkMessageRevoked(pn, "purged-pn"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.PurgeMessage(pn, "purged-pn"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.MarkMessageRevoked(lid, "ledger-lid"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.PurgeMessage(lid, "ledger-lid"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.MarkMessageRevoked(pn, "ledger-pn"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.PurgeMessage(pn, "ledger-pn"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.sql.Exec(`DELETE FROM messages WHERE (chat_jid = ? AND msg_id = ?) OR (chat_jid = ? AND msg_id = ?)`, lid, "ledger-lid", pn, "ledger-pn"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertPoll(Poll{ChatJID: pn, MsgID: "ledger-lid", Question: "destination-only secret", Options: []string{"secret"}, CreatedAt: base}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.MigrateLIDToPN(lid, pn); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"purged-lid", "purged-pn", "ledger-lid"} {
+		msg, err := db.GetMessage(pn, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if msg.PayloadPurgedAt == nil || msg.Text != "" {
+			t.Fatalf("%s purge suppression after LID migration = %+v", id, msg)
+		}
+	}
+	var messageCount, purgeCount int
+	if err := db.sql.QueryRow(`SELECT count(*) FROM messages WHERE chat_jid = ? AND msg_id = ?`, pn, "ledger-pn").Scan(&messageCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.sql.QueryRow(`SELECT count(*) FROM message_payload_purges WHERE chat_jid = ? AND msg_id = ?`, pn, "ledger-pn").Scan(&purgeCount); err != nil {
+		t.Fatal(err)
+	}
+	if messageCount != 0 || purgeCount != 1 {
+		t.Fatalf("destination-ledger suppression counts: messages=%d purges=%d", messageCount, purgeCount)
+	}
+	if got := countRows(t, db.sql, `SELECT count(*) FROM polls WHERE msg_id = 'ledger-lid'`); got != 0 {
+		t.Fatalf("destination-only purged poll rows = %d", got)
 	}
 }
 

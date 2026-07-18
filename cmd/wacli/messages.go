@@ -30,6 +30,7 @@ func newMessagesCmd(flags *rootFlags) *cobra.Command {
 	cmd.AddCommand(newMessagesContextCmd(flags))
 	cmd.AddCommand(newMessagesExportCmd(flags))
 	cmd.AddCommand(newMessagesDeleteCmd(flags))
+	cmd.AddCommand(newMessagesPurgeCmd(flags))
 	cmd.AddCommand(newMessagesRevokeCmd(flags))
 	cmd.AddCommand(newMessagesEditCmd(flags))
 	cmd.AddCommand(newMessagesForwardCmd(flags))
@@ -536,6 +537,11 @@ func newMessagesDeleteCmd(flags *rootFlags) *cobra.Command {
 						return fmt.Errorf("store deleted-for-me message state: %w", err)
 					}
 					return fmt.Errorf("delete local media: %w", deleteMediaErr)
+				}
+				if deleteMedia && strings.TrimSpace(msg.LocalPath) != "" {
+					if err := a.DB().ClearMessageLocalMedia(msg.ChatJID, msg.MsgID); err != nil {
+						return fmt.Errorf("clear deleted local media state: %w", err)
+					}
 				}
 				if err := a.DB().MarkMessageDeletedForMe(msg.ChatJID, msg.MsgID, msg.SenderJID, msg.FromMe, time.Now().UTC()); err != nil {
 					return fmt.Errorf("store deleted-for-me message state: %w", err)

@@ -38,12 +38,18 @@ func TestOpenCreatesExpectedSchema(t *testing.T) {
 		"media_unavailable_at",
 		"revoked",
 		"deleted_for_me",
+		"deleted_at",
+		"deletion_reason",
+		"payload_purged_at",
 		"edited",
 		"edited_ts",
 	} {
 		if !cols[want] {
 			t.Fatalf("expected messages column %q to exist", want)
 		}
+	}
+	if exists, err := db.tableExists("message_payload_purges"); err != nil || !exists {
+		t.Fatalf("message_payload_purges table exists = %v, err = %v", exists, err)
 	}
 
 	callCols, err := tableColumns(db.sql, "call_events")
@@ -109,6 +115,66 @@ func TestOpenCreatesExpectedSchema(t *testing.T) {
 	}
 	if !indexExists(t, db.sql, "idx_status_messages_ts") {
 		t.Fatalf("expected status_messages timestamp index to exist")
+	}
+}
+
+func TestOpenMigratesLegacyMessageTombstonesWithoutPayloadLoss(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "wacli.db")
+	raw, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacySchema := strings.Replace(coreSchemaSQL, "    deleted_at INTEGER,\n    deletion_reason TEXT,\n    payload_purged_at INTEGER,\n", "", 1)
+	legacySchema = strings.Replace(legacySchema, `CREATE TABLE IF NOT EXISTS message_payload_purges (
+    chat_jid TEXT NOT NULL,
+    msg_id TEXT NOT NULL,
+    purged_at INTEGER NOT NULL,
+    deleted_at INTEGER NOT NULL,
+    deletion_reason TEXT NOT NULL,
+    PRIMARY KEY (chat_jid, msg_id)
+);
+
+`, "", 1)
+	if _, err := raw.Exec(legacySchema + `
+		CREATE TABLE schema_migrations (
+			version INTEGER PRIMARY KEY,
+			name TEXT NOT NULL,
+			applied_at INTEGER NOT NULL
+		);
+		INSERT INTO chats(jid, kind, name) VALUES('chat@s.whatsapp.net', 'dm', 'Alice');
+		INSERT INTO messages(chat_jid, msg_id, ts, from_me, text, display_text, media_type, filename, revoked, buttons)
+		VALUES('chat@s.whatsapp.net', 'mid', 123, 1, 'retained text', 'retained display', 'document', 'proof.pdf', 1, '[{"type":"url","display_text":"Open","url":"https://example.com"}]');
+	`); err != nil {
+		_ = raw.Close()
+		t.Fatalf("create legacy store: %v", err)
+	}
+	for _, migration := range schemaMigrations {
+		if migration.version >= 21 {
+			continue
+		}
+		if _, err := raw.Exec(`INSERT INTO schema_migrations(version, name, applied_at) VALUES(?, ?, 1)`, migration.version, migration.name); err != nil {
+			_ = raw.Close()
+			t.Fatal(err)
+		}
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open migrated store: %v", err)
+	}
+	defer db.Close()
+	msg, err := db.GetMessage("chat@s.whatsapp.net", "mid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg.Text != "retained text" || msg.DisplayText != "retained display" || msg.MediaType != "document" || msg.Filename != "proof.pdf" || len(msg.Buttons) != 1 {
+		t.Fatalf("migrated payload = %+v", msg)
+	}
+	if msg.DeletedAt == nil || msg.DeletedAt.Unix() != 123 || msg.DeletionReason != "legacy-whatsapp-revoke" {
+		t.Fatalf("migrated tombstone = %v %q", msg.DeletedAt, msg.DeletionReason)
 	}
 }
 

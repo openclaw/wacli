@@ -1,6 +1,8 @@
 package app
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -52,6 +54,51 @@ func TestEnsureAuthedMigratesHistoricalLIDs(t *testing.T) {
 	}
 	if len(lids) != 0 {
 		t.Fatalf("HistoricalLIDJIDs = %#v, want none", lids)
+	}
+}
+
+func TestEnsureAuthedRemovesPurgedAliasMediaBeforeLIDMigration(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+	lid := types.JID{User: "999123456789", Server: types.HiddenUserServer}
+	pn := types.JID{User: "15551234567", Server: types.DefaultUserServer}
+	f.lids[lid.ToNonAD()] = pn
+	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, chat := range []string{lid.String(), pn.String()} {
+		if err := a.db.UpsertChat(chat, "dm", "Alice", base); err != nil {
+			t.Fatal(err)
+		}
+		if err := a.db.UpsertMessage(store.UpsertMessageParams{ChatJID: chat, MsgID: "mid", Timestamp: base, Text: "payload"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	aliasPath := filepath.Join(t.TempDir(), "alias-media.bin")
+	if err := os.WriteFile(aliasPath, []byte("alias media"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.db.MarkMediaDownloaded(pn.String(), "mid", aliasPath, base); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.db.MarkMessageRevoked(lid.String(), "mid"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.db.PurgeMessage(lid.String(), "mid"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := a.EnsureAuthed(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(aliasPath); !os.IsNotExist(err) {
+		t.Fatalf("purged alias media still exists: %v", err)
+	}
+	msg, err := a.db.GetMessage(pn.String(), "mid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg.PayloadPurgedAt == nil || msg.LocalPath != "" || msg.Text != "" {
+		t.Fatalf("migrated purge state = %+v", msg)
 	}
 }
 

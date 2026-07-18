@@ -2,6 +2,14 @@
 
 ## 0.13.1 - Unreleased
 
+### Added
+
+- Messages: add an explicit, confirmation-gated `messages purge` command that irreversibly erases one retained payload while keeping a durable suppression tombstone.
+
+### Changed
+
+- Messages: retain original text, interactive, reply, and media metadata behind timestamped deletion tombstones; keep sync/history imports merge-only so missing rows never imply deletion.
+
 ### Fixed
 
 - Send: allow text replies to quote stored documents and other supported media by rebuilding their saved message content. (#307 - thanks @suifatt7799-oss)
