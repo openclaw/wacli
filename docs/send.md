@@ -38,7 +38,8 @@ wacli polls list [--chat RECIPIENT] [--limit N] [--json]
 - `--ephemeral` sends text with `ContextInfo.Expiration`, matching the disappearing-send path. For groups, wacli uses the live group timer when available; otherwise it falls back to a 7-day default. Set `--ephemeral-duration` to choose an explicit expiration.
 - `--message` is literal by default. Pass `--message-escapes` to interpret `\n`, `\r`, `\t`, `\\`, and `\"` before sending.
 - Use repeatable `--mention USER` with a phone number or user JID to add WhatsApp mentions to `send text`.
-- `--reply-to` quotes a stored message ID.
+- `send text --reply-to` reconstructs the stored text or supported media quote content (image, video/GIF, audio, document, or sticker); stored media must have complete sync metadata.
+- Other send commands use `--reply-to` to quote a stored message ID.
 - For unsynced group replies, pass `--reply-to-sender`.
 - `send react` defaults to thumbs-up.
 - Pass `--reaction ""` to clear a reaction.

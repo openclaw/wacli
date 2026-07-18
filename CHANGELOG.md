@@ -2,6 +2,10 @@
 
 ## 0.13.1 - Unreleased
 
+### Fixed
+
+- Send: allow text replies to quote stored documents and other supported media by rebuilding their saved message content. (#307 - thanks @suifatt7799-oss)
+
 ## 0.13.0 - 2026-07-17
 
 ### Highlights

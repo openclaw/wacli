@@ -390,7 +390,7 @@ func TestSendTextMessageRejectsUnconstructableQuotesBeforeSending(t *testing.T) 
 			wantError: "not found in local store",
 		},
 		{
-			name: "unsupported content",
+			name: "unsupported media type",
 			seed: func(t *testing.T, db *store.DB, chat types.JID) {
 				t.Helper()
 				if err := db.UpsertMessage(store.UpsertMessageParams{
@@ -398,12 +398,30 @@ func TestSendTextMessageRejectsUnconstructableQuotesBeforeSending(t *testing.T) 
 					MsgID:     "quoted",
 					SenderJID: chat.String(),
 					Timestamp: time.Now(),
-					MediaType: "image",
+					MediaType: "location",
 				}); err != nil {
 					t.Fatalf("UpsertMessage: %v", err)
 				}
 			},
-			wantError: "content is not supported",
+			wantError: "unsupported stored media type",
+		},
+		{
+			name: "incomplete document metadata",
+			seed: func(t *testing.T, db *store.DB, chat types.JID) {
+				t.Helper()
+				if err := db.UpsertMessage(store.UpsertMessageParams{
+					ChatJID:   chat.String(),
+					MsgID:     "quoted",
+					SenderJID: chat.String(),
+					Timestamp: time.Now(),
+					MediaType: "document",
+					Filename:  "incomplete.pdf",
+					MimeType:  "application/pdf",
+				}); err != nil {
+					t.Fatalf("UpsertMessage: %v", err)
+				}
+			},
+			wantError: "incomplete media metadata",
 		},
 	}
 
@@ -427,6 +445,60 @@ func TestSendTextMessageRejectsUnconstructableQuotesBeforeSending(t *testing.T) 
 				t.Fatalf("calls: SendText=%d SendProtoMessage=%d, want 0/0", sender.textCalls, sender.protoCalls)
 			}
 		})
+	}
+}
+
+func TestSendTextMessageQuotesStoredDocument(t *testing.T) {
+	db := openSendTestDB(t)
+	chat := types.JID{User: "15551234567", Server: types.DefaultUserServer}
+	if err := db.UpsertChat(chat.String(), "dm", "Alice", time.Now()); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	if err := db.UpsertMessage(store.UpsertMessageParams{
+		ChatJID:       chat.String(),
+		MsgID:         "quoted-document",
+		Timestamp:     time.Now(),
+		FromMe:        true,
+		MediaType:     "document",
+		MediaCaption:  "test document",
+		Filename:      "test.pdf",
+		MimeType:      "application/pdf",
+		DirectPath:    "/v/t62/test-document",
+		MediaKey:      []byte("media-key"),
+		FileSHA256:    []byte("plain-hash"),
+		FileEncSHA256: []byte("encrypted-hash"),
+		FileLength:    1234,
+	}); err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+	sender := &recordingTextSender{linkedJID: "15550000000@s.whatsapp.net"}
+
+	_, err := sendTextMessageWithSender(context.Background(), sender, db, chat, "reply", "quoted-document", "15550000000@s.whatsapp.net", nil, nil, textEphemeralOptions{})
+	if err != nil {
+		t.Fatalf("sendTextMessageWithSender: %v", err)
+	}
+	info := requireExtendedText(t, sender.protoMsg).GetContextInfo()
+	if info.GetStanzaID() != "quoted-document" {
+		t.Fatalf("stanza ID = %q, want quoted-document", info.GetStanzaID())
+	}
+	if info.GetParticipant() != "15550000000@s.whatsapp.net" {
+		t.Fatalf("participant = %q", info.GetParticipant())
+	}
+	doc := info.GetQuotedMessage().GetDocumentMessage()
+	if doc == nil {
+		t.Fatal("quoted document message is nil")
+	}
+	if doc.GetFileName() != "test.pdf" || doc.GetTitle() != "test.pdf" || doc.GetMimetype() != "application/pdf" {
+		t.Fatalf("quoted document identity: filename=%q title=%q mime=%q", doc.GetFileName(), doc.GetTitle(), doc.GetMimetype())
+	}
+	if doc.GetCaption() != "test document" || doc.GetDirectPath() != "/v/t62/test-document" || doc.GetFileLength() != 1234 {
+		t.Fatalf("quoted document metadata: caption=%q direct_path=%q length=%d", doc.GetCaption(), doc.GetDirectPath(), doc.GetFileLength())
+	}
+	if string(doc.GetMediaKey()) != "media-key" || string(doc.GetFileSHA256()) != "plain-hash" || string(doc.GetFileEncSHA256()) != "encrypted-hash" {
+		t.Fatal("quoted document media hashes or key were not preserved")
+	}
+	if sender.textCalls != 0 || sender.protoCalls != 1 {
+		t.Fatalf("calls: SendText=%d SendProtoMessage=%d, want 0/1", sender.textCalls, sender.protoCalls)
 	}
 }
 

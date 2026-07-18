@@ -976,7 +976,7 @@ func validateMessageCanForward(msg store.Message) error {
 		return fmt.Errorf("reaction messages cannot be forwarded")
 	}
 	mediaType := strings.ToLower(strings.TrimSpace(msg.MediaType))
-	if mediaType != "" && !isForwardableMediaType(mediaType) {
+	if mediaType != "" && !isStoredMediaType(mediaType) {
 		return fmt.Errorf("%s messages cannot be forwarded", mediaType)
 	}
 	if mediaType == "" && strings.TrimSpace(messageForwardText(msg)) == "" {
@@ -1024,7 +1024,7 @@ func buildForwardedMessage(msg store.Message, mediaInfo *store.MediaDownloadInfo
 	if mediaInfo == nil {
 		return forwardedMessagePayload{}, fmt.Errorf("message has no media metadata")
 	}
-	if err := validateForwardMediaInfo(*mediaInfo); err != nil {
+	if err := validateStoredMediaInfo(*mediaInfo); err != nil {
 		return forwardedMessagePayload{}, err
 	}
 
@@ -1042,32 +1042,44 @@ func buildForwardedMessage(msg store.Message, mediaInfo *store.MediaDownloadInfo
 		ForwardingScore: forwardingScore,
 	}
 	ctx := forwardedContextInfo(forwardingScore)
+	message, err := buildStoredMediaMessage(mediaType, msg.MediaCaption, *mediaInfo, ctx)
+	if err != nil {
+		return forwardedMessagePayload{}, err
+	}
+	payload.Message = message
+	if mediaType == "document" && strings.TrimSpace(payload.Filename) == "" {
+		payload.Filename = "document"
+	}
+	return payload, nil
+}
+
+func buildStoredMediaMessage(mediaType, caption string, mediaInfo store.MediaDownloadInfo, ctx *waProto.ContextInfo) (*waProto.Message, error) {
 	switch mediaType {
 	case "image":
-		payload.Message = &waProto.Message{ImageMessage: &waProto.ImageMessage{
+		return &waProto.Message{ImageMessage: &waProto.ImageMessage{
 			DirectPath:    proto.String(mediaInfo.DirectPath),
 			MediaKey:      mediaInfo.MediaKey,
 			FileSHA256:    mediaInfo.FileSHA256,
 			FileEncSHA256: mediaInfo.FileEncSHA256,
 			FileLength:    proto.Uint64(mediaInfo.FileLength),
 			Mimetype:      proto.String(mediaInfo.MimeType),
-			Caption:       proto.String(msg.MediaCaption),
+			Caption:       proto.String(caption),
 			ContextInfo:   ctx,
-		}}
+		}}, nil
 	case "video", "gif":
-		payload.Message = &waProto.Message{VideoMessage: &waProto.VideoMessage{
+		return &waProto.Message{VideoMessage: &waProto.VideoMessage{
 			DirectPath:    proto.String(mediaInfo.DirectPath),
 			MediaKey:      mediaInfo.MediaKey,
 			FileSHA256:    mediaInfo.FileSHA256,
 			FileEncSHA256: mediaInfo.FileEncSHA256,
 			FileLength:    proto.Uint64(mediaInfo.FileLength),
 			Mimetype:      proto.String(mediaInfo.MimeType),
-			Caption:       proto.String(msg.MediaCaption),
+			Caption:       proto.String(caption),
 			GifPlayback:   proto.Bool(mediaType == "gif"),
 			ContextInfo:   ctx,
-		}}
+		}}, nil
 	case "audio":
-		payload.Message = &waProto.Message{AudioMessage: &waProto.AudioMessage{
+		return &waProto.Message{AudioMessage: &waProto.AudioMessage{
 			DirectPath:    proto.String(mediaInfo.DirectPath),
 			MediaKey:      mediaInfo.MediaKey,
 			FileSHA256:    mediaInfo.FileSHA256,
@@ -1075,14 +1087,13 @@ func buildForwardedMessage(msg store.Message, mediaInfo *store.MediaDownloadInfo
 			FileLength:    proto.Uint64(mediaInfo.FileLength),
 			Mimetype:      proto.String(mediaInfo.MimeType),
 			ContextInfo:   ctx,
-		}}
+		}}, nil
 	case "document":
 		name := strings.TrimSpace(mediaInfo.Filename)
 		if name == "" {
 			name = "document"
 		}
-		payload.Filename = name
-		payload.Message = &waProto.Message{DocumentMessage: &waProto.DocumentMessage{
+		return &waProto.Message{DocumentMessage: &waProto.DocumentMessage{
 			DirectPath:    proto.String(mediaInfo.DirectPath),
 			MediaKey:      mediaInfo.MediaKey,
 			FileSHA256:    mediaInfo.FileSHA256,
@@ -1091,11 +1102,11 @@ func buildForwardedMessage(msg store.Message, mediaInfo *store.MediaDownloadInfo
 			Mimetype:      proto.String(mediaInfo.MimeType),
 			FileName:      proto.String(name),
 			Title:         proto.String(name),
-			Caption:       proto.String(msg.MediaCaption),
+			Caption:       proto.String(caption),
 			ContextInfo:   ctx,
-		}}
+		}}, nil
 	case "sticker":
-		payload.Message = &waProto.Message{StickerMessage: &waProto.StickerMessage{
+		return &waProto.Message{StickerMessage: &waProto.StickerMessage{
 			DirectPath:    proto.String(mediaInfo.DirectPath),
 			MediaKey:      mediaInfo.MediaKey,
 			FileSHA256:    mediaInfo.FileSHA256,
@@ -1103,14 +1114,13 @@ func buildForwardedMessage(msg store.Message, mediaInfo *store.MediaDownloadInfo
 			FileLength:    proto.Uint64(mediaInfo.FileLength),
 			Mimetype:      proto.String(mediaInfo.MimeType),
 			ContextInfo:   ctx,
-		}}
+		}}, nil
 	default:
-		return forwardedMessagePayload{}, fmt.Errorf("%s messages cannot be forwarded", mediaType)
+		return nil, fmt.Errorf("unsupported stored media type %q", mediaType)
 	}
-	return payload, nil
 }
 
-func isForwardableMediaType(mediaType string) bool {
+func isStoredMediaType(mediaType string) bool {
 	switch strings.ToLower(strings.TrimSpace(mediaType)) {
 	case "image", "video", "gif", "audio", "document", "sticker":
 		return true
@@ -1119,7 +1129,7 @@ func isForwardableMediaType(mediaType string) bool {
 	}
 }
 
-func validateForwardMediaInfo(info store.MediaDownloadInfo) error {
+func validateStoredMediaInfo(info store.MediaDownloadInfo) error {
 	if strings.TrimSpace(info.DirectPath) == "" || len(info.MediaKey) == 0 || len(info.FileSHA256) == 0 || len(info.FileEncSHA256) == 0 || info.FileLength == 0 {
 		return fmt.Errorf("message has incomplete media metadata (run `wacli sync` first)")
 	}
