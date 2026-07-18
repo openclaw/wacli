@@ -86,6 +86,31 @@ func TestSendDelegateRequestPreservesEphemeralInJSON(t *testing.T) {
 	}
 }
 
+func TestSendDelegateRequestPreservesReplyInJSON(t *testing.T) {
+	raw, err := json.Marshal(sendDelegateRequest{
+		Version:       sendDelegateVersion,
+		Kind:          "text",
+		To:            "15551234567@s.whatsapp.net",
+		Message:       "reply",
+		ReplyTo:       "quoted-message-id",
+		ReplyToSender: "15557654321@s.whatsapp.net",
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	var got sendDelegateRequest
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if got.ReplyTo != "quoted-message-id" {
+		t.Fatalf("ReplyTo = %q", got.ReplyTo)
+	}
+	if got.ReplyToSender != "15557654321@s.whatsapp.net" {
+		t.Fatalf("ReplyToSender = %q", got.ReplyToSender)
+	}
+}
+
 func TestSendDelegateRequestPreservesPresenceInJSON(t *testing.T) {
 	raw, err := json.Marshal(sendDelegateRequest{
 		Version:       sendDelegateVersion,

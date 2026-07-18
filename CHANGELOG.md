@@ -1,29 +1,41 @@
 # Changelog
 
-## 0.12.2 - Unreleased
-
-### Added
-
-- Sync: add opt-in quiet presence mode to suppress initial available-presence and reconnect updates during long-running sync sessions. (#298 - thanks @GodsBoy)
+## 0.13.1 - Unreleased
 
 ### Fixed
 
 - Chat state: durably full-replay corrupted app-state and persist recovered events before applying writes. (#299 - thanks @TomySpagnoletti)
-- Store: normalize Windows drive paths before generating SQLite file URIs to prevent invalid URI authority errors. (#304 - thanks @goutamadwant)
 
-## 0.12.1 - 2026-07-09
+## 0.13.0 - 2026-07-17
+
+### Highlights
+
+- Sync can now stay quiet during long-running mirror sessions so the primary phone keeps normal notification behavior. (#298 - thanks @GodsBoy)
+- Text replies now carry complete quoted-message context through direct and delegated sends. (#302 - thanks @odilorg)
+- Windows auth and store access now handle drive-letter and UNC paths without invalid SQLite URI errors. (#304 - thanks @goutamadwant)
+- Official release artifacts now use a signed, notarized, provenance-bound draft-first pipeline with protected verification and Homebrew handoff.
 
 ### Added
+
+- Sync: add opt-in `--presence-mode quiet` to suppress available-presence updates during long-running sync sessions while retaining safe unavailable cleanup. (#298 - thanks @GodsBoy)
+
+### Fixed
+
+- Messages: preserve quoted content, stanza IDs, and participants when replying to stored incoming or outgoing text messages, including through sync IPC delegation. (#302 - thanks @odilorg)
+- Windows: normalize drive-letter and UNC paths before constructing SQLite file URIs so auth and read-only store opens no longer fail with invalid URI authority. (#304 - thanks @goutamadwant)
+- WhatsApp compatibility: update `whatsmeow` for current protobufs, LID direct-message sends, pairing, and user lookup behavior. (#306)
 
 ### Security
 
 - Build: require Go 1.25.12 and gate source plus release binaries with `govulncheck` so reachable GO-2026-5856 standard-library paths are excluded.
 - Release: sign all official macOS thin and universal binaries with the exact OpenClaw Foundation Developer ID metadata and designated requirement, hardened runtime, timestamp, and Apple notarization before draft upload; require naturally quarantined clean-VM execution as the standalone CLI Gatekeeper proof.
 - Release: bind cross-build provenance and publication freshness to the current protected head, reject wrong linker/runtime versions and lookalike signing authorities, revalidate the exact draft and fresh published release by ID, and verify protected Homebrew handoff, formula stanzas, plus the installed binary's hash, architecture, signing identity, runtime, and notarization constraint.
-
-### Fixed
-
 - Release: move official publication to a local draft-first flow with authenticated cross-build provenance, separate protected-main native verification, a signed annotated exact tag, verified public-release and Homebrew manifests, and credential-free CI builds.
+
+### Changed
+
+- Dependencies: update `go-sqlite3`, the Go networking stack, and `whatsmeow` with its required transitive modules. (#305, #306)
+- Tooling: require Node.js 24 or newer and enforce a 48-hour minimum release age for pnpm packages. (thanks @vincentkoc)
 
 ## 0.12.0 - 2026-07-06
 

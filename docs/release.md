@@ -41,7 +41,7 @@ Every archive contains only `LICENSE`, `README.md`, and `wacli` (`wacli.exe` on 
 Set the release coordinates once:
 
 ```bash
-tag=v0.12.1
+tag=v0.13.0
 version=${tag#v}
 commit=$(git rev-parse HEAD)
 ```
