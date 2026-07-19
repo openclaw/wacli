@@ -693,6 +693,29 @@ func newMessagesEditCmd(flags *rootFlags) *cobra.Command {
 
 			a, lk, err := newApp(ctx, flags, true, false)
 			if err != nil {
+				resp, delegated, delegateErr := tryDelegateSend(ctx, flags, err, sendDelegateRequest{
+					Kind:           "edit",
+					To:             chat,
+					ID:             id,
+					Message:        message,
+					PostSendWaitMS: durationMillis(postSendWait),
+				})
+				if delegated {
+					if delegateErr != nil {
+						return delegateErr
+					}
+					if flags.asJSON {
+						return out.WriteJSON(os.Stdout, map[string]any{
+							"edited":  true,
+							"to":      resp.To,
+							"id":      resp.ID,
+							"target":  resp.Target,
+							"message": message,
+						})
+					}
+					fmt.Fprintf(os.Stdout, "Edited message %s in %s (id %s)\n", resp.Target, resp.To, resp.ID)
+					return nil
+				}
 				return err
 			}
 			defer closeApp(a, lk)
