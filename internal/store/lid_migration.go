@@ -127,8 +127,16 @@ func (d *DB) LIDMigrationPurgedMedia(lidJID, pnJID string) ([]MessageLocalMedia,
 				SELECT 1 FROM message_payload_purges p
 				WHERE p.chat_jid IN (?, ?) AND p.msg_id = m.msg_id
 			)
-		ORDER BY m.chat_jid, m.msg_id, m.local_path
-	`, lidJID, pnJID, lidJID, pnJID)
+		UNION
+		SELECT a.chat_jid, a.msg_id, a.local_path
+		FROM message_local_media_aliases a
+		WHERE a.chat_jid IN (?, ?)
+			AND EXISTS (
+				SELECT 1 FROM message_payload_purges p
+				WHERE p.chat_jid IN (?, ?) AND p.msg_id = a.msg_id
+			)
+		ORDER BY 1, 2, 3
+	`, lidJID, pnJID, lidJID, pnJID, lidJID, pnJID, lidJID, pnJID)
 	if err != nil {
 		return nil, fmt.Errorf("load purged alias media: %w", err)
 	}
@@ -230,6 +238,25 @@ func migrateLIDMessagesToPN(tx *sql.Tx, lidJID, pnJID string) error {
 	}
 
 	if _, err := tx.Exec(`
+		INSERT INTO message_local_media_aliases(chat_jid, msg_id, local_path, downloaded_at)
+		SELECT ?, source.msg_id, source.local_path, source.downloaded_at
+		FROM messages source
+		JOIN messages destination ON destination.chat_jid = ? AND destination.msg_id = source.msg_id
+		WHERE source.chat_jid = ?
+			AND COALESCE(source.local_path, '') != ''
+			AND COALESCE(destination.local_path, '') != ''
+			AND destination.local_path != source.local_path
+			AND NOT EXISTS (
+				SELECT 1 FROM message_payload_purges p
+				WHERE p.chat_jid IN (?, ?) AND p.msg_id = source.msg_id
+			)
+		ON CONFLICT(chat_jid, msg_id, local_path) DO UPDATE SET
+			downloaded_at = COALESCE(message_local_media_aliases.downloaded_at, excluded.downloaded_at)
+	`, pnJID, pnJID, lidJID, lidJID, pnJID); err != nil {
+		return fmt.Errorf("preserve displaced lid message media: %w", err)
+	}
+
+	if _, err := tx.Exec(`
 		INSERT INTO messages(
 			chat_jid, chat_name, msg_id, sender_jid, sender_name, ts, from_me, text, display_text,
 			quoted_msg_id, quoted_sender_jid,
@@ -317,6 +344,17 @@ func migrateLIDMessagesToPN(tx *sql.Tx, lidJID, pnJID string) error {
 	}
 
 	if _, err := tx.Exec(`
+		INSERT INTO message_local_media_aliases(chat_jid, msg_id, local_path, downloaded_at)
+		SELECT ?, msg_id, local_path, downloaded_at
+		FROM message_local_media_aliases
+		WHERE chat_jid = ?
+		ON CONFLICT(chat_jid, msg_id, local_path) DO UPDATE SET
+			downloaded_at = COALESCE(message_local_media_aliases.downloaded_at, excluded.downloaded_at)
+	`, pnJID, lidJID); err != nil {
+		return fmt.Errorf("migrate lid message media aliases: %w", err)
+	}
+
+	if _, err := tx.Exec(`
 		UPDATE messages
 		SET deleted_at = COALESCE(deleted_at, (
 				SELECT p.deleted_at FROM message_payload_purges p
@@ -377,6 +415,9 @@ func migrateLIDMessagesToPN(tx *sql.Tx, lidJID, pnJID string) error {
 	}
 	if _, err := tx.Exec(`DELETE FROM message_payload_purges WHERE chat_jid = ?`, lidJID); err != nil {
 		return fmt.Errorf("delete migrated lid message purge ledger: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM message_local_media_aliases WHERE chat_jid = ?`, lidJID); err != nil {
+		return fmt.Errorf("delete migrated lid message media aliases: %w", err)
 	}
 	return nil
 }

@@ -1225,6 +1225,47 @@ func TestPurgeMessageRequiresTombstoneAndKeepsSuppressionMarker(t *testing.T) {
 	}
 }
 
+func TestPurgeMessageClearsAllLocalMediaAliases(t *testing.T) {
+	db := openTestDB(t)
+	chat := "chat@s.whatsapp.net"
+	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	if err := db.UpsertChat(chat, "dm", "Alice", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{ChatJID: chat, MsgID: "mid", Timestamp: now, Text: "retained"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.MarkMediaDownloaded(chat, "mid", "/tmp/main-media", now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.sql.Exec(`
+		INSERT INTO message_local_media_aliases(chat_jid, msg_id, local_path, downloaded_at)
+		VALUES(?, ?, ?, ?)
+	`, chat, "mid", "/tmp/alias-media", now.Unix()); err != nil {
+		t.Fatal(err)
+	}
+	paths, err := db.MessageLocalMediaPaths(chat, "mid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 2 {
+		t.Fatalf("media paths before purge = %#v", paths)
+	}
+	if err := db.MarkMessageRevoked(chat, "mid"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.PurgeMessage(chat, "mid"); err != nil {
+		t.Fatal(err)
+	}
+	paths, err = db.MessageLocalMediaPaths(chat, "mid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 0 {
+		t.Fatalf("media paths after purge = %#v", paths)
+	}
+}
+
 func TestMessageButtonsClearedOnUpdateText(t *testing.T) {
 	db := openTestDB(t)
 

@@ -531,7 +531,12 @@ func newMessagesDeleteCmd(flags *rootFlags) *cobra.Command {
 				}); err != nil {
 					return err
 				}
-				deletedLocalMedia, deleteMediaErr := deleteLocalMediaIfRequested(deleteMedia, msg.LocalPath)
+				mediaPaths, err := a.DB().MessageLocalMediaPaths(msg.ChatJID, msg.MsgID)
+				if err != nil {
+					return fmt.Errorf("load local media paths: %w", err)
+				}
+				deletedMediaCount, deleteMediaErr := deleteLocalMediaPathsIfRequested(deleteMedia, mediaPaths)
+				deletedLocalMedia := deletedMediaCount > 0
 				if deleteMediaErr != nil {
 					if err := a.DB().MarkMessageDeletedForMePreserveMedia(msg.ChatJID, msg.MsgID); err != nil {
 						return fmt.Errorf("store deleted-for-me message state: %w", err)
@@ -917,16 +922,28 @@ func loadMessageRevokeTarget(ctx context.Context, a *app.App, chat, id string) (
 }
 
 func deleteLocalMediaIfRequested(deleteMedia bool, localPath string) (bool, error) {
-	if !deleteMedia || strings.TrimSpace(localPath) == "" {
-		return false, nil
+	deleted, err := deleteLocalMediaPathsIfRequested(deleteMedia, []string{localPath})
+	return deleted > 0, err
+}
+
+func deleteLocalMediaPathsIfRequested(deleteMedia bool, paths []string) (int, error) {
+	if !deleteMedia {
+		return 0, nil
 	}
-	if err := os.Remove(localPath); err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
+	deleted := 0
+	for _, path := range paths {
+		if strings.TrimSpace(path) == "" {
+			continue
 		}
-		return false, err
+		if err := os.Remove(path); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return deleted, err
+		}
+		deleted++
 	}
-	return true, nil
+	return deleted, nil
 }
 
 func validateMessageCanRevoke(msg store.Message) error {

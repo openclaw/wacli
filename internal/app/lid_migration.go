@@ -31,13 +31,21 @@ func (a *App) migrateHistoricalLIDs(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("load purged alias media for historical LID %s: %w", raw, err)
 		}
-		for _, media := range pendingMedia {
-			if err := os.Remove(media.LocalPath); err != nil && !os.IsNotExist(err) {
-				return fmt.Errorf("remove purged alias media for historical LID %s: %w", raw, err)
+		for start := 0; start < len(pendingMedia); {
+			end := start + 1
+			for end < len(pendingMedia) && pendingMedia[end].ChatJID == pendingMedia[start].ChatJID && pendingMedia[end].MsgID == pendingMedia[start].MsgID {
+				end++
 			}
+			for _, media := range pendingMedia[start:end] {
+				if err := os.Remove(media.LocalPath); err != nil && !os.IsNotExist(err) {
+					return fmt.Errorf("remove purged alias media for historical LID %s: %w", raw, err)
+				}
+			}
+			media := pendingMedia[start]
 			if err := a.db.ClearMessageLocalMedia(media.ChatJID, media.MsgID); err != nil {
 				return fmt.Errorf("clear purged alias media for historical LID %s: %w", raw, err)
 			}
+			start = end
 		}
 		if err := a.db.MigrateLIDToPN(raw, pnJID); err != nil {
 			return fmt.Errorf("migrate historical LID %s: %w", raw, err)

@@ -108,6 +108,15 @@ CREATE TABLE IF NOT EXISTS message_payload_purges (
     PRIMARY KEY (chat_jid, msg_id)
 );
 
+CREATE TABLE IF NOT EXISTS message_local_media_aliases (
+    chat_jid TEXT NOT NULL,
+    msg_id TEXT NOT NULL,
+    local_path TEXT NOT NULL,
+    downloaded_at INTEGER,
+    PRIMARY KEY (chat_jid, msg_id, local_path),
+    FOREIGN KEY (chat_jid, msg_id) REFERENCES messages(chat_jid, msg_id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS status_messages (
     rowid INTEGER PRIMARY KEY AUTOINCREMENT,
     msg_id TEXT NOT NULL UNIQUE,

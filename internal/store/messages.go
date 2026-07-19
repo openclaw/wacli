@@ -201,7 +201,14 @@ func (d *DB) MarkMessageDeletedForMePreserveMedia(chatJID, msgID string) error {
 }
 
 func (d *DB) ClearMessageLocalMedia(chatJID, msgID string) error {
-	res, err := d.sql.Exec(`UPDATE messages SET local_path = NULL, downloaded_at = NULL WHERE chat_jid = ? AND msg_id = ?`, strings.TrimSpace(chatJID), strings.TrimSpace(msgID))
+	chatJID = strings.TrimSpace(chatJID)
+	msgID = strings.TrimSpace(msgID)
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(`UPDATE messages SET local_path = NULL, downloaded_at = NULL WHERE chat_jid = ? AND msg_id = ?`, chatJID, msgID)
 	if err != nil {
 		return err
 	}
@@ -212,7 +219,34 @@ func (d *DB) ClearMessageLocalMedia(chatJID, msgID string) error {
 	if n == 0 {
 		return sql.ErrNoRows
 	}
-	return nil
+	if _, err := tx.Exec(`DELETE FROM message_local_media_aliases WHERE chat_jid = ? AND msg_id = ?`, chatJID, msgID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (d *DB) MessageLocalMediaPaths(chatJID, msgID string) ([]string, error) {
+	rows, err := d.sql.Query(`
+		SELECT local_path FROM messages
+		WHERE chat_jid = ? AND msg_id = ? AND COALESCE(local_path, '') != ''
+		UNION
+		SELECT local_path FROM message_local_media_aliases
+		WHERE chat_jid = ? AND msg_id = ? AND COALESCE(local_path, '') != ''
+		ORDER BY 1
+	`, strings.TrimSpace(chatJID), strings.TrimSpace(msgID), strings.TrimSpace(chatJID), strings.TrimSpace(msgID))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var paths []string
+	for rows.Next() {
+		var path string
+		if err := rows.Scan(&path); err != nil {
+			return nil, err
+		}
+		paths = append(paths, path)
+	}
+	return paths, rows.Err()
 }
 
 func (d *DB) UpdateMessageText(chatJID, msgID, text string) error {
@@ -271,6 +305,7 @@ func (d *DB) PurgeMessage(chatJID, msgID string) error {
 		`DELETE FROM poll_votes WHERE chat_jid = ? AND (poll_msg_id = ? OR vote_msg_id = ?)`,
 		`DELETE FROM polls WHERE chat_jid = ? AND msg_id = ?`,
 		`DELETE FROM starred WHERE chat_jid = ? AND msg_id = ?`,
+		`DELETE FROM message_local_media_aliases WHERE chat_jid = ? AND msg_id = ?`,
 	} {
 		args := []any{chatJID, msgID}
 		if strings.Contains(stmt, "vote_msg_id") {

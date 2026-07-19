@@ -51,6 +51,9 @@ func TestOpenCreatesExpectedSchema(t *testing.T) {
 	if exists, err := db.tableExists("message_payload_purges"); err != nil || !exists {
 		t.Fatalf("message_payload_purges table exists = %v, err = %v", exists, err)
 	}
+	if exists, err := db.tableExists("message_local_media_aliases"); err != nil || !exists {
+		t.Fatalf("message_local_media_aliases table exists = %v, err = %v", exists, err)
+	}
 
 	callCols, err := tableColumns(db.sql, "call_events")
 	if err != nil {

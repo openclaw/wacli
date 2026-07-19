@@ -35,8 +35,25 @@ var schemaMigrations = []migration{
 	{version: 19, name: "messages quoted columns", up: migrateMessagesQuotedColumns},
 	{version: 20, name: "messages media_unavailable_at column", up: migrateMessagesMediaUnavailableColumn},
 	{version: 21, name: "message tombstone metadata", up: migrateMessageTombstoneMetadata},
-	{version: 22, name: "app state recovery markers", up: migrateAppStateRecoveryMarkers},
-	{version: 23, name: "app state recovery intents", up: migrateAppStateRecoveryIntents},
+	{version: 22, name: "message local media aliases", up: ensureMessageLocalMediaAliasesTable},
+	{version: 23, name: "app state recovery markers", up: migrateAppStateRecoveryMarkers},
+	{version: 24, name: "app state recovery intents", up: migrateAppStateRecoveryIntents},
+}
+
+func ensureMessageLocalMediaAliasesTable(d *DB) error {
+	if _, err := d.sql.Exec(`
+		CREATE TABLE IF NOT EXISTS message_local_media_aliases (
+			chat_jid TEXT NOT NULL,
+			msg_id TEXT NOT NULL,
+			local_path TEXT NOT NULL,
+			downloaded_at INTEGER,
+			PRIMARY KEY (chat_jid, msg_id, local_path),
+			FOREIGN KEY (chat_jid, msg_id) REFERENCES messages(chat_jid, msg_id) ON DELETE CASCADE
+		)
+	`); err != nil {
+		return fmt.Errorf("ensure message local media aliases: %w", err)
+	}
+	return nil
 }
 
 func migrateAppStateRecoveryMarkers(d *DB) error {
@@ -87,21 +104,28 @@ func migrateAppStateRecoveryIntents(d *DB) error {
 }
 
 func reconcilePreReleaseAppStateMigrations(d *DB) error {
-	// Pre-release app-state builds used versions 21 and 22 before main assigned
-	// version 21 to message tombstones.
+	// Pre-release app-state builds used versions 21-23 before main assigned
+	// versions 21 and 22 to message tombstones and local media aliases.
 	var migrationName string
 	err := d.sql.QueryRow(`SELECT name FROM schema_migrations WHERE version = 21`).Scan(&migrationName)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("inspect pre-release app state migration: %w", err)
 	}
-	if migrationName != "app state recovery markers" {
-		return nil
+	if err == nil && migrationName == "app state recovery markers" {
+		if err := migrateMessageTombstoneMetadata(d); err != nil {
+			return fmt.Errorf("reconcile pre-release message tombstone migration: %w", err)
+		}
 	}
-	if err := migrateMessageTombstoneMetadata(d); err != nil {
-		return fmt.Errorf("reconcile pre-release message tombstone migration: %w", err)
+
+	migrationName = ""
+	err = d.sql.QueryRow(`SELECT name FROM schema_migrations WHERE version = 22`).Scan(&migrationName)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("inspect pre-release app state migration: %w", err)
+	}
+	if err == nil && (migrationName == "app state recovery markers" || migrationName == "app state recovery intents") {
+		if err := ensureMessageLocalMediaAliasesTable(d); err != nil {
+			return fmt.Errorf("reconcile pre-release message local media aliases migration: %w", err)
+		}
 	}
 	return nil
 }
@@ -303,6 +327,9 @@ func (d *DB) ensureCurrentSchema() error {
 	}
 	if err := ensureMessagePayloadPurgesTable(d); err != nil {
 		return fmt.Errorf("ensure current message payload purge ledger: %w", err)
+	}
+	if err := ensureMessageLocalMediaAliasesTable(d); err != nil {
+		return fmt.Errorf("ensure current message local media aliases: %w", err)
 	}
 	if err := ensureAppStateRecoveryIntents(d); err != nil {
 		return fmt.Errorf("ensure current app state recovery intents: %w", err)
