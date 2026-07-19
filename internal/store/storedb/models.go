@@ -112,9 +112,20 @@ type Message struct {
 	MediaUnavailableAt sql.NullInt64
 	Revoked            int64
 	DeletedForMe       int64
+	DeletedAt          sql.NullInt64
+	DeletionReason     sql.NullString
+	PayloadPurgedAt    sql.NullInt64
 	Edited             int64
 	EditedTs           int64
 	Buttons            sql.NullString
+}
+
+type MessagePayloadPurge struct {
+	ChatJid        string
+	MsgID          string
+	PurgedAt       int64
+	DeletedAt      int64
+	DeletionReason string
 }
 
 type MessagesFt struct {

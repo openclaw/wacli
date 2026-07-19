@@ -215,6 +215,8 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 		return executeDelegatedButtonListSelect(ctx, a, req)
 	case "presence":
 		return executeDelegatedPresence(ctx, a, req)
+	case "edit":
+		return executeDelegatedEdit(ctx, a, req)
 	default:
 		return sendDelegateResponse{}, fmt.Errorf("unsupported send kind %q", req.Kind)
 	}
@@ -240,6 +242,30 @@ func executeDelegatedPresence(ctx context.Context, a *app.App, req sendDelegateR
 		return sendDelegateResponse{}, err
 	}
 	return sendDelegateResponse{OK: true, Sent: true, To: toJID.String()}, nil
+}
+
+func executeDelegatedEdit(ctx context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {
+	msg, chatJID, err := loadMessageMutationTarget(ctx, a, req.To, req.ID)
+	if err != nil {
+		return sendDelegateResponse{}, err
+	}
+	if err := validateMessageCanEdit(msg, time.Now().UTC()); err != nil {
+		return sendDelegateResponse{}, err
+	}
+	if err := warnRapidSendIfNeeded(a.StoreDir(), time.Now().UTC(), os.Stderr); err != nil {
+		return sendDelegateResponse{}, err
+	}
+	sentID, err := runSendOperation(ctx, reconnectForSend(a), func(ctx context.Context) (types.MessageID, error) {
+		return a.WA().EditMessage(ctx, chatJID, types.MessageID(msg.MsgID), req.Message)
+	})
+	if err != nil {
+		return sendDelegateResponse{}, err
+	}
+	if err := a.DB().UpdateMessageText(msg.ChatJID, msg.MsgID, req.Message); err != nil {
+		return sendDelegateResponse{}, fmt.Errorf("store edited message text: %w", err)
+	}
+	waitForPostSendRetryReceipts(ctx, millisDuration(req.PostSendWaitMS, 0))
+	return sendDelegateResponse{OK: true, Sent: true, To: chatJID.String(), ID: string(sentID), Target: msg.MsgID}, nil
 }
 
 func executeDelegatedText(ctx context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {

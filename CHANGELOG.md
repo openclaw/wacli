@@ -2,9 +2,18 @@
 
 ## 0.13.1 - Unreleased
 
+### Added
+
+- Messages: add an explicit, confirmation-gated `messages purge` command that irreversibly erases one retained payload while keeping a durable suppression tombstone.
+
+### Changed
+
+- Messages: retain original text, interactive, reply, and media metadata behind timestamped deletion tombstones; keep sync/history imports merge-only so missing rows never imply deletion.
+
 ### Fixed
 
-- Chat state: durably full-replay corrupted app-state and persist recovered events before applying writes. (#299 - thanks @TomySpagnoletti)
+- Send: delegate `messages edit` through a running `sync --follow` process like other send commands, so edits no longer always fail with `store is locked` while continuous sync owns the store. (#310 - thanks @Umair444)
+- Send: allow text replies to quote stored documents and other supported media by rebuilding their saved message content. (#307 - thanks @suifatt7799-oss)
 
 ## 0.13.0 - 2026-07-17
 

@@ -499,7 +499,7 @@ func buildTextReplyContextInfo(db *store.DB, chat types.JID, replyTo, replyToSen
 	if err != nil {
 		return nil, fmt.Errorf("lookup quoted message: %w", err)
 	}
-	quotedMessage, err := storedTextQuotedMessage(quoted)
+	quotedMessage, err := storedQuotedMessage(db, quoted)
 	if err != nil {
 		return nil, fmt.Errorf("cannot quote message %s: %w", replyTo, err)
 	}
@@ -515,12 +515,25 @@ func buildTextReplyContextInfo(db *store.DB, chat types.JID, replyTo, replyToSen
 	}, nil
 }
 
-func storedTextQuotedMessage(msg store.Message) (*waProto.Message, error) {
+func storedQuotedMessage(db *store.DB, msg store.Message) (*waProto.Message, error) {
 	if msg.Revoked || msg.DeletedForMe {
 		return nil, fmt.Errorf("stored message was deleted")
 	}
-	if strings.TrimSpace(msg.MediaType) != "" || msg.ReactionToID != "" || len(msg.Buttons) > 0 {
+	if msg.ReactionToID != "" || len(msg.Buttons) > 0 {
 		return nil, fmt.Errorf("stored message content is not supported for quoted text replies")
+	}
+	if mediaType := strings.ToLower(strings.TrimSpace(msg.MediaType)); mediaType != "" {
+		if !isStoredMediaType(mediaType) {
+			return nil, fmt.Errorf("unsupported stored media type %q", mediaType)
+		}
+		mediaInfo, err := db.GetMediaDownloadInfo(msg.ChatJID, msg.MsgID)
+		if err != nil {
+			return nil, fmt.Errorf("load stored media metadata: %w", err)
+		}
+		if err := validateStoredMediaInfo(mediaInfo); err != nil {
+			return nil, err
+		}
+		return buildStoredMediaMessage(mediaType, msg.MediaCaption, mediaInfo, nil)
 	}
 	if strings.TrimSpace(msg.Text) == "" {
 		return nil, fmt.Errorf("stored message has no supported text content")

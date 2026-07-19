@@ -153,3 +153,63 @@ func TestRemoveStaleSendDelegateSocketRefusesRegularFile(t *testing.T) {
 		t.Fatalf("error = %v, want not a socket", err)
 	}
 }
+
+func TestMessagesEditDelegatesThroughSendSocketWhenStoreLocked(t *testing.T) {
+	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
+	storeDir := shortPresenceDelegateStoreDir(t)
+	lk, err := lock.Acquire(storeDir)
+	if err != nil {
+		t.Fatalf("lock store: %v", err)
+	}
+	defer lk.Release()
+
+	server := startPresenceDelegateTestSocket(t, storeDir, func(req sendDelegateRequest) sendDelegateResponse {
+		return sendDelegateResponse{
+			OK: true, Sent: true, To: "123@s.whatsapp.net", ID: "sent-id", Target: req.ID,
+		}
+	})
+	defer server.stop()
+
+	stdout, stderr, err := runPresenceDelegateHelper(t, []string{
+		"--store", storeDir, "--json", "--timeout", "750ms",
+		"messages", "edit", "--chat", "123@s.whatsapp.net", "--id", "ABC",
+		"--message", "edited", "--post-send-wait", "25ms",
+	})
+	if err != nil {
+		t.Fatalf("messages edit failed: %v stdout=%q stderr=%q", err, stdout, stderr)
+	}
+
+	req := server.nextRequest(t)
+	if req.Version != sendDelegateVersion || req.Kind != "edit" {
+		t.Fatalf("delegate version/kind = %d/%q", req.Version, req.Kind)
+	}
+	if req.To != "123@s.whatsapp.net" || req.ID != "ABC" || req.Message != "edited" {
+		t.Fatalf("delegate mutation target = %+v", req)
+	}
+	if req.TimeoutMS != 750 || req.PostSendWaitMS != 25 {
+		t.Fatalf("delegate timeouts = command %dms post-send %dms", req.TimeoutMS, req.PostSendWaitMS)
+	}
+	if strings.Contains(stderr, "store is locked") {
+		t.Fatalf("delegated command tried the direct store path: stderr=%q", stderr)
+	}
+	for _, want := range []string{`"edited":true`, `"id":"sent-id"`, `"target":"ABC"`} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("stdout %q missing %s", stdout, want)
+		}
+	}
+}
+
+func TestExecuteDelegatedSendAcceptsEditKind(t *testing.T) {
+	// Reaching app use proves the daemon dispatcher recognized the edit kind.
+	defer func() { _ = recover() }()
+	_, err := executeDelegatedSend(context.Background(), nil, sendDelegateRequest{
+		Version: sendDelegateVersion,
+		Kind:    "edit",
+		To:      "123@s.whatsapp.net",
+		ID:      "ABC",
+		Message: "edited",
+	})
+	if err != nil && strings.Contains(err.Error(), "unsupported send kind") {
+		t.Fatalf("edit rejected as unsupported kind: %v", err)
+	}
+}

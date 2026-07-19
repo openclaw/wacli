@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestOpenMigratesAppStateRecoveryMarkers(t *testing.T) {
+func TestOpenCreatesAppStateRecoveryIntents(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "wacli.db")
 	raw, err := sql.Open("sqlite3", path)
 	if err != nil {
@@ -23,7 +23,7 @@ func TestOpenMigratesAppStateRecoveryMarkers(t *testing.T) {
 		t.Fatalf("create legacy schema: %v", err)
 	}
 	for _, migration := range schemaMigrations {
-		if migration.version >= 21 {
+		if migration.version >= 22 {
 			continue
 		}
 		if _, err := raw.Exec(`INSERT INTO schema_migrations(version, name, applied_at) VALUES(?, ?, 1)`, migration.version, migration.name); err != nil {
@@ -42,14 +42,114 @@ func TestOpenMigratesAppStateRecoveryMarkers(t *testing.T) {
 	defer db.Close()
 	if exists, err := db.tableExists("app_state_recovery_required"); err != nil {
 		t.Fatalf("tableExists: %v", err)
-	} else if !exists {
-		t.Fatal("app_state_recovery_required migration did not run")
+	} else if exists {
+		t.Fatal("legacy app_state_recovery_required table still exists")
 	}
 	if exists, err := db.tableExists("app_state_recovery_intents"); err != nil {
 		t.Fatalf("intent tableExists: %v", err)
 	} else if !exists {
 		t.Fatal("app_state_recovery_intents migration did not run")
 	}
+}
+
+func TestOpenReconcilesPreReleaseAppStateMigrations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "wacli.db")
+	raw, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	if _, err := raw.Exec(coreSchemaSQL + `
+		CREATE TABLE schema_migrations (
+			version INTEGER PRIMARY KEY,
+			name TEXT NOT NULL,
+			applied_at INTEGER NOT NULL
+		);
+		CREATE TABLE app_state_recovery_required (
+			collection TEXT PRIMARY KEY,
+			marked_at INTEGER NOT NULL
+		);
+		CREATE TABLE app_state_recovery_intents (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			collection TEXT NOT NULL
+		);
+		CREATE INDEX idx_app_state_recovery_intents_collection
+		ON app_state_recovery_intents(collection);
+		INSERT INTO chats(jid, kind, name)
+		VALUES('chat@s.whatsapp.net', 'dm', 'Migration test');
+		INSERT INTO messages(chat_jid, msg_id, ts, from_me, text, revoked)
+		VALUES('chat@s.whatsapp.net', 'legacy-delete', 123, 1, 'retained text', 1);
+		INSERT INTO app_state_recovery_required(collection, marked_at)
+		VALUES('regular_low', 1), ('regular_high', 1);
+		INSERT INTO app_state_recovery_intents(collection)
+		VALUES('regular_low');
+	`); err != nil {
+		_ = raw.Close()
+		t.Fatalf("create pre-release schema: %v", err)
+	}
+	for _, migration := range schemaMigrations {
+		if migration.version >= 21 {
+			continue
+		}
+		if _, err := raw.Exec(`INSERT INTO schema_migrations(version, name, applied_at) VALUES(?, ?, 1)`, migration.version, migration.name); err != nil {
+			_ = raw.Close()
+			t.Fatalf("record migration %d: %v", migration.version, err)
+		}
+	}
+	if _, err := raw.Exec(`
+		INSERT INTO schema_migrations(version, name, applied_at)
+		VALUES(21, 'app state recovery markers', 1),
+		      (22, 'app state recovery intents', 1)
+	`); err != nil {
+		_ = raw.Close()
+		t.Fatalf("record pre-release migrations: %v", err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close pre-release DB: %v", err)
+	}
+
+	assertMigrated := func(db *DB) {
+		t.Helper()
+		if exists, err := db.tableExists("app_state_recovery_required"); err != nil {
+			t.Fatalf("legacy tableExists: %v", err)
+		} else if exists {
+			t.Fatal("legacy recovery marker table still exists")
+		}
+		for _, collection := range []string{"regular_low", "regular_high"} {
+			if got := countRows(t, db.sql, `SELECT COUNT(*) FROM app_state_recovery_intents WHERE collection = ?`, collection); got != 1 {
+				t.Fatalf("recovery intents for %s = %d, want 1", collection, got)
+			}
+		}
+		msg, err := db.GetMessage("chat@s.whatsapp.net", "legacy-delete")
+		if err != nil {
+			t.Fatalf("GetMessage: %v", err)
+		}
+		if msg.Text != "retained text" || msg.DeletedAt == nil || msg.DeletedAt.Unix() != 123 || msg.DeletionReason != "legacy-whatsapp-revoke" {
+			t.Fatalf("reconciled tombstone = %+v", msg)
+		}
+		var migrationName string
+		if err := db.sql.QueryRow(`SELECT name FROM schema_migrations WHERE version = 23`).Scan(&migrationName); err != nil {
+			t.Fatalf("load migration 23: %v", err)
+		}
+		if migrationName != "app state recovery intents" {
+			t.Fatalf("migration 23 name = %q", migrationName)
+		}
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open migrated DB: %v", err)
+	}
+	assertMigrated(db)
+	if err := db.Close(); err != nil {
+		t.Fatalf("close migrated DB: %v", err)
+	}
+
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("reopen migrated DB: %v", err)
+	}
+	defer db.Close()
+	assertMigrated(db)
 }
 
 func TestAppStateRecoveryMarkerPersistsAcrossReopen(t *testing.T) {

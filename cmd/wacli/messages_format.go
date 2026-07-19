@@ -121,6 +121,15 @@ func writeMessageShow(dst io.Writer, m store.Message) error {
 	if m.DeletedForMe {
 		fmt.Fprintln(dst, "Deleted for me: yes")
 	}
+	if m.DeletedAt != nil {
+		fmt.Fprintf(dst, "Deleted at: %s\n", m.DeletedAt.Local().Format(time.RFC3339))
+	}
+	if m.DeletionReason != "" {
+		fmt.Fprintf(dst, "Deletion reason: %s\n", sanitize(m.DeletionReason))
+	}
+	if m.PayloadPurgedAt != nil {
+		fmt.Fprintf(dst, "Payload purged at: %s\n", m.PayloadPurgedAt.Local().Format(time.RFC3339))
+	}
 	fmt.Fprintf(dst, "\n%s\n", sanitizeBody(messageText(m)))
 	if raw := messageRawText(m); raw != "" {
 		fmt.Fprintf(dst, "\nRaw text:\n%s\n", sanitizeBody(raw))

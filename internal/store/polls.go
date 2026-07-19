@@ -74,6 +74,8 @@ func (d *DB) UpsertPoll(p Poll) error {
 		OptionsJson:     string(optsJSON),
 		SelectableCount: int64(p.SelectableCount),
 		CreatedTs:       createdTS.UTC().Unix(),
+		ChatJid_2:       p.ChatJID,
+		MsgID_2:         p.MsgID,
 	}); err != nil {
 		return fmt.Errorf("upsert poll: %w", err)
 	}
@@ -117,7 +119,8 @@ func (d *DB) ListPolls(filter PollListFilter) ([]Poll, error) {
 	q := `SELECT p.chat_jid, p.msg_id, COALESCE(p.sender_jid,''), p.question, p.options_json, p.selectable_count, p.created_ts
 	      FROM polls p
 	      LEFT JOIN messages m ON m.chat_jid = p.chat_jid AND m.msg_id = p.msg_id
-	      WHERE (m.msg_id IS NULL OR (m.revoked = 0 AND m.deleted_for_me = 0))`
+	      WHERE (m.msg_id IS NULL OR m.deleted_at IS NULL)
+	        AND NOT EXISTS (SELECT 1 FROM message_payload_purges x WHERE x.chat_jid = p.chat_jid AND x.msg_id = p.msg_id)`
 	args := []any{}
 	chatJIDs := cleanPollFilterChatJIDs(filter)
 	switch {
@@ -238,6 +241,10 @@ func (d *DB) UpsertPollVote(v PollVote) error {
 		VoteMsgID:           v.VoteMsgID,
 		SelectedOptionsJson: string(selJSON),
 		Ts:                  ts.UTC().UnixMilli(),
+		ChatJid_2:           v.ChatJID,
+		MsgID:               v.PollMsgID,
+		ChatJid_3:           v.ChatJID,
+		MsgID_2:             v.VoteMsgID,
 	}); err != nil {
 		return fmt.Errorf("upsert poll vote: %w", err)
 	}
