@@ -948,7 +948,116 @@ func TestChatStatePersistenceHandlerCoversOtherCollectionDuringWrite(t *testing.
 	}
 }
 
-func TestArchiveChatUsesLatestMessageRange(t *testing.T) {
+func TestArchiveChatPNUsesFreshKeylessMessageRange(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	chat := types.JID{User: "456", Server: types.DefaultUserServer}
+	localMessageTS := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+	remoteReactionTS := localMessageTS.Add(time.Hour)
+	archiveTS := remoteReactionTS.Add(time.Hour)
+	previousNowUTC := nowUTC
+	nowUTC = func() time.Time { return archiveTS }
+	t.Cleanup(func() { nowUTC = previousNowUTC })
+
+	if err := a.db.UpsertChat(chat.String(), "dm", "Bob", localMessageTS); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	if err := a.db.UpsertMessage(store.UpsertMessageParams{
+		ChatJID:   chat.String(),
+		MsgID:     "latest",
+		SenderJID: chat.String(),
+		Timestamp: localMessageTS,
+		FromMe:    true,
+		Text:      "hi",
+	}); err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+	// remoteReactionTS intentionally has no local row, matching a linked client
+	// that knows about a newer reaction than wacli's message store.
+
+	if err := a.ArchiveChat(context.Background(), chat, true); err != nil {
+		t.Fatalf("ArchiveChat: %v", err)
+	}
+
+	f.mu.Lock()
+	calls := append([]fakeArchiveCall(nil), f.archiveCalls...)
+	f.mu.Unlock()
+	if len(calls) != 1 {
+		t.Fatalf("archive calls = %d", len(calls))
+	}
+	if calls[0].target != chat || !calls[0].archive {
+		t.Fatalf("archive call = %+v", calls[0])
+	}
+	if !calls[0].lastMsgTS.Equal(archiveTS) || !calls[0].lastMsgTS.After(remoteReactionTS) {
+		t.Fatalf("lastMsgTS = %s, want fresh range at %s", calls[0].lastMsgTS, archiveTS)
+	}
+	if calls[0].lastMsgKey != nil {
+		t.Fatalf("lastMsgKey = %+v, want nil for incomplete local history", calls[0].lastMsgKey)
+	}
+	c, err := a.db.GetChat(chat.String())
+	if err != nil {
+		t.Fatalf("GetChat: %v", err)
+	}
+	if !c.Archived {
+		t.Fatalf("expected local archived state, got %+v", c)
+	}
+}
+
+func TestArchiveChatLIDUsesFreshKeylessMessageRangeWithPNStore(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	pn := types.JID{User: "456", Server: types.DefaultUserServer}
+	lid := types.JID{User: "999", Server: types.HiddenUserServer}
+	f.lids[lid] = pn
+	localMessageTS := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+	archiveTS := localMessageTS.Add(2 * time.Hour)
+	previousNowUTC := nowUTC
+	nowUTC = func() time.Time { return archiveTS }
+	t.Cleanup(func() { nowUTC = previousNowUTC })
+
+	if err := a.db.UpsertChat(pn.String(), "dm", "Bob", localMessageTS); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	if err := a.db.UpsertMessage(store.UpsertMessageParams{
+		ChatJID:   pn.String(),
+		MsgID:     "latest-pn",
+		SenderJID: pn.String(),
+		Timestamp: localMessageTS,
+		Text:      "hi",
+	}); err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+
+	if err := a.ArchiveChat(context.Background(), lid, true); err != nil {
+		t.Fatalf("ArchiveChat: %v", err)
+	}
+
+	f.mu.Lock()
+	calls := append([]fakeArchiveCall(nil), f.archiveCalls...)
+	f.mu.Unlock()
+	if len(calls) != 1 {
+		t.Fatalf("archive calls = %d", len(calls))
+	}
+	if calls[0].target != lid {
+		t.Fatalf("archive target = %s, want requested LID %s", calls[0].target, lid)
+	}
+	if !calls[0].lastMsgTS.Equal(archiveTS) || calls[0].lastMsgKey != nil {
+		t.Fatalf("archive range = (%s, %+v), want (%s, nil)", calls[0].lastMsgTS, calls[0].lastMsgKey, archiveTS)
+	}
+	stored, err := a.db.GetChat(pn.String())
+	if err != nil {
+		t.Fatalf("GetChat PN: %v", err)
+	}
+	if !stored.Archived {
+		t.Fatalf("expected canonical PN chat to be archived, got %+v", stored)
+	}
+}
+
+func TestMarkChatReadUsesLatestMessageRange(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
 	a.wa = f
@@ -969,28 +1078,21 @@ func TestArchiveChatUsesLatestMessageRange(t *testing.T) {
 		t.Fatalf("UpsertMessage: %v", err)
 	}
 
-	if err := a.ArchiveChat(context.Background(), chat, true); err != nil {
-		t.Fatalf("ArchiveChat: %v", err)
+	if err := a.MarkChatRead(context.Background(), chat, true); err != nil {
+		t.Fatalf("MarkChatRead: %v", err)
 	}
 
 	f.mu.Lock()
-	calls := append([]fakeArchiveCall(nil), f.archiveCalls...)
+	calls := append([]fakeMarkReadCall(nil), f.markReadCalls...)
 	f.mu.Unlock()
 	if len(calls) != 1 {
-		t.Fatalf("archive calls = %d", len(calls))
+		t.Fatalf("mark-read calls = %d", len(calls))
 	}
 	if !calls[0].lastMsgTS.Equal(when) {
 		t.Fatalf("lastMsgTS = %s, want %s", calls[0].lastMsgTS, when)
 	}
 	if calls[0].lastMsgKey == nil || calls[0].lastMsgKey.GetID() != "latest" || !calls[0].lastMsgKey.GetFromMe() {
 		t.Fatalf("lastMsgKey = %+v", calls[0].lastMsgKey)
-	}
-	c, err := a.db.GetChat(chat.String())
-	if err != nil {
-		t.Fatalf("GetChat: %v", err)
-	}
-	if !c.Archived {
-		t.Fatalf("expected local archived state, got %+v", c)
 	}
 }
 

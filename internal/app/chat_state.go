@@ -54,12 +54,11 @@ func (a *App) ArchiveChat(ctx context.Context, jid types.JID, archive bool) erro
 	}
 	defer release()
 	chatJID := canonicalJIDString(a.canonicalStoreJID(ctx, jid))
-	lastTS, lastKey := a.latestMessageRange(chatJID)
 	pending, err := a.beginLocalAppStateWrite(appstate.WAPatchRegularLow)
 	if err != nil {
 		return err
 	}
-	postSendEvents, err := a.wa.ArchiveChat(ctx, jid, archive, lastTS, lastKey, func() { pending.reserve(a) })
+	postSendEvents, err := a.wa.ArchiveChat(ctx, jid, archive, nowUTC(), nil, func() { pending.reserve(a) })
 	if err != nil {
 		return errors.Join(err, a.failLocalAppStateWrite(ctx, &pending, postSendEvents))
 	}
