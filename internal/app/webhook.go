@@ -32,6 +32,11 @@ var syncWebhookSafeHTTPClient = newSyncWebhookSafeHTTPClient()
 
 var syncWebhookRequestTimeout = 5 * time.Second
 
+type syncWebhookPayload struct {
+	wa.ParsedMessage
+	ChatName string `json:"ChatName,omitempty"`
+}
+
 func newSyncWebhookSafeHTTPClient() *http.Client {
 	client := linkpreview.NewSafeHTTPClient()
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
@@ -114,7 +119,7 @@ func (a *App) postSyncWebhook(ctx context.Context, opts SyncOptions, pm wa.Parse
 	}
 	ctx, cancel := context.WithTimeout(ctx, syncWebhookRequestTimeout)
 	defer cancel()
-	payload, err := json.Marshal(pm)
+	payload, err := json.Marshal(a.newSyncWebhookPayload(ctx, pm))
 	if err != nil {
 		return fmt.Errorf("marshal webhook payload: %w", err)
 	}
@@ -136,6 +141,22 @@ func (a *App) postSyncWebhook(ctx context.Context, opts SyncOptions, pm wa.Parse
 		return fmt.Errorf("post webhook: %s", resp.Status)
 	}
 	return nil
+}
+
+func (a *App) newSyncWebhookPayload(ctx context.Context, pm wa.ParsedMessage) syncWebhookPayload {
+	payload := syncWebhookPayload{ParsedMessage: pm}
+	chatJID := canonicalJIDString(pm.Chat)
+	if a.wa != nil {
+		chatJID = canonicalJIDString(a.canonicalStoreJID(ctx, pm.Chat))
+	}
+	if chatJID != "" && a.db != nil {
+		chat, err := a.db.GetChat(chatJID)
+		if err != nil {
+			return payload
+		}
+		payload.ChatName = chat.Name
+	}
+	return payload
 }
 
 func newSyncWebhookRequest(ctx context.Context, webhookURL, secret, version string, payload []byte) (*http.Request, error) {

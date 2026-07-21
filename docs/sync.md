@@ -22,7 +22,7 @@ wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--stale-t
 - `--refresh-contacts` imports contacts from the session store.
 - `--refresh-groups` fetches joined groups live and updates the local DB.
 - `--refresh-channels` fetches subscribed WhatsApp Channels live and updates local chat rows.
-- `--webhook URL` posts successfully stored live message events as JSON on a bounded background worker.
+- `--webhook URL` posts successfully stored live message events as JSON on a bounded background worker. The payload includes `ChatName` when a locally resolved chat name is available.
 - `--webhook-secret SECRET` signs webhook payloads with `X-Wacli-Signature: sha256=<hmac>`.
 - Webhook delivery is best-effort: failures, request timeouts, and full-queue drops are logged as warnings and do not stop sync. Retries/backoff are intentionally out of scope for this flag.
 - If neither storage cap is configured, sync prints one warning because WhatsApp history can grow the local database substantially.

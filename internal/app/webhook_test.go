@@ -24,7 +24,7 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
 
-func TestHandleLiveSyncMessagePostsSignedWebhook(t *testing.T) {
+func TestHandleLiveSyncMessagePostsSignedWebhookWithGroupName(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
 	a.wa = f
@@ -49,18 +49,22 @@ func TestHandleLiveSyncMessagePostsSignedWebhook(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	chat := types.JID{User: "15551234567", Server: types.DefaultUserServer}
+	chat := types.JID{User: "120363000000000000", Server: types.GroupServer}
+	f.groups[chat] = &types.GroupInfo{
+		JID:       chat,
+		GroupName: types.GroupName{Name: "test1"},
+	}
 	evt := &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
 				Chat:     chat,
-				Sender:   chat,
+				Sender:   types.JID{User: "15551234567", Server: types.DefaultUserServer},
 				IsFromMe: false,
-				IsGroup:  false,
+				IsGroup:  true,
 			},
 			ID:        "m-live",
 			Timestamp: time.Date(2024, 1, 3, 0, 0, 0, 0, time.UTC),
-			PushName:  "Alice",
+			PushName:  "",
 		},
 		Message: &waProto.Message{Conversation: proto.String("hello")},
 	}
@@ -98,7 +102,11 @@ func TestHandleLiveSyncMessagePostsSignedWebhook(t *testing.T) {
 	if got.signature != syncWebhookSignature("supersecret", got.body) {
 		t.Fatalf("signature = %q, want %q", got.signature, syncWebhookSignature("supersecret", got.body))
 	}
-	for _, want := range [][]byte{[]byte(`"ID":"m-live"`), []byte(`"Text":"hello"`)} {
+	for _, want := range [][]byte{
+		[]byte(`"ChatName":"test1"`),
+		[]byte(`"ID":"m-live"`),
+		[]byte(`"Text":"hello"`),
+	} {
 		if !bytes.Contains(got.body, want) {
 			t.Fatalf("webhook body missing %s: %s", want, got.body)
 		}
