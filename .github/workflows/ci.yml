@@ -33,7 +33,7 @@ jobs:
         run: pnpm -s lint
 
       - name: Verify exact Go security floor
-        run: test "$(go env GOVERSION)" = "go1.26.0"
+        run: test "$(go env GOVERSION)" = "go1.26.5"
 
       - name: govulncheck source
         run: pnpm -s govulncheck:source

@@ -68,7 +68,7 @@ jobs:
             exit 1
           fi
           test "$(git -C source rev-parse HEAD)" = "$RELEASE_COMMIT"
-          grep -qx 'go 1.26.0' source/go.mod
+          grep -qx 'go 1.26.5' source/go.mod
           grep -q "const sourceVersion = \"${RELEASE_VERSION}\"" source/cmd/wacli/root.go
           grep -Eq "^## ${RELEASE_VERSION} - [0-9]{4}-[0-9]{2}-[0-9]{2}$" source/CHANGELOG.md
 

@@ -27,7 +27,7 @@ Download the matching archive from the [latest release](https://github.com/openc
 
 ## Build from source
 
-`wacli` requires Go 1.26.0 or newer and uses `go-sqlite3`, so source builds require cgo and a C toolchain:
+`wacli` requires Go 1.26.5 or newer and uses `go-sqlite3`, so source builds require cgo and a C toolchain:
 
 - macOS: Xcode Command Line Tools.
 - Debian / Ubuntu: `sudo apt install build-essential`.
