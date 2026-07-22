@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/openclaw/wacli/internal/fsutil"
+	"github.com/openclaw/wacli/internal/wa"
 	"go.mau.fi/whatsmeow"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"google.golang.org/protobuf/proto"
@@ -58,10 +59,51 @@ func TestReadSendFileDataRejectsOversizedFile(t *testing.T) {
 
 func TestSendFileCommandExposesReplyFlags(t *testing.T) {
 	cmd := newSendFileCmd(&rootFlags{})
-	for _, name := range []string{"reply-to", "reply-to-sender", "ptt"} {
+	for _, name := range []string{"reply-to", "reply-to-sender", "ptt", "as"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Fatalf("missing --%s flag", name)
 		}
+	}
+}
+
+func TestResolveSendMediaType(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		mime     string
+		override string
+		want     string
+		wantErr  bool
+	}{
+		{name: "mp3 defaults to audio bubble", mime: "audio/mpeg", override: "", want: "audio"},
+		{name: "mp3 forced to document", mime: "audio/mpeg", override: "document", want: "document"},
+		{name: "auto keeps mime detection", mime: "audio/mpeg", override: "auto", want: "audio"},
+		{name: "override is case-insensitive", mime: "audio/mpeg", override: "Document", want: "document"},
+		{name: "image detected from mime", mime: "image/png", override: "", want: "image"},
+		{name: "video detected from mime", mime: "video/mp4", override: "", want: "video"},
+		{name: "unknown mime falls back to document", mime: "application/octet-stream", override: "", want: "document"},
+		{name: "force audio for a document mime", mime: "application/octet-stream", override: "audio", want: "audio"},
+		{name: "invalid override rejected", mime: "audio/mpeg", override: "banana", wantErr: true},
+		{name: "sticker override rejected", mime: "image/webp", override: "sticker", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mediaType, uploadType, err := resolveSendMediaType(tc.mime, tc.override)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("resolveSendMediaType(%q, %q) = %q, want error", tc.mime, tc.override, mediaType)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resolveSendMediaType(%q, %q) unexpected error: %v", tc.mime, tc.override, err)
+			}
+			if mediaType != tc.want {
+				t.Fatalf("resolveSendMediaType(%q, %q) mediaType = %q, want %q", tc.mime, tc.override, mediaType, tc.want)
+			}
+			wantUpload, _ := wa.MediaTypeFromString(tc.want)
+			if uploadType != wantUpload {
+				t.Fatalf("resolveSendMediaType(%q, %q) uploadType = %v, want %v", tc.mime, tc.override, uploadType, wantUpload)
+			}
+		})
 	}
 }
 

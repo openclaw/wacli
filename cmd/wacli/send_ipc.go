@@ -42,6 +42,7 @@ type sendDelegateRequest struct {
 	Filename             string   `json:"filename,omitempty"`
 	Caption              string   `json:"caption,omitempty"`
 	MIME                 string   `json:"mime,omitempty"`
+	As                   string   `json:"as,omitempty"`
 	PTT                  bool     `json:"ptt,omitempty"`
 	ID                   string   `json:"id,omitempty"`
 	Reaction             string   `json:"reaction,omitempty"`
@@ -316,6 +317,7 @@ func executeDelegatedFile(ctx context.Context, a *app.App, req sendDelegateReque
 			filename:      req.Filename,
 			caption:       req.Caption,
 			mimeOverride:  req.MIME,
+			mediaAs:       req.As,
 			replyTo:       req.ReplyTo,
 			replyToSender: req.ReplyToSender,
 			ptt:           req.PTT || req.Kind == "voice",

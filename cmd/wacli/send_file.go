@@ -39,6 +39,7 @@ type sendFileOptions struct {
 	filename      string
 	caption       string
 	mimeOverride  string
+	mediaAs       string
 	replyTo       string
 	replyToSender string
 	ptt           bool
@@ -67,18 +68,9 @@ func sendFile(ctx context.Context, a interface {
 		return "", nil, fmt.Errorf("voice notes require OGG Opus audio; got %s", mimeType)
 	}
 
-	mediaType := "document"
-	uploadType, _ := wa.MediaTypeFromString("document")
-	switch {
-	case strings.HasPrefix(mimeType, "image/"):
-		mediaType = "image"
-		uploadType, _ = wa.MediaTypeFromString("image")
-	case strings.HasPrefix(mimeType, "video/"):
-		mediaType = "video"
-		uploadType, _ = wa.MediaTypeFromString("video")
-	case strings.HasPrefix(mimeType, "audio/"):
-		mediaType = "audio"
-		uploadType, _ = wa.MediaTypeFromString("audio")
+	mediaType, uploadType, err := resolveSendMediaType(mimeType, opts.mediaAs)
+	if err != nil {
+		return "", nil, err
 	}
 
 	isNewsletter := to.Server == types.NewsletterServer
@@ -207,6 +199,37 @@ func sendFile(ctx context.Context, a interface {
 		"media":     mediaType,
 		"ptt":       strconv.FormatBool(opts.ptt),
 	}, nil
+}
+
+// resolveSendMediaType decides the WhatsApp message type (and matching upload
+// type) for an outbound file. By default it derives the type from the MIME
+// prefix. A non-empty override other than "auto" (from --as) forces the type,
+// so a caller can, e.g., send an mp3 as a downloadable document instead of an
+// inline audio bubble — WhatsApp derives the bubble from the message type, not
+// the MIME. Only document/audio/image/video may be forced.
+func resolveSendMediaType(mimeType, override string) (string, whatsmeow.MediaType, error) {
+	if as := strings.ToLower(strings.TrimSpace(override)); as != "" && as != "auto" {
+		switch as {
+		case "document", "audio", "image", "video":
+			ut, _ := wa.MediaTypeFromString(as)
+			return as, ut, nil
+		default:
+			return "", "", fmt.Errorf("invalid --as %q (want document|audio|image|video|auto)", override)
+		}
+	}
+	switch {
+	case strings.HasPrefix(mimeType, "image/"):
+		ut, _ := wa.MediaTypeFromString("image")
+		return "image", ut, nil
+	case strings.HasPrefix(mimeType, "video/"):
+		ut, _ := wa.MediaTypeFromString("video")
+		return "video", ut, nil
+	case strings.HasPrefix(mimeType, "audio/"):
+		ut, _ := wa.MediaTypeFromString("audio")
+		return "audio", ut, nil
+	}
+	ut, _ := wa.MediaTypeFromString("document")
+	return "document", ut, nil
 }
 
 func newImageMessage(up whatsmeow.UploadResponse, mimeType, caption string, data []byte) (*waProto.ImageMessage, error) {

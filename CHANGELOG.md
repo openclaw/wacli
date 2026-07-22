@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- `send file`: add `--as document|audio|image|video|auto` to force the message type regardless of the detected MIME. Lets you deliver an audio file as a downloadable document (`--mime audio/mpeg --as document`) instead of an inline audio bubble, matching how the mobile app attaches files. Plumbed through the `sync --follow` send delegate so it works while the sync process owns the store lock.
+
 ### Fixed
 
 - Sync: include locally resolved chat names in webhook payloads when available. (#312 - thanks @g1e2x87)
