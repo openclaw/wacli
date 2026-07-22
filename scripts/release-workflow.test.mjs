@@ -334,7 +334,7 @@ test("binary build info is bound to the exact clean candidate commit", () => {
   const binary = path.join(directory, "wacli");
   fs.writeFileSync(binary, "fixture");
   const buildInfo = {
-    GoVersion: "go1.25.12",
+    GoVersion: "go1.26.0",
     Path: "github.com/openclaw/wacli/cmd/wacli",
     Settings: [
       { Key: "-trimpath", Value: "true" },
@@ -412,12 +412,12 @@ test("binary build info is bound to the exact clean candidate commit", () => {
     assert.throws(
       () =>
         assertGoBuildInfo(binary, version, {
-          run: runWithInfo({ ...buildInfo, GoVersion: "go1.25.120" }),
+          run: runWithInfo({ ...buildInfo, GoVersion: "go1.26.00" }),
           commit,
           expectedGoos: "darwin",
           expectedGoarch: "arm64",
         }),
-      /not go1\.25\.12/,
+      /not go1\.26\.0/,
     );
 
     const wrongVersionBuildInfo = {

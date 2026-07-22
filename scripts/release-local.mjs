@@ -60,7 +60,7 @@ function assertReleaseSource(version, commit, run) {
   run("git", ["merge-base", "--is-ancestor", commit, "origin/main"], { cwd: repoRoot });
 
   const goMod = fs.readFileSync(path.join(repoRoot, "go.mod"), "utf8");
-  if (!/^go 1\.25\.12$/m.test(goMod)) throw new Error("go.mod must require exact Go 1.25.12");
+  if (!/^go 1\.26\.0$/m.test(goMod)) throw new Error("go.mod must require exact Go 1.26.0");
   const rootSource = fs.readFileSync(path.join(repoRoot, "cmd/wacli/root.go"), "utf8");
   if (!rootSource.includes(`const sourceVersion = \"${version}\"`)) {
     throw new Error(`cmd/wacli/root.go does not default to ${version}`);

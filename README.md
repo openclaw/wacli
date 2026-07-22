@@ -30,7 +30,7 @@ If a Linux install reports `Binary was compiled with 'CGO_ENABLED=0'`, run `brew
 
 ### Build from source
 
-`wacli` requires Go 1.25.12 or newer and uses `go-sqlite3`, so cgo + a C compiler are required.
+`wacli` requires Go 1.26.0 or newer and uses `go-sqlite3`, so cgo + a C compiler are required.
 
 - macOS: Xcode Command Line Tools.
 - Debian/Ubuntu: `sudo apt install build-essential`.

@@ -6,8 +6,8 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 export const RELEASE_REPOSITORY = "openclaw/wacli";
-export const RELEASE_GO_VERSION = "go1.25.12";
-export const RELEASE_GO_TOOLCHAIN = "go1.25.12";
+export const RELEASE_GO_VERSION = "go1.26.0";
+export const RELEASE_GO_TOOLCHAIN = "go1.26.0";
 export const RELEASE_GOVULNCHECK_VERSION = "v1.5.0";
 export const RELEASE_IDENTIFIER = "org.openclaw.wacli";
 export const RELEASE_TEAM_ID = "FWJYW4S8P8";

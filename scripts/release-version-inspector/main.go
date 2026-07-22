@@ -147,7 +147,7 @@ func openMachO(name string) (*executable, error) {
 		}
 	}
 	for _, source := range file.Sections {
-		if source.Size == 0 {
+		if source.Offset == 0 || source.Size == 0 {
 			continue
 		}
 		data, err := source.Data()

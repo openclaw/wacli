@@ -19,7 +19,7 @@
     "govulncheck:binary": "node scripts/govulncheck-stdlib.mjs binary dist/wacli",
     "format": "gofmt -w .",
     "format:check": "bash -lc 'out=$(gofmt -l .); if [ -n \"$out\" ]; then echo \"$out\"; exit 1; fi'",
-    "generate:sqlc": "go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate",
+    "generate:sqlc": "go tool github.com/sqlc-dev/sqlc/cmd/sqlc generate",
     "docs:site": "node scripts/build-docs-site.mjs",
     "check:changed": "pnpm run test",
     "test:changed": "pnpm run test",
