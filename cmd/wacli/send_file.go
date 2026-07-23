@@ -35,6 +35,8 @@ const imageThumbnailMaxPixels = 40_000_000
 const voiceWaveformSamples = 64
 const voiceWaveformMax = 100
 
+const sendMediaTypeAuto = "auto"
+
 type sendFileOptions struct {
 	filename      string
 	caption       string
@@ -54,6 +56,12 @@ func sendFile(ctx context.Context, a interface {
 	WA() app.WAClient
 	DB() *store.DB
 }, to types.JID, filePath string, opts sendFileOptions) (string, map[string]string, error) {
+	mediaAs, err := validateSendFileMediaOptions(opts.mediaAs, opts.ptt)
+	if err != nil {
+		return "", nil, err
+	}
+	opts.mediaAs = mediaAs
+
 	data, err := readSendFileData(filePath)
 	if err != nil {
 		return "", nil, err
@@ -208,14 +216,13 @@ func sendFile(ctx context.Context, a interface {
 // inline audio bubble — WhatsApp derives the bubble from the message type, not
 // the MIME. Only document/audio/image/video may be forced.
 func resolveSendMediaType(mimeType, override string) (string, whatsmeow.MediaType, error) {
-	if as := strings.ToLower(strings.TrimSpace(override)); as != "" && as != "auto" {
-		switch as {
-		case "document", "audio", "image", "video":
-			ut, _ := wa.MediaTypeFromString(as)
-			return as, ut, nil
-		default:
-			return "", "", fmt.Errorf("invalid --as %q (want document|audio|image|video|auto)", override)
-		}
+	as, err := normalizeSendMediaTypeOverride(override)
+	if err != nil {
+		return "", "", err
+	}
+	if as != sendMediaTypeAuto {
+		ut, _ := wa.MediaTypeFromString(as)
+		return as, ut, nil
 	}
 	switch {
 	case strings.HasPrefix(mimeType, "image/"):
@@ -230,6 +237,28 @@ func resolveSendMediaType(mimeType, override string) (string, whatsmeow.MediaTyp
 	}
 	ut, _ := wa.MediaTypeFromString("document")
 	return "document", ut, nil
+}
+
+func validateSendFileMediaOptions(override string, ptt bool) (string, error) {
+	as, err := normalizeSendMediaTypeOverride(override)
+	if err != nil {
+		return "", err
+	}
+	if ptt && as != sendMediaTypeAuto && as != "audio" {
+		return "", fmt.Errorf("--ptt may only be used with --as auto or --as audio")
+	}
+	return as, nil
+}
+
+func normalizeSendMediaTypeOverride(override string) (string, error) {
+	switch as := strings.ToLower(strings.TrimSpace(override)); as {
+	case "", sendMediaTypeAuto:
+		return sendMediaTypeAuto, nil
+	case "document", "audio", "image", "video":
+		return as, nil
+	default:
+		return "", fmt.Errorf("invalid --as %q (want auto|document|audio|image|video)", override)
+	}
 }
 
 func newImageMessage(up whatsmeow.UploadResponse, mimeType, caption string, data []byte) (*waProto.ImageMessage, error) {

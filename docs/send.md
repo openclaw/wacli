@@ -10,7 +10,7 @@ When `sync --follow` is already running for the same store, send commands delega
 
 ```bash
 wacli send text --to RECIPIENT --message TEXT [--message-escapes] [--pick N] [--mention USER] [--no-preview] [--ephemeral] [--ephemeral-duration DURATION] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
-wacli send file --to RECIPIENT --file PATH [--pick N] [--caption TEXT] [--filename NAME] [--mime TYPE] [--as TYPE] [--ptt] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
+wacli send file --to RECIPIENT --file PATH [--pick N] [--caption TEXT] [--filename NAME] [--mime TYPE] [--as auto|document|audio|image|video] [--ptt] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
 wacli send sticker --to RECIPIENT --file PATH [--pick N] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
 wacli send voice --to RECIPIENT --file PATH [--pick N] [--mime TYPE] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
 wacli send react --to PHONE_OR_JID --id MSG_ID [--reaction TEXT] [--sender JID] [--post-send-wait 2s]
@@ -87,7 +87,7 @@ wacli polls list [--chat RECIPIENT] [--limit N] [--json]
 
 - File uploads are capped at 100 MiB.
 - MIME type is detected automatically unless `--mime` is set.
-- WhatsApp derives the message bubble (image, video, audio, or document) from the message type, which wacli picks from the MIME by default. Use `--as document|audio|image|video|auto` to force it. For example, `--mime audio/mpeg --as document` delivers an mp3 as a downloadable document instead of an inline audio bubble, matching how the mobile app attaches files. `--as auto` (the default) keeps MIME-based detection.
+- WhatsApp derives the message bubble (image, video, audio, or document) from the message type, which wacli picks from the MIME by default. Use `--as auto|document|audio|image|video` to force it. For example, `--mime audio/mpeg --as document` delivers an mp3 as a downloadable document instead of an inline audio bubble, matching how the mobile app attaches files. `--as auto` (the default) keeps MIME-based detection. `--ptt` only accepts `--as auto` or `--as audio`.
 - `--filename` changes the displayed document name.
 - Captions apply to images, videos, and documents.
 - Files sent to channels use WhatsApp's unencrypted newsletter media upload path and include the upstream media handle required by `whatsmeow`.

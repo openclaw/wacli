@@ -304,6 +304,10 @@ func executeDelegatedText(ctx context.Context, a *app.App, req sendDelegateReque
 }
 
 func executeDelegatedFile(ctx context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {
+	mediaAs, err := validateSendFileMediaOptions(req.As, req.PTT || req.Kind == "voice")
+	if err != nil {
+		return sendDelegateResponse{}, err
+	}
 	toJID, err := resolveRecipient(a, req.To, recipientOptions{pick: req.Pick, asJSON: true})
 	if err != nil {
 		return sendDelegateResponse{}, err
@@ -317,7 +321,7 @@ func executeDelegatedFile(ctx context.Context, a *app.App, req sendDelegateReque
 			filename:      req.Filename,
 			caption:       req.Caption,
 			mimeOverride:  req.MIME,
-			mediaAs:       req.As,
+			mediaAs:       mediaAs,
 			replyTo:       req.ReplyTo,
 			replyToSender: req.ReplyToSender,
 			ptt:           req.PTT || req.Kind == "voice",

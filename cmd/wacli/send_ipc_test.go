@@ -199,6 +199,51 @@ func TestMessagesEditDelegatesThroughSendSocketWhenStoreLocked(t *testing.T) {
 	}
 }
 
+func TestSendFileDelegatesMediaAsThroughSendSocketWhenStoreLocked(t *testing.T) {
+	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
+	storeDir := shortPresenceDelegateStoreDir(t)
+	lk, err := lock.Acquire(storeDir)
+	if err != nil {
+		t.Fatalf("lock store: %v", err)
+	}
+	defer lk.Release()
+
+	server := startPresenceDelegateTestSocket(t, storeDir, func(req sendDelegateRequest) sendDelegateResponse {
+		return sendDelegateResponse{
+			OK: true, Sent: true, To: "123@s.whatsapp.net", ID: "sent-id", File: map[string]string{"name": "song.mp3"},
+		}
+	})
+	defer server.stop()
+
+	stdout, stderr, err := runPresenceDelegateHelper(t, []string{
+		"--store", storeDir, "--json", "--timeout", "750ms",
+		"send", "file", "--to", "123@s.whatsapp.net", "--file", "song.mp3",
+		"--mime", "audio/mpeg", "--as", "document", "--post-send-wait", "25ms",
+	})
+	if err != nil {
+		t.Fatalf("send file failed: %v stdout=%q stderr=%q", err, stdout, stderr)
+	}
+
+	req := server.nextRequest(t)
+	if req.Version != sendDelegateVersion || req.Kind != "file" {
+		t.Fatalf("delegate version/kind = %d/%q", req.Version, req.Kind)
+	}
+	if req.To != "123@s.whatsapp.net" || req.MIME != "audio/mpeg" || req.As != "document" {
+		t.Fatalf("delegate media options = %+v", req)
+	}
+	if req.TimeoutMS != 750 || req.PostSendWaitMS != 25 {
+		t.Fatalf("delegate timeouts = command %dms post-send %dms", req.TimeoutMS, req.PostSendWaitMS)
+	}
+	if strings.Contains(stderr, "store is locked") || strings.Contains(stderr, "not authenticated") || strings.Contains(stderr, "not connected") {
+		t.Fatalf("delegated command tried the direct store/client path: stderr=%q", stderr)
+	}
+	for _, want := range []string{`"sent":true`, `"id":"sent-id"`, `"name":"song.mp3"`} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("stdout %q missing %s", stdout, want)
+		}
+	}
+}
+
 func TestExecuteDelegatedSendAcceptsEditKind(t *testing.T) {
 	// Reaching app use proves the daemon dispatcher recognized the edit kind.
 	defer func() { _ = recover() }()

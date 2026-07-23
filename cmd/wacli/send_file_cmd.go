@@ -31,6 +31,10 @@ func newSendFileCmd(flags *rootFlags) *cobra.Command {
 			if to == "" || filePath == "" {
 				return fmt.Errorf("--to and --file are required")
 			}
+			mediaAs, err := validateSendFileMediaOptions(mediaAs, ptt)
+			if err != nil {
+				return err
+			}
 			if err := flags.requireWritable(); err != nil {
 				return err
 			}
@@ -129,7 +133,7 @@ func newSendFileCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().StringVar(&filename, "filename", "", "display name for the file (defaults to basename of --file)")
 	cmd.Flags().StringVar(&caption, "caption", "", "caption (images/videos/documents)")
 	cmd.Flags().StringVar(&mimeOverride, "mime", "", "override detected mime type")
-	cmd.Flags().StringVar(&mediaAs, "as", "", "force media type regardless of MIME: document|audio|image|video|auto (default auto)")
+	cmd.Flags().StringVar(&mediaAs, "as", sendMediaTypeAuto, "force WhatsApp media type (auto|document|audio|image|video)")
 	cmd.Flags().StringVar(&replyTo, "reply-to", "", "message ID to quote/reply to")
 	cmd.Flags().StringVar(&replyToSender, "reply-to-sender", "", "sender JID of the quoted message (required for unsynced group replies)")
 	cmd.Flags().BoolVar(&ptt, "ptt", false, "send OGG/Opus audio as a WhatsApp voice note")

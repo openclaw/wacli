@@ -4,7 +4,7 @@
 
 ### Added
 
-- `send file`: add `--as document|audio|image|video|auto` to force the message type regardless of the detected MIME. Lets you deliver an audio file as a downloadable document (`--mime audio/mpeg --as document`) instead of an inline audio bubble, matching how the mobile app attaches files. Plumbed through the `sync --follow` send delegate so it works while the sync process owns the store lock.
+- Send: add `send file --as auto|document|audio|image|video` to choose the WhatsApp media type independently of MIME, including downloadable MP3 documents. (thanks @DiegoDAF)
 
 ### Fixed
 
