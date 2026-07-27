@@ -59,6 +59,7 @@ type sendDelegateRequest struct {
 	PresenceMedia        string   `json:"presence_media,omitempty"`
 	PostSendWaitMS       int64    `json:"post_send_wait_ms,omitempty"`
 	TimeoutMS            int64    `json:"timeout_ms,omitempty"`
+	DeadlineUnixMS       int64    `json:"deadline_unix_ms,omitempty"`
 }
 
 type sendDelegateResponse struct {
@@ -96,7 +97,9 @@ func delegateSend(ctx context.Context, flags *rootFlags, req sendDelegateRequest
 	}
 	defer conn.Close()
 
-	_ = conn.SetDeadline(time.Now().Add(commandTimeout(flags)))
+	deadline := time.Now().Add(commandTimeout(flags))
+	req.DeadlineUnixMS = deadline.UnixMilli()
+	_ = conn.SetDeadline(deadline)
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
 		return sendDelegateResponse{}, err
 	}
@@ -194,14 +197,21 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, a *app.App, send
 	}
 	requestCtx := ctx
 	if pacer.enabled() {
+		deadline := time.Now().Add(millisDuration(req.TimeoutMS, 5*time.Minute))
+		if req.DeadlineUnixMS > 0 {
+			callerDeadline := time.UnixMilli(req.DeadlineUnixMS)
+			if callerDeadline.Before(deadline) {
+				deadline = callerDeadline
+			}
+		}
 		var cancel context.CancelFunc
-		requestCtx, cancel = context.WithTimeout(ctx, millisDuration(req.TimeoutMS, 5*time.Minute))
+		requestCtx, cancel = context.WithDeadline(ctx, deadline)
 		defer cancel()
-		if deadline, ok := requestCtx.Deadline(); ok {
+		if requestDeadline, ok := requestCtx.Deadline(); ok {
 			// The fixed initial deadline only protects request decoding. A paced
 			// request may intentionally run longer than five minutes, so keep the
 			// transport alive through its budget and the final response write.
-			_ = conn.SetDeadline(deadline.Add(sendDelegateResponseGrace))
+			_ = conn.SetDeadline(requestDeadline.Add(sendDelegateResponseGrace))
 		}
 	}
 

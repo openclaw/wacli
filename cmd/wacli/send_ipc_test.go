@@ -189,6 +189,9 @@ func TestMessagesEditDelegatesThroughSendSocketWhenStoreLocked(t *testing.T) {
 	if req.TimeoutMS != 750 || req.PostSendWaitMS != 25 {
 		t.Fatalf("delegate timeouts = command %dms post-send %dms", req.TimeoutMS, req.PostSendWaitMS)
 	}
+	if req.DeadlineUnixMS == 0 {
+		t.Fatal("delegated request missing absolute command deadline")
+	}
 	if strings.Contains(stderr, "store is locked") {
 		t.Fatalf("delegated command tried the direct store path: stderr=%q", stderr)
 	}

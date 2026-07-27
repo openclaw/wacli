@@ -327,3 +327,39 @@ func TestSendPacingExtendsIPCDeadlineThroughResponse(t *testing.T) {
 		t.Fatalf("paced connection deadline = %s, want at least %s", got, wantAtLeast)
 	}
 }
+
+func TestSendPacingHonorsAbsoluteCallerDeadline(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer clientConn.Close()
+	if err := clientConn.SetDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("set client deadline: %v", err)
+	}
+
+	var sendMu sync.Mutex
+	pacedSendSlot := make(chan struct{}, 1)
+	pacedSendSlot <- struct{}{}
+	pacer := newSendPacer(sendSpacing{min: time.Second, max: time.Second})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		handleSendDelegateConn(context.Background(), serverConn, nil, &sendMu, pacedSendSlot, pacer)
+	}()
+
+	req := sendDelegateRequest{
+		Version:        sendDelegateVersion + 1,
+		Kind:           "text",
+		TimeoutMS:      durationMillis(10 * time.Minute),
+		DeadlineUnixMS: time.Now().Add(-time.Second).UnixMilli(),
+	}
+	if err := json.NewEncoder(clientConn).Encode(req); err != nil {
+		t.Fatalf("encode request: %v", err)
+	}
+	var resp sendDelegateResponse
+	if err := json.NewDecoder(clientConn).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.OK || !strings.Contains(resp.Error, "send spacing exceeded request timeout") {
+		t.Fatalf("response = %+v, want expired caller deadline to block dispatch", resp)
+	}
+	<-done
+}
