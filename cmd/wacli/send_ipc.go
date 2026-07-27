@@ -19,8 +19,9 @@ import (
 )
 
 const (
-	sendDelegateVersion    = 1
-	sendDelegateSocketName = ".send.sock"
+	sendDelegateVersion       = 1
+	sendDelegateSocketName    = ".send.sock"
+	sendDelegateResponseGrace = 5 * time.Second
 )
 
 var errSendDelegateUnavailable = errors.New("send delegate unavailable")
@@ -196,6 +197,12 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, a *app.App, send
 		var cancel context.CancelFunc
 		requestCtx, cancel = context.WithTimeout(ctx, millisDuration(req.TimeoutMS, 5*time.Minute))
 		defer cancel()
+		if deadline, ok := requestCtx.Deadline(); ok {
+			// The fixed initial deadline only protects request decoding. A paced
+			// request may intentionally run longer than five minutes, so keep the
+			// transport alive through its budget and the final response write.
+			_ = conn.SetDeadline(deadline.Add(sendDelegateResponseGrace))
+		}
 	}
 
 	if pacer.enabled() {

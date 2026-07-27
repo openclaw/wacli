@@ -10,6 +10,16 @@ import (
 	"time"
 )
 
+type deadlineRecordingConn struct {
+	net.Conn
+	deadlines []time.Time
+}
+
+func (c *deadlineRecordingConn) SetDeadline(deadline time.Time) error {
+	c.deadlines = append(c.deadlines, deadline)
+	return c.Conn.SetDeadline(deadline)
+}
+
 func TestParseSendSpacing(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -276,4 +286,44 @@ func TestSendPacingTimeoutCancelsQueueWait(t *testing.T) {
 		t.Fatalf("response = %+v, want pre-dispatch spacing timeout", resp)
 	}
 	<-done
+}
+
+func TestSendPacingExtendsIPCDeadlineThroughResponse(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	trackedServerConn := &deadlineRecordingConn{Conn: serverConn}
+	defer clientConn.Close()
+
+	var sendMu sync.Mutex
+	pacedSendSlot := make(chan struct{}, 1)
+	pacedSendSlot <- struct{}{}
+	pacer := newSendPacer(sendSpacing{min: time.Second, max: time.Second})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		handleSendDelegateConn(context.Background(), trackedServerConn, nil, &sendMu, pacedSendSlot, pacer)
+	}()
+
+	const requestTimeout = 10 * time.Minute
+	started := time.Now()
+	req := sendDelegateRequest{
+		Version:   sendDelegateVersion + 1,
+		Kind:      "text",
+		TimeoutMS: durationMillis(requestTimeout),
+	}
+	if err := json.NewEncoder(clientConn).Encode(req); err != nil {
+		t.Fatalf("encode request: %v", err)
+	}
+	var resp sendDelegateResponse
+	if err := json.NewDecoder(clientConn).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	<-done
+
+	if len(trackedServerConn.deadlines) != 2 {
+		t.Fatalf("deadlines = %v, want initial decode and paced request deadlines", trackedServerConn.deadlines)
+	}
+	wantAtLeast := started.Add(requestTimeout)
+	if got := trackedServerConn.deadlines[1]; got.Before(wantAtLeast) {
+		t.Fatalf("paced connection deadline = %s, want at least %s", got, wantAtLeast)
+	}
 }
