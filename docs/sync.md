@@ -7,7 +7,7 @@ Read when: running continuous capture, one-shot sync, contact/group refresh, or 
 ## Command
 
 ```bash
-wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--stale-threshold DURATION] [--presence-mode normal|quiet] [--max-messages N] [--max-db-size SIZE] [--download-media] [--refresh-contacts] [--refresh-groups] [--refresh-channels] [--events] [--webhook URL] [--webhook-secret SECRET]
+wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--stale-threshold DURATION] [--presence-mode normal|quiet] [--max-messages N] [--max-db-size SIZE] [--download-media] [--refresh-contacts] [--refresh-groups] [--refresh-channels] [--events] [--webhook URL] [--webhook-secret SECRET] [--webhook-events LIST]
 ```
 
 ## Modes
@@ -24,6 +24,7 @@ wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--stale-t
 - `--refresh-channels` fetches subscribed WhatsApp Channels live and updates local chat rows.
 - `--webhook URL` posts successfully stored live message events as JSON on a bounded background worker. The payload includes `ChatName` when a locally resolved chat name is available.
 - `--webhook-secret SECRET` signs webhook payloads with `X-Wacli-Signature: sha256=<hmac>`.
+- `--webhook-events LIST` selects which event types are posted, as a comma-separated list of `message`, `receipt`, and `chat_presence`. The default is `message`, which posts exactly what earlier versions posted. A list that omits `message` stops message posts, so `--webhook-events receipt` posts receipts only. `chat_presence` needs `--presence-mode normal` (the default): WhatsApp only sends typing notifications to devices that mark themselves available. See [Webhook payloads](#webhook-payloads).
 - Webhook delivery is best-effort: failures, request timeouts, and full-queue drops are logged as warnings and do not stop sync. Retries/backoff are intentionally out of scope for this flag.
 - If neither storage cap is configured, sync prints one warning because WhatsApp history can grow the local database substantially.
 - `WACLI_SYNC_MAX_MESSAGES` and `WACLI_SYNC_MAX_DB_SIZE` apply the same caps to `auth` bootstrap sync and `sync`.
@@ -40,6 +41,40 @@ wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--stale-t
 - While `sync --follow` is running, a `HEARTBEAT` file is written to the store directory (at most once per minute) with the last observed follow activity timestamp in RFC 3339 format. External watchdogs or `wacli doctor` can read this as an activity marker; quiet healthy sessions may not update it because successful keepalives are silent, and keepalive health is reported separately through `stale` events.
 - `--events` emits one NDJSON lifecycle event per stderr line for machine consumers. Routine human progress/status lines, interrupt prompts, and command errors are emitted as events while events are enabled.
 
+## Webhook payloads
+
+Webhook payloads remain flat JSON objects. Receipt and chat-presence payloads carry
+an `EventType` discriminator. Message payloads deliberately omit it so existing
+consumers receive the same signed body as before; a missing `EventType` means
+`message`.
+
+Messages use the stored live message payload documented above, unchanged:
+
+```json
+{"Chat":"15551234567@s.whatsapp.net","ID":"3EB0…","SenderJID":"15551234567@s.whatsapp.net","Timestamp":"2026-07-25T10:00:00Z","FromMe":false,"Text":"hi","ChatName":"Alice"}
+```
+
+`EventType: "receipt"` reports delivery and read state for messages you sent. Only
+`delivered`, `read`, and `played` cross the webhook; the protocol bookkeeping types
+(`sender`, `retry`, `read-self`, `played-self`, `inactive`, `server-error`, `peer_msg`,
+`hist_sync`) are dropped at the source so they cannot crowd out real messages. The
+`delivered` type is spelled out explicitly, even though WhatsApp sends it as an empty
+string on the wire. `MessageIDs` keeps WhatsApp's batching (one POST per receipt, not per message,
+minus any blank IDs), and in groups `Sender` is the participant the receipt came
+from:
+
+```json
+{"EventType":"receipt","Chat":"120363000000000000@g.us","Sender":"15551234567@s.whatsapp.net","MessageIDs":["3EB0…"],"Timestamp":"2026-07-25T10:00:01Z","Type":"delivered","IsFromMe":false}
+```
+
+`EventType: "chat_presence"` reports per-chat typing state. `Media` is `audio` while the
+contact records a voice message and empty otherwise. Global presence (`online` / last
+seen) is deliberately not forwarded:
+
+```json
+{"EventType":"chat_presence","Chat":"15551234567@s.whatsapp.net","Sender":"15551234567@s.whatsapp.net","State":"composing","Media":""}
+```
+
 ## Examples
 
 ```bash
@@ -53,4 +88,5 @@ wacli sync --follow --download-media
 wacli sync --once --events 2>events.ndjson
 wacli sync --follow --stale-threshold 2m --events 2>events.ndjson
 wacli sync --follow --webhook https://example.com/wacli --webhook-secret "$WACLI_WEBHOOK_SECRET"
+wacli sync --follow --webhook https://example.com/wacli --webhook-events message,receipt,chat_presence
 ```

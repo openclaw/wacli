@@ -175,7 +175,7 @@ combined with `--account`.
 
 ### Sync
 
-- `wacli sync [--once] [--follow] [--stale-threshold DURATION] [--download-media] [--webhook URL] [--webhook-secret SECRET]`
+- `wacli sync [--once] [--follow] [--stale-threshold DURATION] [--download-media] [--webhook URL] [--webhook-secret SECRET] [--webhook-events LIST]`
 
 Notes:
 
@@ -183,6 +183,7 @@ Notes:
 - `--download-media` runs a bounded/concurrent media downloader for messages that contain downloadable media metadata.
 - `--webhook` posts live message JSON after successful local storage on a bounded background worker.
 - `--webhook-secret` adds an HMAC-SHA256 `X-Wacli-Signature` header and requires `--webhook`.
+- `--webhook-events` selects which event types are posted (`message`, `receipt`, `chat_presence`; default `message`) and requires `--webhook`. Receipt and chat-presence payloads carry a flat `EventType` discriminator; legacy message payloads omit it.
 - Webhook failures and full-queue drops emit warnings but do not fail sync.
 
 ### History backfill (best-effort)

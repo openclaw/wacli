@@ -25,6 +25,7 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 	var webhookURL string
 	var webhookSecret string
 	var webhookAllowPrivate bool
+	var webhookEventsFlag string
 	var storage syncStorageLimitFlags
 
 	cmd := &cobra.Command{
@@ -41,6 +42,13 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 			}
 			if webhookSecret != "" && webhookURL == "" {
 				return fmt.Errorf("--webhook-secret requires --webhook")
+			}
+			if cmd.Flags().Changed("webhook-events") && webhookURL == "" {
+				return fmt.Errorf("--webhook-events requires --webhook")
+			}
+			webhookEvents, err := appPkg.ParseSyncWebhookEvents(webhookEventsFlag)
+			if err != nil {
+				return err
 			}
 			if staleThreshold != 0 && staleThreshold < time.Second {
 				return fmt.Errorf("--stale-threshold must be at least 1s, got %s", staleThreshold)
@@ -110,6 +118,7 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 				WebhookURL:          webhookURL,
 				WebhookSecret:       webhookSecret,
 				WebhookAllowPrivate: webhookAllowPrivate,
+				WebhookEvents:       webhookEvents,
 			})
 			if err != nil {
 				return err
@@ -139,6 +148,7 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().StringVar(&webhookURL, "webhook", "", "URL to POST live message JSON")
 	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "HMAC-SHA256 secret for X-Wacli-Signature header")
 	cmd.Flags().BoolVar(&webhookAllowPrivate, "webhook-allow-private", false, "allow webhook URLs that resolve to localhost or private networks")
+	cmd.Flags().StringVar(&webhookEventsFlag, "webhook-events", string(appPkg.SyncWebhookEventMessage), "comma-separated event types to POST: message, receipt, chat_presence")
 	cmd.Flags().Int64Var(&storage.maxMessages, "max-messages", 0, "maximum total messages to keep in the local DB before sync stops (0 = unlimited, or WACLI_SYNC_MAX_MESSAGES)")
 	cmd.Flags().StringVar(&storage.maxDBSize, "max-db-size", "", "maximum wacli.db disk usage before sync stops, e.g. 500MB or 2GB (default: WACLI_SYNC_MAX_DB_SIZE or unlimited)")
 	return cmd

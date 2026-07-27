@@ -77,7 +77,8 @@ type SyncOptions struct {
 	WebhookURL          string
 	WebhookSecret       string
 	WebhookAllowPrivate bool
-	Verbosity           int // future
+	WebhookEvents       SyncWebhookEventSet // nil = messages only
+	Verbosity           int                 // future
 }
 
 type SyncResult struct {
@@ -162,10 +163,10 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	}
 
 	var stopWebhook func()
-	var webhookJobs chan wa.ParsedMessage
-	enqueueWebhook := func(wa.ParsedMessage) {}
+	var webhookJobs chan syncWebhookEvent
+	enqueueWebhook := func(syncWebhookEvent) {}
 	if syncWebhookEnabled(opts) {
-		webhookJobs = make(chan wa.ParsedMessage, 512)
+		webhookJobs = make(chan syncWebhookEvent, 512)
 		enqueueWebhook = a.newSyncWebhookEnqueuer(syncCtx, webhookJobs)
 		stopWebhook = a.runSyncWebhookWorker(syncCtx, opts, webhookJobs)
 		defer stopWebhook()

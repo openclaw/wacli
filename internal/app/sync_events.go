@@ -46,9 +46,16 @@ type syncPresence struct {
 	cleanupStarted bool
 }
 
-func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, messagesStored, lastEvent *atomic.Int64, disconnected chan<- struct{}, staleReconnect chan<- staleReconnectRequest, enqueueMedia func(string, string), enqueueWebhook func(wa.ParsedMessage), limits *syncStorageLimits, ps *syncPresence, mediaQ *mediaQueue) uint32 {
+func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, messagesStored, lastEvent *atomic.Int64, disconnected chan<- struct{}, staleReconnect chan<- staleReconnectRequest, enqueueMedia func(string, string), enqueueWebhook func(syncWebhookEvent), limits *syncStorageLimits, ps *syncPresence, mediaQ *mediaQueue) uint32 {
 	var panicCount atomic.Int64
 	var appStateRecoveries sync.Map
+	if enqueueWebhook == nil {
+		enqueueWebhook = func(syncWebhookEvent) {}
+	}
+	enqueueWebhookMessage := newSyncWebhookMessageEnqueuer(enqueueWebhook)
+	if !opts.WebhookEvents.Enabled(SyncWebhookEventMessage) {
+		enqueueWebhookMessage = func(wa.ParsedMessage) {}
+	}
 	return a.wa.AddEventHandler(func(evt interface{}) {
 		if mediaQ != nil {
 			if !mediaQ.beginProducer() {
@@ -88,7 +95,7 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 				a.downloadAndHandleHistorySync(ctx, opts, notif, messagesStored, lastEvent, enqueueMedia, limits)
 				return
 			}
-			a.handleLiveSyncMessage(ctx, opts, v, messagesStored, enqueueMedia, enqueueWebhook, limits)
+			a.handleLiveSyncMessage(ctx, opts, v, messagesStored, enqueueMedia, enqueueWebhookMessage, limits)
 		case *events.CallOffer, *events.CallAccept, *events.CallPreAccept, *events.CallTransport,
 			*events.CallOfferNotice, *events.CallRelayLatency, *events.CallTerminate, *events.CallReject:
 			lastEvent.Store(nowUTC().UnixNano())
@@ -103,6 +110,19 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 		case *events.Receipt:
 			lastEvent.Store(nowUTC().UnixNano())
 			a.handleReceiptPersistenceEvent(ctx, v)
+			if opts.WebhookEvents.Enabled(SyncWebhookEventReceipt) {
+				if job, ok := newSyncWebhookReceiptEvent(v); ok {
+					enqueueWebhook(job)
+				}
+			}
+		case *events.ChatPresence:
+			// Deliberately does not touch lastEvent: typing notifications must
+			// not keep an idle-exit sync alive.
+			if opts.WebhookEvents.Enabled(SyncWebhookEventChatPresence) {
+				if job, ok := newSyncWebhookChatPresenceEvent(v); ok {
+					enqueueWebhook(job)
+				}
+			}
 		case *events.Connected:
 			a.emitOrPrint("connected", nil, "\nConnected.\n")
 			ps.mu.Lock()
