@@ -2,6 +2,10 @@
 
 ## 0.15.1 - Unreleased
 
+### Added
+
+- Sync: add opt-in receipt and chat-presence webhook events while keeping legacy message payloads unchanged. (#315 - thanks @Jaime-data)
+
 ### Chore
 
 - Build: migrate `sqlc` code generator to Go 1.24+ `go tool` directive and bump project toolchain requirement to Go 1.26.5. (#313 - thanks @thedavidweng)
