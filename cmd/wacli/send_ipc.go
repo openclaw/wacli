@@ -123,7 +123,7 @@ func tryDelegateSend(ctx context.Context, flags *rootFlags, lockErr error, req s
 	return resp, true, nil
 }
 
-func startSendDelegateServer(ctx context.Context, a *app.App) (func(), error) {
+func startSendDelegateServer(ctx context.Context, a *app.App, spacing sendSpacing) (func(), error) {
 	path := sendDelegateSocketPath(a.StoreDir())
 	if err := removeStaleSendDelegateSocket(path); err != nil {
 		return nil, err
@@ -140,6 +140,10 @@ func startSendDelegateServer(ctx context.Context, a *app.App) (func(), error) {
 
 	done := make(chan struct{})
 	var sendMu sync.Mutex
+	// One pacer shared across connections: it spaces the serialized delegated
+	// sends so a burst of `wacli send` processes delegating to this daemon
+	// leaves the wire paced instead of back-to-back. Disabled = no-op.
+	pacer := newSendPacer(spacing)
 	go func() {
 		defer close(done)
 		for {
@@ -147,7 +151,7 @@ func startSendDelegateServer(ctx context.Context, a *app.App) (func(), error) {
 			if err != nil {
 				return
 			}
-			go handleSendDelegateConn(ctx, conn, a, &sendMu)
+			go handleSendDelegateConn(ctx, conn, a, &sendMu, pacer)
 		}
 	}()
 
@@ -173,7 +177,7 @@ func removeStaleSendDelegateSocket(path string) error {
 	return os.Remove(path)
 }
 
-func handleSendDelegateConn(ctx context.Context, conn net.Conn, a *app.App, sendMu *sync.Mutex) {
+func handleSendDelegateConn(ctx context.Context, conn net.Conn, a *app.App, sendMu *sync.Mutex, pacer *sendPacer) {
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(5 * time.Minute))
 
@@ -184,6 +188,10 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, a *app.App, send
 	}
 	sendMu.Lock()
 	defer sendMu.Unlock()
+
+	// Space this send from the previous one while serialized (no-op if
+	// --send-spacing is unset).
+	pacer.pace(ctx)
 
 	resp, err := executeDelegatedSend(ctx, a, req)
 	if err != nil {
