@@ -140,6 +140,11 @@ func startSendDelegateServer(ctx context.Context, a *app.App, spacing sendSpacin
 
 	done := make(chan struct{})
 	var sendMu sync.Mutex
+	var pacedSendSlot chan struct{}
+	if spacing.enabled() {
+		pacedSendSlot = make(chan struct{}, 1)
+		pacedSendSlot <- struct{}{}
+	}
 	// One pacer shared across connections: it spaces the serialized delegated
 	// sends so a burst of `wacli send` processes delegating to this daemon
 	// leaves the wire paced instead of back-to-back. Disabled = no-op.
@@ -151,7 +156,7 @@ func startSendDelegateServer(ctx context.Context, a *app.App, spacing sendSpacin
 			if err != nil {
 				return
 			}
-			go handleSendDelegateConn(ctx, conn, a, &sendMu, pacer)
+			go handleSendDelegateConn(ctx, conn, a, &sendMu, pacedSendSlot, pacer)
 		}
 	}()
 
@@ -177,7 +182,7 @@ func removeStaleSendDelegateSocket(path string) error {
 	return os.Remove(path)
 }
 
-func handleSendDelegateConn(ctx context.Context, conn net.Conn, a *app.App, sendMu *sync.Mutex, pacer *sendPacer) {
+func handleSendDelegateConn(ctx context.Context, conn net.Conn, a *app.App, sendMu *sync.Mutex, pacedSendSlot chan struct{}, pacer *sendPacer) {
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(5 * time.Minute))
 
@@ -193,8 +198,23 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, a *app.App, send
 		defer cancel()
 	}
 
-	sendMu.Lock()
-	defer sendMu.Unlock()
+	if pacer.enabled() {
+		select {
+		case <-requestCtx.Done():
+			_ = json.NewEncoder(conn).Encode(sendDelegateResponse{
+				OK:    false,
+				Error: "send spacing exceeded request timeout before dispatch",
+			})
+			return
+		case <-pacedSendSlot:
+			defer func() { pacedSendSlot <- struct{}{} }()
+		}
+	} else {
+		// Preserve the original unpaced serialization path exactly when the
+		// opt-in flag is unset.
+		sendMu.Lock()
+		defer sendMu.Unlock()
+	}
 
 	// Space this send from the previous one while serialized. Bound the wait by
 	// the caller's request timeout, including time spent waiting for earlier

@@ -244,17 +244,20 @@ func TestSendPacerFirstSendRespectsAlreadyExpiredContext(t *testing.T) {
 	}
 }
 
-func TestSendPacingTimeoutIncludesMutexQueueWait(t *testing.T) {
+func TestSendPacingTimeoutCancelsQueueWait(t *testing.T) {
 	serverConn, clientConn := net.Pipe()
 	defer clientConn.Close()
+	if err := clientConn.SetDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("set client deadline: %v", err)
+	}
 
 	var sendMu sync.Mutex
-	sendMu.Lock()
+	pacedSendSlot := make(chan struct{}, 1) // empty means an earlier send owns it
 	pacer := newSendPacer(sendSpacing{min: time.Second, max: time.Second})
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		handleSendDelegateConn(context.Background(), serverConn, nil, &sendMu, pacer)
+		handleSendDelegateConn(context.Background(), serverConn, nil, &sendMu, pacedSendSlot, pacer)
 	}()
 
 	req := sendDelegateRequest{
@@ -265,11 +268,6 @@ func TestSendPacingTimeoutIncludesMutexQueueWait(t *testing.T) {
 	if err := json.NewEncoder(clientConn).Encode(req); err != nil {
 		t.Fatalf("encode request: %v", err)
 	}
-	// The server has consumed the request and is queued on sendMu. Its request
-	// deadline must elapse there, before pacing or dispatch can begin.
-	time.Sleep(50 * time.Millisecond)
-	sendMu.Unlock()
-
 	var resp sendDelegateResponse
 	if err := json.NewDecoder(clientConn).Decode(&resp); err != nil {
 		t.Fatalf("decode response: %v", err)
