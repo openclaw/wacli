@@ -186,28 +186,37 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, a *app.App, send
 		_ = json.NewEncoder(conn).Encode(sendDelegateResponse{OK: false, Error: err.Error()})
 		return
 	}
+	requestCtx := ctx
+	if pacer.enabled() {
+		var cancel context.CancelFunc
+		requestCtx, cancel = context.WithTimeout(ctx, millisDuration(req.TimeoutMS, 5*time.Minute))
+		defer cancel()
+	}
+
 	sendMu.Lock()
 	defer sendMu.Unlock()
 
 	// Space this send from the previous one while serialized. Bound the wait by
-	// the caller's request timeout and have pacing + send share that one
-	// deadline, so a long spacing interval can never dispatch a send after the
-	// caller has already timed out. Disabled spacing leaves the path untouched.
+	// the caller's request timeout, including time spent waiting for earlier
+	// delegated sends, and have pacing + send share that one deadline. Disabled
+	// spacing leaves the path untouched.
 	if pacer.enabled() {
-		reqCtx, cancel := context.WithTimeout(ctx, millisDuration(req.TimeoutMS, 5*time.Minute))
-		defer cancel()
-		if !pacer.wait(reqCtx) {
+		if !pacer.wait(requestCtx) {
 			_ = json.NewEncoder(conn).Encode(sendDelegateResponse{
 				OK:    false,
 				Error: "send spacing exceeded request timeout before dispatch",
 			})
 			return
 		}
-		pacer.record()
-		ctx = reqCtx
 	}
 
-	resp, err := executeDelegatedSend(ctx, a, req)
+	resp, err := executeDelegatedSend(requestCtx, a, req)
+	if pacer.enabled() {
+		// Record completion, not handler entry: recipient resolution, media
+		// preparation, and the actual wire send all happen inside execute.
+		// Starting the gap here prevents a slow operation from consuming it.
+		pacer.record()
+	}
 	if err != nil {
 		resp = sendDelegateResponse{OK: false, Error: err.Error()}
 	}

@@ -2,6 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"net"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -63,9 +67,8 @@ func fakePacer(spacing sendSpacing, rng func(int64) int64) (*sendPacer, *[]time.
 	return p, &slept
 }
 
-// paceOnce mirrors handleSendDelegateConn's use of the pacer: wait bounded by
-// ctx, and only dispatch (record) if the wait was satisfied. Returns whether
-// the send would be dispatched.
+// paceOnce models a zero-duration delegated send: wait within ctx, then record
+// completion if the send would be dispatched.
 func paceOnce(p *sendPacer, ctx context.Context) bool {
 	if !p.enabled() {
 		return true
@@ -136,9 +139,25 @@ func TestSendPacerRandomGapWithinBounds(t *testing.T) {
 	}
 }
 
-func TestSendPacerSkipsWaitWhenElapsedExceedsGap(t *testing.T) {
-	// A slow send: advance the clock past the gap before the next send, so no
-	// additional wait is needed.
+func TestSendPacerFullDurationRangeDoesNotPanic(t *testing.T) {
+	const maxDuration = time.Duration(1<<63 - 1)
+	p := &sendPacer{
+		spacing: sendSpacing{max: maxDuration},
+		rng: func(n int64) int64 {
+			if n <= 0 {
+				t.Fatalf("rng bound = %d, want positive", n)
+			}
+			return n - 1
+		},
+	}
+	if gap := p.pick(); gap < 0 || gap > maxDuration {
+		t.Fatalf("gap = %s, want within [0,%s]", gap, maxDuration)
+	}
+}
+
+func TestSendPacerSkipsWaitAfterIdlePeriodExceedsGap(t *testing.T) {
+	// Advance the clock after the previous send completed. Existing idle time
+	// counts toward the gap, so no additional wait is needed.
 	clock := time.Unix(1000, 0)
 	slept := []time.Duration{}
 	p := &sendPacer{
@@ -150,11 +169,37 @@ func TestSendPacerSkipsWaitWhenElapsedExceedsGap(t *testing.T) {
 		},
 		rng: func(int64) int64 { return 0 },
 	}
-	paceOnce(p, context.Background()) // first: records start, no wait
+	paceOnce(p, context.Background()) // first: records completion, no wait
 	clock = clock.Add(3 * time.Second)
 	paceOnce(p, context.Background()) // elapsed 3s > 1s gap: no wait
 	if len(slept) != 0 {
 		t.Fatalf("expected no wait when elapsed exceeds gap, slept %v", slept)
+	}
+}
+
+func TestSendPacerStartsGapAfterSendCompletion(t *testing.T) {
+	clock := time.Unix(1000, 0)
+	var slept []time.Duration
+	p := &sendPacer{
+		spacing: sendSpacing{min: time.Second, max: time.Second},
+		now:     func() time.Time { return clock },
+		sleep: func(_ context.Context, d time.Duration) {
+			slept = append(slept, d)
+			clock = clock.Add(d)
+		},
+		rng: func(int64) int64 { return 0 },
+	}
+
+	if !p.wait(context.Background()) {
+		t.Fatal("first send unexpectedly blocked")
+	}
+	clock = clock.Add(3 * time.Second) // slow preparation and wire send
+	p.record()                         // handler records only after completion
+	if !p.wait(context.Background()) {
+		t.Fatal("second send unexpectedly blocked")
+	}
+	if len(slept) != 1 || slept[0] != time.Second {
+		t.Fatalf("slept = %v, want one full gap after completion", slept)
 	}
 }
 
@@ -197,4 +242,40 @@ func TestSendPacerFirstSendRespectsAlreadyExpiredContext(t *testing.T) {
 	if paceOnce(p, ctx) {
 		t.Fatalf("first send dispatched despite an already-cancelled context")
 	}
+}
+
+func TestSendPacingTimeoutIncludesMutexQueueWait(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer clientConn.Close()
+
+	var sendMu sync.Mutex
+	sendMu.Lock()
+	pacer := newSendPacer(sendSpacing{min: time.Second, max: time.Second})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		handleSendDelegateConn(context.Background(), serverConn, nil, &sendMu, pacer)
+	}()
+
+	req := sendDelegateRequest{
+		Version:   sendDelegateVersion + 1,
+		Kind:      "text",
+		TimeoutMS: 10,
+	}
+	if err := json.NewEncoder(clientConn).Encode(req); err != nil {
+		t.Fatalf("encode request: %v", err)
+	}
+	// The server has consumed the request and is queued on sendMu. Its request
+	// deadline must elapse there, before pacing or dispatch can begin.
+	time.Sleep(50 * time.Millisecond)
+	sendMu.Unlock()
+
+	var resp sendDelegateResponse
+	if err := json.NewDecoder(clientConn).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.OK || !strings.Contains(resp.Error, "send spacing exceeded request timeout") {
+		t.Fatalf("response = %+v, want pre-dispatch spacing timeout", resp)
+	}
+	<-done
 }

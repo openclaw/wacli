@@ -49,9 +49,9 @@ func parseSendSpacing(raw string) (sendSpacing, error) {
 }
 
 // sendPacer enforces sendSpacing across the daemon's serialized delegated
-// sends. It is NOT safe for concurrent use: callers invoke pace() while holding
-// the send mutex, so sends are already serialized and the pacer just adds the
-// gap between them. The clock, sleeper, and RNG are injectable for tests.
+// sends. It is NOT safe for concurrent use: callers invoke wait and record while
+// holding the send mutex, so sends are already serialized and the pacer just
+// adds the gap between them. The clock, sleeper, and RNG are injectable for tests.
 type sendPacer struct {
 	spacing sendSpacing
 	last    time.Time
@@ -75,13 +75,14 @@ func newSendPacer(spacing sendSpacing) *sendPacer {
 func (p *sendPacer) enabled() bool { return p != nil && p.spacing.enabled() }
 
 // wait blocks until at least a freshly-chosen gap has elapsed since the
-// previous send started. It reports whether the caller may proceed with the
-// send: false means the context was cancelled (the caller's request timeout
-// elapsed) before the gap was satisfied, so the send MUST NOT be dispatched —
+// previous serialized send attempt completed. It reports whether the caller
+// may proceed with the send: false means the context was cancelled (the
+// caller's request timeout elapsed) before the gap was satisfied, so the send
+// MUST NOT be dispatched —
 // otherwise pacing could push a send past the caller's timeout and deliver it
 // after the caller has already reported failure. The first send of the session
-// waits for nothing. Call inside the send critical section; on true, call
-// record() and dispatch.
+// waits for nothing. Call inside the send critical section; on true, dispatch
+// and call record() after the attempt completes.
 func (p *sendPacer) wait(ctx context.Context) bool {
 	if p == nil || !p.spacing.enabled() || !p.hasLast {
 		return ctx.Err() == nil
@@ -93,9 +94,9 @@ func (p *sendPacer) wait(ctx context.Context) bool {
 	return ctx.Err() == nil
 }
 
-// record marks a send's start time. Call it only once a send is actually being
-// dispatched (after wait() returned true), so an aborted, un-dispatched send
-// never shifts the spacing baseline.
+// record marks the completion of a serialized send attempt. Call it after
+// wait() returned true and the attempt finishes, so time spent preparing or
+// sending cannot consume the gap before the next attempt.
 func (p *sendPacer) record() {
 	if p == nil || !p.spacing.enabled() {
 		return
@@ -109,6 +110,12 @@ func (p *sendPacer) pick() time.Duration {
 		return p.spacing.min
 	}
 	span := int64(p.spacing.max - p.spacing.min)
+	// span+1 overflows only for the full non-negative time.Duration range.
+	// Omitting that range's single upper endpoint keeps an otherwise valid CLI
+	// value from panicking the daemon.
+	if span == int64(time.Duration(1<<63-1)) {
+		return p.spacing.min + time.Duration(p.rng(span))
+	}
 	return p.spacing.min + time.Duration(p.rng(span+1))
 }
 
