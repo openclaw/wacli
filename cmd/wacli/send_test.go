@@ -76,6 +76,10 @@ func (s *recordingTextSender) LinkedJID() string {
 	return s.linkedJID
 }
 
+func (s *recordingTextSender) LinkedLID() string {
+	return s.linkedLID.String()
+}
+
 func (s *recordingTextSender) ResolvePNToLID(_ context.Context, _ types.JID) types.JID {
 	s.resolveLIDCalls++
 	return s.linkedLID
@@ -121,7 +125,7 @@ func TestResolveRecipientFallsBackToFormattedPhone(t *testing.T) {
 	}
 }
 
-func TestSendTextToOwnPNTargetsRegisteredLID(t *testing.T) {
+func TestSendTextToOwnPNRejectsRegisteredLID(t *testing.T) {
 	pn := types.NewJID("15551234567", types.DefaultUserServer)
 	lid := types.NewJID("999123456789", types.HiddenUserServer)
 	warmup := &mockUserInfoClient{
@@ -141,12 +145,29 @@ func TestSendTextToOwnPNTargetsRegisteredLID(t *testing.T) {
 
 	var stderr bytes.Buffer
 	target := warmupRecipient(context.Background(), warmup, pn, &stderr)
-	sender := &recordingTextSender{}
-	if _, err := sendTextMessageWithSender(context.Background(), sender, openSendTestDB(t), target, "self-test", "", "", nil, nil, textEphemeralOptions{}); err != nil {
-		t.Fatalf("sendTextMessageWithSender: %v", err)
+	sender := &recordingTextSender{linkedJID: pn.String(), linkedLID: lid}
+	_, err := sendTextMessageWithSender(context.Background(), sender, openSendTestDB(t), target, "self-test", "", "", nil, nil, textEphemeralOptions{})
+	if err == nil || !strings.Contains(err.Error(), "linked account itself is not supported") {
+		t.Fatalf("sendTextMessageWithSender error = %v, want self-send rejection", err)
 	}
-	if sender.textRecipient != lid {
-		t.Fatalf("send target = %s, want registered LID %s", sender.textRecipient, lid)
+	if sender.textCalls != 0 || sender.protoCalls != 0 {
+		t.Fatalf("self-send reached protocol sender: text=%d proto=%d", sender.textCalls, sender.protoCalls)
+	}
+	if sender.resolveLIDCalls != 0 {
+		t.Fatalf("ResolvePNToLID calls = %d, want 0", sender.resolveLIDCalls)
+	}
+}
+
+func TestSendTextToOwnPNRejectsWithoutRegistrationCanonicalization(t *testing.T) {
+	pn := types.NewJID("15551234567", types.DefaultUserServer)
+	sender := &recordingTextSender{linkedJID: pn.String()}
+
+	_, err := sendTextMessageWithSender(context.Background(), sender, openSendTestDB(t), pn, "self-test", "", "", nil, nil, textEphemeralOptions{})
+	if err == nil || !strings.Contains(err.Error(), "linked account itself is not supported") {
+		t.Fatalf("sendTextMessageWithSender error = %v, want self-send rejection", err)
+	}
+	if sender.textCalls != 0 || sender.protoCalls != 0 || sender.resolveLIDCalls != 0 {
+		t.Fatalf("self-send reached protocol path: text=%d proto=%d resolve=%d", sender.textCalls, sender.protoCalls, sender.resolveLIDCalls)
 	}
 }
 

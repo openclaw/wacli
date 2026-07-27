@@ -350,6 +350,9 @@ func executeDelegatedText(ctx context.Context, a *app.App, req sendDelegateReque
 	if err != nil {
 		return sendDelegateResponse{}, err
 	}
+	if err := validateTextRecipient(a.WA(), toJID); err != nil {
+		return sendDelegateResponse{}, err
+	}
 	toJID = warmupDelegatedRecipient(ctx, a, toJID)
 	mentionedJIDs, err := parseMentionedJIDs(req.Mentions)
 	if err != nil {

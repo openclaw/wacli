@@ -113,6 +113,9 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if err := validateTextRecipient(a.WA(), toJID); err != nil {
+				return err
+			}
 			mentionedJIDs, err := parseMentionedJIDs(mentions)
 			if err != nil {
 				return err
@@ -216,6 +219,7 @@ type textMessageSender interface {
 	GetGroupInfo(ctx context.Context, jid types.JID) (*types.GroupInfo, error)
 	ResolvePNToLID(ctx context.Context, jid types.JID) types.JID
 	LinkedJID() string
+	LinkedLID() string
 }
 
 type textEphemeralOptions struct {
@@ -232,11 +236,16 @@ type resolvedTextEphemeral struct {
 
 const defaultEphemeralExpiration uint32 = 7 * 24 * 60 * 60
 
+var errSelfTextRecipient = errors.New("send text to the linked account itself is not supported: WhatsApp can acknowledge self-messages without delivering them; use the official Message Yourself chat")
+
 func sendTextMessage(ctx context.Context, a sendTextApp, to types.JID, text, replyTo, replyToSender string, preview *linkpreview.Preview, mentionedJIDs []string, ephemeral textEphemeralOptions) (types.MessageID, error) {
 	return sendTextMessageWithSender(ctx, a.WA(), a.DB(), to, text, replyTo, replyToSender, preview, mentionedJIDs, ephemeral)
 }
 
 func sendTextMessageWithSender(ctx context.Context, sender textMessageSender, db *store.DB, to types.JID, text, replyTo, replyToSender string, preview *linkpreview.Preview, mentionedJIDs []string, ephemeral textEphemeralOptions) (types.MessageID, error) {
+	if err := validateTextRecipient(sender, to); err != nil {
+		return "", err
+	}
 	selfJID, err := textReplySelfJID(ctx, sender, db, to, replyTo, replyToSender)
 	if err != nil {
 		return "", err
@@ -263,6 +272,30 @@ func sendTextMessageWithSender(ctx context.Context, sender textMessageSender, db
 		applyEphemeralContext(msg, resolved.expiration)
 	}
 	return sender.SendProtoMessage(ctx, to, msg)
+}
+
+func validateTextRecipient(sender textMessageSender, to types.JID) error {
+	if isSelfTextRecipient(sender, to) {
+		return errSelfTextRecipient
+	}
+	return nil
+}
+
+func isSelfTextRecipient(sender textMessageSender, to types.JID) bool {
+	linked, err := types.ParseJID(strings.TrimSpace(sender.LinkedJID()))
+	if err != nil || linked.IsEmpty() {
+		return false
+	}
+	linked = linked.ToNonAD()
+	to = to.ToNonAD()
+	if to == linked {
+		return true
+	}
+	if to.Server != types.HiddenUserServer || linked.Server != types.DefaultUserServer {
+		return false
+	}
+	linkedLID, err := types.ParseJID(strings.TrimSpace(sender.LinkedLID()))
+	return err == nil && !linkedLID.IsEmpty() && linkedLID.ToNonAD() == to
 }
 
 func textReplySelfJID(ctx context.Context, sender textMessageSender, db *store.DB, chat types.JID, replyTo, replyToSender string) (string, error) {
