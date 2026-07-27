@@ -47,7 +47,7 @@ func TestParseSendSpacing(t *testing.T) {
 }
 
 // fakePacer builds a pacer with a controllable clock: sleeping advances the
-// clock, so successive paces observe elapsed time deterministically.
+// clock, so successive sends observe elapsed time deterministically.
 func fakePacer(spacing sendSpacing, rng func(int64) int64) (*sendPacer, *[]time.Duration) {
 	clock := time.Unix(1000, 0)
 	slept := []time.Duration{}
@@ -63,10 +63,26 @@ func fakePacer(spacing sendSpacing, rng func(int64) int64) (*sendPacer, *[]time.
 	return p, &slept
 }
 
+// paceOnce mirrors handleSendDelegateConn's use of the pacer: wait bounded by
+// ctx, and only dispatch (record) if the wait was satisfied. Returns whether
+// the send would be dispatched.
+func paceOnce(p *sendPacer, ctx context.Context) bool {
+	if !p.enabled() {
+		return true
+	}
+	if !p.wait(ctx) {
+		return false
+	}
+	p.record()
+	return true
+}
+
 func TestSendPacerDisabledNeverSleeps(t *testing.T) {
 	p, slept := fakePacer(sendSpacing{}, func(int64) int64 { return 0 })
 	for i := 0; i < 3; i++ {
-		p.pace(context.Background())
+		if !paceOnce(p, context.Background()) {
+			t.Fatalf("disabled pacer blocked a send")
+		}
 	}
 	if len(*slept) != 0 {
 		t.Fatalf("disabled pacer slept: %v", *slept)
@@ -74,11 +90,13 @@ func TestSendPacerDisabledNeverSleeps(t *testing.T) {
 }
 
 func TestSendPacerSpacesConsecutiveSends(t *testing.T) {
-	// Fixed 1s gap; no wall time elapses between paces (sends are instantaneous
-	// in the fake), so every send after the first waits the full gap.
+	// Fixed 1s gap; no wall time elapses between sends (instantaneous in the
+	// fake), so every send after the first waits the full gap.
 	p, slept := fakePacer(sendSpacing{min: time.Second, max: time.Second}, func(int64) int64 { return 0 })
 	for i := 0; i < 3; i++ {
-		p.pace(context.Background())
+		if !paceOnce(p, context.Background()) {
+			t.Fatalf("send %d unexpectedly blocked", i)
+		}
 	}
 	want := []time.Duration{time.Second, time.Second}
 	if len(*slept) != len(want) || (*slept)[0] != want[0] || (*slept)[1] != want[1] {
@@ -101,7 +119,9 @@ func TestSendPacerRandomGapWithinBounds(t *testing.T) {
 		return v
 	})
 	for k := 0; k < 3; k++ {
-		p.pace(context.Background())
+		if !paceOnce(p, context.Background()) {
+			t.Fatalf("send %d unexpectedly blocked", k)
+		}
 	}
 	if len(*slept) != 2 {
 		t.Fatalf("expected 2 waits, got %v", *slept)
@@ -111,14 +131,13 @@ func TestSendPacerRandomGapWithinBounds(t *testing.T) {
 			t.Fatalf("gap %s out of bounds [%s,%s]", d, spacing.min, spacing.max)
 		}
 	}
-	// First waited gap should be the minimum (rng=0).
 	if (*slept)[0] != spacing.min {
 		t.Fatalf("first gap = %s, want min %s", (*slept)[0], spacing.min)
 	}
 }
 
 func TestSendPacerSkipsWaitWhenElapsedExceedsGap(t *testing.T) {
-	// A slow send: advance the clock past the gap before the next pace, so no
+	// A slow send: advance the clock past the gap before the next send, so no
 	// additional wait is needed.
 	clock := time.Unix(1000, 0)
 	slept := []time.Duration{}
@@ -131,10 +150,51 @@ func TestSendPacerSkipsWaitWhenElapsedExceedsGap(t *testing.T) {
 		},
 		rng: func(int64) int64 { return 0 },
 	}
-	p.pace(context.Background()) // first: records start, no wait
+	paceOnce(p, context.Background()) // first: records start, no wait
 	clock = clock.Add(3 * time.Second)
-	p.pace(context.Background()) // elapsed 3s > 1s gap: no wait
+	paceOnce(p, context.Background()) // elapsed 3s > 1s gap: no wait
 	if len(slept) != 0 {
 		t.Fatalf("expected no wait when elapsed exceeds gap, slept %v", slept)
+	}
+}
+
+// Regression for the ClawSweeper P1 finding: if the caller's request timeout
+// elapses while the pacer is waiting, the send must be aborted (not dispatched)
+// and the spacing baseline must not move, so a paced send can never leave the
+// wire after the caller has already reported failure.
+func TestSendPacerAbortsWhenTimeoutElapsesDuringWait(t *testing.T) {
+	clock := time.Unix(1000, 0)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	p := &sendPacer{
+		spacing: sendSpacing{min: time.Second, max: time.Second},
+		now:     func() time.Time { return clock },
+		// The wait outlives the request budget: cancelling mid-sleep models the
+		// caller's timeout firing before the gap is satisfied.
+		sleep: func(_ context.Context, _ time.Duration) { cancel() },
+		rng:   func(int64) int64 { return 0 },
+	}
+
+	if !paceOnce(p, ctx) { // first send dispatches immediately
+		t.Fatalf("first send should dispatch")
+	}
+	baseline := p.last
+
+	if dispatched := paceOnce(p, ctx); dispatched {
+		t.Fatalf("second send dispatched after its wait was cut short by the request timeout")
+	}
+	if p.last != baseline {
+		t.Fatalf("spacing baseline advanced for an un-dispatched send: last=%v baseline=%v", p.last, baseline)
+	}
+}
+
+// An already-expired context must block even the first send: the caller has
+// given up before we ever reach the wire.
+func TestSendPacerFirstSendRespectsAlreadyExpiredContext(t *testing.T) {
+	p, _ := fakePacer(sendSpacing{min: time.Second, max: time.Second}, func(int64) int64 { return 0 })
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if paceOnce(p, ctx) {
+		t.Fatalf("first send dispatched despite an already-cancelled context")
 	}
 }

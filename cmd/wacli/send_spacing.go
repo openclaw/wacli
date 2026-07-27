@@ -72,19 +72,33 @@ func newSendPacer(spacing sendSpacing) *sendPacer {
 	}
 }
 
-// pace blocks until at least a freshly-chosen gap has elapsed since the
-// previous send started, then records this send's start time. It is a no-op
-// when spacing is disabled or for the first send of the session. Call it inside
-// the send critical section, immediately before dispatching the send.
-func (p *sendPacer) pace(ctx context.Context) {
+func (p *sendPacer) enabled() bool { return p != nil && p.spacing.enabled() }
+
+// wait blocks until at least a freshly-chosen gap has elapsed since the
+// previous send started. It reports whether the caller may proceed with the
+// send: false means the context was cancelled (the caller's request timeout
+// elapsed) before the gap was satisfied, so the send MUST NOT be dispatched —
+// otherwise pacing could push a send past the caller's timeout and deliver it
+// after the caller has already reported failure. The first send of the session
+// waits for nothing. Call inside the send critical section; on true, call
+// record() and dispatch.
+func (p *sendPacer) wait(ctx context.Context) bool {
+	if p == nil || !p.spacing.enabled() || !p.hasLast {
+		return ctx.Err() == nil
+	}
+	gap := p.pick()
+	if remaining := gap - p.now().Sub(p.last); remaining > 0 {
+		p.sleep(ctx, remaining)
+	}
+	return ctx.Err() == nil
+}
+
+// record marks a send's start time. Call it only once a send is actually being
+// dispatched (after wait() returned true), so an aborted, un-dispatched send
+// never shifts the spacing baseline.
+func (p *sendPacer) record() {
 	if p == nil || !p.spacing.enabled() {
 		return
-	}
-	if p.hasLast {
-		gap := p.pick()
-		if remaining := gap - p.now().Sub(p.last); remaining > 0 {
-			p.sleep(ctx, remaining)
-		}
 	}
 	p.last = p.now()
 	p.hasLast = true

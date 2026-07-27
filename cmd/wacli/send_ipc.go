@@ -189,9 +189,23 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, a *app.App, send
 	sendMu.Lock()
 	defer sendMu.Unlock()
 
-	// Space this send from the previous one while serialized (no-op if
-	// --send-spacing is unset).
-	pacer.pace(ctx)
+	// Space this send from the previous one while serialized. Bound the wait by
+	// the caller's request timeout and have pacing + send share that one
+	// deadline, so a long spacing interval can never dispatch a send after the
+	// caller has already timed out. Disabled spacing leaves the path untouched.
+	if pacer.enabled() {
+		reqCtx, cancel := context.WithTimeout(ctx, millisDuration(req.TimeoutMS, 5*time.Minute))
+		defer cancel()
+		if !pacer.wait(reqCtx) {
+			_ = json.NewEncoder(conn).Encode(sendDelegateResponse{
+				OK:    false,
+				Error: "send spacing exceeded request timeout before dispatch",
+			})
+			return
+		}
+		pacer.record()
+		ctx = reqCtx
+	}
 
 	resp, err := executeDelegatedSend(ctx, a, req)
 	if err != nil {
