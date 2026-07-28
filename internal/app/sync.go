@@ -140,6 +140,7 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	lastEvent.Store(now)
 
 	disconnected := make(chan struct{}, 1)
+	loggedOut := make(chan struct{}, 1)
 	staleReconnect := make(chan staleReconnectRequest, 1)
 
 	var waitMedia func(context.Context) bool
@@ -173,7 +174,7 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	}
 
 	ps := &syncPresence{}
-	handlerID := a.addSyncEventHandler(syncCtx, opts, &messagesStored, &lastEvent, disconnected, staleReconnect, enqueueMedia, enqueueWebhook, limits, ps, mediaQ)
+	handlerID := a.addSyncEventHandler(syncCtx, opts, &messagesStored, &lastEvent, disconnected, loggedOut, staleReconnect, enqueueMedia, enqueueWebhook, limits, ps, mediaQ)
 	defer a.wa.RemoveEventHandler(handlerID)
 
 	connectionEpoch.Store(nowUTC().UnixNano())
@@ -234,9 +235,9 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 
 	var err error
 	if opts.Mode == SyncModeFollow {
-		_, err = a.runSyncFollow(syncCtx, opts.MaxReconnect, opts.PresenceMode, &messagesStored, &connectionEpoch, disconnected, staleReconnect)
+		_, err = a.runSyncFollow(syncCtx, opts.MaxReconnect, opts.PresenceMode, &messagesStored, &connectionEpoch, disconnected, loggedOut, staleReconnect)
 	} else {
-		_, err = a.runSyncUntilIdle(syncCtx, opts.IdleExit, opts.MaxReconnect, opts.PresenceMode, &messagesStored, &lastEvent, disconnected)
+		_, err = a.runSyncUntilIdle(syncCtx, opts.IdleExit, opts.MaxReconnect, opts.PresenceMode, &messagesStored, &lastEvent, disconnected, loggedOut)
 	}
 	limitErr := limits.Err()
 	// Successful one-shot modes must finish queued downloads before cleanup

@@ -355,6 +355,7 @@ func emitWebhookEvents(t *testing.T, webhookEvents string, emit func(f *fakeWA))
 		&messagesStored,
 		&lastEvent,
 		make(chan struct{}, 1),
+		make(chan struct{}, 1),
 		make(chan staleReconnectRequest, 1),
 		func(string, string) {},
 		a.newSyncWebhookEnqueuer(ctx, jobs),

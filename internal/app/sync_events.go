@@ -46,7 +46,7 @@ type syncPresence struct {
 	cleanupStarted bool
 }
 
-func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, messagesStored, lastEvent *atomic.Int64, disconnected chan<- struct{}, staleReconnect chan<- staleReconnectRequest, enqueueMedia func(string, string), enqueueWebhook func(syncWebhookEvent), limits *syncStorageLimits, ps *syncPresence, mediaQ *mediaQueue) uint32 {
+func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, messagesStored, lastEvent *atomic.Int64, disconnected chan<- struct{}, loggedOut chan<- struct{}, staleReconnect chan<- staleReconnectRequest, enqueueMedia func(string, string), enqueueWebhook func(syncWebhookEvent), limits *syncStorageLimits, ps *syncPresence, mediaQ *mediaQueue) uint32 {
 	var panicCount atomic.Int64
 	var appStateRecoveries sync.Map
 	if enqueueWebhook == nil {
@@ -155,6 +155,20 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 			}
 		case *events.AppStateSyncError:
 			a.handleAppStateSyncError(ctx, v, &appStateRecoveries)
+		case *events.LoggedOut:
+			// WhatsApp revoked this session (linked device removed on the phone,
+			// or a logout/ban). whatsmeow reconnects on Disconnected, so without
+			// this the follow loop spins forever against a dead session. Surface
+			// the logout and signal the loop to stop instead of reconnecting.
+			a.emitOrPrint("logged_out", map[string]any{
+				"reason":      v.Reason.String(),
+				"reason_code": int(v.Reason),
+				"on_connect":  v.OnConnect,
+			}, "\nLogged out of WhatsApp (%s). Stopping sync.\n", v.Reason.String())
+			select {
+			case loggedOut <- struct{}{}:
+			default:
+			}
 		}
 	})
 }

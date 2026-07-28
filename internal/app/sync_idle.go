@@ -9,7 +9,7 @@ import (
 	"github.com/openclaw/wacli/internal/wa"
 )
 
-func (a *App) runSyncFollow(ctx context.Context, maxReconnect time.Duration, presenceMode SyncPresenceMode, messagesStored, connectionEpoch *atomic.Int64, disconnected <-chan struct{}, staleReconnect <-chan staleReconnectRequest) (SyncResult, error) {
+func (a *App) runSyncFollow(ctx context.Context, maxReconnect time.Duration, presenceMode SyncPresenceMode, messagesStored, connectionEpoch *atomic.Int64, disconnected <-chan struct{}, loggedOut <-chan struct{}, staleReconnect <-chan staleReconnectRequest) (SyncResult, error) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -38,11 +38,19 @@ func (a *App) runSyncFollow(ctx context.Context, maxReconnect time.Duration, pre
 			if err := a.reconnect(ctx, maxReconnect, presenceMode); err != nil {
 				return SyncResult{MessagesStored: messagesStored.Load()}, err
 			}
+		case <-loggedOut:
+			// Session revoked (see the LoggedOut handler). Stop cleanly instead
+			// of reconnecting forever against a dead session.
+			a.emitOrPrint("stopping", map[string]any{
+				"messages_synced": messagesStored.Load(),
+				"reason":          "logged_out",
+			}, "\nStopping sync (logged out).\n")
+			return SyncResult{MessagesStored: messagesStored.Load()}, nil
 		}
 	}
 }
 
-func (a *App) runSyncUntilIdle(ctx context.Context, idleExit, maxReconnect time.Duration, presenceMode SyncPresenceMode, messagesStored, lastEvent *atomic.Int64, disconnected <-chan struct{}) (SyncResult, error) {
+func (a *App) runSyncUntilIdle(ctx context.Context, idleExit, maxReconnect time.Duration, presenceMode SyncPresenceMode, messagesStored, lastEvent *atomic.Int64, disconnected <-chan struct{}, loggedOut <-chan struct{}) (SyncResult, error) {
 	poll := 250 * time.Millisecond
 	if idleExit >= 2*time.Second {
 		poll = 1 * time.Second
@@ -59,6 +67,14 @@ func (a *App) runSyncUntilIdle(ctx context.Context, idleExit, maxReconnect time.
 			if err := a.reconnect(ctx, maxReconnect, presenceMode); err != nil {
 				return SyncResult{MessagesStored: messagesStored.Load()}, err
 			}
+		case <-loggedOut:
+			// Session revoked (see the LoggedOut handler). Stop cleanly instead
+			// of reconnecting forever against a dead session.
+			a.emitOrPrint("stopping", map[string]any{
+				"messages_synced": messagesStored.Load(),
+				"reason":          "logged_out",
+			}, "\nStopping sync (logged out).\n")
+			return SyncResult{MessagesStored: messagesStored.Load()}, nil
 		case <-ticker.C:
 			last := time.Unix(0, lastEvent.Load())
 			if time.Since(last) >= idleExit {

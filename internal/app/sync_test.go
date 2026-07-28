@@ -132,6 +132,7 @@ func TestSyncEventHandlerClearsUnreadCountOnReadSelfReceipt(t *testing.T) {
 		&messagesStored,
 		&lastEvent,
 		make(chan struct{}, 1),
+		make(chan struct{}, 1),
 		make(chan staleReconnectRequest, 1),
 		func(string, string) {},
 		nil,
@@ -174,6 +175,7 @@ func TestSyncEventHandlerIgnoresRegularReadReceiptsForUnreadCount(t *testing.T) 
 		SyncOptions{},
 		&messagesStored,
 		&lastEvent,
+		make(chan struct{}, 1),
 		make(chan struct{}, 1),
 		make(chan staleReconnectRequest, 1),
 		func(string, string) {},
@@ -3590,6 +3592,7 @@ func TestSyncFollowIgnoresKeepAliveTimeoutFromPreviousConnection(t *testing.T) {
 	var connectionEpoch atomic.Int64
 	connectionEpoch.Store(nowUTC().UnixNano())
 	disconnected := make(chan struct{}, 1)
+	loggedOut := make(chan struct{}, 1)
 	staleReconnect := make(chan staleReconnectRequest, 1)
 	staleReconnect <- staleReconnectRequest{
 		threshold:   200 * time.Millisecond,
@@ -3601,7 +3604,7 @@ func TestSyncFollowIgnoresKeepAliveTimeoutFromPreviousConnection(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
-	_, err := a.runSyncFollow(ctx, time.Second, SyncPresenceModeNormal, &messagesStored, &connectionEpoch, disconnected, staleReconnect)
+	_, err := a.runSyncFollow(ctx, time.Second, SyncPresenceModeNormal, &messagesStored, &connectionEpoch, disconnected, loggedOut, staleReconnect)
 	if err != nil {
 		t.Fatalf("runSyncFollow: %v", err)
 	}
