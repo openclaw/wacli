@@ -135,6 +135,63 @@ func TestRunSyncFollowStopsOnLoggedOut(t *testing.T) {
 	}
 }
 
+// A revocation delivers Disconnected and LoggedOut back to back, so both
+// buffered signals can be ready when the follow loop selects. The terminal
+// logout signal must win even when select picks the disconnect (or stale)
+// branch first: the loop must stop without a single reconnect attempt.
+// Repeated runs cover Go's random choice between the ready channels.
+func TestRunSyncFollowLoggedOutWinsOverPendingReconnect(t *testing.T) {
+	cases := []struct {
+		name  string
+		queue func(disconnected chan struct{}, staleReconnect chan staleReconnectRequest)
+	}{
+		{"paired_with_disconnected", func(disconnected chan struct{}, _ chan staleReconnectRequest) {
+			disconnected <- struct{}{}
+		}},
+		{"paired_with_stale_reconnect", func(_ chan struct{}, staleReconnect chan staleReconnectRequest) {
+			staleReconnect <- staleReconnectRequest{lastSuccess: nowUTC(), threshold: time.Minute, idle: time.Minute, source: "test"}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for i := 0; i < 50; i++ {
+				a := newTestApp(t)
+				f := newFakeWA()
+				a.wa = f
+
+				var messagesStored, connectionEpoch atomic.Int64
+				disconnected := make(chan struct{}, 1)
+				loggedOut := make(chan struct{}, 1)
+				staleReconnect := make(chan staleReconnectRequest, 1)
+				tc.queue(disconnected, staleReconnect)
+				loggedOut <- struct{}{}
+
+				done := make(chan error, 1)
+				go func() {
+					_, err := a.runSyncFollow(context.Background(), time.Second, SyncPresenceModeNormal, &messagesStored, &connectionEpoch, disconnected, loggedOut, staleReconnect)
+					done <- err
+				}()
+
+				select {
+				case err := <-done:
+					if err != nil {
+						t.Fatalf("run %d: runSyncFollow returned error: %v", i, err)
+					}
+				case <-time.After(2 * time.Second):
+					t.Fatalf("run %d: runSyncFollow did not stop with paired signals queued", i)
+				}
+
+				f.mu.Lock()
+				calls := f.connectCalls
+				f.mu.Unlock()
+				if calls != 0 {
+					t.Fatalf("run %d: follow loop reconnected before consuming logout (connectCalls=%d), want 0", i, calls)
+				}
+			}
+		})
+	}
+}
+
 // The bootstrap/once idle loop must also stop on logout rather than reconnect.
 func TestRunSyncUntilIdleStopsOnLoggedOut(t *testing.T) {
 	a := newTestApp(t)
@@ -168,6 +225,46 @@ func TestRunSyncUntilIdleStopsOnLoggedOut(t *testing.T) {
 	f.mu.Unlock()
 	if calls != 0 {
 		t.Fatalf("logged-out idle loop reconnected (connectCalls=%d), want 0", calls)
+	}
+}
+
+// Same pairing race in the idle loop: with disconnected and loggedOut both
+// queued, the loop must stop without reconnecting.
+func TestRunSyncUntilIdleLoggedOutWinsOverDisconnected(t *testing.T) {
+	for i := 0; i < 50; i++ {
+		a := newTestApp(t)
+		f := newFakeWA()
+		a.wa = f
+
+		var messagesStored, lastEvent atomic.Int64
+		lastEvent.Store(nowUTC().UnixNano())
+		disconnected := make(chan struct{}, 1)
+		loggedOut := make(chan struct{}, 1)
+		disconnected <- struct{}{}
+		loggedOut <- struct{}{}
+
+		done := make(chan error, 1)
+		go func() {
+			// Large idleExit so the idle ticker never fires before the logout signal.
+			_, err := a.runSyncUntilIdle(context.Background(), time.Hour, time.Second, SyncPresenceModeNormal, &messagesStored, &lastEvent, disconnected, loggedOut)
+			done <- err
+		}()
+
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("run %d: runSyncUntilIdle returned error: %v", i, err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("run %d: runSyncUntilIdle did not stop with paired signals queued", i)
+		}
+
+		f.mu.Lock()
+		calls := f.connectCalls
+		f.mu.Unlock()
+		if calls != 0 {
+			t.Fatalf("run %d: idle loop reconnected before consuming logout (connectCalls=%d), want 0", i, calls)
+		}
 	}
 }
 
