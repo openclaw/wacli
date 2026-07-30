@@ -21,6 +21,12 @@ import (
 	"go.mau.fi/whatsmeow/types/events"
 )
 
+// loggedOutRecoveryHint is the operator-facing recovery sequence for a revoked
+// session. sync deliberately keeps the local device record (see the LoggedOut
+// case), and `auth --phone` short-circuits while that record exists — so
+// re-pairing needs the explicit local logout first.
+const loggedOutRecoveryHint = "To re-authenticate, run `wacli auth logout` to clear the local session, then `wacli auth --phone` to pair again."
+
 func newMediaEnqueuer(ctx context.Context, queue *mediaQueue) func(chatJID, msgID string) {
 	return func(chatJID, msgID string) {
 		if strings.TrimSpace(chatJID) == "" || strings.TrimSpace(msgID) == "" {
@@ -164,7 +170,8 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 				"reason":      v.Reason.String(),
 				"reason_code": int(v.Reason),
 				"on_connect":  v.OnConnect,
-			}, "\nLogged out of WhatsApp (%s). Stopping sync.\n", v.Reason.String())
+				"recovery":    loggedOutRecoveryHint,
+			}, "\nLogged out of WhatsApp (%s). Stopping sync.\n%s\n", v.Reason.String(), loggedOutRecoveryHint)
 			select {
 			case loggedOut <- struct{}{}:
 			default:

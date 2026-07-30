@@ -94,7 +94,55 @@ func TestSyncEventHandlerEmitsLoggedOutAndSignals(t *testing.T) {
 			if s, _ := data["reason"].(string); s == "" {
 				t.Fatal("logged_out reason string is empty")
 			}
+			recovery, _ := data["recovery"].(string)
+			if !strings.Contains(recovery, "wacli auth logout") || !strings.Contains(recovery, "wacli auth --phone") {
+				t.Fatalf("logged_out recovery hint must name the `wacli auth logout` + `wacli auth --phone` sequence, got %q", recovery)
+			}
 		})
+	}
+}
+
+// The human (non --events) output must tell the operator how to recover:
+// sync keeps the local device record on a forced logout, so a bare
+// `auth --phone` short-circuits — the printed hint must name the
+// `wacli auth logout` → `wacli auth --phone` sequence.
+func TestSyncLoggedOutHumanOutputIncludesRecoveryHint(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	var human bytes.Buffer
+	st := newSyncStatus(&human)
+	a.statusMu.Lock()
+	a.status = st
+	a.statusMu.Unlock()
+
+	var messagesStored, lastEvent atomic.Int64
+	loggedOut := make(chan struct{}, 1)
+	handlerID := a.addSyncEventHandler(
+		context.Background(),
+		SyncOptions{Mode: SyncModeFollow},
+		&messagesStored,
+		&lastEvent,
+		make(chan struct{}, 1),
+		loggedOut,
+		make(chan staleReconnectRequest, 1),
+		func(string, string) {},
+		nil,
+		nil,
+		&syncPresence{},
+		nil,
+	)
+	defer f.RemoveEventHandler(handlerID)
+
+	f.emit(&events.LoggedOut{OnConnect: true, Reason: events.ConnectFailureLoggedOut})
+
+	got := human.String()
+	if !strings.Contains(got, "Logged out of WhatsApp") {
+		t.Fatalf("human output missing logout notice:\n%s", got)
+	}
+	if !strings.Contains(got, "wacli auth logout") || !strings.Contains(got, "wacli auth --phone") {
+		t.Fatalf("human output must name the `wacli auth logout` + `wacli auth --phone` recovery sequence:\n%s", got)
 	}
 }
 
