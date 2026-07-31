@@ -85,6 +85,10 @@ func (s *recordingTextSender) ResolvePNToLID(_ context.Context, _ types.JID) typ
 	return s.linkedLID
 }
 
+func (s *recordingTextSender) ResolveLIDToPN(_ context.Context, jid types.JID) types.JID {
+	return jid
+}
+
 type outboundTextResolverStub struct {
 	lid types.JID
 	pn  types.JID
@@ -465,7 +469,7 @@ func TestBuildTextReplyContextInfo(t *testing.T) {
 				t.Fatalf("UpsertMessage: %v", err)
 			}
 
-			got, err := buildTextReplyContextInfo(db, tc.chat, "quoted", "", self)
+			got, err := buildTextReplyContextInfo(db, tc.chat, types.EmptyJID, "quoted", "", self)
 			if err != nil {
 				t.Fatalf("buildTextReplyContextInfo: %v", err)
 			}
@@ -1124,5 +1128,52 @@ func TestBuildTextMessageAttachesLinkPreview(t *testing.T) {
 	}
 	if string(ext.GetJPEGThumbnail()) != "jpeg" {
 		t.Fatalf("thumbnail = %q", string(ext.GetJPEGThumbnail()))
+	}
+}
+
+func TestBuildTextReplyContextInfoFindsQuoteUnderChatAlias(t *testing.T) {
+	pn := types.NewJID("51918505715", types.DefaultUserServer)
+	lid := types.NewJID("46922702278894", types.HiddenUserServer)
+
+	tests := []struct {
+		name      string
+		storedIn  types.JID
+		addressed types.JID
+	}{
+		{name: "history under phone JID, addressed by LID", storedIn: pn, addressed: lid},
+		{name: "history under LID, addressed by phone JID", storedIn: lid, addressed: pn},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			db := openSendTestDB(t)
+			if err := db.UpsertChat(tc.storedIn.String(), "chat", "alias chat", time.Now()); err != nil {
+				t.Fatalf("UpsertChat: %v", err)
+			}
+			if err := db.UpsertMessage(store.UpsertMessageParams{
+				ChatJID:   tc.storedIn.String(),
+				MsgID:     "quoted",
+				SenderJID: tc.storedIn.String(),
+				Timestamp: time.Now(),
+				Text:      "original",
+			}); err != nil {
+				t.Fatalf("UpsertMessage: %v", err)
+			}
+
+			if _, err := buildTextReplyContextInfo(db, tc.addressed, types.EmptyJID, "quoted", "", ""); err == nil {
+				t.Fatal("expected the un-aliased lookup to fail")
+			}
+
+			got, err := buildTextReplyContextInfo(db, tc.addressed, tc.storedIn, "quoted", "", "")
+			if err != nil {
+				t.Fatalf("alias lookup should resolve the quote: %v", err)
+			}
+			if got == nil || got.GetStanzaID() != "quoted" {
+				t.Fatalf("context info = %+v, want StanzaID=quoted", got)
+			}
+			if got.GetParticipant() != tc.storedIn.String() {
+				t.Fatalf("participant = %q, want %q", got.GetParticipant(), tc.storedIn.String())
+			}
+		})
 	}
 }

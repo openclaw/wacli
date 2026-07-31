@@ -218,6 +218,7 @@ type textMessageSender interface {
 	SendProtoMessage(ctx context.Context, to types.JID, msg *waProto.Message) (types.MessageID, error)
 	GetGroupInfo(ctx context.Context, jid types.JID) (*types.GroupInfo, error)
 	ResolvePNToLID(ctx context.Context, jid types.JID) types.JID
+	ResolveLIDToPN(ctx context.Context, jid types.JID) types.JID
 	LinkedJID() string
 	LinkedLID() string
 }
@@ -250,7 +251,11 @@ func sendTextMessageWithSender(ctx context.Context, sender textMessageSender, db
 	if err != nil {
 		return "", err
 	}
-	msg, plainText, err := buildTextMessageWithSelf(db, to, text, replyTo, replyToSender, selfJID, preview, mentionedJIDs)
+	var aliasTo types.JID
+	if strings.TrimSpace(replyTo) != "" {
+		aliasTo = replyLookupAlias(ctx, sender, to)
+	}
+	msg, plainText, err := buildTextMessageWithSelf(db, to, aliasTo, text, replyTo, replyToSender, selfJID, preview, mentionedJIDs)
 	if err != nil {
 		return "", err
 	}
@@ -466,11 +471,11 @@ func decodeMessageEscapes(s string) (string, error) {
 }
 
 func buildTextMessage(db *store.DB, to types.JID, text, replyTo, replyToSender string, preview *linkpreview.Preview, mentionedJIDs []string) (*waProto.Message, bool, error) {
-	return buildTextMessageWithSelf(db, to, text, replyTo, replyToSender, "", preview, mentionedJIDs)
+	return buildTextMessageWithSelf(db, to, types.EmptyJID, text, replyTo, replyToSender, "", preview, mentionedJIDs)
 }
 
-func buildTextMessageWithSelf(db *store.DB, to types.JID, text, replyTo, replyToSender, selfJID string, preview *linkpreview.Preview, mentionedJIDs []string) (*waProto.Message, bool, error) {
-	info, err := buildTextContextInfo(db, to, replyTo, replyToSender, selfJID, mentionedJIDs)
+func buildTextMessageWithSelf(db *store.DB, to, aliasTo types.JID, text, replyTo, replyToSender, selfJID string, preview *linkpreview.Preview, mentionedJIDs []string) (*waProto.Message, bool, error) {
+	info, err := buildTextContextInfo(db, to, aliasTo, replyTo, replyToSender, selfJID, mentionedJIDs)
 	if err != nil {
 		return nil, false, err
 	}
@@ -507,8 +512,27 @@ func attachLinkPreview(msg *waProto.ExtendedTextMessage, preview *linkpreview.Pr
 	msg.PreviewType = waProto.ExtendedTextMessage_NONE.Enum()
 }
 
-func buildTextContextInfo(db *store.DB, chat types.JID, replyTo, replyToSender, selfJID string, mentionedJIDs []string) (*waProto.ContextInfo, error) {
-	info, err := buildTextReplyContextInfo(db, chat, replyTo, replyToSender, selfJID)
+func getQuotedMessage(db *store.DB, chat, aliasChat types.JID, replyTo string) (store.Message, error) {
+	quoted, err := db.GetMessage(chat.String(), replyTo)
+	if !errors.Is(err, sql.ErrNoRows) || aliasChat.IsEmpty() || aliasChat.String() == chat.String() {
+		return quoted, err
+	}
+	return db.GetMessage(aliasChat.String(), replyTo)
+}
+
+func replyLookupAlias(ctx context.Context, sender textMessageSender, to types.JID) types.JID {
+	switch to.Server {
+	case types.DefaultUserServer:
+		return sender.ResolvePNToLID(ctx, to).ToNonAD()
+	case types.HiddenUserServer:
+		return sender.ResolveLIDToPN(ctx, to).ToNonAD()
+	default:
+		return types.EmptyJID
+	}
+}
+
+func buildTextContextInfo(db *store.DB, chat, aliasChat types.JID, replyTo, replyToSender, selfJID string, mentionedJIDs []string) (*waProto.ContextInfo, error) {
+	info, err := buildTextReplyContextInfo(db, chat, aliasChat, replyTo, replyToSender, selfJID)
 	if err != nil {
 		return nil, err
 	}
@@ -522,13 +546,13 @@ func buildTextContextInfo(db *store.DB, chat types.JID, replyTo, replyToSender, 
 	return info, nil
 }
 
-func buildTextReplyContextInfo(db *store.DB, chat types.JID, replyTo, replyToSender, selfJID string) (*waProto.ContextInfo, error) {
+func buildTextReplyContextInfo(db *store.DB, chat, aliasChat types.JID, replyTo, replyToSender, selfJID string) (*waProto.ContextInfo, error) {
 	replyTo = strings.TrimSpace(replyTo)
 	if replyTo == "" {
 		return nil, nil
 	}
 
-	quoted, err := db.GetMessage(chat.String(), replyTo)
+	quoted, err := getQuotedMessage(db, chat, aliasChat, replyTo)
 	if errors.Is(err, sql.ErrNoRows) {
 		if chat.Server == types.GroupServer && strings.TrimSpace(replyToSender) != "" {
 			participant, participantErr := resolveTextReplyParticipant(chat, store.Message{}, replyToSender, selfJID)
