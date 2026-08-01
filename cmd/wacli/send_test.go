@@ -45,6 +45,7 @@ type recordingTextSender struct {
 	linkedJID       string
 	linkedLID       types.JID
 	resolveLIDCalls int
+	lidToPN         types.JID
 }
 
 func (s *recordingTextSender) SendText(_ context.Context, to types.JID, text string) (types.MessageID, error) {
@@ -86,6 +87,9 @@ func (s *recordingTextSender) ResolvePNToLID(_ context.Context, _ types.JID) typ
 }
 
 func (s *recordingTextSender) ResolveLIDToPN(_ context.Context, jid types.JID) types.JID {
+	if !s.lidToPN.IsEmpty() {
+		return s.lidToPN
+	}
 	return jid
 }
 
@@ -1175,5 +1179,50 @@ func TestBuildTextReplyContextInfoFindsQuoteUnderChatAlias(t *testing.T) {
 				t.Fatalf("participant = %q, want %q", got.GetParticipant(), tc.storedIn.String())
 			}
 		})
+	}
+}
+
+func TestSendTextReplyToOwnMessageUnderChatAliasUsesLIDParticipant(t *testing.T) {
+	db := openSendTestDB(t)
+	pn := types.NewJID("51918505715", types.DefaultUserServer)
+	lid := types.NewJID("46922702278894", types.HiddenUserServer)
+	linkedPN := types.NewJID("15550000000", types.DefaultUserServer)
+	linkedLID := types.NewJID("99887766554433", types.HiddenUserServer)
+
+	if err := db.UpsertChat(pn.String(), "dm", "Alice", time.Now()); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	if err := db.UpsertMessage(store.UpsertMessageParams{
+		ChatJID:   pn.String(),
+		MsgID:     "quoted",
+		Timestamp: time.Now(),
+		FromMe:    true,
+		Text:      "my earlier message",
+	}); err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+
+	sender := &recordingTextSender{
+		linkedJID: linkedPN.String(),
+		linkedLID: linkedLID,
+		lidToPN:   pn,
+	}
+
+	if _, err := sendTextMessageWithSender(context.Background(), sender, db, lid, "reply", "quoted", "", nil, nil, textEphemeralOptions{}); err != nil {
+		t.Fatalf("sendTextMessageWithSender: %v", err)
+	}
+
+	if sender.protoMsg == nil {
+		t.Fatal("no proto message sent")
+	}
+	ctxInfo := sender.protoMsg.GetExtendedTextMessage().GetContextInfo()
+	if ctxInfo == nil {
+		t.Fatal("no context info on the sent message")
+	}
+	if ctxInfo.GetStanzaID() != "quoted" {
+		t.Fatalf("stanza ID = %q, want quoted", ctxInfo.GetStanzaID())
+	}
+	if ctxInfo.GetParticipant() != linkedLID.String() {
+		t.Fatalf("participant = %q, want the linked LID %q", ctxInfo.GetParticipant(), linkedLID.String())
 	}
 }

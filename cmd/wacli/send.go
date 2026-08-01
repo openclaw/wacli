@@ -247,13 +247,13 @@ func sendTextMessageWithSender(ctx context.Context, sender textMessageSender, db
 	if err := validateTextRecipient(sender, to); err != nil {
 		return "", err
 	}
-	selfJID, err := textReplySelfJID(ctx, sender, db, to, replyTo, replyToSender)
-	if err != nil {
-		return "", err
-	}
 	var aliasTo types.JID
 	if strings.TrimSpace(replyTo) != "" {
 		aliasTo = replyLookupAlias(ctx, sender, to)
+	}
+	selfJID, err := textReplySelfJID(ctx, sender, db, to, aliasTo, replyTo, replyToSender)
+	if err != nil {
+		return "", err
 	}
 	msg, plainText, err := buildTextMessageWithSelf(db, to, aliasTo, text, replyTo, replyToSender, selfJID, preview, mentionedJIDs)
 	if err != nil {
@@ -303,13 +303,13 @@ func isSelfTextRecipient(sender textMessageSender, to types.JID) bool {
 	return err == nil && !linkedLID.IsEmpty() && linkedLID.ToNonAD() == to
 }
 
-func textReplySelfJID(ctx context.Context, sender textMessageSender, db *store.DB, chat types.JID, replyTo, replyToSender string) (string, error) {
+func textReplySelfJID(ctx context.Context, sender textMessageSender, db *store.DB, chat, aliasChat types.JID, replyTo, replyToSender string) (string, error) {
 	linked := strings.TrimSpace(sender.LinkedJID())
 	replyTo = strings.TrimSpace(replyTo)
 	if replyTo == "" || strings.TrimSpace(replyToSender) != "" {
 		return linked, nil
 	}
-	quoted, err := db.GetMessage(chat.String(), replyTo)
+	quoted, err := getQuotedMessage(db, chat, aliasChat, replyTo)
 	if err != nil || !quoted.FromMe {
 		return linked, nil
 	}
