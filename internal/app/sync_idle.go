@@ -56,7 +56,11 @@ func (a *App) runSyncFollow(ctx context.Context, maxReconnect time.Duration, pre
 			// Client.Connect can see the existing socket as still live and return nil.
 			a.wa.Close()
 			connectionEpoch.Store(nowUTC().UnixNano())
-			if err := a.reconnect(ctx, maxReconnect, presenceMode); err != nil {
+			loggedOutDuringReconnect, err := a.reconnectWhileWatchingLogout(ctx, maxReconnect, presenceMode, loggedOut)
+			if loggedOutDuringReconnect {
+				return a.stopLoggedOut(messagesStored)
+			}
+			if err != nil {
 				return SyncResult{MessagesStored: messagesStored.Load()}, err
 			}
 		case <-disconnected:
@@ -65,7 +69,11 @@ func (a *App) runSyncFollow(ctx context.Context, maxReconnect time.Duration, pre
 			}
 			a.emitOrPrint("reconnecting", nil, "Reconnecting...\n")
 			connectionEpoch.Store(nowUTC().UnixNano())
-			if err := a.reconnect(ctx, maxReconnect, presenceMode); err != nil {
+			loggedOutDuringReconnect, err := a.reconnectWhileWatchingLogout(ctx, maxReconnect, presenceMode, loggedOut)
+			if loggedOutDuringReconnect {
+				return a.stopLoggedOut(messagesStored)
+			}
+			if err != nil {
 				return SyncResult{MessagesStored: messagesStored.Load()}, err
 			}
 		case <-loggedOut:
@@ -93,7 +101,11 @@ func (a *App) runSyncUntilIdle(ctx context.Context, idleExit, maxReconnect time.
 				return a.stopLoggedOut(messagesStored)
 			}
 			a.emitOrPrint("reconnecting", nil, "Reconnecting...\n")
-			if err := a.reconnect(ctx, maxReconnect, presenceMode); err != nil {
+			loggedOutDuringReconnect, err := a.reconnectWhileWatchingLogout(ctx, maxReconnect, presenceMode, loggedOut)
+			if loggedOutDuringReconnect {
+				return a.stopLoggedOut(messagesStored)
+			}
+			if err != nil {
 				return SyncResult{MessagesStored: messagesStored.Load()}, err
 			}
 		case <-loggedOut:
@@ -130,4 +142,31 @@ func (a *App) reconnect(ctx context.Context, maxDuration time.Duration, presence
 		return fmt.Errorf("could not reconnect after %s: %w", maxDuration, err)
 	}
 	return err
+}
+
+// reconnectWhileWatchingLogout lets the terminal logout signal interrupt an
+// active reconnect. Checking the channel only before reconnecting is not enough:
+// LoggedOut may arrive while ReconnectWithBackoff is sleeping or dialing.
+func (a *App) reconnectWhileWatchingLogout(ctx context.Context, maxDuration time.Duration, presenceMode SyncPresenceMode, loggedOut <-chan struct{}) (bool, error) {
+	reconnectCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- a.reconnect(reconnectCtx, maxDuration, presenceMode)
+	}()
+
+	select {
+	case <-loggedOut:
+		cancel()
+		<-done
+		return true, nil
+	case err := <-done:
+		// If reconnect and logout complete together, the terminal signal still
+		// wins. Otherwise it remains queued for the loop's next select.
+		if loggedOutPending(loggedOut) {
+			return true, nil
+		}
+		return false, err
+	}
 }

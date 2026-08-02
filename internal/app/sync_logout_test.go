@@ -240,6 +240,47 @@ func TestRunSyncFollowLoggedOutWinsOverPendingReconnect(t *testing.T) {
 	}
 }
 
+// A logout can arrive after the loop has already entered ReconnectWithBackoff.
+// The terminal signal must cancel that active reconnect instead of waiting for
+// the reconnect deadline before the loop gets another chance to select it.
+func TestRunSyncFollowStopsWhenLoggedOutDuringReconnect(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	f.connectDelay = time.Hour
+	f.connectStarted = make(chan struct{}, 1)
+	a.wa = f
+
+	var messagesStored, connectionEpoch atomic.Int64
+	disconnected := make(chan struct{}, 1)
+	loggedOut := make(chan struct{}, 1)
+	staleReconnect := make(chan staleReconnectRequest, 1)
+	disconnected <- struct{}{}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := a.runSyncFollow(ctx, time.Hour, SyncPresenceModeNormal, &messagesStored, &connectionEpoch, disconnected, loggedOut, staleReconnect)
+		done <- err
+	}()
+
+	select {
+	case <-f.connectStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("follow loop did not enter reconnect")
+	}
+	loggedOut <- struct{}{}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("runSyncFollow returned error on logout during reconnect: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("runSyncFollow did not cancel reconnect after logged_out signal")
+	}
+}
+
 // The bootstrap/once idle loop must also stop on logout rather than reconnect.
 func TestRunSyncUntilIdleStopsOnLoggedOut(t *testing.T) {
 	a := newTestApp(t)
@@ -313,6 +354,44 @@ func TestRunSyncUntilIdleLoggedOutWinsOverDisconnected(t *testing.T) {
 		if calls != 0 {
 			t.Fatalf("run %d: idle loop reconnected before consuming logout (connectCalls=%d), want 0", i, calls)
 		}
+	}
+}
+
+func TestRunSyncUntilIdleStopsWhenLoggedOutDuringReconnect(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	f.connectDelay = time.Hour
+	f.connectStarted = make(chan struct{}, 1)
+	a.wa = f
+
+	var messagesStored, lastEvent atomic.Int64
+	lastEvent.Store(nowUTC().UnixNano())
+	disconnected := make(chan struct{}, 1)
+	loggedOut := make(chan struct{}, 1)
+	disconnected <- struct{}{}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := a.runSyncUntilIdle(ctx, time.Hour, time.Hour, SyncPresenceModeNormal, &messagesStored, &lastEvent, disconnected, loggedOut)
+		done <- err
+	}()
+
+	select {
+	case <-f.connectStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("idle loop did not enter reconnect")
+	}
+	loggedOut <- struct{}{}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("runSyncUntilIdle returned error on logout during reconnect: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("runSyncUntilIdle did not cancel reconnect after logged_out signal")
 	}
 }
 

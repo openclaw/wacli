@@ -34,12 +34,13 @@ type fakeWA struct {
 	nextHandlerID uint32
 	handlers      map[uint32]func(interface{})
 
-	connectEvents []interface{}
-	connectErrs   []error
-	connectCalls  int
-	connectDelay  time.Duration
-	downloadDelay time.Duration
-	downloadErr   error
+	connectEvents  []interface{}
+	connectErrs    []error
+	connectCalls   int
+	connectDelay   time.Duration
+	connectStarted chan struct{}
+	downloadDelay  time.Duration
+	downloadErr    error
 
 	onMediaRetry       func(info *types.MessageInfo, mediaKey []byte) interface{}
 	mediaRetryReceipts []string
@@ -178,6 +179,12 @@ func (f *fakeWA) Connect(ctx context.Context, opts wa.ConnectOptions) error {
 		return nil
 	}
 	f.connectCalls++
+	if f.connectStarted != nil {
+		select {
+		case f.connectStarted <- struct{}{}:
+		default:
+		}
+	}
 	authed := f.authed
 	var connectErr error
 	if len(f.connectErrs) > 0 {

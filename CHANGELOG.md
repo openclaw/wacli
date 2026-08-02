@@ -9,6 +9,7 @@
 
 ### Fixed
 
+- Sync: stop promptly when WhatsApp revokes the linked session, including while a reconnect is already in progress, and print the re-authentication steps. (#325 - thanks @cohnen)
 - Send: keep self-chat storage under the canonical phone-number chat and reject text sends to the linked account itself instead of reporting an acknowledgement that may never reach Message Yourself. (#319 - thanks @Lucas-Kim-J)
 
 ### Chore
