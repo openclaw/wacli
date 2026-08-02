@@ -20,13 +20,6 @@ builds:
       - amd64
       - arm64
 
-universal_binaries:
-  - id: wacli
-    ids:
-      - wacli
-    name_template: wacli
-    replace: false
-
 archives:
   - id: default
     formats:

@@ -1,166 +1,41 @@
-name: release-builds
-run-name: release-builds commit=${{ inputs.commit }} version=${{ inputs.version }}
+name: Release
 
 on:
   workflow_dispatch:
     inputs:
-      commit:
-        description: "Full protected-main commit SHA to build"
-        required: true
-        type: string
       version:
-        description: "Release version without v (for example 0.12.1)"
+        description: SemVer to release
         required: true
         type: string
 
-permissions:
-  contents: read
-
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+permissions: {}
 
 jobs:
-  cross-platform:
-    if: >-
-      ${{
-        github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
-        github.workflow_ref == format('{0}/.github/workflows/release.yml@refs/heads/{1}', github.repository, github.event.repository.default_branch)
-      }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout protected release tooling
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          fetch-depth: 0
-          path: trusted
-          persist-credentials: false
-          ref: ${{ github.sha }}
-
-      - name: Validate selected commit
-        env:
-          RELEASE_COMMIT: ${{ inputs.commit }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          TRUSTED_WORKFLOW_SHA: ${{ github.sha }}
-        run: |
-          test "$(git -C trusted rev-parse HEAD)" = "$TRUSTED_WORKFLOW_SHA"
-          if [[ ! "$RELEASE_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "::error::commit must be a full lowercase SHA"
-            exit 1
-          fi
-          git -C trusted cat-file -e "${RELEASE_COMMIT}^{commit}"
-          git -C trusted merge-base --is-ancestor "$RELEASE_COMMIT" "origin/$DEFAULT_BRANCH"
-
-      - name: Checkout candidate source
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          fetch-depth: 0
-          path: source
-          persist-credentials: false
-          ref: ${{ inputs.commit }}
-
-      - name: Validate candidate version
-        env:
-          RELEASE_COMMIT: ${{ inputs.commit }}
-          RELEASE_VERSION: ${{ inputs.version }}
-        run: |
-          if [[ ! "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::version must look like X.Y.Z"
-            exit 1
-          fi
-          test "$(git -C source rev-parse HEAD)" = "$RELEASE_COMMIT"
-          grep -qx 'go 1.26.5' source/go.mod
-          grep -q "const sourceVersion = \"${RELEASE_VERSION}\"" source/cmd/wacli/root.go
-          grep -Eq "^## ${RELEASE_VERSION} - [0-9]{4}-[0-9]{2}-[0-9]{2}$" source/CHANGELOG.md
-
-      - name: Setup Node
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: "24"
-
-      - name: Setup Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
-        with:
-          go-version-file: source/go.mod
-          cache-dependency-path: source/go.sum
-          cache: true
-
-      - name: Install cross compilers
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential gcc-aarch64-linux-gnu libc6-dev-arm64-cross mingw-w64
-
-      - name: Install GoReleaser
-        uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6.4.0
-        with:
-          distribution: goreleaser
-          version: v2.16.0
-          install-only: true
-
-      - name: Build credential-free Linux and Windows assets
-        env:
-          RELEASE_VERSION: ${{ inputs.version }}
-        run: |
-          git -C source -c tag.gpgSign=false tag "v${RELEASE_VERSION}"
-          mkdir -m 700 "$RUNNER_TEMP/build-home"
-          cd source
-          for pass in 1 2; do
-            pass_root="$RUNNER_TEMP/cross-repro-$pass"
-            mkdir -m 700 "$pass_root"
-            mkdir -m 700 "$pass_root/home" "$pass_root/gomodcache" "$pass_root/gocache" "$pass_root/tmp"
-            env -i \
-              CGO_ENABLED=1 \
-              GOCACHE="$pass_root/gocache" \
-              GOMODCACHE="$pass_root/gomodcache" \
-              GOTOOLCHAIN=local \
-              HOME="$pass_root/home" \
-              PATH="$PATH" \
-              TMPDIR="$pass_root/tmp" \
-              goreleaser release --clean --skip=publish --config .goreleaser-linux-windows.yaml
-            mv dist "$pass_root/dist"
-          done
-
-          cross_files=(
-            "wacli_linux_amd64_linux_amd64_v1/wacli"
-            "wacli_linux_arm64_linux_arm64_v8.0/wacli"
-            "wacli_windows_amd64_windows_amd64_v1/wacli.exe"
-            "wacli_${RELEASE_VERSION}_linux_amd64.tar.gz"
-            "wacli_${RELEASE_VERSION}_linux_arm64.tar.gz"
-            "wacli_${RELEASE_VERSION}_windows_amd64.zip"
-            "checksums.txt"
-          )
-          for file in "${cross_files[@]}"; do
-            cmp "$RUNNER_TEMP/cross-repro-1/dist/$file" "$RUNNER_TEMP/cross-repro-2/dist/$file"
-          done
-          mv "$RUNNER_TEMP/cross-repro-1/dist" dist
-          echo "REPRODUCIBLE_CROSS_PLATFORM version=$RELEASE_VERSION files=${#cross_files[@]}"
-
-      - name: Collect exact cross-platform assets with protected tooling
-        env:
-          RELEASE_COMMIT: ${{ inputs.commit }}
-          RELEASE_VERSION: ${{ inputs.version }}
-        run: |
-          env -i \
-            HOME="$RUNNER_TEMP/build-home" \
-            PATH="$PATH" \
-            TMPDIR="$RUNNER_TEMP" \
-            node trusted/scripts/collect-cross-platform-assets.mjs \
-              --source source/dist \
-              --output cross-assets \
-              --version "$RELEASE_VERSION" \
-              --commit "$RELEASE_COMMIT" \
-              --repository "$GITHUB_REPOSITORY" \
-              --workflow-path .github/workflows/release.yml \
-              --workflow-ref "$GITHUB_WORKFLOW_REF" \
-              --workflow-sha "$GITHUB_SHA" \
-              --run-id "$GITHUB_RUN_ID" \
-              --run-attempt "$GITHUB_RUN_ATTEMPT" \
-              --event "$GITHUB_EVENT_NAME" \
-              --ref "$GITHUB_REF"
-
-      - name: Upload credential-free build output
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: wacli-${{ inputs.version }}-cross-${{ inputs.commit }}
-          path: cross-assets/*
-          if-no-files-found: error
-          retention-days: 7
+  release:
+    permissions:
+      actions: read
+      checks: read
+      contents: write
+      pull-requests: write
+      statuses: read
+    uses: openclaw/release-workflows/.github/workflows/release-go-cli.yml@v1
+    with:
+      version: ${{ inputs.version }}
+      repository-type: openclaw
+      homebrew-tap: openclaw/homebrew-tap
+      homebrew-formula: wacli
+      archive-files: '["LICENSE","README.md"]'
+      checksum-filename: checksums.txt
+      nfpm: disabled
+      split-goreleaser-config: .goreleaser-linux-windows.yaml
+      stable-identifier: org.openclaw.wacli
+      ci-check-events: '["push","pull_request"]'
+      reproducible-rebuild: non-darwin
+      strict-checks: false
+    secrets:
+      MACOS_SIGNING_P12: ${{ secrets.MACOS_SIGNING_P12 }}
+      MACOS_SIGNING_P12_PASSWORD: ${{ secrets.MACOS_SIGNING_P12_PASSWORD }}
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_PRIVATE_KEY_P8: ${{ secrets.ASC_PRIVATE_KEY_P8 }}
+      TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
