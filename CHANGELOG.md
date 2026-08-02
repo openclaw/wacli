@@ -9,8 +9,8 @@
 
 ### Fixed
 
-- Send: resolve quoted direct messages across phone-number and LID chat aliases so replies can find migrated history. (#326 - thanks @0xlucuma)
 - Send: keep self-chat storage under the canonical phone-number chat and reject text sends to the linked account itself instead of reporting an acknowledgement that may never reach Message Yourself. (#319 - thanks @Lucas-Kim-J)
+- Send: resolve quoted direct messages across phone-number and LID chat aliases so replies can find migrated history. (#326 - thanks @0xlucuma)
 
 ### Chore
 
