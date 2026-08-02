@@ -159,8 +159,10 @@ func sendFile(ctx context.Context, a interface {
 		return "", nil, err
 	}
 
+	// Network send already succeeded. Local store failures must still surface so
+	// history does not silently diverge (disk full, locked DB, corruption).
 	if to == types.StatusBroadcastJID {
-		_ = a.DB().UpsertStatusMessage(store.UpsertStatusMessageParams{
+		if err := a.DB().UpsertStatusMessage(store.UpsertStatusMessageParams{
 			MsgID:         id,
 			Timestamp:     now,
 			FromMe:        true,
@@ -175,12 +177,16 @@ func sendFile(ctx context.Context, a interface {
 			FileSHA256:    up.FileSHA256,
 			FileEncSHA256: up.FileEncSHA256,
 			FileLength:    up.FileLength,
-		})
+		}); err != nil {
+			return id, nil, fmt.Errorf("message sent but local store update failed: %w", err)
+		}
 	} else {
 		chatName := a.WA().ResolveChatName(ctx, to, "")
 		kind := chatKindFromJID(to)
-		_ = a.DB().UpsertChat(to.String(), kind, chatName, now)
-		_ = a.DB().UpsertMessage(store.UpsertMessageParams{
+		if err := a.DB().UpsertChat(to.String(), kind, chatName, now); err != nil {
+			return id, nil, fmt.Errorf("message sent but local chat store update failed: %w", err)
+		}
+		if err := a.DB().UpsertMessage(store.UpsertMessageParams{
 			ChatJID:       to.String(),
 			ChatName:      chatName,
 			MsgID:         id,
@@ -198,7 +204,9 @@ func sendFile(ctx context.Context, a interface {
 			FileSHA256:    up.FileSHA256,
 			FileEncSHA256: up.FileEncSHA256,
 			FileLength:    up.FileLength,
-		})
+		}); err != nil {
+			return id, nil, fmt.Errorf("message sent but local message store update failed: %w", err)
+		}
 	}
 
 	return id, map[string]string{
