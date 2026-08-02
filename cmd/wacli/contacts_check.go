@@ -39,6 +39,7 @@ type contactCheckResult struct {
 func checkRegistrations(ctx context.Context, checker registrationChecker, inputs []string) ([]contactCheckResult, error) {
 	results := make([]contactCheckResult, 0, len(inputs))
 	phones := make([]string, 0, len(inputs))
+	seen := make(map[string]bool, len(inputs))
 	for _, in := range inputs {
 		jid, err := wa.ParseUserOrJID(in)
 		if err != nil {
@@ -47,7 +48,10 @@ func checkRegistrations(ctx context.Context, checker registrationChecker, inputs
 		if jid.Server != types.DefaultUserServer {
 			return nil, fmt.Errorf("unsupported recipient %q: pass a phone number or user JID", in)
 		}
-		phones = append(phones, "+"+jid.User)
+		if !seen[jid.User] {
+			seen[jid.User] = true
+			phones = append(phones, "+"+jid.User)
+		}
 		results = append(results, contactCheckResult{Query: in, Phone: jid.User})
 	}
 

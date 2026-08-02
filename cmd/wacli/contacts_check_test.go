@@ -51,6 +51,30 @@ func TestCheckRegistrationsNormalizesAndMaps(t *testing.T) {
 	}
 }
 
+func TestCheckRegistrationsDeduplicatesLookups(t *testing.T) {
+	jid := types.NewJID("4366412345678", types.DefaultUserServer)
+	checker := &fakeRegistrationChecker{
+		resp: []types.IsOnWhatsAppResponse{
+			{Query: "+4366412345678", JID: jid, IsIn: true},
+		},
+	}
+	results, err := checkRegistrations(context.Background(), checker, []string{"+43 664 12345678", "4366412345678@s.whatsapp.net"})
+	if err != nil {
+		t.Fatalf("checkRegistrations: %v", err)
+	}
+	if len(checker.gotPhones) != 1 || checker.gotPhones[0] != "+4366412345678" {
+		t.Fatalf("expected single deduplicated lookup, got %#v", checker.gotPhones)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected per-input results, got %d", len(results))
+	}
+	for _, r := range results {
+		if !r.Registered || r.JID != jid.String() {
+			t.Fatalf("expected both inputs registered as %s, got %+v", jid, r)
+		}
+	}
+}
+
 func TestCheckRegistrationsRejectsNonUserJID(t *testing.T) {
 	checker := &fakeRegistrationChecker{}
 	_, err := checkRegistrations(context.Background(), checker, []string{"12345@g.us"})
