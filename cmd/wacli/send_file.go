@@ -241,7 +241,16 @@ func warnSendStoreFailure(w io.Writer, id string, storeWarning error) {
 	if storeWarning == nil {
 		return
 	}
-	fmt.Fprintf(w, "warning: message delivered (id %s) but local history update failed: %v\n", id, storeWarning)
+	warnSendStoreFailureMsg(w, id, storeWarning.Error())
+}
+
+// warnSendStoreFailureMsg is the string form for callers that receive the
+// warning across the IPC boundary.
+func warnSendStoreFailureMsg(w io.Writer, id, msg string) {
+	if msg == "" {
+		return
+	}
+	fmt.Fprintf(w, "warning: message delivered (id %s) but local history update failed: %s\n", id, msg)
 }
 
 // addStoreWarning annotates a JSON success payload with the partial-success

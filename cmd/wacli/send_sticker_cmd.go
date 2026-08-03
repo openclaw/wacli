@@ -74,33 +74,26 @@ func newSendStickerCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 
-			type sendStickerResult struct {
-				id   string
-				meta map[string]string
-			}
-			res, err := runSendOperation(ctx, reconnectForSend(a), func(ctx context.Context) (sendStickerResult, error) {
-				msgID, meta, err := sendSticker(ctx, a, toJID, filePath, sendStickerOptions{
+			res, err := runSendOperation(ctx, reconnectForSend(a), func(ctx context.Context) (sendFileOutcome, error) {
+				return sendSticker(ctx, a, toJID, filePath, sendStickerOptions{
 					replyTo:       replyTo,
 					replyToSender: replyToSender,
 				})
-				if err != nil {
-					return sendStickerResult{}, err
-				}
-				return sendStickerResult{id: msgID, meta: meta}, nil
 			})
 			if err != nil {
 				return err
 			}
+			warnSendStoreFailure(os.Stderr, res.id, res.storeWarning)
 
 			waitForPostSendRetryReceipts(ctx, postSendWait)
 
 			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{
+				return out.WriteJSON(os.Stdout, addStoreWarning(map[string]any{
 					"sent": true,
 					"to":   toJID.String(),
 					"id":   res.id,
 					"file": res.meta,
-				})
+				}, res.storeWarning))
 			}
 			fmt.Fprintf(os.Stdout, "Sent sticker to %s (id %s)\n", toJID.String(), res.id)
 			return nil

@@ -9,6 +9,7 @@
 ### Fixed
 
 - Send: surface local history failures after a delivered file, voice, or status send as a `store_warning` (stderr warning plus JSON field) instead of silently diverging local history, while keeping the delivered message id so scripts do not retry an already-sent message. (#328 - thanks @SebTardif)
+- Send: extend the `store_warning` partial-success contract to every remaining send surface — text, sticker, reactions, polls, poll votes, button/list selections, and message forwarding — including sends delegated to a running `sync --follow` process.
 
 ## 0.15.1 - 2026-08-01
 

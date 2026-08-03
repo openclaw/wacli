@@ -126,17 +126,18 @@ func newPollVoteCmd(flags *rootFlags) *cobra.Command {
 			}
 
 			now := time.Now().UTC()
-			persistOutboundVote(ctx, a, toJID, pollChatJID, msgID, string(sentID), cleaned, now)
+			storeErr := persistOutboundVote(ctx, a, toJID, pollChatJID, msgID, string(sentID), cleaned, now)
+			warnSendStoreFailure(os.Stderr, string(sentID), storeErr)
 			waitForPostSendRetryReceipts(ctx, postSendWait)
 
 			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{
+				return out.WriteJSON(os.Stdout, addStoreWarning(map[string]any{
 					"sent":     true,
 					"to":       toJID.String(),
 					"id":       string(sentID),
 					"target":   msgID,
 					"selected": cleaned,
-				})
+				}, storeErr))
 			}
 			fmt.Fprintf(os.Stdout, "Voted on %s in %s (id %s)\n", msgID, toJID.String(), sentID)
 			return nil
@@ -331,13 +332,16 @@ func pollChatJIDCandidates(ctx context.Context, a *app.App, jid types.JID) []str
 	return jidStrings(jids)
 }
 
-func persistOutboundVote(ctx context.Context, a *app.App, chat types.JID, chatJID, pollMsgID, voteMsgID string, options []string, now time.Time) {
+func persistOutboundVote(ctx context.Context, a *app.App, chat types.JID, chatJID, pollMsgID, voteMsgID string, options []string, now time.Time) error {
 	if strings.TrimSpace(chatJID) == "" {
 		chatJID = primaryPollChatJID(ctx, a, chat)
 	}
 	chatName := a.WA().ResolveChatName(ctx, chat, "")
-	_ = a.DB().UpsertChat(chatJID, chatKindFromJID(chat), chatName, now)
-	_ = a.DB().UpsertMessage(store.UpsertMessageParams{
+	var storeErr error
+	if err := a.DB().UpsertChat(chatJID, chatKindFromJID(chat), chatName, now); err != nil {
+		storeErr = fmt.Errorf("chat update: %w", err)
+	}
+	if err := a.DB().UpsertMessage(store.UpsertMessageParams{
 		ChatJID:    chatJID,
 		ChatName:   chatName,
 		MsgID:      voteMsgID,
@@ -345,19 +349,24 @@ func persistOutboundVote(ctx context.Context, a *app.App, chat types.JID, chatJI
 		Timestamp:  now,
 		FromMe:     true,
 		Text:       "Voted: " + strings.Join(options, ", "),
-	})
+	}); err != nil {
+		storeErr = errors.Join(storeErr, fmt.Errorf("message update: %w", err))
+	}
 	voter := a.WA().LinkedJID()
 	if voter == "" {
-		return
+		return storeErr
 	}
-	_ = a.DB().UpsertPollVote(store.PollVote{
+	if err := a.DB().UpsertPollVote(store.PollVote{
 		ChatJID:   chatJID,
 		PollMsgID: pollMsgID,
 		VoterJID:  voter,
 		VoteMsgID: voteMsgID,
 		Selected:  options,
 		VotedAt:   now,
-	})
+	}); err != nil {
+		storeErr = errors.Join(storeErr, fmt.Errorf("poll vote update: %w", err))
+	}
+	return storeErr
 }
 
 func executeDelegatedPollVote(ctx context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {
@@ -395,16 +404,20 @@ func executeDelegatedPollVote(ctx context.Context, a *app.App, req sendDelegateR
 		return sendDelegateResponse{}, err
 	}
 	now := time.Now().UTC()
-	persistOutboundVote(ctx, a, toJID, pollChatJID, req.ID, string(sentID), cleaned, now)
+	storeErr := persistOutboundVote(ctx, a, toJID, pollChatJID, req.ID, string(sentID), cleaned, now)
 	waitForPostSendRetryReceipts(ctx, millisDuration(req.PostSendWaitMS, 0))
-	return sendDelegateResponse{
+	resp := sendDelegateResponse{
 		OK:       true,
 		Sent:     true,
 		To:       toJID.String(),
 		ID:       string(sentID),
 		Target:   req.ID,
 		Selected: cleaned,
-	}, nil
+	}
+	if storeErr != nil {
+		resp.StoreWarning = storeErr.Error()
+	}
+	return resp, nil
 }
 
 // ---- show -----------------------------------------------------------------

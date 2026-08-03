@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -845,8 +846,11 @@ func newMessagesForwardCmd(flags *rootFlags) *cobra.Command {
 
 			now := time.Now().UTC()
 			chatName := a.WA().ResolveChatName(ctx, toJID, "")
-			_ = a.DB().UpsertChat(toJID.String(), chatKindFromJID(toJID), chatName, now)
-			_ = a.DB().UpsertMessage(store.UpsertMessageParams{
+			var storeErr error
+			if err := a.DB().UpsertChat(toJID.String(), chatKindFromJID(toJID), chatName, now); err != nil {
+				storeErr = fmt.Errorf("chat update: %w", err)
+			}
+			if err := a.DB().UpsertMessage(store.UpsertMessageParams{
 				ChatJID:         toJID.String(),
 				ChatName:        chatName,
 				MsgID:           string(sentID),
@@ -866,17 +870,20 @@ func newMessagesForwardCmd(flags *rootFlags) *cobra.Command {
 				FileLength:      payload.FileLength,
 				IsForwarded:     true,
 				ForwardingScore: payload.ForwardingScore,
-			})
+			}); err != nil {
+				storeErr = errors.Join(storeErr, fmt.Errorf("message update: %w", err))
+			}
+			warnSendStoreFailure(os.Stderr, string(sentID), storeErr)
 
 			waitForPostSendRetryReceipts(ctx, postSendWait)
 
 			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{
+				return out.WriteJSON(os.Stdout, addStoreWarning(map[string]any{
 					"forwarded": true,
 					"to":        toJID.String(),
 					"id":        sentID,
 					"source":    source.MsgID,
-				})
+				}, storeErr))
 			}
 			fmt.Fprintf(os.Stdout, "Forwarded message %s to %s (id %s)\n", source.MsgID, toJID.String(), sentID)
 			return nil

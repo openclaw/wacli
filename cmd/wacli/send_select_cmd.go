@@ -51,11 +51,12 @@ type selectOption struct {
 }
 
 type selectResult struct {
-	Sent     bool         `json:"sent"`
-	To       string       `json:"to"`
-	ID       string       `json:"id"`
-	Target   string       `json:"target"`
-	Selected selectOption `json:"selected"`
+	Sent         bool         `json:"sent"`
+	To           string       `json:"to"`
+	ID           string       `json:"id"`
+	Target       string       `json:"target"`
+	Selected     selectOption `json:"selected"`
+	StoreWarning string       `json:"store_warning,omitempty"`
 }
 
 func newSendSelectCmd(flags *rootFlags) *cobra.Command {
@@ -135,6 +136,7 @@ func newSendSelectCmd(flags *rootFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			warnSendStoreFailureMsg(os.Stderr, res.ID, res.StoreWarning)
 			if flags.asJSON {
 				return out.WriteJSON(os.Stdout, res)
 			}
@@ -203,15 +205,19 @@ func sendButtonListSelection(ctx context.Context, a *app.App, chat types.JID, ta
 		return selectResult{}, err
 	}
 	now := time.Now().UTC()
-	persistOutboundSelection(ctx, a, chat, chatJID, string(sentID), selected, now)
+	storeErr := persistOutboundSelection(ctx, a, chat, chatJID, string(sentID), selected, now)
 	waitForPostSendRetryReceipts(ctx, req.PostSendWait)
-	return selectResult{
+	res := selectResult{
 		Sent:     true,
 		To:       chat.String(),
 		ID:       string(sentID),
 		Target:   targetID,
 		Selected: selected,
-	}, nil
+	}
+	if storeErr != nil {
+		res.StoreWarning = storeErr.Error()
+	}
+	return res, nil
 }
 
 func sendSelectProto(ctx context.Context, sender selectSender, to types.JID, msg *waProto.Message) (types.MessageID, error) {
@@ -446,14 +452,14 @@ func resolveSelectSender(chat types.JID, target store.Message, override string) 
 	return types.JID{}, nil
 }
 
-func persistOutboundSelection(ctx context.Context, a *app.App, chat types.JID, chatJID, msgID string, selected selectOption, now time.Time) {
+func persistOutboundSelection(ctx context.Context, a *app.App, chat types.JID, chatJID, msgID string, selected selectOption, now time.Time) error {
 	if strings.TrimSpace(chatJID) == "" {
 		chatJID = primaryPollChatJID(ctx, a, chat)
 	}
 	chatName := a.WA().ResolveChatName(ctx, chat, "")
+	var storeErr error
 	if err := a.DB().UpsertChat(chatJID, chatKindFromJID(chat), chatName, now); err != nil {
-		warnOutboundPersist("chat", msgID, err)
-		return
+		storeErr = fmt.Errorf("chat update: %w", err)
 	}
 	if err := a.DB().UpsertMessage(store.UpsertMessageParams{
 		ChatJID:    chatJID,
@@ -464,8 +470,9 @@ func persistOutboundSelection(ctx context.Context, a *app.App, chat types.JID, c
 		FromMe:     true,
 		Text:       "Selected: " + selected.DisplayText,
 	}); err != nil {
-		warnOutboundPersist("message", msgID, err)
+		storeErr = errors.Join(storeErr, fmt.Errorf("message update: %w", err))
 	}
+	return storeErr
 }
 
 func executeDelegatedButtonListSelect(ctx context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {
@@ -500,5 +507,6 @@ func executeDelegatedButtonListSelect(ctx context.Context, a *app.App, req sendD
 		ID:             res.ID,
 		Target:         res.Target,
 		SelectedOption: &res.Selected,
+		StoreWarning:   res.StoreWarning,
 	}, nil
 }

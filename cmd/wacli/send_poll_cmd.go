@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -100,17 +101,18 @@ func newSendPollCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 
-			persistOutboundPoll(ctx, a, toJID, string(msgID), question, cleaned, uint32(multi), time.Now().UTC())
+			storeErr := persistOutboundPoll(ctx, a, toJID, string(msgID), question, cleaned, uint32(multi), time.Now().UTC())
+			warnSendStoreFailure(os.Stderr, string(msgID), storeErr)
 			waitForPostSendRetryReceipts(ctx, postSendWait)
 
 			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{
+				return out.WriteJSON(os.Stdout, addStoreWarning(map[string]any{
 					"sent":     true,
 					"to":       toJID.String(),
 					"id":       msgID,
 					"question": question,
 					"options":  cleaned,
-				})
+				}, storeErr))
 			}
 			fmt.Fprintf(os.Stdout, "Sent poll to %s (id %s)\n", toJID.String(), msgID)
 			return nil
@@ -166,11 +168,14 @@ func sendPollMessage(ctx context.Context, sender pollSender, to types.JID, quest
 	return sender.SendPoll(ctx, to, question, options, multi, ephemeral)
 }
 
-func persistOutboundPoll(ctx context.Context, a *app.App, chat types.JID, msgID, question string, options []string, selectable uint32, now time.Time) {
+func persistOutboundPoll(ctx context.Context, a *app.App, chat types.JID, msgID, question string, options []string, selectable uint32, now time.Time) error {
 	chatJID := primaryPollChatJID(ctx, a, chat)
 	chatName := a.WA().ResolveChatName(ctx, chat, "")
-	_ = a.DB().UpsertChat(chatJID, chatKindFromJID(chat), chatName, now)
-	_ = a.DB().UpsertMessage(store.UpsertMessageParams{
+	var storeErr error
+	if err := a.DB().UpsertChat(chatJID, chatKindFromJID(chat), chatName, now); err != nil {
+		storeErr = fmt.Errorf("chat update: %w", err)
+	}
+	if err := a.DB().UpsertMessage(store.UpsertMessageParams{
 		ChatJID:    chatJID,
 		ChatName:   chatName,
 		MsgID:      msgID,
@@ -178,8 +183,10 @@ func persistOutboundPoll(ctx context.Context, a *app.App, chat types.JID, msgID,
 		Timestamp:  now,
 		FromMe:     true,
 		Text:       "Poll: " + question,
-	})
-	_ = a.DB().UpsertPoll(store.Poll{
+	}); err != nil {
+		storeErr = errors.Join(storeErr, fmt.Errorf("message update: %w", err))
+	}
+	if err := a.DB().UpsertPoll(store.Poll{
 		ChatJID:         chatJID,
 		MsgID:           msgID,
 		SenderJID:       outboundPollSenderJID(ctx, a.WA(), chat),
@@ -187,7 +194,10 @@ func persistOutboundPoll(ctx context.Context, a *app.App, chat types.JID, msgID,
 		Options:         options,
 		SelectableCount: selectable,
 		CreatedAt:       now,
-	})
+	}); err != nil {
+		storeErr = errors.Join(storeErr, fmt.Errorf("poll update: %w", err))
+	}
+	return storeErr
 }
 
 func outboundPollSenderJID(ctx context.Context, wa outboundPollIdentityResolver, chat types.JID) string {
@@ -232,14 +242,18 @@ func executeDelegatedPoll(ctx context.Context, a *app.App, req sendDelegateReque
 	if err != nil {
 		return sendDelegateResponse{}, err
 	}
-	persistOutboundPoll(ctx, a, toJID, string(msgID), req.Question, cleaned, uint32(req.Selectable), time.Now().UTC())
+	storeErr := persistOutboundPoll(ctx, a, toJID, string(msgID), req.Question, cleaned, uint32(req.Selectable), time.Now().UTC())
 	waitForPostSendRetryReceipts(ctx, millisDuration(req.PostSendWaitMS, 0))
-	return sendDelegateResponse{
+	resp := sendDelegateResponse{
 		OK:       true,
 		Sent:     true,
 		To:       toJID.String(),
 		ID:       string(msgID),
 		Question: req.Question,
 		Options:  cleaned,
-	}, nil
+	}
+	if storeErr != nil {
+		resp.StoreWarning = storeErr.Error()
+	}
+	return resp, nil
 }

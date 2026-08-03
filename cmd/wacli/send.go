@@ -138,16 +138,17 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 
 			now := time.Now().UTC()
 			chat := toJID
-			persistOutboundText(ctx, a, chat, string(msgID), message, now)
+			storeErr := persistOutboundText(ctx, a, chat, string(msgID), message, now)
+			warnSendStoreFailure(os.Stderr, string(msgID), storeErr)
 
 			waitForPostSendRetryReceipts(ctx, postSendWait)
 
 			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{
+				return out.WriteJSON(os.Stdout, addStoreWarning(map[string]any{
 					"sent": true,
 					"to":   chat.String(),
 					"id":   msgID,
-				})
+				}, storeErr))
 			}
 			fmt.Fprintf(os.Stdout, "Sent to %s (id %s)\n", chat.String(), msgID)
 			return nil
@@ -168,8 +169,8 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 	return cmd
 }
 
-func persistOutboundText(ctx context.Context, a *app.App, chat types.JID, msgID, text string, now time.Time) {
-	persistOutboundTextWith(ctx, a.DB(), a.WA(), chat, msgID, text, now)
+func persistOutboundText(ctx context.Context, a *app.App, chat types.JID, msgID, text string, now time.Time) error {
+	return persistOutboundTextWith(ctx, a.DB(), a.WA(), chat, msgID, text, now)
 }
 
 type outboundTextResolver interface {
@@ -177,15 +178,15 @@ type outboundTextResolver interface {
 	ResolveLIDToPN(ctx context.Context, jid types.JID) types.JID
 }
 
-func persistOutboundTextWith(ctx context.Context, db *store.DB, resolver outboundTextResolver, chat types.JID, msgID, text string, now time.Time) {
+func persistOutboundTextWith(ctx context.Context, db *store.DB, resolver outboundTextResolver, chat types.JID, msgID, text string, now time.Time) error {
 	chat = resolver.ResolveLIDToPN(ctx, chat)
 	if chat.Server == types.DefaultUserServer {
 		chat = chat.ToNonAD()
 	}
 	chatName := resolver.ResolveChatName(ctx, chat, "")
+	var storeErr error
 	if err := db.UpsertChat(chat.String(), chatKindFromJID(chat), chatName, now); err != nil {
-		warnOutboundPersist("chat", msgID, err)
-		return
+		storeErr = fmt.Errorf("chat update: %w", err)
 	}
 	if err := db.UpsertMessage(store.UpsertMessageParams{
 		ChatJID:    chat.String(),
@@ -197,15 +198,9 @@ func persistOutboundTextWith(ctx context.Context, db *store.DB, resolver outboun
 		FromMe:     true,
 		Text:       text,
 	}); err != nil {
-		warnOutboundPersist("message", msgID, err)
+		storeErr = errors.Join(storeErr, fmt.Errorf("message update: %w", err))
 	}
-}
-
-func warnOutboundPersist(kind, msgID string, err error) {
-	if err == nil {
-		return
-	}
-	fmt.Fprintf(os.Stderr, "warning: sent message %s was accepted by WhatsApp, but local outbound %s persistence failed: %v\n", msgID, kind, err)
+	return storeErr
 }
 
 type sendTextApp interface {

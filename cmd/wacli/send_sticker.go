@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"time"
@@ -39,41 +40,44 @@ type webPStickerMetadata struct {
 func sendSticker(ctx context.Context, a interface {
 	WA() app.WAClient
 	DB() *store.DB
-}, to types.JID, filePath string, opts sendStickerOptions) (string, map[string]string, error) {
+}, to types.JID, filePath string, opts sendStickerOptions) (sendFileOutcome, error) {
 	data, err := readSendFileData(filePath)
 	if err != nil {
-		return "", nil, err
+		return sendFileOutcome{}, err
 	}
 	meta, err := validateWebPSticker(data)
 	if err != nil {
-		return "", nil, err
+		return sendFileOutcome{}, err
 	}
 
 	uploadType, err := wa.MediaTypeFromString("sticker")
 	if err != nil {
-		return "", nil, err
+		return sendFileOutcome{}, err
 	}
 	up, err := a.WA().Upload(ctx, data, uploadType)
 	if err != nil {
-		return "", nil, err
+		return sendFileOutcome{}, err
 	}
 
 	replyContext, err := buildReplyContextInfo(a.DB(), to, opts.replyTo, opts.replyToSender)
 	if err != nil {
-		return "", nil, err
+		return sendFileOutcome{}, err
 	}
 	msg := newStickerMessage(up, replyContext, meta)
 
 	id, err := a.WA().SendProtoMessage(ctx, to, msg)
 	if err != nil {
-		return "", nil, err
+		return sendFileOutcome{}, err
 	}
 
 	now := time.Now().UTC()
 	name := filepath.Base(filePath)
 	chatName := a.WA().ResolveChatName(ctx, to, "")
-	_ = a.DB().UpsertChat(to.String(), chatKindFromJID(to), chatName, now)
-	_ = a.DB().UpsertMessage(store.UpsertMessageParams{
+	var storeErr error
+	if err := a.DB().UpsertChat(to.String(), chatKindFromJID(to), chatName, now); err != nil {
+		storeErr = fmt.Errorf("chat update: %w", err)
+	}
+	if err := a.DB().UpsertMessage(store.UpsertMessageParams{
 		ChatJID:       to.String(),
 		ChatName:      chatName,
 		MsgID:         id,
@@ -89,12 +93,18 @@ func sendSticker(ctx context.Context, a interface {
 		FileSHA256:    up.FileSHA256,
 		FileEncSHA256: up.FileEncSHA256,
 		FileLength:    up.FileLength,
-	})
+	}); err != nil {
+		storeErr = errors.Join(storeErr, fmt.Errorf("message update: %w", err))
+	}
 
-	return id, map[string]string{
-		"name":      name,
-		"mime_type": sendStickerMIME,
-		"media":     "sticker",
+	return sendFileOutcome{
+		id: id,
+		meta: map[string]string{
+			"name":      name,
+			"mime_type": sendStickerMIME,
+			"media":     "sticker",
+		},
+		storeWarning: storeErr,
 	}, nil
 }
 

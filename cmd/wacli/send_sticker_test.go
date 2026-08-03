@@ -88,7 +88,7 @@ func TestSendStickerRejectsNonWebPBeforeUpload(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	_, _, err := sendSticker(context.Background(), nil, types.JID{}, path, sendStickerOptions{})
+	_, err := sendSticker(context.Background(), nil, types.JID{}, path, sendStickerOptions{})
 	if err == nil || !strings.Contains(err.Error(), "stickers must be valid WebP") {
 		t.Fatalf("expected WebP validation error, got %v", err)
 	}

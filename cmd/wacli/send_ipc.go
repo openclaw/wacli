@@ -370,9 +370,13 @@ func executeDelegatedText(ctx context.Context, a *app.App, req sendDelegateReque
 		return sendDelegateResponse{}, err
 	}
 	now := time.Now().UTC()
-	persistOutboundText(ctx, a, toJID, string(msgID), req.Message, now)
+	storeErr := persistOutboundText(ctx, a, toJID, string(msgID), req.Message, now)
 	waitForPostSendRetryReceipts(ctx, millisDuration(req.PostSendWaitMS, 0))
-	return sendDelegateResponse{OK: true, Sent: true, To: toJID.String(), ID: string(msgID)}, nil
+	resp := sendDelegateResponse{OK: true, Sent: true, To: toJID.String(), ID: string(msgID)}
+	if storeErr != nil {
+		resp.StoreWarning = storeErr.Error()
+	}
+	return resp, nil
 }
 
 func executeDelegatedFile(ctx context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {
@@ -424,14 +428,18 @@ func executeDelegatedSticker(ctx context.Context, a *app.App, req sendDelegateRe
 		return sendDelegateResponse{}, err
 	}
 	res, err := runSendOperation(ctx, reconnectForSend(a), func(ctx context.Context) (sendDelegateResponse, error) {
-		msgID, meta, err := sendSticker(ctx, a, toJID, req.File, sendStickerOptions{
+		outcome, err := sendSticker(ctx, a, toJID, req.File, sendStickerOptions{
 			replyTo:       req.ReplyTo,
 			replyToSender: req.ReplyToSender,
 		})
 		if err != nil {
 			return sendDelegateResponse{}, err
 		}
-		return sendDelegateResponse{OK: true, Sent: true, To: toJID.String(), ID: msgID, File: meta}, nil
+		resp := sendDelegateResponse{OK: true, Sent: true, To: toJID.String(), ID: outcome.id, File: outcome.meta}
+		if outcome.storeWarning != nil {
+			resp.StoreWarning = outcome.storeWarning.Error()
+		}
+		return resp, nil
 	})
 	if err != nil {
 		return sendDelegateResponse{}, err
@@ -457,15 +465,17 @@ func executeDelegatedReact(ctx context.Context, a *app.App, req sendDelegateRequ
 	}
 	now := time.Now().UTC()
 	chatName := a.WA().ResolveChatName(ctx, chat, "")
-	upsertSentReaction(a.DB(), chat, chatName, sentID, req.ID, req.Reaction, now)
+	storeErr := upsertSentReaction(a.DB(), chat, chatName, sentID, req.ID, req.Reaction, now)
 	waitForPostSendRetryReceipts(ctx, millisDuration(req.PostSendWaitMS, 0))
-	return sendDelegateResponse{OK: true, Sent: true, To: chat.String(), ID: string(sentID), Target: req.ID, Reaction: req.Reaction}, nil
+	resp := sendDelegateResponse{OK: true, Sent: true, To: chat.String(), ID: string(sentID), Target: req.ID, Reaction: req.Reaction}
+	if storeErr != nil {
+		resp.StoreWarning = storeErr.Error()
+	}
+	return resp, nil
 }
 
 func writeDelegatedSendOutput(flags *rootFlags, kind string, resp sendDelegateResponse) error {
-	if resp.StoreWarning != "" {
-		fmt.Fprintf(os.Stderr, "warning: message delivered (id %s) but local history update failed: %s\n", resp.ID, resp.StoreWarning)
-	}
+	warnSendStoreFailureMsg(os.Stderr, resp.ID, resp.StoreWarning)
 	if flags.asJSON {
 		body := map[string]any{"sent": resp.Sent, "to": resp.To, "id": resp.ID}
 		if resp.File != nil {
