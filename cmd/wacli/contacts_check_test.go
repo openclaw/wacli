@@ -46,6 +46,9 @@ func TestCheckRegistrationsNormalizesAndMaps(t *testing.T) {
 	if results[1].Registered || results[1].JID != "" {
 		t.Fatalf("expected unregistered, got %+v", results[1])
 	}
+	if !results[0].Responded || !results[1].Responded {
+		t.Fatalf("expected both marked responded, got %+v", results)
+	}
 	if results[0].Phone != "4366412345678" || results[1].Phone != "15550000001" {
 		t.Fatalf("unexpected phones: %+v", results)
 	}
@@ -72,6 +75,27 @@ func TestCheckRegistrationsDeduplicatesLookups(t *testing.T) {
 		if !r.Registered || r.JID != jid.String() {
 			t.Fatalf("expected both inputs registered as %s, got %+v", jid, r)
 		}
+	}
+}
+
+func TestCheckRegistrationsMarksOmittedResponses(t *testing.T) {
+	checker := &fakeRegistrationChecker{
+		resp: []types.IsOnWhatsAppResponse{
+			{Query: "+15550000001", IsIn: false},
+		},
+	}
+	results, err := checkRegistrations(context.Background(), checker, []string{"+4366412345678", "+15550000001"})
+	if err != nil {
+		t.Fatalf("checkRegistrations: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if results[0].Responded || results[0].Registered {
+		t.Fatalf("expected omitted number to stay unresponded, got %+v", results[0])
+	}
+	if !results[1].Responded || results[1].Registered {
+		t.Fatalf("expected confirmed negative, got %+v", results[1])
 	}
 }
 

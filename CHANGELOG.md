@@ -2,11 +2,14 @@
 
 ## 0.15.2 - Unreleased
 
+### Added
+
+- Contacts: add `contacts check <phone> [phone...]` to query live whether numbers are registered on WhatsApp, with JSON output for scripting; per-number `responded` distinguishes a server non-answer from a confirmed "not registered". (#331)
+
 ## 0.15.1 - 2026-08-01
 
 ### Added
 
-- Contacts: add `contacts check <phone> [phone...]` to query live whether numbers are registered on WhatsApp, with JSON output for scripting.
 - Sync: add opt-in `--send-spacing` fixed or randomized pacing for sends delegated to a running follow process. (#318 - thanks @cohnen)
 - Sync: add opt-in receipt and chat-presence webhook events while keeping legacy message payloads unchanged. (#315 - thanks @Jaime-data)
 

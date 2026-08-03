@@ -34,6 +34,9 @@ type contactCheckResult struct {
 	Phone      string `json:"phone"`
 	JID        string `json:"jid,omitempty"`
 	Registered bool   `json:"registered"`
+	// Responded distinguishes a confirmed negative from the server
+	// omitting the number entirely; registered=false alone is ambiguous.
+	Responded bool `json:"responded"`
 }
 
 func checkRegistrations(ctx context.Context, checker registrationChecker, inputs []string) ([]contactCheckResult, error) {
@@ -68,6 +71,7 @@ func checkRegistrations(ctx context.Context, checker registrationChecker, inputs
 		if !ok {
 			continue
 		}
+		results[i].Responded = true
 		results[i].Registered = r.IsIn
 		if r.IsIn && !r.JID.IsEmpty() {
 			results[i].JID = r.JID.ToNonAD().String()
@@ -106,12 +110,15 @@ func runContactsCheck(flags *rootFlags, args []string) error {
 		return out.WriteJSON(os.Stdout, results)
 	}
 	for _, r := range results {
-		status := "not registered"
-		if r.Registered {
+		status := "no response"
+		switch {
+		case r.Registered:
 			status = "registered"
 			if r.JID != "" && r.JID != r.Phone+"@s.whatsapp.net" {
 				status += " (" + r.JID + ")"
 			}
+		case r.Responded:
+			status = "not registered"
 		}
 		fmt.Fprintf(os.Stdout, "%s\t%s\n", r.Phone, status)
 	}
