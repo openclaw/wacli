@@ -80,24 +80,25 @@ func newSendStatusCmd(flags *rootFlags) *cobra.Command {
 			}
 
 			if filePath != "" {
-				msgID, meta, err := sendFile(ctx, a, types.StatusBroadcastJID, filePath, sendFileOptions{
+				res, err := sendFile(ctx, a, types.StatusBroadcastJID, filePath, sendFileOptions{
 					caption:      message,
 					mimeOverride: mimeOverride,
 				})
 				if err != nil {
 					return err
 				}
+				warnSendStoreFailure(os.Stderr, res.id, res.storeWarning)
 				waitForPostSendRetryReceipts(ctx, postSendWait)
 				if flags.asJSON {
-					return out.WriteJSON(os.Stdout, map[string]any{
+					return out.WriteJSON(os.Stdout, addStoreWarning(map[string]any{
 						"sent":      true,
 						"to":        types.StatusBroadcastJID.String(),
-						"id":        msgID,
-						"media":     meta["media"],
-						"mime_type": meta["mime_type"],
-					})
+						"id":        res.id,
+						"media":     res.meta["media"],
+						"mime_type": res.meta["mime_type"],
+					}, res.storeWarning))
 				}
-				fmt.Fprintf(os.Stdout, "Sent status (id %s)\n", msgID)
+				fmt.Fprintf(os.Stdout, "Sent status (id %s)\n", res.id)
 				return nil
 			}
 
@@ -114,7 +115,7 @@ func newSendStatusCmd(flags *rootFlags) *cobra.Command {
 			if fontPtr != nil {
 				storedFont = *fontPtr
 			}
-			_ = a.DB().UpsertStatusMessage(store.UpsertStatusMessageParams{
+			storeErr := a.DB().UpsertStatusMessage(store.UpsertStatusMessageParams{
 				MsgID:           string(msgID),
 				Timestamp:       now,
 				FromMe:          true,
@@ -122,15 +123,16 @@ func newSendStatusCmd(flags *rootFlags) *cobra.Command {
 				BackgroundColor: backgroundColor,
 				Font:            storedFont,
 			})
+			warnSendStoreFailure(os.Stderr, string(msgID), storeErr)
 
 			waitForPostSendRetryReceipts(ctx, postSendWait)
 
 			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{
+				return out.WriteJSON(os.Stdout, addStoreWarning(map[string]any{
 					"sent": true,
 					"to":   chat.String(),
 					"id":   msgID,
-				})
+				}, storeErr))
 			}
 			fmt.Fprintf(os.Stdout, "Sent status (id %s)\n", msgID)
 			return nil

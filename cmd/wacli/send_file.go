@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -11,6 +12,7 @@ import (
 	_ "image/gif"
 	"image/jpeg"
 	_ "image/png"
+	"io"
 	"math"
 	"mime"
 	"net/http"
@@ -52,19 +54,30 @@ type voiceNoteMetadata struct {
 	waveform []byte
 }
 
+// sendFileOutcome is the result of a completed file send. storeWarning is
+// non-nil when WhatsApp accepted the message but recording it in local
+// history failed; callers must surface the warning without discarding the
+// delivered ID, since reporting a hard error would invite automation to
+// retry an already-delivered message.
+type sendFileOutcome struct {
+	id           string
+	meta         map[string]string
+	storeWarning error
+}
+
 func sendFile(ctx context.Context, a interface {
 	WA() app.WAClient
 	DB() *store.DB
-}, to types.JID, filePath string, opts sendFileOptions) (string, map[string]string, error) {
+}, to types.JID, filePath string, opts sendFileOptions) (sendFileOutcome, error) {
 	mediaAs, err := validateSendFileMediaOptions(opts.mediaAs, opts.ptt)
 	if err != nil {
-		return "", nil, err
+		return sendFileOutcome{}, err
 	}
 	opts.mediaAs = mediaAs
 
 	data, err := readSendFileData(filePath)
 	if err != nil {
-		return "", nil, err
+		return sendFileOutcome{}, err
 	}
 
 	name := strings.TrimSpace(opts.filename)
@@ -73,20 +86,20 @@ func sendFile(ctx context.Context, a interface {
 	}
 	mimeType := detectSendFileMIME(filePath, opts.mimeOverride, data)
 	if opts.ptt && !isOggOpusMIME(mimeType) {
-		return "", nil, fmt.Errorf("voice notes require OGG Opus audio; got %s", mimeType)
+		return sendFileOutcome{}, fmt.Errorf("voice notes require OGG Opus audio; got %s", mimeType)
 	}
 
 	mediaType, uploadType, err := resolveSendMediaType(mimeType, opts.mediaAs)
 	if err != nil {
-		return "", nil, err
+		return sendFileOutcome{}, err
 	}
 
 	isNewsletter := to.Server == types.NewsletterServer
 	if isNewsletter && opts.ptt {
-		return "", nil, fmt.Errorf("voice-note mode is not supported for channels; omit --ptt to send audio")
+		return sendFileOutcome{}, fmt.Errorf("voice-note mode is not supported for channels; omit --ptt to send audio")
 	}
 	if isNewsletter && (strings.TrimSpace(opts.replyTo) != "" || strings.TrimSpace(opts.replyToSender) != "") {
-		return "", nil, fmt.Errorf("quoted file replies are not supported for channels")
+		return sendFileOutcome{}, fmt.Errorf("quoted file replies are not supported for channels")
 	}
 
 	var up whatsmeow.UploadResponse
@@ -96,7 +109,7 @@ func sendFile(ctx context.Context, a interface {
 		up, err = a.WA().Upload(ctx, data, uploadType)
 	}
 	if err != nil {
-		return "", nil, err
+		return sendFileOutcome{}, err
 	}
 
 	now := time.Now().UTC()
@@ -105,7 +118,7 @@ func sendFile(ctx context.Context, a interface {
 	if !isNewsletter {
 		replyContext, err = buildReplyContextInfo(a.DB(), to, opts.replyTo, opts.replyToSender)
 		if err != nil {
-			return "", nil, err
+			return sendFileOutcome{}, err
 		}
 	}
 	voiceMeta := voiceNoteMetadata{}
@@ -117,7 +130,7 @@ func sendFile(ctx context.Context, a interface {
 	case "image":
 		imageMsg, err := newImageMessage(up, mimeType, opts.caption, data)
 		if err != nil {
-			return "", nil, err
+			return sendFileOutcome{}, err
 		}
 		msg.ImageMessage = imageMsg
 	case "video":
@@ -156,11 +169,15 @@ func sendFile(ctx context.Context, a interface {
 		id, err = a.WA().SendProtoMessage(ctx, to, msg)
 	}
 	if err != nil {
-		return "", nil, err
+		return sendFileOutcome{}, err
 	}
 
+	// The send already succeeded; store failures below surface as a warning
+	// on the outcome instead of an error so history divergence is visible
+	// without turning a delivered message into a reported failure.
+	var storeErr error
 	if to == types.StatusBroadcastJID {
-		_ = a.DB().UpsertStatusMessage(store.UpsertStatusMessageParams{
+		storeErr = a.DB().UpsertStatusMessage(store.UpsertStatusMessageParams{
 			MsgID:         id,
 			Timestamp:     now,
 			FromMe:        true,
@@ -179,8 +196,10 @@ func sendFile(ctx context.Context, a interface {
 	} else {
 		chatName := a.WA().ResolveChatName(ctx, to, "")
 		kind := chatKindFromJID(to)
-		_ = a.DB().UpsertChat(to.String(), kind, chatName, now)
-		_ = a.DB().UpsertMessage(store.UpsertMessageParams{
+		if err := a.DB().UpsertChat(to.String(), kind, chatName, now); err != nil {
+			storeErr = fmt.Errorf("chat update: %w", err)
+		}
+		if err := a.DB().UpsertMessage(store.UpsertMessageParams{
 			ChatJID:       to.String(),
 			ChatName:      chatName,
 			MsgID:         id,
@@ -198,15 +217,40 @@ func sendFile(ctx context.Context, a interface {
 			FileSHA256:    up.FileSHA256,
 			FileEncSHA256: up.FileEncSHA256,
 			FileLength:    up.FileLength,
-		})
+		}); err != nil {
+			storeErr = errors.Join(storeErr, fmt.Errorf("message update: %w", err))
+		}
 	}
 
-	return id, map[string]string{
-		"name":      name,
-		"mime_type": mimeType,
-		"media":     mediaType,
-		"ptt":       strconv.FormatBool(opts.ptt),
+	return sendFileOutcome{
+		id: id,
+		meta: map[string]string{
+			"name":      name,
+			"mime_type": mimeType,
+			"media":     mediaType,
+			"ptt":       strconv.FormatBool(opts.ptt),
+		},
+		storeWarning: storeErr,
 	}, nil
+}
+
+// warnSendStoreFailure reports a post-delivery local-history failure on the
+// human channel. Kept alongside sendFileOutcome so every caller phrases the
+// partial success the same way.
+func warnSendStoreFailure(w io.Writer, id string, storeWarning error) {
+	if storeWarning == nil {
+		return
+	}
+	fmt.Fprintf(w, "warning: message delivered (id %s) but local history update failed: %v\n", id, storeWarning)
+}
+
+// addStoreWarning annotates a JSON success payload with the partial-success
+// marker; absent key means local history was written.
+func addStoreWarning(payload map[string]any, storeWarning error) map[string]any {
+	if storeWarning != nil {
+		payload["store_warning"] = storeWarning.Error()
+	}
+	return payload
 }
 
 // resolveSendMediaType decides the WhatsApp message type (and matching upload

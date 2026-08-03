@@ -75,6 +75,7 @@ type sendDelegateResponse struct {
 	Selected       []string          `json:"selected,omitempty"`
 	SelectedOption *selectOption     `json:"selected_option,omitempty"`
 	File           map[string]string `json:"file,omitempty"`
+	StoreWarning   string            `json:"store_warning,omitempty"`
 }
 
 func sendDelegateSocketPath(storeDir string) string {
@@ -388,7 +389,7 @@ func executeDelegatedFile(ctx context.Context, a *app.App, req sendDelegateReque
 		return sendDelegateResponse{}, err
 	}
 	res, err := runSendOperation(ctx, reconnectForSend(a), func(ctx context.Context) (sendDelegateResponse, error) {
-		msgID, meta, err := sendFile(ctx, a, toJID, req.File, sendFileOptions{
+		outcome, err := sendFile(ctx, a, toJID, req.File, sendFileOptions{
 			filename:      req.Filename,
 			caption:       req.Caption,
 			mimeOverride:  req.MIME,
@@ -400,7 +401,11 @@ func executeDelegatedFile(ctx context.Context, a *app.App, req sendDelegateReque
 		if err != nil {
 			return sendDelegateResponse{}, err
 		}
-		return sendDelegateResponse{OK: true, Sent: true, To: toJID.String(), ID: msgID, File: meta}, nil
+		resp := sendDelegateResponse{OK: true, Sent: true, To: toJID.String(), ID: outcome.id, File: outcome.meta}
+		if outcome.storeWarning != nil {
+			resp.StoreWarning = outcome.storeWarning.Error()
+		}
+		return resp, nil
 	})
 	if err != nil {
 		return sendDelegateResponse{}, err
@@ -458,10 +463,16 @@ func executeDelegatedReact(ctx context.Context, a *app.App, req sendDelegateRequ
 }
 
 func writeDelegatedSendOutput(flags *rootFlags, kind string, resp sendDelegateResponse) error {
+	if resp.StoreWarning != "" {
+		fmt.Fprintf(os.Stderr, "warning: message delivered (id %s) but local history update failed: %s\n", resp.ID, resp.StoreWarning)
+	}
 	if flags.asJSON {
 		body := map[string]any{"sent": resp.Sent, "to": resp.To, "id": resp.ID}
 		if resp.File != nil {
 			body["file"] = resp.File
+		}
+		if resp.StoreWarning != "" {
+			body["store_warning"] = resp.StoreWarning
 		}
 		if kind == "react" {
 			body["target"] = resp.Target

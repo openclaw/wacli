@@ -76,35 +76,28 @@ func newSendVoiceCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 
-			type sendVoiceResult struct {
-				id   string
-				meta map[string]string
-			}
-			res, err := runSendOperation(ctx, reconnectForSend(a), func(ctx context.Context) (sendVoiceResult, error) {
-				msgID, meta, err := sendFile(ctx, a, toJID, filePath, sendFileOptions{
+			res, err := runSendOperation(ctx, reconnectForSend(a), func(ctx context.Context) (sendFileOutcome, error) {
+				return sendFile(ctx, a, toJID, filePath, sendFileOptions{
 					mimeOverride:  mimeOverride,
 					replyTo:       replyTo,
 					replyToSender: replyToSender,
 					ptt:           true,
 				})
-				if err != nil {
-					return sendVoiceResult{}, err
-				}
-				return sendVoiceResult{id: msgID, meta: meta}, nil
 			})
 			if err != nil {
 				return err
 			}
+			warnSendStoreFailure(os.Stderr, res.id, res.storeWarning)
 
 			waitForPostSendRetryReceipts(ctx, postSendWait)
 
 			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{
+				return out.WriteJSON(os.Stdout, addStoreWarning(map[string]any{
 					"sent": true,
 					"to":   toJID.String(),
 					"id":   res.id,
 					"file": res.meta,
-				})
+				}, res.storeWarning))
 			}
 			fmt.Fprintf(os.Stdout, "Sent voice note to %s (id %s)\n", toJID.String(), res.id)
 			return nil

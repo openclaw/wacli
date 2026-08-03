@@ -88,12 +88,8 @@ func newSendFileCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 
-			type sendFileResult struct {
-				id   string
-				meta map[string]string
-			}
-			res, err := runSendOperation(ctx, reconnectForSend(a), func(ctx context.Context) (sendFileResult, error) {
-				msgID, meta, err := sendFile(ctx, a, toJID, filePath, sendFileOptions{
+			res, err := runSendOperation(ctx, reconnectForSend(a), func(ctx context.Context) (sendFileOutcome, error) {
+				return sendFile(ctx, a, toJID, filePath, sendFileOptions{
 					filename:      filename,
 					caption:       caption,
 					mimeOverride:  mimeOverride,
@@ -102,27 +98,23 @@ func newSendFileCmd(flags *rootFlags) *cobra.Command {
 					replyToSender: replyToSender,
 					ptt:           ptt,
 				})
-				if err != nil {
-					return sendFileResult{}, err
-				}
-				return sendFileResult{id: msgID, meta: meta}, nil
 			})
 			if err != nil {
 				return err
 			}
-			msgID, meta := res.id, res.meta
+			warnSendStoreFailure(os.Stderr, res.id, res.storeWarning)
 
 			waitForPostSendRetryReceipts(ctx, postSendWait)
 
 			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{
+				return out.WriteJSON(os.Stdout, addStoreWarning(map[string]any{
 					"sent": true,
 					"to":   toJID.String(),
-					"id":   msgID,
-					"file": meta,
-				})
+					"id":   res.id,
+					"file": res.meta,
+				}, res.storeWarning))
 			}
-			fmt.Fprintf(os.Stdout, "Sent %s to %s (id %s)\n", meta["name"], toJID.String(), msgID)
+			fmt.Fprintf(os.Stdout, "Sent %s to %s (id %s)\n", res.meta["name"], toJID.String(), res.id)
 			return nil
 		},
 	}

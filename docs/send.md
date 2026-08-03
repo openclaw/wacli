@@ -47,6 +47,7 @@ wacli polls list [--chat RECIPIENT] [--limit N] [--json]
 - Sent reactions are stored locally immediately, including reaction target and display text.
 - For group reactions, pass `--sender` for the original message sender.
 - Use `--post-send-wait 0` to disable the retry-receipt grace window for latency-sensitive scripts.
+- If `send file`, `send voice`, or `send status` delivers a message but recording it in local history fails (disk full, locked store), the command still succeeds with the delivered id and prints a warning to stderr; JSON output carries the failure in `store_warning`. Do not retry such a send — the recipient already has the message.
 
 ## Polls
 

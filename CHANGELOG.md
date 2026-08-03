@@ -6,6 +6,10 @@
 
 - Contacts: add `contacts check <phone> [phone...]` to query live whether numbers are registered on WhatsApp, with JSON output for scripting; per-number `responded` distinguishes a server non-answer from a confirmed "not registered". (#331)
 
+### Fixed
+
+- Send: surface local history failures after a delivered file, voice, or status send as a `store_warning` (stderr warning plus JSON field) instead of silently diverging local history, while keeping the delivered message id so scripts do not retry an already-sent message. (#328 - thanks @SebTardif)
+
 ## 0.15.1 - 2026-08-01
 
 ### Added
