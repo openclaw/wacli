@@ -27,10 +27,17 @@ var directMediaBaseURL = "https://mmg.whatsapp.net"
 
 var directMediaHTTPClient = newDirectMediaHTTPClient()
 
+// directMediaHTTPClientTimeout is a safety bound on the full request including body.
+// Phase timeouts on the transport still fail stalled handshakes/headers quickly;
+// this ceiling prevents a forever-slow body from hanging the process when the
+// caller context has no deadline.
+const directMediaHTTPClientTimeout = 5 * time.Minute
+
 func newDirectMediaHTTPClient() *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.ResponseHeaderTimeout = 10 * time.Second
 	return &http.Client{
+		Timeout:   directMediaHTTPClientTimeout,
 		Transport: transport,
 	}
 }

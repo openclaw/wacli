@@ -16,10 +16,13 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
 
-func TestNewDirectMediaHTTPClientBoundsPhasesWithoutTotalBodyTimeout(t *testing.T) {
+func TestNewDirectMediaHTTPClientBoundsPhasesWithGenerousBodyTimeout(t *testing.T) {
 	client := newDirectMediaHTTPClient()
-	if client.Timeout != 0 {
-		t.Fatalf("direct media HTTP client timeout = %s, want zero to preserve caller/body budget", client.Timeout)
+	if client.Timeout != directMediaHTTPClientTimeout {
+		t.Fatalf("direct media HTTP client timeout = %s, want %s safety ceiling", client.Timeout, directMediaHTTPClientTimeout)
+	}
+	if client.Timeout < 2*time.Minute {
+		t.Fatalf("direct media HTTP client timeout = %s, want at least 2m so large media bodies can finish", client.Timeout)
 	}
 	transport, ok := client.Transport.(*http.Transport)
 	if !ok {
@@ -46,7 +49,7 @@ func TestNewDirectMediaHTTPClientBoundsPhasesWithoutTotalBodyTimeout(t *testing.
 	if transport.MaxIdleConns <= 0 {
 		t.Fatalf("max idle connections = %d, want positive limit", transport.MaxIdleConns)
 	}
-	t.Logf("direct media behavior: client.Timeout=%s, so valid response bodies keep the caller context budget", client.Timeout)
+	t.Logf("direct media behavior: client.Timeout=%s safety ceiling with phase bounds for headers/handshake", client.Timeout)
 	t.Logf("direct media behavior: default transport semantics preserved: ForceAttemptHTTP2=%t DialContextPresent=%t MaxIdleConnsPerHost=%d", transport.ForceAttemptHTTP2, transport.DialContext != nil, transport.MaxIdleConnsPerHost)
 	t.Logf("direct media behavior: phase bounds active: TLSHandshakeTimeout=%s ResponseHeaderTimeout=%s ExpectContinueTimeout=%s IdleConnTimeout=%s MaxIdleConns=%d", transport.TLSHandshakeTimeout, transport.ResponseHeaderTimeout, transport.ExpectContinueTimeout, transport.IdleConnTimeout, transport.MaxIdleConns)
 }

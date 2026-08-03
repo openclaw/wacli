@@ -2,6 +2,10 @@
 
 ## 0.15.3 - Unreleased
 
+### Fixed
+
+- Media: give direct downloads a 5-minute overall HTTP client timeout while keeping phase bounds (TLS/headers) for fast stall detection. Thanks @SebTardif.
+
 ## 0.15.2 - 2026-08-02
 
 ### Added
