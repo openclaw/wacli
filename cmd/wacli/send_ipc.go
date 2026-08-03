@@ -52,6 +52,9 @@ type sendDelegateRequest struct {
 	ButtonID             string   `json:"button_id,omitempty"`
 	SelectIndex          int      `json:"select_index,omitempty"`
 	Type                 string   `json:"type,omitempty"`
+	Latitude             float64  `json:"latitude,omitempty"`
+	Longitude            float64  `json:"longitude,omitempty"`
+	Name                 string   `json:"name,omitempty"`
 	Question             string   `json:"question,omitempty"`
 	Options              []string `json:"options,omitempty"`
 	Selectable           int      `json:"selectable,omitempty"`
@@ -277,6 +280,8 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 		return executeDelegatedSticker(ctx, a, req)
 	case "react":
 		return executeDelegatedReact(ctx, a, req)
+	case "location":
+		return executeDelegatedLocation(ctx, a, req)
 	case "poll":
 		return executeDelegatedPoll(ctx, a, req)
 	case "poll_vote":
@@ -507,6 +512,8 @@ func writeDelegatedSendOutput(flags *rootFlags, kind string, resp sendDelegateRe
 		fmt.Fprintf(os.Stdout, "Sent %s to %s (id %s)\n", resp.File["name"], resp.To, resp.ID)
 	case "sticker":
 		fmt.Fprintf(os.Stdout, "Sent sticker to %s (id %s)\n", resp.To, resp.ID)
+	case "location":
+		fmt.Fprintf(os.Stdout, "Sent location to %s (id %s)\n", resp.To, resp.ID)
 	case "voice":
 		fmt.Fprintf(os.Stdout, "Sent voice note to %s (id %s)\n", resp.To, resp.ID)
 	case "react":

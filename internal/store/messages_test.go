@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"errors"
 	"strings"
 	"testing"
@@ -1351,5 +1352,34 @@ func TestUpdateMessageTextClearsMediaState(t *testing.T) {
 	}
 	if msg.MediaType != "" || msg.MediaCaption != "" || msg.Filename != "" {
 		t.Fatalf("media state not cleared: %+v", msg)
+	}
+}
+
+func TestPurgeMessageClearsStoredLocation(t *testing.T) {
+	db := openTestDB(t)
+	chat := "chat@s.whatsapp.net"
+	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	if err := db.UpsertChat(chat, "dm", "Alice", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID: chat, MsgID: "mid", Timestamp: now, MediaType: "location",
+		DisplayText: "Sent location",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertMessageLocation(MessageLocation{
+		ChatJID: chat, MsgID: "mid", Latitude: 51.4779, Longitude: -0.0015, Name: "Head office",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.MarkMessageRevoked(chat, "mid"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.PurgeMessage(chat, "mid"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.GetMessageLocation(chat, "mid"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("purged message retained its coordinates: err = %v", err)
 	}
 }

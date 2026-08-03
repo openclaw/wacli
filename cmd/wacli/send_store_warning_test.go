@@ -113,3 +113,27 @@ func TestPersistOutboundTextSurfacesStoreFailure(t *testing.T) {
 		t.Fatal("expected store error after close")
 	}
 }
+
+func TestPersistOutboundLocationSurfacesStoreFailure(t *testing.T) {
+	_, db, _ := newSendFileFixture(t)
+	chat := types.NewJID("15550000001", types.DefaultUserServer)
+	now := time.Now().UTC()
+
+	if err := persistOutboundLocationWith(context.Background(), db, fakeTextResolver{}, chat, "LOC1", locationOptions{Latitude: 1, Longitude: 2}, now); err != nil {
+		t.Fatalf("healthy store: %v", err)
+	}
+	msg, err := db.GetMessage(chat.String(), "LOC1")
+	if err != nil {
+		t.Fatalf("sent location not persisted: %v", err)
+	}
+	if msg.DisplayText != locationDisplayText {
+		t.Fatalf("display_text = %q want %q", msg.DisplayText, locationDisplayText)
+	}
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+	if err := persistOutboundLocationWith(context.Background(), db, fakeTextResolver{}, chat, "LOC2", locationOptions{Latitude: 1, Longitude: 2}, now); err == nil {
+		t.Fatal("expected store error after close")
+	}
+}

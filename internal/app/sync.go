@@ -542,6 +542,19 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 	}); err != nil {
 		return err
 	}
+	if pm.Location != nil {
+		if err := a.db.UpsertMessageLocation(store.MessageLocation{
+			ChatJID:   chatJID,
+			MsgID:     pm.ID,
+			Latitude:  pm.Location.Latitude,
+			Longitude: pm.Location.Longitude,
+			Name:      pm.Location.Name,
+			Address:   pm.Location.Address,
+			IsLive:    pm.Location.IsLive,
+		}); err != nil {
+			return err
+		}
+	}
 	if pm.Call != nil {
 		pm.Call.Chat = pm.Chat
 		if pm.Call.SenderJID == "" {
@@ -783,6 +796,8 @@ func mediaLabel(mediaType string) string {
 		return "document"
 	case "location":
 		return "location"
+	case "live_location":
+		return "live location"
 	case "contact":
 		return "contact"
 	case "contacts":

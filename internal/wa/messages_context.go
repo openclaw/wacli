@@ -32,6 +32,9 @@ func contextInfoForMessage(m *waProto.Message) *waProto.ContextInfo {
 	if loc := m.GetLocationMessage(); loc != nil {
 		return loc.GetContextInfo()
 	}
+	if live := m.GetLiveLocationMessage(); live != nil {
+		return live.GetContextInfo()
+	}
 	if contact := m.GetContactMessage(); contact != nil {
 		return contact.GetContextInfo()
 	}
@@ -93,6 +96,9 @@ func displayTextForProto(m *waProto.Message) string {
 	}
 	if loc := m.GetLocationMessage(); loc != nil {
 		return "Sent location"
+	}
+	if live := m.GetLiveLocationMessage(); live != nil {
+		return "Sent live location"
 	}
 	if contact := m.GetContactMessage(); contact != nil {
 		return contactDisplayText(contact)

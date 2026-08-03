@@ -1,6 +1,10 @@
 package wa
 
-import waProto "go.mau.fi/whatsmeow/binary/proto"
+import (
+	"strings"
+
+	waProto "go.mau.fi/whatsmeow/binary/proto"
+)
 
 func extractMedia(m *waProto.Message, pm *ParsedMessage) {
 	if img := m.GetImageMessage(); img != nil {
@@ -82,5 +86,27 @@ func extractMedia(m *waProto.Message, pm *ParsedMessage) {
 			FileEncSHA256: clone(sticker.GetFileEncSHA256()),
 			FileLength:    sticker.GetFileLength(),
 		}
+	}
+}
+
+func extractLocation(m *waProto.Message, pm *ParsedMessage) {
+	if loc := m.GetLocationMessage(); loc != nil {
+		pm.Location = &Location{
+			Latitude:  loc.GetDegreesLatitude(),
+			Longitude: loc.GetDegreesLongitude(),
+			Name:      strings.TrimSpace(loc.GetName()),
+			Address:   strings.TrimSpace(loc.GetAddress()),
+		}
+		pm.Media = &Media{Type: "location", Caption: strings.TrimSpace(loc.GetName())}
+		return
+	}
+	if live := m.GetLiveLocationMessage(); live != nil {
+		pm.Location = &Location{
+			Latitude:  live.GetDegreesLatitude(),
+			Longitude: live.GetDegreesLongitude(),
+			Name:      strings.TrimSpace(live.GetCaption()),
+			IsLive:    true,
+		}
+		pm.Media = &Media{Type: "live_location", Caption: strings.TrimSpace(live.GetCaption())}
 	}
 }

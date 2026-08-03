@@ -22,6 +22,7 @@ wacli groups prune [--days N] [--left-only=false|--include-active] [--dry-run] [
 
 - `store stats` reads local counts for chats, groups, left groups, and normal chat messages.
 - Status broadcasts are persisted separately in `status_messages`; they are not chat rows and are not included in normal chat/message cleanup paths.
+- Location pins are persisted in `message_locations`. Coordinates follow the same lifecycle as the rest of a message's local payload: `messages purge` removes them with the retained payload, `store cleanup` and `chats cleanup` remove them with their chat, and a LID-to-phone identity migration moves them with the message rather than leaving them under the old identity.
 - `store cleanup` removes chats whose known local activity is older than `--days` and deletes their messages through the SQLite chat/message cascade.
 - `chats cleanup --jid JID` removes one local chat row and its local messages.
 - `groups prune` removes local group metadata plus the matching local chat/messages for pruned group JIDs.

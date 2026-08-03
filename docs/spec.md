@@ -110,6 +110,9 @@ Immediately after QR pairing success, `wacli auth` runs a bootstrap sync:
 - `status_messages`
   - `rowid` (PK), `msg_id` (unique), `ts`, `from_me`, `sender_jid`, `sender_name`, `text`, `media_type`, `media_caption`, `filename`, `mime_type`, `direct_path`, hashes/keys, `background_color`, `font`, …
   - status broadcasts use WhatsApp's `status@broadcast` target and are kept out of normal chat `messages`.
+- `message_locations`
+  - (`chat_jid`, `msg_id`) (PK), `latitude`, `longitude`, `name`, `address`, `is_live`
+  - one row per location pin; the message row keeps `media_type=location` (or `live_location`) and the coordinates live here rather than in `messages`.
 - `contact_aliases` (local management)
   - `jid` (PK/FK), `alias`, `notes`, `tags` (or join table)
 

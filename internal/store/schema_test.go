@@ -55,6 +55,16 @@ func TestOpenCreatesExpectedSchema(t *testing.T) {
 		t.Fatalf("message_local_media_aliases table exists = %v, err = %v", exists, err)
 	}
 
+	locationCols, err := tableColumns(db.sql, "message_locations")
+	if err != nil {
+		t.Fatalf("message_locations tableColumns: %v", err)
+	}
+	for _, want := range []string{"chat_jid", "msg_id", "latitude", "longitude", "name", "address", "is_live"} {
+		if !locationCols[want] {
+			t.Fatalf("expected message_locations column %q to exist", want)
+		}
+	}
+
 	callCols, err := tableColumns(db.sql, "call_events")
 	if err != nil {
 		t.Fatalf("call_events tableColumns: %v", err)
@@ -626,4 +636,47 @@ func indexExists(t *testing.T, db *sql.DB, name string) bool {
 		t.Fatalf("query index %q: %v", name, err)
 	}
 	return found == name
+}
+
+func TestOpenRepairsRecordedMessageLocationsMigrationMissingTable(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "wacli.db")
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	raw, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	if _, err := raw.Exec(`
+		DROP TABLE message_locations;
+		INSERT OR IGNORE INTO schema_migrations(version, name, applied_at) VALUES(25, 'message locations', 1);
+	`); err != nil {
+		_ = raw.Close()
+		t.Fatalf("create inconsistent schema: %v", err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("raw close: %v", err)
+	}
+
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("Open repaired DB: %v", err)
+	}
+	defer db.Close()
+
+	if ok, err := db.tableExists("message_locations"); err != nil || !ok {
+		t.Fatalf("message_locations exists=%v err=%v", ok, err)
+	}
+	if err := db.UpsertMessageLocation(MessageLocation{
+		ChatJID: "15551112222@s.whatsapp.net", MsgID: "LOC-1", Latitude: 1, Longitude: 2,
+	}); err != nil {
+		t.Fatalf("UpsertMessageLocation after schema repair: %v", err)
+	}
 }

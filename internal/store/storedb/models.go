@@ -120,6 +120,23 @@ type Message struct {
 	Buttons            sql.NullString
 }
 
+type MessageLocalMediaAlias struct {
+	ChatJid      string
+	MsgID        string
+	LocalPath    string
+	DownloadedAt sql.NullInt64
+}
+
+type MessageLocation struct {
+	ChatJid   string
+	MsgID     string
+	Latitude  float64
+	Longitude float64
+	Name      sql.NullString
+	Address   sql.NullString
+	IsLive    int64
+}
+
 type MessagePayloadPurge struct {
 	ChatJid        string
 	MsgID          string

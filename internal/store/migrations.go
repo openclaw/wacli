@@ -38,6 +38,25 @@ var schemaMigrations = []migration{
 	{version: 22, name: "message local media aliases", up: ensureMessageLocalMediaAliasesTable},
 	{version: 23, name: "app state recovery markers", up: migrateAppStateRecoveryMarkers},
 	{version: 24, name: "app state recovery intents", up: migrateAppStateRecoveryIntents},
+	{version: 25, name: "message locations", up: migrateMessageLocations},
+}
+
+func migrateMessageLocations(d *DB) error {
+	if _, err := d.sql.Exec(`
+		CREATE TABLE IF NOT EXISTS message_locations (
+			chat_jid TEXT NOT NULL,
+			msg_id TEXT NOT NULL,
+			latitude REAL NOT NULL,
+			longitude REAL NOT NULL,
+			name TEXT,
+			address TEXT,
+			is_live INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY (chat_jid, msg_id)
+		);
+	`); err != nil {
+		return fmt.Errorf("create message_locations table: %w", err)
+	}
+	return nil
 }
 
 func ensureMessageLocalMediaAliasesTable(d *DB) error {
@@ -333,6 +352,9 @@ func (d *DB) ensureCurrentSchema() error {
 	}
 	if err := ensureAppStateRecoveryIntents(d); err != nil {
 		return fmt.Errorf("ensure current app state recovery intents: %w", err)
+	}
+	if err := migrateMessageLocations(d); err != nil {
+		return fmt.Errorf("ensure current message locations schema: %w", err)
 	}
 	return nil
 }

@@ -1,6 +1,8 @@
 package store
 
 import (
+	"database/sql"
+	"errors"
 	"reflect"
 	"testing"
 	"time"
@@ -556,5 +558,81 @@ func TestMigrateLIDToPNPreservesEditedState(t *testing.T) {
 	}
 	if msg.Text != "edited" {
 		t.Fatalf("original upsert clobbered migrated edit: %q", msg.Text)
+	}
+}
+
+func TestMigrateLIDToPNMovesMessageLocations(t *testing.T) {
+	db := openTestDB(t)
+	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	pn := "15551234567@s.whatsapp.net"
+	lid := "999123456789@lid"
+	if err := db.UpsertChat(lid, "unknown", lid, base); err != nil {
+		t.Fatalf("UpsertChat lid: %v", err)
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID: lid, MsgID: "LOC-1", Timestamp: base, MediaType: "location",
+		DisplayText: "Sent location",
+	}); err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+	if err := db.UpsertMessageLocation(MessageLocation{
+		ChatJID: lid, MsgID: "LOC-1", Latitude: 51.4779, Longitude: -0.0015, Name: "Head office",
+	}); err != nil {
+		t.Fatalf("UpsertMessageLocation: %v", err)
+	}
+
+	if err := db.MigrateLIDToPN(lid, pn); err != nil {
+		t.Fatalf("MigrateLIDToPN: %v", err)
+	}
+
+	moved, err := db.GetMessageLocation(pn, "LOC-1")
+	if err != nil {
+		t.Fatalf("GetMessageLocation pn: %v", err)
+	}
+	if moved.Latitude != 51.4779 || moved.Longitude != -0.0015 {
+		t.Fatalf("coordinates = %v,%v", moved.Latitude, moved.Longitude)
+	}
+	if moved.Name != "Head office" {
+		t.Fatalf("name = %q", moved.Name)
+	}
+	if _, err := db.GetMessageLocation(lid, "LOC-1"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("lid location retained: err = %v", err)
+	}
+}
+
+func TestMigrateLIDToPNDropsPurgedMessageLocations(t *testing.T) {
+	db := openTestDB(t)
+	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	pn := "15551234567@s.whatsapp.net"
+	lid := "999123456789@lid"
+	if err := db.UpsertChat(lid, "unknown", lid, base); err != nil {
+		t.Fatalf("UpsertChat lid: %v", err)
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID: lid, MsgID: "LOC-1", Timestamp: base, MediaType: "location",
+		DisplayText: "Sent location",
+	}); err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+	if err := db.UpsertMessageLocation(MessageLocation{
+		ChatJID: lid, MsgID: "LOC-1", Latitude: 51.4779, Longitude: -0.0015,
+	}); err != nil {
+		t.Fatalf("UpsertMessageLocation: %v", err)
+	}
+	if err := db.MarkMessageRevoked(lid, "LOC-1"); err != nil {
+		t.Fatalf("MarkMessageRevoked: %v", err)
+	}
+	if err := db.PurgeMessage(lid, "LOC-1"); err != nil {
+		t.Fatalf("PurgeMessage: %v", err)
+	}
+
+	if err := db.MigrateLIDToPN(lid, pn); err != nil {
+		t.Fatalf("MigrateLIDToPN: %v", err)
+	}
+
+	if _, err := db.GetMessageLocation(pn, "LOC-1"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("purged coordinates resurfaced under the phone identity: err = %v", err)
 	}
 }

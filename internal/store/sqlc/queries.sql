@@ -469,3 +469,27 @@ DELETE FROM poll_votes WHERE chat_jid = ? AND poll_msg_id = ?;
 
 -- name: DeletePoll :exec
 DELETE FROM polls WHERE chat_jid = ? AND msg_id = ?;
+
+-- name: UpsertMessageLocation :exec
+INSERT INTO message_locations (chat_jid, msg_id, latitude, longitude, name, address, is_live)
+SELECT ?, ?, ?, ?, ?, ?, ?
+WHERE NOT EXISTS (
+    SELECT 1 FROM message_payload_purges p WHERE p.chat_jid = ? AND p.msg_id = ?
+)
+ON CONFLICT(chat_jid, msg_id) DO UPDATE SET
+    latitude = excluded.latitude,
+    longitude = excluded.longitude,
+    name = excluded.name,
+    address = excluded.address,
+    is_live = excluded.is_live;
+
+-- name: GetMessageLocation :one
+SELECT chat_jid, msg_id, latitude, longitude, COALESCE(name,''), COALESCE(address,''), is_live
+FROM message_locations
+WHERE chat_jid = ? AND msg_id = ?;
+
+-- name: DeleteMessageLocation :exec
+DELETE FROM message_locations WHERE chat_jid = ? AND msg_id = ?;
+
+-- name: DeleteMessageLocationsForChat :exec
+DELETE FROM message_locations WHERE chat_jid = ?;

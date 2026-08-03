@@ -188,6 +188,17 @@ CREATE TABLE IF NOT EXISTS polls (
 
 CREATE INDEX IF NOT EXISTS idx_polls_chat_ts ON polls(chat_jid, created_ts);
 
+CREATE TABLE IF NOT EXISTS message_locations (
+    chat_jid TEXT NOT NULL,
+    msg_id TEXT NOT NULL,
+    latitude REAL NOT NULL,
+    longitude REAL NOT NULL,
+    name TEXT,
+    address TEXT,
+    is_live INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (chat_jid, msg_id)
+);
+
 CREATE TABLE IF NOT EXISTS poll_votes (
     chat_jid TEXT NOT NULL,
     poll_msg_id TEXT NOT NULL,

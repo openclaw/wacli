@@ -1,6 +1,8 @@
 package store
 
 import (
+	"database/sql"
+	"errors"
 	"testing"
 	"time"
 )
@@ -552,4 +554,42 @@ func sameStrings(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func TestDeleteChatsOlderThanDropsMessageLocations(t *testing.T) {
+	db := openTestDB(t)
+
+	now := time.Now().UTC()
+	old := now.AddDate(0, 0, -200)
+	recent := now.AddDate(0, 0, -30)
+
+	for jid, ts := range map[string]time.Time{
+		"old@s.whatsapp.net":    old,
+		"recent@s.whatsapp.net": recent,
+	} {
+		if err := db.UpsertChat(jid, "dm", "Chat", ts); err != nil {
+			t.Fatalf("UpsertChat %s: %v", jid, err)
+		}
+		if err := db.UpsertMessage(UpsertMessageParams{
+			ChatJID: jid, MsgID: "LOC-1", Timestamp: ts, MediaType: "location",
+		}); err != nil {
+			t.Fatalf("UpsertMessage %s: %v", jid, err)
+		}
+		if err := db.UpsertMessageLocation(MessageLocation{
+			ChatJID: jid, MsgID: "LOC-1", Latitude: 51.4779, Longitude: -0.0015,
+		}); err != nil {
+			t.Fatalf("UpsertMessageLocation %s: %v", jid, err)
+		}
+	}
+
+	if _, err := db.DeleteChatsOlderThan(180); err != nil {
+		t.Fatalf("DeleteChatsOlderThan: %v", err)
+	}
+
+	if _, err := db.GetMessageLocation("old@s.whatsapp.net", "LOC-1"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("stale chat retained its coordinates: err = %v", err)
+	}
+	if _, err := db.GetMessageLocation("recent@s.whatsapp.net", "LOC-1"); err != nil {
+		t.Fatalf("recent chat lost its coordinates: %v", err)
+	}
 }

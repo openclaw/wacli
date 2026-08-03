@@ -175,6 +175,29 @@ func (q *Queries) DeleteLeftGroupsOlderThan(ctx context.Context, leftAt sql.Null
 	return result.RowsAffected()
 }
 
+const deleteMessageLocation = `-- name: DeleteMessageLocation :exec
+DELETE FROM message_locations WHERE chat_jid = ? AND msg_id = ?
+`
+
+type DeleteMessageLocationParams struct {
+	ChatJid string
+	MsgID   string
+}
+
+func (q *Queries) DeleteMessageLocation(ctx context.Context, arg DeleteMessageLocationParams) error {
+	_, err := q.db.ExecContext(ctx, deleteMessageLocation, arg.ChatJid, arg.MsgID)
+	return err
+}
+
+const deleteMessageLocationsForChat = `-- name: DeleteMessageLocationsForChat :exec
+DELETE FROM message_locations WHERE chat_jid = ?
+`
+
+func (q *Queries) DeleteMessageLocationsForChat(ctx context.Context, chatJid string) error {
+	_, err := q.db.ExecContext(ctx, deleteMessageLocationsForChat, chatJid)
+	return err
+}
+
 const deletePoll = `-- name: DeletePoll :exec
 DELETE FROM polls WHERE chat_jid = ? AND msg_id = ?
 `
@@ -534,6 +557,42 @@ func (q *Queries) GetMessage(ctx context.Context, arg GetMessageParams) (GetMess
 		&i.PayloadPurgedAt,
 		&i.Buttons,
 		&i.Column32,
+	)
+	return i, err
+}
+
+const getMessageLocation = `-- name: GetMessageLocation :one
+SELECT chat_jid, msg_id, latitude, longitude, COALESCE(name,''), COALESCE(address,''), is_live
+FROM message_locations
+WHERE chat_jid = ? AND msg_id = ?
+`
+
+type GetMessageLocationParams struct {
+	ChatJid string
+	MsgID   string
+}
+
+type GetMessageLocationRow struct {
+	ChatJid   string
+	MsgID     string
+	Latitude  float64
+	Longitude float64
+	Name      string
+	Address   string
+	IsLive    int64
+}
+
+func (q *Queries) GetMessageLocation(ctx context.Context, arg GetMessageLocationParams) (GetMessageLocationRow, error) {
+	row := q.db.QueryRowContext(ctx, getMessageLocation, arg.ChatJid, arg.MsgID)
+	var i GetMessageLocationRow
+	err := row.Scan(
+		&i.ChatJid,
+		&i.MsgID,
+		&i.Latitude,
+		&i.Longitude,
+		&i.Name,
+		&i.Address,
+		&i.IsLive,
 	)
 	return i, err
 }
@@ -1865,6 +1924,47 @@ func (q *Queries) UpsertMessage(ctx context.Context, arg UpsertMessageParams) er
 		arg.Edited,
 		arg.EditedTs,
 		arg.Buttons,
+		arg.ChatJid_2,
+		arg.MsgID_2,
+	)
+	return err
+}
+
+const upsertMessageLocation = `-- name: UpsertMessageLocation :exec
+INSERT INTO message_locations (chat_jid, msg_id, latitude, longitude, name, address, is_live)
+SELECT ?, ?, ?, ?, ?, ?, ?
+WHERE NOT EXISTS (
+    SELECT 1 FROM message_payload_purges p WHERE p.chat_jid = ? AND p.msg_id = ?
+)
+ON CONFLICT(chat_jid, msg_id) DO UPDATE SET
+    latitude = excluded.latitude,
+    longitude = excluded.longitude,
+    name = excluded.name,
+    address = excluded.address,
+    is_live = excluded.is_live
+`
+
+type UpsertMessageLocationParams struct {
+	ChatJid   string
+	MsgID     string
+	Latitude  float64
+	Longitude float64
+	Name      sql.NullString
+	Address   sql.NullString
+	IsLive    int64
+	ChatJid_2 string
+	MsgID_2   string
+}
+
+func (q *Queries) UpsertMessageLocation(ctx context.Context, arg UpsertMessageLocationParams) error {
+	_, err := q.db.ExecContext(ctx, upsertMessageLocation,
+		arg.ChatJid,
+		arg.MsgID,
+		arg.Latitude,
+		arg.Longitude,
+		arg.Name,
+		arg.Address,
+		arg.IsLive,
 		arg.ChatJid_2,
 		arg.MsgID_2,
 	)

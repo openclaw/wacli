@@ -31,6 +31,7 @@ func newSendCmd(flags *rootFlags) *cobra.Command {
 	cmd.AddCommand(newSendStickerCmd(flags))
 	cmd.AddCommand(newSendVoiceCmd(flags))
 	cmd.AddCommand(newSendReactCmd(flags))
+	cmd.AddCommand(newSendLocationCmd(flags))
 	cmd.AddCommand(newSendPollCmd(flags))
 	cmd.AddCommand(newSendStatusCmd(flags))
 	cmd.AddCommand(newSendSelectCmd(flags))
@@ -178,11 +179,16 @@ type outboundTextResolver interface {
 	ResolveLIDToPN(ctx context.Context, jid types.JID) types.JID
 }
 
-func persistOutboundTextWith(ctx context.Context, db *store.DB, resolver outboundTextResolver, chat types.JID, msgID, text string, now time.Time) error {
+func canonicalOutboundChat(ctx context.Context, resolver outboundTextResolver, chat types.JID) types.JID {
 	chat = resolver.ResolveLIDToPN(ctx, chat)
 	if chat.Server == types.DefaultUserServer {
 		chat = chat.ToNonAD()
 	}
+	return chat
+}
+
+func persistOutboundTextWith(ctx context.Context, db *store.DB, resolver outboundTextResolver, chat types.JID, msgID, text string, now time.Time) error {
+	chat = canonicalOutboundChat(ctx, resolver, chat)
 	chatName := resolver.ResolveChatName(ctx, chat, "")
 	var storeErr error
 	if err := db.UpsertChat(chat.String(), chatKindFromJID(chat), chatName, now); err != nil {

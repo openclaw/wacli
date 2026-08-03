@@ -22,6 +22,14 @@ type Media struct {
 	FileLength    uint64
 }
 
+type Location struct {
+	Latitude  float64
+	Longitude float64
+	Name      string
+	Address   string
+	IsLive    bool
+}
+
 type Button struct {
 	Type         string `json:"type"`
 	DisplayText  string `json:"display_text"`
@@ -69,6 +77,7 @@ type ParsedMessage struct {
 	Text             string
 	Buttons          []Button
 	Media            *Media
+	Location         *Location
 	Poll             *Poll
 	PollVote         *PollVoteRef
 	PollAdd          *PollAddOptionRef
@@ -165,6 +174,7 @@ func extractWAProto(m *waProto.Message, pm *ParsedMessage) {
 	extractReaction(m, pm)
 	extractPlainText(m, pm)
 	extractMedia(m, pm)
+	extractLocation(m, pm)
 	extractContactText(m, pm)
 	extractBusinessText(m, pm)
 	extractPoll(m, pm)
