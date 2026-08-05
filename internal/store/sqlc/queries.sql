@@ -6,6 +6,13 @@ ON CONFLICT(jid) DO UPDATE SET
     name=CASE WHEN excluded.name IS NOT NULL AND excluded.name != '' THEN excluded.name ELSE chats.name END,
     last_message_ts=CASE WHEN excluded.last_message_ts > COALESCE(chats.last_message_ts, 0) THEN excluded.last_message_ts ELSE chats.last_message_ts END;
 
+-- name: UpsertChatMetadata :exec
+INSERT INTO chats(jid, kind, name)
+VALUES(?, ?, ?)
+ON CONFLICT(jid) DO UPDATE SET
+    kind=excluded.kind,
+    name=CASE WHEN excluded.name IS NOT NULL AND excluded.name != '' THEN excluded.name ELSE chats.name END;
+
 -- name: GetChat :one
 SELECT jid, kind, COALESCE(name,''), COALESCE(last_message_ts,0), COALESCE(archived,0), COALESCE(pinned,0), COALESCE(muted_until,0), COALESCE(unread,0), COALESCE(unread_count,0)
 FROM chats

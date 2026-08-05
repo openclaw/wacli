@@ -1639,6 +1639,25 @@ func (q *Queries) UpsertChat(ctx context.Context, arg UpsertChatParams) error {
 	return err
 }
 
+const upsertChatMetadata = `-- name: UpsertChatMetadata :exec
+INSERT INTO chats(jid, kind, name)
+VALUES(?, ?, ?)
+ON CONFLICT(jid) DO UPDATE SET
+    kind=excluded.kind,
+    name=CASE WHEN excluded.name IS NOT NULL AND excluded.name != '' THEN excluded.name ELSE chats.name END
+`
+
+type UpsertChatMetadataParams struct {
+	Jid  string
+	Kind string
+	Name sql.NullString
+}
+
+func (q *Queries) UpsertChatMetadata(ctx context.Context, arg UpsertChatMetadataParams) error {
+	_, err := q.db.ExecContext(ctx, upsertChatMetadata, arg.Jid, arg.Kind, arg.Name)
+	return err
+}
+
 const upsertContact = `-- name: UpsertContact :exec
 INSERT INTO contacts(jid, phone, push_name, full_name, first_name, business_name, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, ?)

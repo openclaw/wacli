@@ -70,6 +70,40 @@ func TestRefreshGroupsStoresGroupsAndChats(t *testing.T) {
 	}
 }
 
+func TestRefreshGroupsPreservesChatLastMessageTimestamp(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	gid := types.JID{User: "12345", Server: types.GroupServer}
+	messageTS := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	refreshTS := messageTS.Add(24 * time.Hour)
+	if err := a.db.UpsertChat(gid.String(), "group", "Old Name", messageTS); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	f.groups[gid] = &types.GroupInfo{
+		JID:       gid,
+		GroupName: types.GroupName{Name: "New Name"},
+	}
+	previousNowUTC := nowUTC
+	nowUTC = func() time.Time { return refreshTS }
+	t.Cleanup(func() { nowUTC = previousNowUTC })
+
+	if err := a.refreshGroups(context.Background()); err != nil {
+		t.Fatalf("refreshGroups: %v", err)
+	}
+	c, err := a.db.GetChat(gid.String())
+	if err != nil {
+		t.Fatalf("GetChat: %v", err)
+	}
+	if c.Name != "New Name" {
+		t.Fatalf("expected refreshed chat name, got %q", c.Name)
+	}
+	if !c.LastMessageTS.Equal(messageTS) {
+		t.Fatalf("expected LastMessageTS=%s, got %s", messageTS, c.LastMessageTS)
+	}
+}
+
 func TestRefreshNewslettersStoresChats(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()

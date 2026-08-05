@@ -30,6 +30,17 @@ func (d *DB) UpsertChat(jid, kind, name string, lastTS time.Time) error {
 	})
 }
 
+func (d *DB) UpsertChatMetadata(jid, kind, name string) error {
+	if strings.TrimSpace(kind) == "" {
+		kind = "unknown"
+	}
+	return d.q.UpsertChatMetadata(storeCtx(), storedb.UpsertChatMetadataParams{
+		Jid:  jid,
+		Kind: kind,
+		Name: nullString(name),
+	})
+}
+
 func (d *DB) ListChats(query string, limit int) ([]Chat, error) {
 	return d.ListChatsFiltered(ChatListFilter{Query: query, Limit: limit})
 }

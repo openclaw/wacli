@@ -42,6 +42,39 @@ func TestUpsertChatNameAndLastMessageTS(t *testing.T) {
 	}
 }
 
+func TestUpsertChatMetadataPreservesLastMessageTimestamp(t *testing.T) {
+	db := openTestDB(t)
+
+	messageTS := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := db.UpsertChat("existing@g.us", "group", "Old Name", messageTS); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	if err := db.UpsertChatMetadata("existing@g.us", "group", "New Name"); err != nil {
+		t.Fatalf("UpsertChatMetadata existing: %v", err)
+	}
+	existing, err := db.GetChat("existing@g.us")
+	if err != nil {
+		t.Fatalf("GetChat existing: %v", err)
+	}
+	if existing.Name != "New Name" {
+		t.Fatalf("expected refreshed name, got %q", existing.Name)
+	}
+	if !existing.LastMessageTS.Equal(messageTS) {
+		t.Fatalf("expected LastMessageTS=%s, got %s", messageTS, existing.LastMessageTS)
+	}
+
+	if err := db.UpsertChatMetadata("new@g.us", "group", "New Group"); err != nil {
+		t.Fatalf("UpsertChatMetadata new: %v", err)
+	}
+	created, err := db.GetChat("new@g.us")
+	if err != nil {
+		t.Fatalf("GetChat new: %v", err)
+	}
+	if !created.LastMessageTS.IsZero() {
+		t.Fatalf("expected new metadata-only chat to have unknown activity, got %s", created.LastMessageTS)
+	}
+}
+
 func TestChatStateColumnsAndFilters(t *testing.T) {
 	db := openTestDB(t)
 	now := time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC)
