@@ -1,6 +1,7 @@
 package wa
 
 import (
+	"sort"
 	"strings"
 	"time"
 
@@ -8,6 +9,7 @@ import (
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 type Media struct {
@@ -94,6 +96,9 @@ type ParsedMessage struct {
 	Edited           bool
 	Revoked          bool
 	Call             *ParsedCallEvent
+	// UnhandledPayload names the populated waE2E.Message field when parsing
+	// extracted no content at all. Empty when the message was understood.
+	UnhandledPayload string
 }
 
 func ParseLiveMessage(evt *events.Message) ParsedMessage {
@@ -111,7 +116,7 @@ func ParseLiveMessage(evt *events.Message) ParsedMessage {
 		applyDeviceSentDestination(evt.Info.DeviceSentMeta.DestinationJID, &msg)
 	}
 
-	extractWAProto(evt.Message, &msg)
+	markUnhandledPayload(extractWAProto(evt.Message, &msg), &msg)
 	return msg
 }
 
@@ -142,34 +147,78 @@ func ParseHistoryMessage(chatJID string, hist *waProto.WebMessageInfo) ParsedMes
 	pm.SenderJID = sender
 
 	if hist.GetMessage() != nil {
-		extractWAProto(hist.GetMessage(), &pm)
+		markUnhandledPayload(extractWAProto(hist.GetMessage(), &pm), &pm)
 	}
 	return pm
 }
 
-func extractWAProto(m *waProto.Message, pm *ParsedMessage) {
-	if m == nil || pm == nil {
+// hasContent reports whether parsing produced anything storable. A message with
+// no content is persisted with a "(message)" placeholder, which is
+// indistinguishable from a message that genuinely carried nothing.
+func (pm ParsedMessage) hasContent() bool {
+	return strings.TrimSpace(pm.Text) != "" ||
+		pm.Media != nil ||
+		pm.Poll != nil ||
+		pm.PollVote != nil ||
+		pm.PollAdd != nil ||
+		pm.Call != nil ||
+		pm.Location != nil ||
+		pm.Revoked ||
+		len(pm.Buttons) > 0 ||
+		strings.TrimSpace(pm.ReactionToID) != "" ||
+		strings.TrimSpace(pm.ReactionEmoji) != ""
+}
+
+// markUnhandledPayload records which payload field was present when extraction
+// yielded nothing, so the placeholder row can be diagnosed instead of silently
+// discarding content. Field names come from the protobuf descriptor, so new
+// WhatsApp message types are reported without needing a code change here.
+func markUnhandledPayload(m *waProto.Message, pm *ParsedMessage) {
+	if m == nil || pm == nil || pm.hasContent() {
 		return
+	}
+	var names []string
+	m.ProtoReflect().Range(func(fd protoreflect.FieldDescriptor, _ protoreflect.Value) bool {
+		switch fd.Name() {
+		case "messageContextInfo":
+			return true
+		}
+		names = append(names, string(fd.Name()))
+		return true
+	})
+	if len(names) == 0 {
+		return
+	}
+	sort.Strings(names)
+	pm.UnhandledPayload = strings.Join(names, ",")
+}
+
+// extractWAProto returns the leaf message it ultimately extracted from, after
+// unwrapping any device-sent, edited or protocol-edit wrappers. Callers use it
+// to describe an unhandled payload: naming the wrapper instead of the leaf
+// would report `protocolMessage` for every unhandled edit, which is exactly the
+// case the diagnostic exists for.
+func extractWAProto(m *waProto.Message, pm *ParsedMessage) *waProto.Message {
+	if m == nil || pm == nil {
+		return nil
 	}
 
 	if deviceSent := m.GetDeviceSentMessage(); deviceSent.GetMessage() != nil {
 		applyDeviceSentDestination(deviceSent.GetDestinationJID(), pm)
-		extractWAProto(deviceSent.GetMessage(), pm)
-		return
+		return extractWAProto(deviceSent.GetMessage(), pm)
 	}
 	if edited := m.GetEditedMessage().GetMessage(); edited != nil {
 		if edited.MessageContextInfo == nil && m.MessageContextInfo != nil {
 			edited.MessageContextInfo = m.MessageContextInfo
 		}
 		pm.Edited = true
-		extractWAProto(edited, pm)
-		return
+		return extractWAProto(edited, pm)
 	}
 	if replacement, handled := extractProtocolMutation(m, pm); handled {
 		if replacement != nil {
-			extractWAProto(replacement, pm)
+			return extractWAProto(replacement, pm)
 		}
-		return
+		return m
 	}
 	extractReaction(m, pm)
 	extractPlainText(m, pm)
@@ -195,6 +244,7 @@ func extractWAProto(m *waProto.Message, pm *ParsedMessage) {
 		pm.ForwardingScore = ctx.GetForwardingScore()
 		pm.IsForwarded = ctx.GetIsForwarded() || pm.ForwardingScore > 0
 	}
+	return m
 }
 
 func applyDeviceSentDestination(destination string, pm *ParsedMessage) {
