@@ -116,8 +116,7 @@ func ParseLiveMessage(evt *events.Message) ParsedMessage {
 		applyDeviceSentDestination(evt.Info.DeviceSentMeta.DestinationJID, &msg)
 	}
 
-	extractWAProto(evt.Message, &msg)
-	markUnhandledPayload(evt.Message, &msg)
+	markUnhandledPayload(extractWAProto(evt.Message, &msg), &msg)
 	return msg
 }
 
@@ -148,8 +147,7 @@ func ParseHistoryMessage(chatJID string, hist *waProto.WebMessageInfo) ParsedMes
 	pm.SenderJID = sender
 
 	if hist.GetMessage() != nil {
-		extractWAProto(hist.GetMessage(), &pm)
-		markUnhandledPayload(hist.GetMessage(), &pm)
+		markUnhandledPayload(extractWAProto(hist.GetMessage(), &pm), &pm)
 	}
 	return pm
 }
@@ -195,29 +193,32 @@ func markUnhandledPayload(m *waProto.Message, pm *ParsedMessage) {
 	pm.UnhandledPayload = strings.Join(names, ",")
 }
 
-func extractWAProto(m *waProto.Message, pm *ParsedMessage) {
+// extractWAProto returns the leaf message it ultimately extracted from, after
+// unwrapping any device-sent, edited or protocol-edit wrappers. Callers use it
+// to describe an unhandled payload: naming the wrapper instead of the leaf
+// would report `protocolMessage` for every unhandled edit, which is exactly the
+// case the diagnostic exists for.
+func extractWAProto(m *waProto.Message, pm *ParsedMessage) *waProto.Message {
 	if m == nil || pm == nil {
-		return
+		return nil
 	}
 
 	if deviceSent := m.GetDeviceSentMessage(); deviceSent.GetMessage() != nil {
 		applyDeviceSentDestination(deviceSent.GetDestinationJID(), pm)
-		extractWAProto(deviceSent.GetMessage(), pm)
-		return
+		return extractWAProto(deviceSent.GetMessage(), pm)
 	}
 	if edited := m.GetEditedMessage().GetMessage(); edited != nil {
 		if edited.MessageContextInfo == nil && m.MessageContextInfo != nil {
 			edited.MessageContextInfo = m.MessageContextInfo
 		}
 		pm.Edited = true
-		extractWAProto(edited, pm)
-		return
+		return extractWAProto(edited, pm)
 	}
 	if replacement, handled := extractProtocolMutation(m, pm); handled {
 		if replacement != nil {
-			extractWAProto(replacement, pm)
+			return extractWAProto(replacement, pm)
 		}
-		return
+		return m
 	}
 	extractReaction(m, pm)
 	extractPlainText(m, pm)
@@ -243,6 +244,7 @@ func extractWAProto(m *waProto.Message, pm *ParsedMessage) {
 		pm.ForwardingScore = ctx.GetForwardingScore()
 		pm.IsForwarded = ctx.GetIsForwarded() || pm.ForwardingScore > 0
 	}
+	return m
 }
 
 func applyDeviceSentDestination(destination string, pm *ParsedMessage) {

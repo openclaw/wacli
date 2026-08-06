@@ -399,7 +399,6 @@ func chatKind(chat types.JID) string {
 
 func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error {
 	pm.Chat = a.canonicalStoreJID(ctx, pm.Chat)
-	a.warnUnhandledPayload(pm)
 	chatJID := canonicalJIDString(pm.Chat)
 	chatName := a.wa.ResolveChatName(ctx, pm.Chat, pm.PushName)
 	if pm.Chat != types.StatusBroadcastJID {
@@ -543,6 +542,7 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 	}); err != nil {
 		return err
 	}
+	a.warnUnhandledPayload(pm)
 	if pm.Location != nil {
 		if err := a.db.UpsertMessageLocation(store.MessageLocation{
 			ChatJID:   chatJID,
@@ -719,6 +719,10 @@ func (a *App) buildDisplayText(ctx context.Context, pm wa.ParsedMessage) string 
 // the resulting "(message)" placeholder is diagnosable. Without it the row is
 // indistinguishable from a message that genuinely carried nothing, and any
 // consumer reading local history silently sees a gap it cannot account for.
+//
+// Called only after the message upsert succeeds: the warning states that the
+// row was stored, so emitting it earlier would report a write that may still
+// fail.
 func (a *App) warnUnhandledPayload(pm wa.ParsedMessage) {
 	if pm.UnhandledPayload == "" {
 		return

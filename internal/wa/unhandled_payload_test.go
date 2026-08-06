@@ -107,3 +107,78 @@ func TestMarkUnhandledPayloadIgnoresRevoke(t *testing.T) {
 		t.Fatalf("expected revoke to be handled, got %q", pm.UnhandledPayload)
 	}
 }
+
+// A payload wrapped in deviceSentMessage must be named by its leaf. Reporting
+// the wrapper would send an operator looking at the envelope instead of the
+// content that went missing.
+func TestMarkUnhandledPayloadNamesLeafInsideDeviceSent(t *testing.T) {
+	pm := ParseLiveMessage(liveEvent(&waProto.Message{
+		DeviceSentMessage: &waProto.DeviceSentMessage{
+			DestinationJID: proto.String("456@s.whatsapp.net"),
+			Message: &waProto.Message{
+				StickerSyncRmrMessage: &waProto.StickerSyncRMRMessage{
+					Filehash: []string{"abc"},
+				},
+			},
+		},
+	}))
+	if pm.UnhandledPayload != "stickerSyncRmrMessage" {
+		t.Fatalf("expected the leaf payload, got %q", pm.UnhandledPayload)
+	}
+}
+
+// The edit case is the reason this diagnostic exists: naming protocolMessage
+// here would report every unhandled edit as the same generic wrapper.
+func TestMarkUnhandledPayloadNamesLeafInsideProtocolEdit(t *testing.T) {
+	pm := ParseLiveMessage(liveEvent(&waProto.Message{
+		ProtocolMessage: &waProto.ProtocolMessage{
+			Type: waProto.ProtocolMessage_MESSAGE_EDIT.Enum(),
+			Key:  &waProto.MessageKey{ID: proto.String("ORIGINAL")},
+			EditedMessage: &waProto.Message{
+				StickerSyncRmrMessage: &waProto.StickerSyncRMRMessage{
+					Filehash: []string{"abc"},
+				},
+			},
+		},
+	}))
+	if pm.ID != "ORIGINAL" {
+		t.Fatalf("expected the edit to adopt the original id, got %q", pm.ID)
+	}
+	if pm.UnhandledPayload != "stickerSyncRmrMessage" {
+		t.Fatalf("expected the leaf payload, got %q", pm.UnhandledPayload)
+	}
+}
+
+// editedMessage is the other wrapper shape the parser unwraps.
+func TestMarkUnhandledPayloadNamesLeafInsideEditedMessage(t *testing.T) {
+	pm := ParseLiveMessage(liveEvent(&waProto.Message{
+		EditedMessage: &waProto.FutureProofMessage{
+			Message: &waProto.Message{
+				StickerSyncRmrMessage: &waProto.StickerSyncRMRMessage{
+					Filehash: []string{"abc"},
+				},
+			},
+		},
+	}))
+	if !pm.Edited {
+		t.Fatal("expected the message to be marked edited")
+	}
+	if pm.UnhandledPayload != "stickerSyncRmrMessage" {
+		t.Fatalf("expected the leaf payload, got %q", pm.UnhandledPayload)
+	}
+}
+
+// A wrapper around content the parser understands stays unflagged.
+func TestMarkUnhandledPayloadIgnoresWrappedText(t *testing.T) {
+	pm := ParseLiveMessage(liveEvent(&waProto.Message{
+		DeviceSentMessage: &waProto.DeviceSentMessage{
+			Message: &waProto.Message{Conversation: proto.String("hello")},
+		},
+	}))
+	if pm.Text != "hello" {
+		t.Fatalf("expected wrapped text to be extracted, got %q", pm.Text)
+	}
+	if pm.UnhandledPayload != "" {
+		t.Fatalf("expected no unhandled payload, got %q", pm.UnhandledPayload)
+	}
+}
