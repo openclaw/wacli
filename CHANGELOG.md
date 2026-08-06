@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Sync: warn when a message is stored without content, naming the payload field that went unextracted, so the resulting `(message)` placeholder can be diagnosed instead of silently losing the body. (#343)
+
 ## 0.16.0 - 2026-08-02
 
 ### Added

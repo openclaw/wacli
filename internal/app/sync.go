@@ -399,6 +399,7 @@ func chatKind(chat types.JID) string {
 
 func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error {
 	pm.Chat = a.canonicalStoreJID(ctx, pm.Chat)
+	a.warnUnhandledPayload(pm)
 	chatJID := canonicalJIDString(pm.Chat)
 	chatName := a.wa.ResolveChatName(ctx, pm.Chat, pm.PushName)
 	if pm.Chat != types.StatusBroadcastJID {
@@ -712,6 +713,28 @@ func (a *App) buildDisplayText(ctx context.Context, pm wa.ParsedMessage) string 
 		base = "(message)"
 	}
 	return base
+}
+
+// warnUnhandledPayload surfaces messages whose payload produced no content, so
+// the resulting "(message)" placeholder is diagnosable. Without it the row is
+// indistinguishable from a message that genuinely carried nothing, and any
+// consumer reading local history silently sees a gap it cannot account for.
+func (a *App) warnUnhandledPayload(pm wa.ParsedMessage) {
+	if pm.UnhandledPayload == "" {
+		return
+	}
+	a.emitWarning(
+		"unhandled_message_payload",
+		fmt.Sprintf(
+			"stored message %s in %s without content: unhandled payload %s",
+			pm.ID, canonicalJIDString(pm.Chat), pm.UnhandledPayload,
+		),
+		map[string]any{
+			"chat_jid": canonicalJIDString(pm.Chat),
+			"msg_id":   pm.ID,
+			"payload":  pm.UnhandledPayload,
+		},
+	)
 }
 
 func baseDisplayText(pm wa.ParsedMessage) string {
