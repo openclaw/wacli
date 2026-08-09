@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Sync: identify unhandled payload types when content extraction produces a placeholder, with bounded diagnostics during history replay. (#344 - thanks @dvainrub)
+
 ## 0.16.0 - 2026-08-02
 
 ### Added

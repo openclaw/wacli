@@ -580,7 +580,55 @@ func historySyncNotificationFromMessage(v *events.Message) *waE2E.HistorySyncNot
 	return v.Message.GetProtocolMessage().GetHistorySyncNotification()
 }
 
+const maxHistoryUnhandledPayloadWarnings = 10
+
+type historyUnhandledPayloadWarnings struct {
+	seen       map[string]struct{}
+	reported   int
+	suppressed int
+}
+
+func (w *historyUnhandledPayloadWarnings) observe(a *App, pm wa.ParsedMessage) {
+	payload := strings.TrimSpace(pm.UnhandledPayload)
+	if payload == "" {
+		return
+	}
+	if w.seen == nil {
+		w.seen = make(map[string]struct{})
+	}
+	if _, ok := w.seen[payload]; ok {
+		w.suppressed++
+		return
+	}
+	w.seen[payload] = struct{}{}
+	if w.reported >= maxHistoryUnhandledPayloadWarnings {
+		w.suppressed++
+		return
+	}
+	w.reported++
+	a.warnUnhandledPayload(pm)
+}
+
+func (w *historyUnhandledPayloadWarnings) flush(a *App) {
+	if w.suppressed == 0 {
+		return
+	}
+	a.emitWarning(
+		"unhandled_message_payloads_suppressed",
+		fmt.Sprintf(
+			"history sync suppressed %d additional unhandled-payload warnings across %d payload shapes",
+			w.suppressed, len(w.seen),
+		),
+		map[string]any{
+			"suppressed_messages": w.suppressed,
+			"unique_payloads":     len(w.seen),
+		},
+	)
+}
+
 func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events.HistorySync, messagesStored, lastEvent *atomic.Int64, enqueueMedia func(string, string), limits ...*syncStorageLimits) {
+	var unhandledWarnings historyUnhandledPayloadWarnings
+	defer unhandledWarnings.flush(a)
 	a.emitOrPrint("history_sync", map[string]any{"conversations": len(v.Data.Conversations)}, "\nProcessing history sync (%d conversations)...\n", len(v.Data.Conversations))
 	a.storeHistoryCallLogRecords(ctx, v, lastEvent)
 	for _, conv := range v.Data.Conversations {
@@ -617,7 +665,10 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 					a.decryptEncryptedReaction(ctx, &pm, evt)
 				}
 			}
-			if err := a.storeParsedMessageForSync(ctx, pm, limits...); err == nil {
+			storedPM := pm
+			storedPM.UnhandledPayload = ""
+			if err := a.storeParsedMessageForSync(ctx, storedPM, limits...); err == nil {
+				unhandledWarnings.observe(a, pm)
 				a.emitSyncProgress(messagesStored.Add(1))
 				if pm.Poll != nil || pm.PollAdd != nil || pm.PollVote != nil {
 					pendingPolls = append(pendingPolls, historyPollSideEffect{pm: pm, evt: pollEvt, hist: m.Message})
