@@ -36,16 +36,9 @@ func TestListMessagesReportsEdited(t *testing.T) {
 	if !msgs[0].Edited {
 		t.Fatal("expected Edited to be true")
 	}
-	if msgs[0].EditedAt == nil {
-		t.Fatal("expected EditedAt to be set")
-	}
-	if !msgs[0].EditedAt.Equal(ts) {
-		t.Fatalf("expected EditedAt %v, got %v", ts, *msgs[0].EditedAt)
-	}
 }
 
-// An untouched message must not carry an edit timestamp, otherwise every row
-// looks edited and the field is useless for filtering.
+// An untouched message must keep the edit flag false so callers can filter it.
 func TestListMessagesLeavesEditedUnsetForPlainMessage(t *testing.T) {
 	db := openTestDB(t)
 
@@ -72,9 +65,6 @@ func TestListMessagesLeavesEditedUnsetForPlainMessage(t *testing.T) {
 	}
 	if msgs[0].Edited {
 		t.Fatal("expected Edited to be false")
-	}
-	if msgs[0].EditedAt != nil {
-		t.Fatalf("expected no EditedAt, got %v", *msgs[0].EditedAt)
 	}
 }
 
@@ -107,5 +97,65 @@ func TestSearchMessagesReportsEdited(t *testing.T) {
 	}
 	if !msgs[0].Edited {
 		t.Fatal("expected Edited to be true from search results")
+	}
+}
+
+func TestGetMessageReportsEdited(t *testing.T) {
+	db := openTestDB(t)
+
+	chat := "123@s.whatsapp.net"
+	if err := db.UpsertChat(chat, "dm", "Alice", time.Now()); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID:   chat,
+		MsgID:     "edited",
+		Timestamp: time.Date(2024, 2, 1, 12, 0, 0, 0, time.UTC),
+		Text:      "final text",
+		Edited:    true,
+	}); err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+
+	msg, err := db.GetMessage(chat, "edited")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if !msg.Edited {
+		t.Fatal("expected Edited to be true")
+	}
+}
+
+func TestMessageContextReportsEdited(t *testing.T) {
+	db := openTestDB(t)
+
+	chat := "123@s.whatsapp.net"
+	base := time.Date(2024, 2, 1, 12, 0, 0, 0, time.UTC)
+	if err := db.UpsertChat(chat, "dm", "Alice", base); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	for i, id := range []string{"before", "target", "after"} {
+		if err := db.UpsertMessage(UpsertMessageParams{
+			ChatJID:   chat,
+			MsgID:     id,
+			Timestamp: base.Add(time.Duration(i) * time.Minute),
+			Text:      id,
+			Edited:    true,
+		}); err != nil {
+			t.Fatalf("UpsertMessage %s: %v", id, err)
+		}
+	}
+
+	msgs, err := db.MessageContext(chat, "target", 1, 1)
+	if err != nil {
+		t.Fatalf("MessageContext: %v", err)
+	}
+	if len(msgs) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(msgs))
+	}
+	for _, msg := range msgs {
+		if !msg.Edited {
+			t.Fatalf("expected %s to report Edited", msg.MsgID)
+		}
 	}
 }

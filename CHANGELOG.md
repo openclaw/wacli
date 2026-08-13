@@ -5,6 +5,7 @@
 ### Added
 
 - Sync: identify unhandled payload types when content extraction produces a placeholder, with bounded diagnostics during history replay. (#344 - thanks @dvainrub)
+- Messages: expose persisted edited state consistently in list, search, show, and context JSON output. (#347 - thanks @dvainrub)
 
 ### Chore
 
