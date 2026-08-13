@@ -75,7 +75,7 @@ func newGroupsCreateCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 			if info != nil {
-				_ = persistGroupInfo(a.DB(), info)
+				_ = persistGroupInfo(ctx, a.DB(), a.WA(), info)
 			}
 
 			if flags.asJSON {
@@ -135,7 +135,7 @@ func newGroupsTopicCmd(flags *rootFlags, use string) *cobra.Command {
 				return err
 			}
 			if info, err := a.WA().GetGroupInfo(ctx, gjid); err == nil && info != nil {
-				_ = persistGroupInfo(a.DB(), info)
+				_ = persistGroupInfo(ctx, a.DB(), a.WA(), info)
 			}
 			if flags.asJSON {
 				return out.WriteJSON(os.Stdout, map[string]any{"jid": gjid.String(), "topic": text})
@@ -202,7 +202,7 @@ func newGroupsToggleCmd(flags *rootFlags, use, short string, apply func(context.
 				return err
 			}
 			if info, err := a.WA().GetGroupInfo(ctx, gjid); err == nil && info != nil {
-				_ = persistGroupInfo(a.DB(), info)
+				_ = persistGroupInfo(ctx, a.DB(), a.WA(), info)
 			}
 			if flags.asJSON {
 				return out.WriteJSON(os.Stdout, map[string]any{"jid": gjid.String(), jsonKey: enabled})
@@ -343,7 +343,7 @@ func newGroupsRequestsActionCmd(flags *rootFlags, action string) *cobra.Command 
 				return err
 			}
 			if info, err := a.WA().GetGroupInfo(ctx, gjid); err == nil && info != nil {
-				_ = persistGroupInfo(a.DB(), info)
+				_ = persistGroupInfo(ctx, a.DB(), a.WA(), info)
 			}
 
 			if flags.asJSON {

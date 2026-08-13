@@ -2991,6 +2991,67 @@ func TestStoreParsedMessageResolvesLIDChatAndSender(t *testing.T) {
 	}
 }
 
+func TestStoreParsedMessageResolvesGroupIdentityLIDs(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	group := types.JID{User: "120363000000", Server: types.GroupServer}
+	lid := types.JID{User: "999123456789", Server: types.HiddenUserServer}
+	pn := types.JID{User: "15551234567", Server: types.DefaultUserServer}
+	f.lids[lid] = pn
+	f.groups[group] = &types.GroupInfo{
+		JID:       group,
+		OwnerJID:  lid,
+		GroupName: types.GroupName{Name: "Project"},
+		Participants: []types.GroupParticipant{{
+			JID:     lid,
+			IsAdmin: true,
+		}},
+	}
+
+	err := a.storeParsedMessage(context.Background(), wa.ParsedMessage{
+		Chat:             group,
+		ID:               "m-group-lid",
+		SenderJID:        lid.String(),
+		ReplyToID:        "quoted",
+		ReplyToSenderJID: lid.String(),
+		Timestamp:        time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+		Text:             "hello",
+	})
+	if err != nil {
+		t.Fatalf("storeParsedMessage: %v", err)
+	}
+
+	msg, err := a.db.GetMessage(group.String(), "m-group-lid")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if msg.SenderJID != pn.String() || msg.QuotedSenderJID != pn.String() {
+		t.Fatalf("message identities = sender %q quoted %q, want %q", msg.SenderJID, msg.QuotedSenderJID, pn.String())
+	}
+	groups, err := a.db.ListGroups("Project", 1)
+	if err != nil {
+		t.Fatalf("ListGroups: %v", err)
+	}
+	if len(groups) != 1 || groups[0].OwnerJID != pn.String() {
+		t.Fatalf("stored group = %+v, want owner %q", groups, pn.String())
+	}
+
+	raw, err := sql.Open("sqlite3", filepath.Join(a.opts.StoreDir, "wacli.db"))
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer raw.Close()
+	var participantJID string
+	if err := raw.QueryRow(`SELECT user_jid FROM group_participants WHERE group_jid = ?`, group.String()).Scan(&participantJID); err != nil {
+		t.Fatalf("query participant: %v", err)
+	}
+	if participantJID != pn.String() {
+		t.Fatalf("participant JID = %q, want %q", participantJID, pn.String())
+	}
+}
+
 func TestStoreParsedMessageStoresForwardedMetadata(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()

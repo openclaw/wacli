@@ -16,8 +16,8 @@ type MessageLocalMedia struct {
 	LocalPath string
 }
 
-// HistoricalLIDJIDs returns distinct hidden-user JIDs stored in chat and
-// message/poll identity columns. The app layer resolves these through whatsmeow.
+// HistoricalLIDJIDs returns distinct hidden-user JIDs stored in chat, group,
+// message, and poll identity columns. The app layer resolves these through whatsmeow.
 func (d *DB) HistoricalLIDJIDs() ([]string, error) {
 	rows, err := d.sql.Query(`
 		SELECT jid FROM chats WHERE jid GLOB '*@lid'
@@ -27,6 +27,10 @@ func (d *DB) HistoricalLIDJIDs() ([]string, error) {
 		SELECT sender_jid FROM messages WHERE sender_jid GLOB '*@lid'
 		UNION
 		SELECT quoted_sender_jid FROM messages WHERE quoted_sender_jid GLOB '*@lid'
+		UNION
+		SELECT owner_jid FROM groups WHERE owner_jid GLOB '*@lid'
+		UNION
+		SELECT user_jid FROM group_participants WHERE user_jid GLOB '*@lid'
 		UNION
 		SELECT chat_jid FROM polls WHERE chat_jid GLOB '*@lid'
 		UNION
@@ -96,6 +100,9 @@ func (d *DB) MigrateLIDToPN(lidJID, pnJID string) error {
 		return err
 	}
 	if err := migrateLIDSenderToPN(tx, lidJID, pnJID); err != nil {
+		return err
+	}
+	if err := migrateLIDGroupIdentitiesToPN(tx, lidJID, pnJID); err != nil {
 		return err
 	}
 	if err := migrateLIDMessageLocationsToPN(tx, lidJID, pnJID); err != nil {
@@ -431,6 +438,30 @@ func migrateLIDSenderToPN(tx *sql.Tx, lidJID, pnJID string) error {
 	}
 	if _, err := tx.Exec(`UPDATE messages SET quoted_sender_jid = ? WHERE quoted_sender_jid = ?`, pnJID, lidJID); err != nil {
 		return fmt.Errorf("rewrite lid quoted message senders: %w", err)
+	}
+	return nil
+}
+
+func migrateLIDGroupIdentitiesToPN(tx *sql.Tx, lidJID, pnJID string) error {
+	if _, err := tx.Exec(`UPDATE groups SET owner_jid = ? WHERE owner_jid = ?`, pnJID, lidJID); err != nil {
+		return fmt.Errorf("rewrite lid group owners: %w", err)
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO group_participants(group_jid, user_jid, role, updated_at)
+		SELECT group_jid, ?, role, updated_at
+		FROM group_participants
+		WHERE user_jid = ?
+		ON CONFLICT(group_jid, user_jid) DO UPDATE SET
+			role = CASE
+				WHEN excluded.updated_at >= group_participants.updated_at THEN excluded.role
+				ELSE group_participants.role
+			END,
+			updated_at = max(group_participants.updated_at, excluded.updated_at)
+	`, pnJID, lidJID); err != nil {
+		return fmt.Errorf("merge lid group participants: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM group_participants WHERE user_jid = ?`, lidJID); err != nil {
+		return fmt.Errorf("delete lid group participants: %w", err)
 	}
 	return nil
 }

@@ -6,6 +6,10 @@
 
 - Sync: identify unhandled payload types when content extraction produces a placeholder, with bounded diagnostics during history replay. (#344 - thanks @dvainrub)
 
+### Fixed
+
+- Sync: normalize resolvable LIDs in group owners, participants, and quoted senders, including historical store repair. (#348 - thanks @hchittanuru3)
+
 ### Chore
 
 - Dependencies: update `whatsmeow` for current socket headers, LID history tokens, status queries, and group creation behavior.

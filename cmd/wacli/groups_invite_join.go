@@ -151,7 +151,7 @@ func newGroupsJoinCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 			if info, err := a.WA().GetGroupInfo(ctx, jid); err == nil && info != nil {
-				_ = persistGroupInfo(a.DB(), info)
+				_ = persistGroupInfo(ctx, a.DB(), a.WA(), info)
 			}
 			if flags.asJSON {
 				return out.WriteJSON(os.Stdout, map[string]any{"jid": jid.String(), "joined": true})

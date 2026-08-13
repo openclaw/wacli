@@ -452,7 +452,8 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 	// Best-effort: store group metadata (and participants) when available.
 	if pm.Chat.Server == types.GroupServer {
 		if gi, err := a.wa.GetGroupInfo(ctx, pm.Chat); err == nil && gi != nil {
-			_ = a.db.UpsertGroupWithHierarchy(gi.JID.String(), gi.GroupName.Name, gi.OwnerJID.String(), gi.GroupCreated, gi.IsParent, gi.LinkedParentJID.String())
+			ownerJID := a.canonicalStoreJID(ctx, gi.OwnerJID).String()
+			_ = a.db.UpsertGroupWithHierarchy(gi.JID.String(), gi.GroupName.Name, ownerJID, gi.GroupCreated, gi.IsParent, gi.LinkedParentJID.String())
 			var ps []store.GroupParticipant
 			for _, p := range gi.Participants {
 				role := "member"
@@ -463,7 +464,7 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 				}
 				ps = append(ps, store.GroupParticipant{
 					GroupJID: pm.Chat.String(),
-					UserJID:  canonicalJIDString(p.JID),
+					UserJID:  a.canonicalStoreJID(ctx, p.JID).String(),
 					Role:     role,
 				})
 			}
@@ -522,7 +523,7 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 		Text:            pm.Text,
 		DisplayText:     displayText,
 		QuotedMsgID:     pm.ReplyToID,
-		QuotedSenderJID: pm.ReplyToSenderJID,
+		QuotedSenderJID: a.canonicalStoreJIDString(ctx, pm.ReplyToSenderJID),
 		Buttons:         waButtonsToStore(pm.Buttons),
 		IsForwarded:     pm.IsForwarded,
 		ForwardingScore: pm.ForwardingScore,

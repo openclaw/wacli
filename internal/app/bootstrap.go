@@ -43,7 +43,8 @@ func (a *App) refreshGroups(ctx context.Context) error {
 			continue
 		}
 		joined[g.JID.String()] = true
-		_ = a.db.UpsertGroupWithHierarchy(g.JID.String(), g.GroupName.Name, g.OwnerJID.String(), g.GroupCreated, g.IsParent, g.LinkedParentJID.String())
+		ownerJID := a.canonicalStoreJID(ctx, g.OwnerJID).String()
+		_ = a.db.UpsertGroupWithHierarchy(g.JID.String(), g.GroupName.Name, ownerJID, g.GroupCreated, g.IsParent, g.LinkedParentJID.String())
 		_ = a.db.UpsertChatMetadata(g.JID.String(), "group", g.GroupName.Name)
 	}
 	return a.db.MarkGroupsMissingFrom(joined, now)

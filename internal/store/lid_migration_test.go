@@ -70,6 +70,30 @@ func TestHistoricalLIDJIDsFindsChatAndMessageColumns(t *testing.T) {
 	}
 }
 
+func TestHistoricalLIDJIDsFindsGroupIdentities(t *testing.T) {
+	db := openTestDB(t)
+	lid := "999123456789@lid"
+	group := "120363000000@g.us"
+	if err := db.UpsertGroup(group, "Project", lid, time.Time{}); err != nil {
+		t.Fatalf("UpsertGroup: %v", err)
+	}
+	if err := db.ReplaceGroupParticipants(group, []GroupParticipant{{
+		GroupJID: group,
+		UserJID:  lid,
+		Role:     "admin",
+	}}); err != nil {
+		t.Fatalf("ReplaceGroupParticipants: %v", err)
+	}
+
+	got, err := db.HistoricalLIDJIDs()
+	if err != nil {
+		t.Fatalf("HistoricalLIDJIDs: %v", err)
+	}
+	if want := []string{lid}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("HistoricalLIDJIDs = %#v, want %#v", got, want)
+	}
+}
+
 func TestHistoricalLIDJIDsFindsPurgeLedgerOnlyIdentity(t *testing.T) {
 	db := openTestDB(t)
 	lid := "888123456789@lid"
@@ -314,6 +338,52 @@ func TestMigrateLIDToPNMergesChatsAndMessages(t *testing.T) {
 	}
 	if len(lids) != 0 {
 		t.Fatalf("HistoricalLIDJIDs after migrate = %#v, want none", lids)
+	}
+}
+
+func TestMigrateLIDToPNMergesGroupIdentities(t *testing.T) {
+	db := openTestDB(t)
+	lid := "999123456789@lid"
+	pn := "15551234567@s.whatsapp.net"
+	group := "120363000000@g.us"
+	if err := db.UpsertGroup(group, "Project", lid, time.Time{}); err != nil {
+		t.Fatalf("UpsertGroup: %v", err)
+	}
+	if _, err := db.sql.Exec(`
+		INSERT INTO group_participants(group_jid, user_jid, role, updated_at)
+		VALUES (?, ?, 'member', 1), (?, ?, 'admin', 2)
+	`, group, pn, group, lid); err != nil {
+		t.Fatalf("insert participants: %v", err)
+	}
+
+	if err := db.MigrateLIDToPN(lid, pn); err != nil {
+		t.Fatalf("MigrateLIDToPN: %v", err)
+	}
+	if err := db.MigrateLIDToPN(lid, pn); err != nil {
+		t.Fatalf("MigrateLIDToPN idempotent: %v", err)
+	}
+
+	groups, err := db.ListGroups("Project", 1)
+	if err != nil {
+		t.Fatalf("ListGroups: %v", err)
+	}
+	if len(groups) != 1 || groups[0].OwnerJID != pn {
+		t.Fatalf("groups = %+v, want owner %q", groups, pn)
+	}
+	if got := countRows(t, db.sql, "SELECT COUNT(*) FROM group_participants WHERE group_jid = ?", group); got != 1 {
+		t.Fatalf("participant rows = %d, want 1", got)
+	}
+	var userJID, role string
+	var updatedAt int64
+	if err := db.sql.QueryRow(`
+		SELECT user_jid, role, updated_at
+		FROM group_participants
+		WHERE group_jid = ?
+	`, group).Scan(&userJID, &role, &updatedAt); err != nil {
+		t.Fatalf("query participant: %v", err)
+	}
+	if userJID != pn || role != "admin" || updatedAt != 2 {
+		t.Fatalf("participant = (%q, %q, %d), want (%q, admin, 2)", userJID, role, updatedAt, pn)
 	}
 }
 

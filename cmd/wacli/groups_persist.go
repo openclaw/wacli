@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+
 	"github.com/openclaw/wacli/internal/store"
 	"go.mau.fi/whatsmeow/types"
 )
@@ -12,14 +14,19 @@ func canonicalCLIJID(jid types.JID) types.JID {
 	return jid
 }
 
-func persistGroupInfo(db *store.DB, info *types.GroupInfo) error {
+type groupJIDResolver interface {
+	ResolveLIDToPN(context.Context, types.JID) types.JID
+}
+
+func persistGroupInfo(ctx context.Context, db *store.DB, resolver groupJIDResolver, info *types.GroupInfo) error {
 	if info == nil {
 		return nil
 	}
+	ownerJID := canonicalCLIJID(resolver.ResolveLIDToPN(ctx, info.OwnerJID)).String()
 	if err := db.UpsertGroupWithHierarchy(
 		info.JID.String(),
 		info.GroupName.Name,
-		info.OwnerJID.String(),
+		ownerJID,
 		info.GroupCreated,
 		info.IsParent,
 		info.LinkedParentJID.String(),
@@ -36,7 +43,7 @@ func persistGroupInfo(db *store.DB, info *types.GroupInfo) error {
 		}
 		ps = append(ps, store.GroupParticipant{
 			GroupJID: info.JID.String(),
-			UserJID:  canonicalCLIJID(p.JID).String(),
+			UserJID:  canonicalCLIJID(resolver.ResolveLIDToPN(ctx, p.JID)).String(),
 			Role:     role,
 		})
 	}

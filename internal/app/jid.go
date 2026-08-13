@@ -20,3 +20,11 @@ func canonicalJIDString(jid types.JID) string {
 func (a *App) canonicalStoreJID(ctx context.Context, jid types.JID) types.JID {
 	return canonicalJID(a.wa.ResolveLIDToPN(ctx, jid))
 }
+
+func (a *App) canonicalStoreJIDString(ctx context.Context, raw string) string {
+	jid, err := types.ParseJID(raw)
+	if err != nil {
+		return raw
+	}
+	return a.canonicalStoreJID(ctx, jid).String()
+}

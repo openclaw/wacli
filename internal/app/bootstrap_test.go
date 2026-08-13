@@ -39,10 +39,13 @@ func TestRefreshGroupsStoresGroupsAndChats(t *testing.T) {
 	a.wa = f
 
 	gid := types.JID{User: "12345", Server: types.GroupServer}
+	ownerLID := types.JID{User: "999123456789", Server: types.HiddenUserServer}
+	ownerPN := types.JID{User: "15551234567", Server: types.DefaultUserServer}
+	f.lids[ownerLID] = ownerPN
 	created := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	f.groups[gid] = &types.GroupInfo{
 		JID:               gid,
-		OwnerJID:          types.JID{User: "999", Server: types.DefaultUserServer},
+		OwnerJID:          ownerLID,
 		GroupName:         types.GroupName{Name: "MyGroup"},
 		GroupCreated:      created,
 		GroupLinkedParent: types.GroupLinkedParent{LinkedParentJID: types.JID{User: "parent", Server: types.GroupServer}},
@@ -60,6 +63,9 @@ func TestRefreshGroupsStoresGroupsAndChats(t *testing.T) {
 	}
 	if gs[0].LinkedParentJID != "parent@g.us" {
 		t.Fatalf("expected linked parent to be stored, got %+v", gs[0])
+	}
+	if gs[0].OwnerJID != ownerPN.String() {
+		t.Fatalf("OwnerJID = %q, want %q", gs[0].OwnerJID, ownerPN.String())
 	}
 	c, err := a.db.GetChat(gid.String())
 	if err != nil {
