@@ -73,6 +73,95 @@ func TestLiveSyncWarnsOnEncryptedReactionDecryptFailure(t *testing.T) {
 	}
 }
 
+func TestLiveSyncDecryptsSecretMessageEditBeforeStorage(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	chat := types.JID{User: "123", Server: types.DefaultUserServer}
+	base := time.Date(2024, 1, 3, 0, 0, 0, 0, time.UTC)
+	var messagesStored atomic.Int64
+	a.handleLiveSyncMessage(context.Background(), SyncOptions{}, &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{Chat: chat, Sender: chat},
+			ID:            "original-id",
+			Timestamp:     base,
+		},
+		Message: &waProto.Message{Conversation: proto.String("original body")},
+	}, &messagesStored, func(string, string) {}, nil)
+
+	f.decryptSecretFunc = func(_ *events.Message) (*waE2E.Message, error) {
+		return decryptedProtocolEdit("edited body"), nil
+	}
+	a.handleLiveSyncMessage(context.Background(), SyncOptions{}, &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{Chat: chat, Sender: chat},
+			ID:            "edit-event",
+			Timestamp:     base.Add(time.Minute),
+		},
+		Message: secretEditEnvelope(chat, "original-id"),
+	}, &messagesStored, func(string, string) {}, nil)
+
+	msg, err := a.db.GetMessage(chat.String(), "original-id")
+	if err != nil {
+		t.Fatalf("GetMessage edited original: %v", err)
+	}
+	if msg.Text != "edited body" || !msg.Edited {
+		t.Fatalf("encrypted edit was not applied: %+v", msg)
+	}
+	if n, err := a.db.CountMessages(); err != nil || n != 1 {
+		t.Fatalf("expected only the original row, got %d (err=%v)", n, err)
+	}
+}
+
+func TestLiveSyncRejectsSecretMessageEditTargetMismatch(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	chat := types.JID{User: "123", Server: types.DefaultUserServer}
+	base := time.Date(2024, 1, 3, 0, 0, 0, 0, time.UTC)
+	var messagesStored atomic.Int64
+	a.handleLiveSyncMessage(context.Background(), SyncOptions{}, &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{Chat: chat, Sender: chat},
+			ID:            "original-id",
+			Timestamp:     base,
+		},
+		Message: &waProto.Message{Conversation: proto.String("original body")},
+	}, &messagesStored, func(string, string) {}, nil)
+
+	f.decryptSecretFunc = func(_ *events.Message) (*waE2E.Message, error) {
+		decrypted := decryptedProtocolEdit("wrong body")
+		decrypted.ProtocolMessage.Key = &waCommon.MessageKey{ID: proto.String("other-id")}
+		return decrypted, nil
+	}
+	out := captureStderr(t, func() {
+		a.handleLiveSyncMessage(context.Background(), SyncOptions{}, &events.Message{
+			Info: types.MessageInfo{
+				MessageSource: types.MessageSource{Chat: chat, Sender: chat},
+				ID:            "edit-event",
+				Timestamp:     base.Add(time.Minute),
+			},
+			Message: secretEditEnvelope(chat, "original-id"),
+		}, &messagesStored, func(string, string) {}, nil)
+	})
+
+	if !strings.Contains(out, "target does not match decrypted payload") {
+		t.Fatalf("expected target mismatch warning, got:\n%s", out)
+	}
+	msg, err := a.db.GetMessage(chat.String(), "original-id")
+	if err != nil {
+		t.Fatalf("GetMessage original: %v", err)
+	}
+	if msg.Text != "original body" || msg.Edited {
+		t.Fatalf("mismatched edit changed original: %+v", msg)
+	}
+	if n, err := a.db.CountMessages(); err != nil || n != 1 {
+		t.Fatalf("expected only the original row, got %d (err=%v)", n, err)
+	}
+}
+
 func TestLiveSyncIncrementsUnreadCountForIncomingMessages(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
@@ -2767,6 +2856,79 @@ func TestHistorySyncEditedMessageSurvivesOlderOriginal(t *testing.T) {
 	}
 	if !msg.Timestamp.Equal(base) {
 		t.Fatalf("timestamp = %s, want original timestamp", msg.Timestamp)
+	}
+}
+
+func TestHistorySyncDecryptsSecretMessageEditBeforeStorage(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	chat := types.JID{User: "123", Server: types.DefaultUserServer}
+	base := time.Date(2024, 1, 3, 0, 0, 0, 0, time.UTC)
+	f.decryptSecretFunc = func(_ *events.Message) (*waE2E.Message, error) {
+		return decryptedProtocolEdit("edited body"), nil
+	}
+	editMsg := &waWeb.WebMessageInfo{
+		Key: &waCommon.MessageKey{
+			RemoteJID: proto.String(chat.String()),
+			FromMe:    proto.Bool(false),
+			ID:        proto.String("edit-event"),
+		},
+		MessageTimestamp: proto.Uint64(uint64(base.Add(time.Minute).Unix())),
+		Message:          secretEditEnvelope(chat, "original-id"),
+	}
+	originalMsg := &waWeb.WebMessageInfo{
+		Key: &waCommon.MessageKey{
+			RemoteJID: proto.String(chat.String()),
+			FromMe:    proto.Bool(false),
+			ID:        proto.String("original-id"),
+		},
+		MessageTimestamp: proto.Uint64(uint64(base.Unix())),
+		Message:          &waProto.Message{Conversation: proto.String("original body")},
+	}
+	history := &events.HistorySync{Data: &waHistorySync.HistorySync{
+		SyncType: waHistorySync.HistorySync_FULL.Enum(),
+		Conversations: []*waHistorySync.Conversation{{
+			ID:       proto.String(chat.String()),
+			Messages: []*waHistorySync.HistorySyncMsg{{Message: editMsg}, {Message: originalMsg}},
+		}},
+	}}
+
+	var messagesStored atomic.Int64
+	var lastEvent atomic.Int64
+	a.handleHistorySync(context.Background(), SyncOptions{}, history, &messagesStored, &lastEvent, func(string, string) {})
+
+	msg, err := a.db.GetMessage(chat.String(), "original-id")
+	if err != nil {
+		t.Fatalf("GetMessage edited original: %v", err)
+	}
+	if msg.Text != "edited body" || !msg.Edited {
+		t.Fatalf("encrypted history edit was not applied: %+v", msg)
+	}
+	if n, err := a.db.CountMessages(); err != nil || n != 1 {
+		t.Fatalf("expected only the original row, got %d (err=%v)", n, err)
+	}
+}
+
+func secretEditEnvelope(chat types.JID, targetID string) *waProto.Message {
+	return &waProto.Message{
+		SecretEncryptedMessage: &waE2E.SecretEncryptedMessage{
+			TargetMessageKey: &waCommon.MessageKey{
+				ID:        proto.String(targetID),
+				RemoteJID: proto.String(chat.String()),
+			},
+			SecretEncType: waE2E.SecretEncryptedMessage_MESSAGE_EDIT.Enum(),
+		},
+	}
+}
+
+func decryptedProtocolEdit(body string) *waE2E.Message {
+	return &waE2E.Message{
+		ProtocolMessage: &waE2E.ProtocolMessage{
+			Type:          waE2E.ProtocolMessage_MESSAGE_EDIT.Enum(),
+			EditedMessage: &waE2E.Message{Conversation: proto.String(body)},
+		},
 	}
 }
 
