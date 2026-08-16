@@ -180,7 +180,7 @@ func markUnhandledPayload(m *waProto.Message, pm *ParsedMessage) {
 	var names []string
 	m.ProtoReflect().Range(func(fd protoreflect.FieldDescriptor, _ protoreflect.Value) bool {
 		switch fd.Name() {
-		case "messageContextInfo":
+		case "messageContextInfo", "senderKeyDistributionMessage":
 			return true
 		}
 		names = append(names, string(fd.Name()))

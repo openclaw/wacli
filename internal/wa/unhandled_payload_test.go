@@ -65,6 +65,19 @@ func TestMarkUnhandledPayloadIgnoresMessageContextInfo(t *testing.T) {
 	}
 }
 
+// senderKeyDistributionMessage is a Signal/WhatsApp protocol message for group
+// session key setup; it carries no user content and is not an unhandled payload.
+func TestMarkUnhandledPayloadIgnoresSenderKeyDistributionMessage(t *testing.T) {
+	pm := ParseLiveMessage(liveEvent(&waProto.Message{
+		SenderKeyDistributionMessage: &waProto.SenderKeyDistributionMessage{
+			GroupID: proto.String("123@g.us"),
+		},
+	}))
+	if pm.UnhandledPayload != "" {
+		t.Fatalf("expected senderKeyDistributionMessage to be ignored, got %q", pm.UnhandledPayload)
+	}
+}
+
 // An empty message has nothing to report; flagging it would fire on every
 // keep-alive-shaped payload.
 func TestMarkUnhandledPayloadIgnoresEmptyMessage(t *testing.T) {
