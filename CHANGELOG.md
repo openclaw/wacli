@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- CLI: treat a broken stdout pipe as success so commands such as `wacli accounts list | head` do not exit 1 after a successful listing.
+
 ## v0.17.1 - 2026-08-14
 
 ### Fixed

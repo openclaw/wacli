@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -22,6 +24,40 @@ func TestWriteJSONEnvelope(t *testing.T) {
 	}
 	if got["error"] != nil {
 		t.Fatalf("expected error=nil, got %v", got["error"])
+	}
+}
+
+type errWriter struct {
+	err error
+}
+
+func (w errWriter) Write([]byte) (int, error) {
+	return 0, w.err
+}
+
+func TestWriteJSONBrokenPipe(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+	}{
+		{name: "epipe", err: syscall.EPIPE},
+		{name: "os-path-error", err: &os.PathError{Op: "write", Path: "stdout", Err: syscall.EPIPE}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := WriteJSON(errWriter{err: tc.err}, map[string]any{"ok": true})
+			if err != nil {
+				t.Fatalf("WriteJSON: %v", err)
+			}
+		})
+	}
+}
+
+func TestWriteJSONPreservesOtherWriteErrors(t *testing.T) {
+	want := errors.New("disk full")
+	err := WriteJSON(errWriter{err: want}, map[string]any{"ok": true})
+	if !errors.Is(err, want) {
+		t.Fatalf("WriteJSON error = %v, want %v", err, want)
 	}
 }
 
