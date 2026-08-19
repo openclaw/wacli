@@ -7,7 +7,6 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"syscall"
 )
 
 type envelope struct {
@@ -32,15 +31,15 @@ func isBrokenPipe(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, syscall.EPIPE) {
+	if isPlatformBrokenPipe(err) {
 		return true
 	}
 	var fsPathErr *fs.PathError
-	if errors.As(err, &fsPathErr) && errors.Is(fsPathErr.Err, syscall.EPIPE) {
+	if errors.As(err, &fsPathErr) && isPlatformBrokenPipe(fsPathErr.Err) {
 		return true
 	}
 	var osPathErr *os.PathError
-	if errors.As(err, &osPathErr) && errors.Is(osPathErr.Err, syscall.EPIPE) {
+	if errors.As(err, &osPathErr) && isPlatformBrokenPipe(osPathErr.Err) {
 		return true
 	}
 	return false
