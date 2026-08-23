@@ -39,6 +39,28 @@ var schemaMigrations = []migration{
 	{version: 23, name: "app state recovery markers", up: migrateAppStateRecoveryMarkers},
 	{version: 24, name: "app state recovery intents", up: migrateAppStateRecoveryIntents},
 	{version: 25, name: "message locations", up: migrateMessageLocations},
+	{version: 26, name: "sync optimization policy", up: migrateSyncOptimizationPolicy},
+}
+
+func migrateSyncOptimizationPolicy(d *DB) error {
+	_, err := d.sql.Exec(`
+		CREATE TABLE IF NOT EXISTS sync_optimization_policy (
+			id INTEGER PRIMARY KEY CHECK (id = 1),
+			enabled INTEGER NOT NULL DEFAULT 0,
+			max_chats INTEGER NOT NULL DEFAULT 100,
+			exclude_archived INTEGER NOT NULL DEFAULT 1,
+			history_days INTEGER NOT NULL DEFAULT 30,
+			max_messages_per_chat INTEGER NOT NULL DEFAULT 50,
+			prune_evicted_chats INTEGER NOT NULL DEFAULT 1,
+			persist_calls INTEGER NOT NULL DEFAULT 0,
+			persist_statuses INTEGER NOT NULL DEFAULT 0,
+			updated_at INTEGER NOT NULL
+		);
+	`)
+	if err != nil {
+		return fmt.Errorf("create sync optimization policy table: %w", err)
+	}
+	return nil
 }
 
 func migrateMessageLocations(d *DB) error {

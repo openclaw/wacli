@@ -28,11 +28,13 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 	var webhookEventsFlag string
 	var sendSpacingFlag string
 	var storage syncStorageLimitFlags
+	var optimized optimizedFlags
 
 	cmd := &cobra.Command{
 		Use:   "sync",
 		Short: "Sync messages (requires prior auth; never shows QR)",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			optimized.capture(cmd)
 			if err := flags.requireWritable(); err != nil {
 				return err
 			}
@@ -75,6 +77,10 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 			defer closeApp(a, lk)
 
 			if err := a.EnsureAuthed(); err != nil {
+				return err
+			}
+			policy, err := optimizedPolicyForApp(a, cmd, optimized)
+			if err != nil {
 				return err
 			}
 
@@ -120,6 +126,7 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 				MaxMessages:         maxMessages,
 				MaxDBSizeBytes:      maxDBSize,
 				WarnNoLimits:        true,
+				Optimization:        policy,
 				WebhookURL:          webhookURL,
 				WebhookSecret:       webhookSecret,
 				WebhookAllowPrivate: webhookAllowPrivate,
@@ -157,5 +164,6 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().StringVar(&webhookEventsFlag, "webhook-events", string(appPkg.SyncWebhookEventMessage), "comma-separated event types to POST: message, receipt, chat_presence")
 	cmd.Flags().Int64Var(&storage.maxMessages, "max-messages", 0, "maximum total messages to keep in the local DB before sync stops (0 = unlimited, or WACLI_SYNC_MAX_MESSAGES)")
 	cmd.Flags().StringVar(&storage.maxDBSize, "max-db-size", "", "maximum wacli.db disk usage before sync stops, e.g. 500MB or 2GB (default: WACLI_SYNC_MAX_DB_SIZE or unlimited)")
+	addOptimizedFlags(cmd, &optimized)
 	return cmd
 }

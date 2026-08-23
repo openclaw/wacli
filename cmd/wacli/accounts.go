@@ -82,6 +82,7 @@ func newAccountsAddCmd(flags *rootFlags) *cobra.Command {
 		Short: "Add an account and authenticate it",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			opts.optimized.capture(cmd)
 			if err := flags.requireWritable(); err != nil {
 				return err
 			}
@@ -145,7 +146,7 @@ func newAccountsAddCmd(flags *rootFlags) *cobra.Command {
 			if !flags.asJSON {
 				fmt.Fprintf(os.Stdout, "Account %s added at %s\n", name, added.StoreDir)
 			}
-			res, err := runAuth(flags, opts)
+			res, err := runAuth(flags, opts, cmd)
 			if err != nil {
 				return err
 			}

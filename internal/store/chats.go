@@ -41,6 +41,176 @@ func (d *DB) UpsertChatMetadata(jid, kind, name string) error {
 	})
 }
 
+// UpsertHistoryChat records lightweight conversation state even when its
+// messages are intentionally excluded from the local index.
+func (d *DB) UpsertHistoryChat(jid, kind, name string, lastTS time.Time, archived *bool) error {
+	if strings.TrimSpace(kind) == "" {
+		kind = "unknown"
+	}
+	archivedValue := any(nil)
+	if archived != nil {
+		archivedValue = boolToInt(*archived)
+	}
+	_, err := d.sql.ExecContext(storeCtx(), `
+		INSERT INTO chats(jid,kind,name,last_message_ts,archived)
+		VALUES(?,?,?,?,COALESCE(?,0))
+		ON CONFLICT(jid) DO UPDATE SET
+		kind=excluded.kind,
+		name=CASE WHEN excluded.name IS NOT NULL AND excluded.name != '' THEN excluded.name ELSE chats.name END,
+		last_message_ts=MAX(COALESCE(chats.last_message_ts,0),COALESCE(excluded.last_message_ts,0)),
+		archived=COALESCE(?, chats.archived)`,
+		jid, kind, nullString(name), sqlNullInt64(unix(lastTS)), archivedValue, archivedValue)
+	return err
+}
+
+// ApplySyncOptimizationRetention prunes indexed payloads while keeping chat,
+// contact and group metadata available for recipient resolution.
+func (d *DB) ApplySyncOptimizationRetention(p SyncOptimizationPolicy) (int64, error) {
+	if !p.Enabled {
+		return 0, nil
+	}
+	if err := p.Validate(); err != nil {
+		return 0, err
+	}
+	q := `SELECT jid FROM chats`
+	if p.ExcludeArchived {
+		q += ` WHERE archived=0`
+	}
+	q += ` ORDER BY COALESCE(last_message_ts,0) DESC, jid ASC LIMIT ?`
+	rows, err := d.sql.QueryContext(storeCtx(), q, p.MaxChats)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	keep := make(map[string]struct{}, p.MaxChats)
+	for rows.Next() {
+		var jid string
+		if err := rows.Scan(&jid); err != nil {
+			return 0, err
+		}
+		keep[jid] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	indexed, err := d.sql.QueryContext(storeCtx(), `SELECT DISTINCT chat_jid FROM messages`)
+	if err != nil {
+		return 0, err
+	}
+	defer indexed.Close()
+	var pruned int64
+	for indexed.Next() {
+		var jid string
+		if err := indexed.Scan(&jid); err != nil {
+			return pruned, err
+		}
+		if _, ok := keep[jid]; !ok && p.PruneEvictedChats {
+			n, err := d.PruneIndexedChatData(jid)
+			if err != nil {
+				return pruned, err
+			}
+			pruned += n
+		}
+	}
+	if err := indexed.Err(); err != nil {
+		return pruned, err
+	}
+	for jid := range keep {
+		n, err := d.PruneChatMessagesToLimit(jid, p.MaxMessagesPerChat)
+		if err != nil {
+			return pruned, err
+		}
+		pruned += n
+	}
+	if !p.PersistCalls {
+		if _, err := d.sql.ExecContext(storeCtx(), `DELETE FROM call_events`); err != nil {
+			return pruned, err
+		}
+	}
+	if !p.PersistStatuses {
+		if _, err := d.sql.ExecContext(storeCtx(), `DELETE FROM status_messages`); err != nil {
+			return pruned, err
+		}
+	}
+	return pruned, nil
+}
+
+func (d *DB) ChatIsInSyncOptimizationSet(jid string, p SyncOptimizationPolicy) (bool, error) {
+	if !p.Enabled {
+		return true, nil
+	}
+	q := `SELECT jid FROM chats`
+	if p.ExcludeArchived {
+		q += ` WHERE archived=0`
+	}
+	q += ` ORDER BY COALESCE(last_message_ts,0) DESC, jid ASC LIMIT ?`
+	rows, err := d.sql.QueryContext(storeCtx(), q, p.MaxChats)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var candidate string
+		if err := rows.Scan(&candidate); err != nil {
+			return false, err
+		}
+		if candidate == jid {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
+}
+
+func (d *DB) PruneIndexedChatData(jid string) (int64, error) {
+	tx, err := d.sql.BeginTx(storeCtx(), nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	if _, err = tx.Exec(`DELETE FROM poll_votes WHERE chat_jid=?`, jid); err != nil {
+		return 0, err
+	}
+	if _, err = tx.Exec(`DELETE FROM polls WHERE chat_jid=?`, jid); err != nil {
+		return 0, err
+	}
+	if _, err = tx.Exec(`DELETE FROM message_locations WHERE chat_jid=?`, jid); err != nil {
+		return 0, err
+	}
+	if _, err = tx.Exec(`DELETE FROM starred WHERE chat_jid=?`, jid); err != nil {
+		return 0, err
+	}
+	if _, err = tx.Exec(`DELETE FROM call_events WHERE chat_jid=?`, jid); err != nil {
+		return 0, err
+	}
+	res, err := tx.Exec(`DELETE FROM messages WHERE chat_jid=?`, jid)
+	if err != nil {
+		return 0, err
+	}
+	if err = tx.Commit(); err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
+func (d *DB) PruneChatMessagesToLimit(jid string, limit int) (int64, error) {
+	if limit <= 0 {
+		return 0, fmt.Errorf("message limit must be positive")
+	}
+	res, err := d.sql.ExecContext(storeCtx(), `DELETE FROM messages WHERE chat_jid=? AND rowid NOT IN (SELECT rowid FROM messages WHERE chat_jid=? ORDER BY ts DESC,rowid DESC LIMIT ?)`, jid, jid, limit)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	// Remove records keyed to messages that were just evicted.
+	_, _ = d.sql.ExecContext(storeCtx(), `DELETE FROM message_locations WHERE chat_jid=? AND msg_id NOT IN (SELECT msg_id FROM messages WHERE chat_jid=?)`, jid, jid)
+	_, _ = d.sql.ExecContext(storeCtx(), `DELETE FROM starred WHERE chat_jid=? AND msg_id NOT IN (SELECT msg_id FROM messages WHERE chat_jid=?)`, jid, jid)
+	_, _ = d.sql.ExecContext(storeCtx(), `DELETE FROM polls WHERE chat_jid=? AND msg_id NOT IN (SELECT msg_id FROM messages WHERE chat_jid=?)`, jid, jid)
+	_, _ = d.sql.ExecContext(storeCtx(), `DELETE FROM poll_votes WHERE chat_jid=? AND poll_msg_id NOT IN (SELECT msg_id FROM messages WHERE chat_jid=?)`, jid, jid)
+	return n, nil
+}
+
 func (d *DB) ListChats(query string, limit int) ([]Chat, error) {
 	return d.ListChatsFiltered(ChatListFilter{Query: query, Limit: limit})
 }

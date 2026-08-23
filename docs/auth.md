@@ -37,3 +37,7 @@ wacli auth --download-media
 wacli auth status --json
 wacli auth logout
 ```
+
+For large accounts, `wacli auth --optimized` persists a bounded local index and
+asks WhatsApp for at most 30 days and 50 messages per chat during initial
+pairing. See [sync](sync.md#optimized-sync) for the retained-chat policy.

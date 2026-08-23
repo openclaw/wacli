@@ -95,3 +95,33 @@ wacli sync --follow --stale-threshold 2m --events 2>events.ndjson
 wacli sync --follow --webhook https://example.com/wacli --webhook-secret "$WACLI_WEBHOOK_SECRET"
 wacli sync --follow --webhook https://example.com/wacli --webhook-events message,receipt,chat_presence
 ```
+
+## Optimized sync
+
+Use `--optimized` for a bounded local index on large WhatsApp accounts. The
+policy is saved with the selected account and later `sync` runs enforce it
+automatically. Its defaults retain the 100 most active non-archived chats and
+the newest 50 messages in each, request 30 days of initial history while
+pairing, disable automatic media downloads, and skip call and Status records.
+
+```bash
+wacli auth --optimized
+wacli sync --follow
+```
+
+On an existing populated store, first activation prunes local data and needs an
+explicit confirmation:
+
+```bash
+wacli sync --optimized --confirm
+```
+
+This deletes indexed messages outside the retained set, all locally downloaded
+media files, and existing call/Status rows. It never deletes WhatsApp history
+from the primary phone.
+
+Use `--max-chats`, `--history-days`, and `--history-messages-per-chat` to tune
+the persisted policy. The history request settings only affect a fresh linked
+device, so logout and pair again to apply them to an existing WhatsApp session.
+`--download-media` cannot be combined with optimized sync, but explicit
+`wacli media download` commands remain available.

@@ -249,6 +249,41 @@ func (d *DB) MessageLocalMediaPaths(chatJID, msgID string) ([]string, error) {
 	return paths, rows.Err()
 }
 
+// AllLocalMediaPaths returns the distinct media files managed by this store.
+func (d *DB) AllLocalMediaPaths() ([]string, error) {
+	rows, err := d.sql.Query(`SELECT local_path FROM messages WHERE COALESCE(local_path,'') != '' UNION SELECT local_path FROM message_local_media_aliases WHERE COALESCE(local_path,'') != '' ORDER BY 1`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var paths []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		paths = append(paths, p)
+	}
+	return paths, rows.Err()
+}
+
+// ClearAllLocalMediaPaths forgets downloaded files after callers have removed
+// them from disk. It deliberately leaves remote media metadata searchable.
+func (d *DB) ClearAllLocalMediaPaths() error {
+	tx, err := d.sql.BeginTx(storeCtx(), nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`UPDATE messages SET local_path=NULL, downloaded_at=NULL WHERE COALESCE(local_path,'') != ''`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM message_local_media_aliases`); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (d *DB) UpdateMessageText(chatJID, msgID, text string) error {
 	n, err := d.q.UpdateMessageText(storeCtx(), storedb.UpdateMessageTextParams{
 		Text:        nullString(text),

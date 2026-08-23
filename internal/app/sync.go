@@ -74,6 +74,7 @@ type SyncOptions struct {
 	MaxMessages         int64         // 0 = unlimited
 	MaxDBSizeBytes      int64         // 0 = unlimited
 	WarnNoLimits        bool
+	Optimization        *store.SyncOptimizationPolicy
 	WebhookURL          string
 	WebhookSecret       string
 	WebhookAllowPrivate bool
@@ -92,6 +93,28 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	if opts.Mode == "" {
 		opts.Mode = SyncModeFollow
 	}
+	policy := store.SyncOptimizationPolicy{}
+	if opts.Optimization != nil {
+		policy = *opts.Optimization
+		if err := a.db.SetSyncOptimizationPolicy(policy); err != nil {
+			return SyncResult{}, fmt.Errorf("save optimized sync policy: %w", err)
+		}
+	} else {
+		var err error
+		policy, err = a.db.SyncOptimizationPolicy()
+		if err != nil {
+			return SyncResult{}, fmt.Errorf("load optimized sync policy: %w", err)
+		}
+	}
+	if policy.Enabled {
+		if opts.DownloadMedia {
+			return SyncResult{}, fmt.Errorf("--download-media cannot be used while optimized sync is enabled")
+		}
+		if _, err := a.db.ApplySyncOptimizationRetention(policy); err != nil {
+			return SyncResult{}, fmt.Errorf("apply optimized retention: %w", err)
+		}
+	}
+	a.optimization = policy
 	if opts.PresenceMode == "" {
 		opts.PresenceMode = SyncPresenceModeNormal
 	}
@@ -583,6 +606,9 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 }
 
 func (a *App) storeParsedCallEvent(ctx context.Context, call wa.ParsedCallEvent, chatName, senderName string) error {
+	if a.optimization.Enabled && !a.optimization.PersistCalls {
+		return nil
+	}
 	call.Chat = a.canonicalStoreJID(ctx, call.Chat)
 	chatJID := canonicalJIDString(call.Chat)
 	if chatJID == "" {

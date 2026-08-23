@@ -101,6 +101,10 @@ func (d *DB) Close() error {
 	return d.sql.Close()
 }
 
+// Raw exposes no write helpers; it is used only by command-level diagnostics
+// that must count existing local data before an explicit destructive action.
+func (d *DB) Raw() *sql.DB { return d.sql }
+
 func (d *DB) init() error {
 	// Pragmas: keep consistent for writers/readers.
 	_, _ = d.sql.Exec("PRAGMA journal_mode=WAL;")

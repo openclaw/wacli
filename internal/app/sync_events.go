@@ -393,6 +393,9 @@ func (a *App) handleDeleteForMeEvent(ctx context.Context, evt *events.DeleteForM
 }
 
 func (a *App) handleLiveCallEvent(ctx context.Context, evt interface{}) error {
+	if a.optimization.Enabled && !a.optimization.PersistCalls {
+		return nil
+	}
 	self := a.linkedLiveCallIdentity()
 	var alternateSelf []types.JID
 	if _, ok := evt.(*events.AppState); ok {
@@ -533,6 +536,14 @@ func (a *App) handleLiveSyncMessage(ctx context.Context, opts SyncOptions, v *ev
 	if pm.ReactionToID != "" && pm.ReactionEmoji == "" && v.Message != nil && v.Message.GetEncReactionMessage() != nil {
 		a.decryptEncryptedReaction(ctx, &pm, v)
 	}
+	allowed, err := a.optimizationAllowsMessage(ctx, pm)
+	if err != nil {
+		a.emitWarning("optimized_sync_policy_failed", fmt.Sprintf("warning: apply optimized sync policy: %v", err), map[string]any{"error": err.Error()})
+		return
+	}
+	if !allowed {
+		return
+	}
 	incrementUnread := a.shouldIncrementLiveUnread(ctx, pm)
 	if err := a.storeParsedMessageForSync(ctx, pm, limits...); err == nil {
 		if incrementUnread {
@@ -578,6 +589,27 @@ func historySyncNotificationFromMessage(v *events.Message) *waE2E.HistorySyncNot
 		return nil
 	}
 	return v.Message.GetProtocolMessage().GetHistorySyncNotification()
+}
+
+func (a *App) optimizationAllowsMessage(ctx context.Context, pm wa.ParsedMessage) (bool, error) {
+	p := a.optimization
+	if !p.Enabled {
+		return true, nil
+	}
+	if pm.Chat == types.StatusBroadcastJID {
+		return p.PersistStatuses, nil
+	}
+	chat := a.canonicalStoreJID(ctx, pm.Chat)
+	if chat.IsEmpty() {
+		return false, nil
+	}
+	if err := a.db.UpsertChat(chat.String(), chatKind(chat), "", pm.Timestamp); err != nil {
+		return false, err
+	}
+	if _, err := a.db.ApplySyncOptimizationRetention(p); err != nil {
+		return false, err
+	}
+	return a.db.ChatIsInSyncOptimizationSet(chat.String(), p)
 }
 
 const maxHistoryUnhandledPayloadWarnings = 10
@@ -630,7 +662,26 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 	var unhandledWarnings historyUnhandledPayloadWarnings
 	defer unhandledWarnings.flush(a)
 	a.emitOrPrint("history_sync", map[string]any{"conversations": len(v.Data.Conversations)}, "\nProcessing history sync (%d conversations)...\n", len(v.Data.Conversations))
-	a.storeHistoryCallLogRecords(ctx, v, lastEvent)
+	if !a.optimization.Enabled || a.optimization.PersistCalls {
+		a.storeHistoryCallLogRecords(ctx, v, lastEvent)
+	}
+	if a.optimization.Enabled {
+		for _, conv := range v.Data.Conversations {
+			chatID := strings.TrimSpace(conv.GetID())
+			jid, err := types.ParseJID(chatID)
+			if chatID == "" || err != nil || jid.IsEmpty() {
+				continue
+			}
+			activity := int64(conv.GetLastMsgTimestamp())
+			if ts := int64(conv.GetConversationTimestamp()); ts > activity {
+				activity = ts
+			}
+			_ = a.db.UpsertHistoryChat(canonicalJIDString(a.canonicalStoreJID(ctx, jid)), chatKind(jid), conv.GetName(), time.Unix(activity, 0).UTC(), conv.Archived)
+		}
+		if _, err := a.db.ApplySyncOptimizationRetention(a.optimization); err != nil {
+			a.emitWarning("optimized_retention_failed", fmt.Sprintf("warning: apply optimized retention: %v", err), map[string]any{"error": err.Error()})
+		}
+	}
 	for _, conv := range v.Data.Conversations {
 		lastEvent.Store(nowUTC().UnixNano())
 		chatID := strings.TrimSpace(conv.GetID())
@@ -638,6 +689,16 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 			continue
 		}
 		a.storeHistoryUnreadCount(ctx, chatID, conv)
+		if a.optimization.Enabled {
+			jid, err := types.ParseJID(chatID)
+			if err != nil || jid.IsEmpty() {
+				continue
+			}
+			allowed, err := a.db.ChatIsInSyncOptimizationSet(canonicalJIDString(a.canonicalStoreJID(ctx, jid)), a.optimization)
+			if err != nil || !allowed {
+				continue
+			}
+		}
 		var pendingPolls []historyPollSideEffect
 		for _, m := range conv.Messages {
 			lastEvent.Store(nowUTC().UnixNano())
@@ -777,10 +838,19 @@ func (a *App) emitSyncProgress(total int64) {
 }
 
 func (a *App) storeParsedMessageForSync(ctx context.Context, pm wa.ParsedMessage, limits ...*syncStorageLimits) error {
+	var err error
 	if len(limits) > 0 && limits[0] != nil {
-		return limits[0].StoreParsedMessage(ctx, pm)
+		err = limits[0].StoreParsedMessage(ctx, pm)
+	} else {
+		err = a.storeParsedMessage(ctx, pm)
 	}
-	return a.storeParsedMessage(ctx, pm)
+	if err != nil {
+		return err
+	}
+	if a.optimization.Enabled {
+		_, err = a.db.ApplySyncOptimizationRetention(a.optimization)
+	}
+	return err
 }
 
 func (a *App) decryptEncryptedReaction(ctx context.Context, pm *wa.ParsedMessage, msg *events.Message) {

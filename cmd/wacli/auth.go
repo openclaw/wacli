@@ -11,9 +11,13 @@ import (
 	"github.com/mdp/qrterminal/v3"
 	appPkg "github.com/openclaw/wacli/internal/app"
 	"github.com/openclaw/wacli/internal/out"
+	"github.com/openclaw/wacli/internal/store"
 	"github.com/openclaw/wacli/internal/wa"
 	"github.com/spf13/cobra"
+	"go.mau.fi/whatsmeow/proto/waCompanionReg"
+	wmstore "go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
+	"google.golang.org/protobuf/proto"
 )
 
 type authOptions struct {
@@ -22,6 +26,7 @@ type authOptions struct {
 	downloadMedia bool
 	qrFormat      string
 	phone         string
+	optimized     optimizedFlags
 }
 
 type validatedAuthOptions struct {
@@ -36,7 +41,8 @@ func newAuthCmd(flags *rootFlags) *cobra.Command {
 		Use:   "auth",
 		Short: "Authenticate with WhatsApp (QR) and bootstrap sync",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			res, err := runAuth(flags, opts)
+			opts.optimized.capture(cmd)
+			res, err := runAuth(flags, opts, cmd)
 			if err != nil {
 				return err
 			}
@@ -67,9 +73,10 @@ func addAuthFlags(cmd *cobra.Command, opts *authOptions) {
 	cmd.Flags().BoolVar(&opts.downloadMedia, "download-media", false, "download media in the background during sync")
 	cmd.Flags().StringVar(&opts.qrFormat, "qr-format", "terminal", "QR output format: terminal or text")
 	cmd.Flags().StringVar(&opts.phone, "phone", "", "pair by phone number instead of QR code")
+	addOptimizedFlags(cmd, &opts.optimized)
 }
 
-func runAuth(flags *rootFlags, opts authOptions) (appPkg.SyncResult, error) {
+func runAuth(flags *rootFlags, opts authOptions, cmd *cobra.Command) (appPkg.SyncResult, error) {
 	if err := flags.requireWritable(); err != nil {
 		return appPkg.SyncResult{}, err
 	}
@@ -89,6 +96,15 @@ func runAuth(flags *rootFlags, opts authOptions) (appPkg.SyncResult, error) {
 		return appPkg.SyncResult{}, err
 	}
 	defer closeApp(a, lk)
+	policy, err := optimizedPolicyForApp(a, cmd, opts.optimized)
+	if err != nil {
+		return appPkg.SyncResult{}, err
+	}
+	if policy != nil && policy.Enabled {
+		applyOptimizedHistorySyncConfig(*policy)
+	} else if stored, err := a.DB().SyncOptimizationPolicy(); err == nil && stored.Enabled {
+		applyOptimizedHistorySyncConfig(stored)
+	}
 
 	mode := appPkg.SyncModeBootstrap
 	if opts.follow {
@@ -114,7 +130,19 @@ func runAuth(flags *rootFlags, opts authOptions) (appPkg.SyncResult, error) {
 		MaxMessages:     maxMessages,
 		MaxDBSizeBytes:  maxDBSize,
 		WarnNoLimits:    true,
+		Optimization:    policy,
 	})
+}
+
+func applyOptimizedHistorySyncConfig(policy store.SyncOptimizationPolicy) {
+	if wmstore.DeviceProps.HistorySyncConfig == nil {
+		wmstore.DeviceProps.HistorySyncConfig = &waCompanionReg.DeviceProps_HistorySyncConfig{}
+	}
+	c := wmstore.DeviceProps.HistorySyncConfig
+	c.FullSyncDaysLimit = proto.Uint32(uint32(policy.HistoryDays))
+	c.RecentSyncDaysLimit = proto.Uint32(uint32(policy.HistoryDays))
+	c.InitialSyncMaxMessagesPerChat = proto.Uint32(uint32(policy.MaxMessagesPerChat))
+	c.SupportCallLogHistory = proto.Bool(policy.PersistCalls)
 }
 
 func validateAuthOptions(flags *rootFlags, opts authOptions) (validatedAuthOptions, error) {
