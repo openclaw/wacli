@@ -502,10 +502,26 @@ func (a *App) handleAppStateSyncError(ctx context.Context, evt *events.AppStateS
 
 	a.emitWarning(
 		"app_state_lthash_mismatch",
-		fmt.Sprintf("warning: app state %s hit an LTHash mismatch; requesting recovery snapshot", name),
+		fmt.Sprintf("warning: app state %s hit an LTHash mismatch; attempting full sync", name),
 		map[string]any{"name": name},
 	)
 	go func() {
+		if err := a.wa.FetchAppState(ctx, name, true, false); err == nil {
+			return
+		} else if !errors.Is(err, appstate.ErrMismatchingLTHash) {
+			a.emitWarning(
+				"app_state_full_sync_failed",
+				fmt.Sprintf("warning: app state %s full sync failed: %v", name, err),
+				map[string]any{"name": name, "error": err.Error()},
+			)
+			return
+		}
+
+		a.emitWarning(
+			"app_state_full_sync_mismatch",
+			fmt.Sprintf("warning: app state %s full sync still has an LTHash mismatch; requesting recovery snapshot", name),
+			map[string]any{"name": name},
+		)
 		reqCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		reqID, err := a.wa.RequestAppStateRecovery(reqCtx, name)
