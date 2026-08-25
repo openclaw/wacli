@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { css, faviconSvg, js, socialCardSvg, themeBootstrapScript, themeToggleMarkup } from "./docs-site-assets.mjs";
-import { escapeAttr, escapeHtml, markdownToHtml, tocFromHtml, validateLinks } from "./docs-site-render.mjs";
+import { escapeAttr, escapeHtml, renderMarkdown, tocFromHeadings, validateLinks } from "./docs-site-render.mjs";
 
 const root = process.cwd();
 const docsDir = path.join(root, "docs");
@@ -62,8 +62,8 @@ for (const section of nav) for (const page of section.pages) sectionByRel.set(pa
 const orderedPages = nav.flatMap((s) => s.pages);
 
 for (const page of pages) {
-  const html = markdownToHtml(page.markdown, page.rel, rewriteHref);
-  const toc = tocFromHtml(html);
+  const { html, headings } = renderMarkdown(page.markdown, page.rel, rewriteHref);
+  const toc = tocFromHeadings(headings);
   const idx = orderedPages.findIndex((p) => p.rel === page.rel);
   const prev = idx > 0 ? orderedPages[idx - 1] : null;
   const next = idx >= 0 && idx < orderedPages.length - 1 ? orderedPages[idx + 1] : null;
