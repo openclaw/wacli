@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Chore
+
+- Dependencies: update Go modules, pnpm, CI actions, GoReleaser, and Docker images; require Go 1.27.0 and align local, CI, and release toolchain checks.
+
 ## v0.17.1 - 2026-08-14
 
 ### Fixed

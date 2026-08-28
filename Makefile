@@ -34,12 +34,12 @@ fmt:
 
 lint:
 	GOWORK=off pnpm -s lint
-	@test "$$(GOWORK=off go env GOVERSION)" = go1.26.5
+	@test "$$(GOWORK=off go env GOVERSION)" = go1.27.0
 	GOWORK=off pnpm -s govulncheck:source
 	@set -e; \
 	output_file="$$(mktemp)"; \
 	trap 'rm -f "$$output_file"' EXIT; \
-	if ! CGO_ENABLED=1 GOWORK=off go run golang.org/x/tools/cmd/deadcode@v0.47.0 -test -tags sqlite_fts5 ./... > "$$output_file"; then cat "$$output_file"; exit 1; fi; \
+	if ! CGO_ENABLED=1 GOWORK=off go run golang.org/x/tools/cmd/deadcode@v0.49.0 -test -tags sqlite_fts5 ./... > "$$output_file"; then cat "$$output_file"; exit 1; fi; \
 	if [ -s "$$output_file" ]; then cat "$$output_file"; exit 1; fi
 
 release-check:
