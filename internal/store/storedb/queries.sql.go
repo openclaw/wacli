@@ -599,6 +599,44 @@ func (q *Queries) GetMessageLocation(ctx context.Context, arg GetMessageLocation
 	return i, err
 }
 
+const getNextMessageInfo = `-- name: GetNextMessageInfo :one
+SELECT m.chat_jid, m.msg_id, m.ts, m.from_me, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,'')
+FROM messages m
+JOIN messages anchor ON anchor.chat_jid = m.chat_jid
+WHERE anchor.chat_jid = ? AND anchor.msg_id = ?
+  AND (m.ts, m.rowid) > (anchor.ts, anchor.rowid)
+ORDER BY m.ts ASC, m.rowid ASC
+LIMIT 1
+`
+
+type GetNextMessageInfoParams struct {
+	ChatJid string
+	MsgID   string
+}
+
+type GetNextMessageInfoRow struct {
+	ChatJid    string
+	MsgID      string
+	Ts         int64
+	FromMe     int64
+	SenderJid  string
+	SenderName string
+}
+
+func (q *Queries) GetNextMessageInfo(ctx context.Context, arg GetNextMessageInfoParams) (GetNextMessageInfoRow, error) {
+	row := q.db.QueryRowContext(ctx, getNextMessageInfo, arg.ChatJid, arg.MsgID)
+	var i GetNextMessageInfoRow
+	err := row.Scan(
+		&i.ChatJid,
+		&i.MsgID,
+		&i.Ts,
+		&i.FromMe,
+		&i.SenderJid,
+		&i.SenderName,
+	)
+	return i, err
+}
+
 const getOldestMessageInfo = `-- name: GetOldestMessageInfo :one
 SELECT m.chat_jid, m.msg_id, m.ts, m.from_me, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,'')
 FROM messages m

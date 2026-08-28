@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- History: retry an unanswered backfill anchor once with the next local message, report both anchors, and keep retries bounded without deleting history or filtering message IDs. (#371 - thanks @Entretoize)
+
 ### Chore
 
 - Dependencies: update Go modules, pnpm, CI actions, GoReleaser, and Docker images; require Go 1.27.0 and align local, CI, and release toolchain checks.
