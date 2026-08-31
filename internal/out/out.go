@@ -2,11 +2,8 @@ package out
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"io/fs"
-	"os"
 )
 
 type envelope struct {
@@ -21,28 +18,10 @@ func WriteJSON(w io.Writer, data interface{}) error {
 		return err
 	}
 	_, err = fmt.Fprintln(w, string(b))
-	if isBrokenPipe(err) {
+	if isPlatformBrokenPipe(err) {
 		return nil
 	}
 	return err
-}
-
-func isBrokenPipe(err error) bool {
-	if err == nil {
-		return false
-	}
-	if isPlatformBrokenPipe(err) {
-		return true
-	}
-	var fsPathErr *fs.PathError
-	if errors.As(err, &fsPathErr) && isPlatformBrokenPipe(fsPathErr.Err) {
-		return true
-	}
-	var osPathErr *os.PathError
-	if errors.As(err, &osPathErr) && isPlatformBrokenPipe(osPathErr.Err) {
-		return true
-	}
-	return false
 }
 
 func WriteError(w io.Writer, asJSON bool, err error) error {
