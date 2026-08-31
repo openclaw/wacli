@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Sync: update whatsmeow so incoming socket frames use the active connection context.
 - History: retry an unanswered backfill anchor once with the next local message, report both anchors, and keep retries bounded without deleting history or filtering message IDs. (#371 - thanks @Entretoize)
 
 ### Chore
