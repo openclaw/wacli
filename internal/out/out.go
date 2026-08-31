@@ -18,6 +18,9 @@ func WriteJSON(w io.Writer, data interface{}) error {
 		return err
 	}
 	_, err = fmt.Fprintln(w, string(b))
+	if isPlatformBrokenPipe(err) {
+		return nil
+	}
 	return err
 }
 

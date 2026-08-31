@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"time"
 
@@ -78,9 +79,27 @@ func newGroupsListCmd(flags *rootFlags) *cobra.Command {
 			}
 			defer closeApp(a, lk)
 
-			gs, err := a.DB().ListGroups(query, limit)
+			if limit <= 0 {
+				limit = 50
+			}
+			fetchLimit := limit
+			if fetchLimit < math.MaxInt {
+				fetchLimit++
+			}
+			gs, err := a.DB().ListGroups(query, fetchLimit)
 			if err != nil {
 				return err
+			}
+			if len(gs) > limit {
+				gs = gs[:limit]
+				message := fmt.Sprintf("showing first %d matching groups; more are available; increase --limit", limit)
+				if flags.events {
+					_ = out.NewEventWriter(os.Stderr, true).Emit("warning", map[string]any{
+						"code": "groups_list_truncated", "message": message, "limit": limit,
+					})
+				} else {
+					_ = out.WriteError(os.Stderr, false, fmt.Errorf("warning: %s", message))
+				}
 			}
 			if flags.asJSON {
 				return out.WriteJSON(os.Stdout, gs)
@@ -111,6 +130,6 @@ func newGroupsListCmd(flags *rootFlags) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&query, "query", "", "search query")
-	cmd.Flags().IntVar(&limit, "limit", 50, "limit")
+	cmd.Flags().IntVar(&limit, "limit", 50, "maximum groups to return (non-positive values use 50)")
 	return cmd
 }
