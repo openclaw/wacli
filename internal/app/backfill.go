@@ -3,12 +3,14 @@ package app
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/openclaw/wacli/internal/store"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/types"
@@ -132,6 +134,48 @@ func (a *App) BackfillHistory(ctx context.Context, opts BackfillOptions) (Backfi
 
 	var requestsSent int
 	var responsesSeen int
+	errResponseTimeout := errors.New("timed out waiting for on-demand history sync response")
+	request := func(ctx context.Context, anchor store.MessageInfo) (onDemandResponse, error) {
+		if err := ctx.Err(); err != nil {
+			return onDemandResponse{}, err
+		}
+		ch := make(chan onDemandResponse, 4)
+		mu.Lock()
+		waitCh = ch
+		mu.Unlock()
+		defer func() {
+			mu.Lock()
+			waitCh = nil
+			mu.Unlock()
+		}()
+
+		requestsSent++
+		a.emitOrPrint("backfill_requesting", map[string]any{
+			"chat_jid":      chatStr,
+			"count":         opts.Count,
+			"request":       requestsSent,
+			"anchor_msg_id": anchor.MsgID,
+		}, "Requesting %d older messages for %s...\n", opts.Count, chatStr)
+		reqInfo := types.MessageInfo{
+			MessageSource: types.MessageSource{Chat: chat, IsFromMe: anchor.FromMe},
+			ID:            types.MessageID(anchor.MsgID),
+			Timestamp:     anchor.Timestamp,
+		}
+		if _, err := a.wa.RequestHistorySyncOnDemand(ctx, reqInfo, opts.Count); err != nil {
+			return onDemandResponse{}, err
+		}
+		timer := time.NewTimer(opts.WaitPerRequest)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return onDemandResponse{}, ctx.Err()
+		case resp := <-ch:
+			responsesSeen++
+			return resp, nil
+		case <-timer.C:
+			return onDemandResponse{}, fmt.Errorf("%w (anchor %s)", errResponseTimeout, anchor.MsgID)
+		}
+	}
 
 	syncRes, err := a.Sync(ctx, SyncOptions{
 		Mode:     SyncModeOnce,
@@ -147,45 +191,22 @@ func (a *App) BackfillHistory(ctx context.Context, opts BackfillOptions) (Backfi
 					return err
 				}
 
-				reqInfo := types.MessageInfo{
-					MessageSource: types.MessageSource{
-						Chat:     chat,
-						IsFromMe: oldest.FromMe,
-					},
-					ID:        types.MessageID(oldest.MsgID),
-					Timestamp: oldest.Timestamp,
+				resp, err := request(ctx, oldest)
+				if errors.Is(err, errResponseTimeout) && ctx.Err() == nil {
+					next, nextErr := a.db.GetNextMessageInfo(chatStr, oldest.MsgID)
+					if nextErr != nil && !errors.Is(nextErr, sql.ErrNoRows) {
+						return nextErr
+					}
+					if nextErr == nil {
+						a.emitWarning("backfill_anchor_retry",
+							fmt.Sprintf("warning: no history response for anchor %s; retrying once with next local anchor %s", oldest.MsgID, next.MsgID),
+							map[string]any{"chat_jid": chatStr, "anchor_msg_id": oldest.MsgID, "retry_anchor_msg_id": next.MsgID})
+						resp, err = request(ctx, next)
+					}
 				}
-
-				ch := make(chan onDemandResponse, 4)
-				mu.Lock()
-				waitCh = ch
-				mu.Unlock()
-
-				requestsSent++
-				a.emitOrPrint("backfill_requesting", map[string]any{
-					"chat_jid": chatStr,
-					"count":    opts.Count,
-					"request":  requestsSent,
-				}, "Requesting %d older messages for %s...\n", opts.Count, chatStr)
-				if _, err := a.wa.RequestHistorySyncOnDemand(ctx, reqInfo, opts.Count); err != nil {
+				if err != nil {
 					return err
 				}
-
-				var resp onDemandResponse
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case resp = <-ch:
-					responsesSeen++
-				case <-time.After(opts.WaitPerRequest):
-					return fmt.Errorf("timed out waiting for on-demand history sync response")
-				}
-
-				mu.Lock()
-				if waitCh == ch {
-					waitCh = nil
-				}
-				mu.Unlock()
 
 				a.emitOrPrint("backfill_response", map[string]any{
 					"chat_jid":       chatStr,
@@ -195,6 +216,7 @@ func (a *App) BackfillHistory(ctx context.Context, opts BackfillOptions) (Backfi
 				}, "On-demand history sync: %d conversations, %d messages.\n", resp.conversations, resp.messages)
 
 				newOldest, err := a.db.GetOldestMessageInfo(chatStr)
+				// A retry's newer anchor is not progress past the original oldest row.
 				if err == nil && newOldest.MsgID == oldest.MsgID {
 					a.emitOrPrint("backfill_stopped", map[string]any{
 						"chat_jid": chatStr,

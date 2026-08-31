@@ -298,6 +298,15 @@ WHERE m.chat_jid = ?
 ORDER BY m.ts DESC, m.rowid DESC
 LIMIT 1;
 
+-- name: GetNextMessageInfo :one
+SELECT m.chat_jid, m.msg_id, m.ts, m.from_me, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,'')
+FROM messages m
+JOIN messages anchor ON anchor.chat_jid = m.chat_jid
+WHERE anchor.chat_jid = ? AND anchor.msg_id = ?
+  AND (m.ts, m.rowid) > (anchor.ts, anchor.rowid)
+ORDER BY m.ts ASC, m.rowid ASC
+LIMIT 1;
+
 -- name: MessageContextBefore :many
 SELECT m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.quoted_msg_id,''), COALESCE(m.quoted_sender_jid,''), m.is_forwarded, m.forwarding_score, COALESCE(m.reaction_to_id,''), COALESCE(m.reaction_emoji,''), COALESCE(m.media_type,''), COALESCE(m.media_caption,''), COALESCE(m.filename,''), COALESCE(m.mime_type,''), COALESCE(m.direct_path,''), COALESCE(m.local_path,''), COALESCE(m.downloaded_at,0), CASE WHEN s.msg_id IS NULL THEN 0 ELSE 1 END, COALESCE(s.starred_at,0), m.revoked, m.deleted_for_me, COALESCE(m.deleted_at,0), COALESCE(m.deletion_reason,''), COALESCE(m.payload_purged_at,0), m.edited, COALESCE(m.buttons,''), ''
 FROM messages m

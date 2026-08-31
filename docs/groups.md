@@ -35,6 +35,7 @@ wacli groups prune [--days N] [--left-only=false|--include-active] [--dry-run] [
 - Group JIDs use the `...@g.us` server.
 - `list` reads local rows and hides groups marked left. Human output includes the group type (`group`, `community`, or `subgroup`) and parent community JID when known.
 - `list --json` includes `IsParent` for communities and `LinkedParentJID` for subgroups.
+- `list` returns at most 50 matching groups by default; non-positive `--limit` values also use 50. When more matching groups exist, stderr warns that the result is truncated (a warning event with `--events`); increase `--limit` to see more. JSON and table output keep their existing shape.
 - `refresh` fetches joined groups live and updates local rows, including WhatsApp Community hierarchy metadata exposed by whatsmeow.
 - `info` fetches one group live and persists it, including whether the chat is a Community parent or linked subgroup.
 - `create` returns the new live group info and persists it locally. Use `--community` to create a community parent, or `--linked-parent` to create a subgroup inside an existing community.

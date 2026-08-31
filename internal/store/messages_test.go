@@ -783,6 +783,51 @@ func TestCountMessagesAndOldestMessageInfo(t *testing.T) {
 	}
 }
 
+func TestGetNextMessageInfo(t *testing.T) {
+	db := openTestDB(t)
+	base := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+	for _, chat := range []string{"123@g.us", "456@g.us"} {
+		if err := db.UpsertChat(chat, "group", "Test group", base); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Insert out of timestamp order, with a tie and an interleaved different chat.
+	for _, msg := range []UpsertMessageParams{
+		{ChatJID: "123@g.us", MsgID: "latest", Timestamp: base.Add(time.Second)},
+		{ChatJID: "123@g.us", MsgID: "first", Timestamp: base},
+		{ChatJID: "456@g.us", MsgID: "other", Timestamp: base},
+		{ChatJID: "123@g.us", MsgID: "second", Timestamp: base, FromMe: true, SenderJID: "789@s.whatsapp.net", SenderName: "Alice"},
+	} {
+		if err := db.UpsertMessage(msg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct{ chat, anchor, want string }{
+		{"123@g.us", "first", "second"},
+		{"123@g.us", "second", "latest"},
+		{"123@g.us", "latest", ""},
+		{"123@g.us", "missing", ""},
+		{"456@g.us", "other", ""},
+		{"456@g.us", "first", ""},
+	} {
+		t.Run(tc.chat+"/"+tc.anchor, func(t *testing.T) {
+			next, err := db.GetNextMessageInfo(tc.chat, tc.anchor)
+			if tc.want == "" {
+				if !errors.Is(err, sql.ErrNoRows) {
+					t.Fatalf("error = %v, want no rows", err)
+				}
+				return
+			}
+			if err != nil || next.ChatJID != tc.chat || next.MsgID != tc.want {
+				t.Fatalf("next = %+v, err = %v, want %s", next, err, tc.want)
+			}
+			if tc.want == "second" && (!next.Timestamp.Equal(base) || !next.FromMe || next.SenderJID != "789@s.whatsapp.net" || next.SenderName != "Alice") {
+				t.Fatalf("next lost anchor metadata: %+v", next)
+			}
+		})
+	}
+}
+
 func TestMessageRevokedTombstoneIsHiddenFromListAndSearch(t *testing.T) {
 	db := openTestDB(t)
 

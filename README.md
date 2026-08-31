@@ -23,7 +23,7 @@ brew install openclaw/tap/wacli
 
 Prebuilt archives for macOS, Linux, and Windows are available from [GitHub Releases](https://github.com/openclaw/wacli/releases/latest).
 
-To build from source, install Go 1.26.5 or newer and a C compiler, then run:
+To build from source, install Go 1.27.0 or newer and a C compiler, then run:
 
 ```sh
 CGO_ENABLED=1 CGO_CFLAGS="-Wno-error=missing-braces" \
@@ -104,7 +104,7 @@ See [accounts](docs/accounts.md) for store selection and [sync](docs/sync.md) fo
 
 ## Development
 
-Development requires Go 1.26.5, Node.js 24 or newer, pnpm, cgo, and a C compiler.
+Development requires Go 1.27.0, Node.js 24 or newer, pnpm, cgo, and a C compiler.
 
 ```sh
 pnpm install --frozen-lockfile

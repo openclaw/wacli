@@ -22,11 +22,13 @@ wacli history backfill --chat JID [--count 50] [--requests N] [--wait 1m] [--idl
 ## Limits
 
 - `--count` defaults to 50 and must be at most 500.
-- `--requests` defaults to 1 and must be at most 100.
+- `--requests` defaults to 1 and must be at most 100. Each requested batch may make one extra attempt after a timeout.
 - Requests are per chat.
-- The anchor is the oldest locally stored message in that chat.
+- The anchor starts at the oldest locally stored message in that chat. If the phone does not answer within `--wait`, backfill retries once using the next chronological local message (timestamp, then row ID). No message IDs or content types are filtered out, and no local rows are deleted.
+- Each attempt gets its own `--wait`; a batch can therefore wait up to twice that duration for responses. If there is no next anchor, or the retry also times out, backfill stops with an error naming the unanswered anchor. Transport errors and cancellation are not retried.
+- A successful retry must add history older than the original local anchor to continue to another batch. Returning only already-stored messages stops backfill normally.
 - Automatic initial history-sync blob downloads are disabled during backfill; only on-demand responses are processed.
-- `--events` emits NDJSON request/response/stop lifecycle events on stderr.
+- `--events` emits NDJSON request/response/stop lifecycle events on stderr. Requests include `anchor_msg_id`, and a `warning` with code `backfill_anchor_retry` identifies the unanswered anchor and its replacement. Human output reports the same retry on stderr. The result's request count includes retry attempts.
 
 ## Examples
 

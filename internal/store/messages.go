@@ -479,6 +479,25 @@ func (d *DB) GetLatestMessageInfo(chatJID string) (MessageInfo, error) {
 	return messageInfoFromLatestRow(row), nil
 }
 
+func (d *DB) GetNextMessageInfo(chatJID, msgID string) (MessageInfo, error) {
+	chatJID = strings.TrimSpace(chatJID)
+	if chatJID == "" {
+		return MessageInfo{}, fmt.Errorf("chat JID is required")
+	}
+	row, err := d.q.GetNextMessageInfo(storeCtx(), storedb.GetNextMessageInfoParams{ChatJid: chatJID, MsgID: msgID})
+	if err != nil {
+		return MessageInfo{}, err
+	}
+	return MessageInfo{
+		ChatJID:    row.ChatJid,
+		MsgID:      row.MsgID,
+		Timestamp:  fromUnix(row.Ts),
+		FromMe:     row.FromMe != 0,
+		SenderJID:  row.SenderJid,
+		SenderName: row.SenderName,
+	}, nil
+}
+
 func (d *DB) MessageContext(chatJID, msgID string, before, after int) ([]Message, error) {
 	if before < 0 {
 		before = 0

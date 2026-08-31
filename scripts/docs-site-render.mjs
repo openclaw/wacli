@@ -3,18 +3,23 @@ import path from "node:path";
 
 import { highlight } from "./docs-site-highlight.mjs";
 
-export function markdownToHtml(markdown, currentRel, rewriteHref) {
+export function renderMarkdown(markdown, currentRel, rewriteHref) {
+  const state = { headings: [], slugs: new Map() };
+  const html = renderMarkdownInto(markdown, currentRel, rewriteHref, state);
+  return { html, headings: state.headings };
+}
+
+function renderMarkdownInto(markdown, currentRel, rewriteHref, state) {
   const lines = markdown.replace(/\r\n/g, "\n").split("\n");
   const html = [];
   let paragraph = [];
   let list = null;
   let fence = null;
   let blockquote = [];
-  const slugs = new Map();
 
   const flushParagraph = () => {
     if (!paragraph.length) return;
-    html.push(`<p>${inline(paragraph.join(" "), currentRel, rewriteHref)}</p>`);
+    html.push(`<p>${inline(paragraph.join(" "), currentRel, rewriteHref).html}</p>`);
     paragraph = [];
   };
   const closeList = () => {
@@ -24,7 +29,7 @@ export function markdownToHtml(markdown, currentRel, rewriteHref) {
   };
   const flushBlockquote = () => {
     if (!blockquote.length) return;
-    const inner = markdownToHtml(blockquote.join("\n"), currentRel, rewriteHref);
+    const inner = renderMarkdownInto(blockquote.join("\n"), currentRel, rewriteHref, state);
     html.push(`<blockquote>${inner}</blockquote>`);
     blockquote = [];
   };
@@ -72,12 +77,15 @@ export function markdownToHtml(markdown, currentRel, rewriteHref) {
       closeList();
       const level = heading[1].length;
       const text = heading[2].trim();
-      const id = uniqueSlug(slugs, text);
+      const id = uniqueSlug(state.slugs, text);
       const inner = inline(text, currentRel, rewriteHref);
+      if (level === 2 || level === 3) {
+        state.headings.push({ level, id, label: inner.text });
+      }
       if (level === 1) {
-        html.push(`<h1 id="${id}">${inner}</h1>`);
+        html.push(`<h1 id="${id}">${inner.html}</h1>`);
       } else {
-        html.push(`<h${level} id="${id}"><a class="anchor" href="#${id}" aria-label="Anchor link">#</a>${inner}</h${level}>`);
+        html.push(`<h${level} id="${id}"><a class="anchor" href="#${id}" aria-label="Anchor link">#</a>${inner.html}</h${level}>`);
       }
       continue;
     }
@@ -96,8 +104,8 @@ export function markdownToHtml(markdown, currentRel, rewriteHref) {
         i += 1;
         rows.push(splitRow(lines[i]));
       }
-      const th = header.map((c, idx) => `<th${aligns[idx] ? ` style="text-align:${aligns[idx]}"` : ""}>${inline(c, currentRel, rewriteHref)}</th>`).join("");
-      const tb = rows.map((r) => `<tr>${r.map((c, idx) => `<td${aligns[idx] ? ` style="text-align:${aligns[idx]}"` : ""}>${inline(c, currentRel, rewriteHref)}</td>`).join("")}</tr>`).join("");
+      const th = header.map((c, idx) => `<th${aligns[idx] ? ` style="text-align:${aligns[idx]}"` : ""}>${inline(c, currentRel, rewriteHref).html}</th>`).join("");
+      const tb = rows.map((r) => `<tr>${r.map((c, idx) => `<td${aligns[idx] ? ` style="text-align:${aligns[idx]}"` : ""}>${inline(c, currentRel, rewriteHref).html}</td>`).join("")}</tr>`).join("");
       html.push(`<table><thead><tr>${th}</tr></thead><tbody>${tb}</tbody></table>`);
       continue;
     }
@@ -111,7 +119,7 @@ export function markdownToHtml(markdown, currentRel, rewriteHref) {
         list = tag;
         html.push(`<${tag}>`);
       }
-      html.push(`<li>${inline((bullet || numbered)[1], currentRel, rewriteHref)}</li>`);
+      html.push(`<li>${inline((bullet || numbered)[1], currentRel, rewriteHref).html}</li>`);
       continue;
     }
     paragraph.push(line.trim());
@@ -122,20 +130,10 @@ export function markdownToHtml(markdown, currentRel, rewriteHref) {
   return html.join("\n");
 }
 
-export function tocFromHtml(html) {
-  const items = [];
-  const re = /<h([23]) id="([^"]+)">([\s\S]*?)<\/h[23]>/g;
-  let m;
-  while ((m = re.exec(html))) {
-    const text = m[3]
-      .replace(/<a class="anchor"[^>]*>.*?<\/a>/, "")
-      .replace(/<[^>]+>/g, "")
-      .trim();
-    items.push({ level: Number(m[1]), id: m[2], text });
-  }
-  if (items.length < 2) return "";
-  return `<nav class="toc" aria-label="On this page"><h2>On this page</h2>${items
-    .map((i) => `<a class="toc-l${i.level}" href="#${i.id}">${escapeHtml(i.text)}</a>`)
+export function tocFromHeadings(headings) {
+  if (headings.length < 2) return "";
+  return `<nav class="toc" aria-label="On this page"><h2>On this page</h2>${headings
+    .map((heading) => `<a class="toc-l${heading.level}" href="#${heading.id}">${escapeHtml(heading.label)}</a>`)
     .join("")}</nav>`;
 }
 
@@ -183,20 +181,84 @@ export function escapeAttr(value) {
 }
 
 function inline(text, currentRel, rewriteHref) {
-  const stash = [];
-  let out = text.replace(/`([^`]+)`/g, (_, code) => {
-    stash.push(`<code>${escapeHtml(code)}</code>`);
-    return `\u0000${stash.length - 1}\u0000`;
+  const tokens = [];
+  const stash = (token) => {
+    tokens.push(token);
+    return `\u0000${tokens.length - 1}\u0000`;
+  };
+  let value = text.replace(/`([^`]+)`/g, (_, code) => {
+    return stash({ kind: "code", value: code });
   });
-  out = escapeHtml(out)
-    .replace(/&lt;br&gt;/g, "<br>")
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/(^|[^*])\*([^*\s][^*]*?)\*(?!\*)/g, "$1<em>$2</em>")
-    .replace(/(^|[^_])_([^_\s][^_]*?)_(?!_)/g, "$1<em>$2</em>")
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, href) => `<a href="${escapeAttr(rewriteHref(href, currentRel))}">${sanitizeLinkLabel(label)}</a>`)
-    .replace(/&lt;(https?:\/\/[^\s<>]+)&gt;/g, '<a href="$1">$1</a>');
-  out = out.replace(/\\\|/g, "|");
-  return out.replace(/\u0000(\d+)\u0000/g, (_, i) => stash[Number(i)]);
+  value = tokenizeInline(escapeHtml(value));
+  return renderInlineValue(value, tokens, false);
+
+  function tokenizeInline(escaped) {
+    return escaped
+    .replace(/&lt;br&gt;/g, () => stash({ kind: "break" }))
+    .replace(/\*\*([^*]+)\*\*/g, (_, inner) => stash({ kind: "strong", value: tokenizeInline(inner) }))
+    .replace(/(^|[^*])\*([^*\s][^*]*?)\*(?!\*)/g, (_, prefix, inner) => `${prefix}${stash({ kind: "em", value: tokenizeInline(inner) })}`)
+    .replace(/(^|[^_])_([^_\s][^_]*?)_(?!_)/g, (_, prefix, inner) => `${prefix}${stash({ kind: "em", value: tokenizeInline(inner) })}`)
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, href) => {
+      return stash({ kind: "link", value: tokenizeInline(label), href: rewriteHref(href, currentRel) });
+    })
+    .replace(/&lt;(https?:\/\/[^\s<>]+)&gt;/g, (_, href) => {
+      return stash({ kind: "autolink", href });
+    })
+    .replace(/\\\|/g, "|");
+  }
+}
+
+function renderInlineValue(value, tokens, linkLabel) {
+  const marker = /\u0000(\d+)\u0000/g;
+  let html = "";
+  let text = "";
+  let offset = 0;
+  for (const match of value.matchAll(marker)) {
+    const escaped = value.slice(offset, match.index);
+    html += escaped;
+    text += decodeEscapedText(escaped);
+    const rendered = renderInlineToken(tokens[Number(match[1])], tokens, linkLabel);
+    html += rendered.html;
+    text += rendered.text;
+    offset = match.index + match[0].length;
+  }
+  const escaped = value.slice(offset);
+  return {
+    html: html + escaped,
+    text: text + decodeEscapedText(escaped),
+  };
+}
+
+function renderInlineToken(token, tokens, linkLabel) {
+  if (token.kind === "code") {
+    return { html: `<code>${escapeHtml(token.value)}</code>`, text: token.value };
+  }
+  if (token.kind === "break") {
+    return linkLabel ? { html: "&lt;br&gt;", text: "<br>" } : { html: "<br>", text: "" };
+  }
+  if (token.kind === "autolink") {
+    return {
+      html: `<a href="${token.href}">${token.href}</a>`,
+      text: decodeEscapedText(token.href),
+    };
+  }
+  const inner = renderInlineValue(token.value, tokens, token.kind === "link" || linkLabel);
+  if (token.kind === "strong") {
+    return { html: `<strong>${inner.html}</strong>`, text: inner.text };
+  }
+  if (token.kind === "em") {
+    return { html: `<em>${inner.html}</em>`, text: inner.text };
+  }
+  return {
+    html: `<a href="${escapeAttr(token.href)}">${inner.html}</a>`,
+    text: inner.text,
+  };
+}
+
+function decodeEscapedText(value) {
+  return value.replace(/&(amp|lt|gt|quot|#39);/g, (entity) => {
+    return ({ "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"', "&#39;": "'" })[entity];
+  });
 }
 
 function splitRow(line) {
@@ -236,15 +298,6 @@ function uniqueSlug(slugs, text) {
   const count = (slugs.get(base) || 0) + 1;
   slugs.set(base, count);
   return count === 1 ? base : `${base}-${count}`;
-}
-
-function sanitizeLinkLabel(label) {
-  return label.replace(/<\/?(?:strong|em)>|[<>]/g, (match) => {
-    if (match === "<strong>" || match === "</strong>" || match === "<em>" || match === "</em>") {
-      return match;
-    }
-    return match === "<" ? "&lt;" : "&gt;";
-  });
 }
 
 function allHtml(dir) {
