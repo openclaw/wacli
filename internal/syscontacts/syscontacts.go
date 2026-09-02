@@ -3,10 +3,13 @@ package syscontacts
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strings"
 	"unicode"
 )
+
+const MaxContactsDecodeBytes = 8 << 20
 
 type Contact struct {
 	FirstName string   `json:"first_name"`
@@ -23,9 +26,12 @@ func (c Contact) Name() string {
 }
 
 func Decode(r io.Reader) ([]Contact, error) {
-	raw, err := io.ReadAll(r)
+	raw, err := io.ReadAll(io.LimitReader(r, int64(MaxContactsDecodeBytes)+1))
 	if err != nil {
 		return nil, err
+	}
+	if len(raw) > MaxContactsDecodeBytes {
+		return nil, fmt.Errorf("contacts export too large; maximum size is %d bytes", MaxContactsDecodeBytes)
 	}
 	trimmed := strings.TrimSpace(string(raw))
 	if trimmed == "" {

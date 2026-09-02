@@ -1,6 +1,7 @@
 package syscontacts
 
 import (
+	"io"
 	"strings"
 	"testing"
 )
@@ -35,6 +36,26 @@ func TestDecodeSupportsJSONArrayAndNDJSON(t *testing.T) {
 			t.Fatalf("contacts = %#v", contacts)
 		}
 	}
+}
+
+func TestDecodeRejectsOversizeStream(t *testing.T) {
+	r := io.LimitReader(repeatReader{ch: 'x'}, int64(MaxContactsDecodeBytes)+1)
+	_, err := Decode(r)
+	if err == nil {
+		t.Fatal("Decode(oversize stream): want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("Decode(oversize stream): %v", err)
+	}
+}
+
+type repeatReader struct{ ch byte }
+
+func (r repeatReader) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = r.ch
+	}
+	return len(p), nil
 }
 
 func TestPhoneToNameKeepsFirstNameForDuplicateNumber(t *testing.T) {
