@@ -1003,6 +1003,12 @@ func (c *Client) ReconnectWithBackoff(ctx context.Context, minDelay, maxDelay ti
 	opts.AllowQR = false
 	opts.DetachSocket = true
 	delay := minDelay
+	// Start stopped so backoff wait begins only after Connect fails.
+	timer := time.NewTimer(0)
+	if !timer.Stop() {
+		<-timer.C
+	}
+	defer timer.Stop()
 	for {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -1010,14 +1016,34 @@ func (c *Client) ReconnectWithBackoff(ctx context.Context, minDelay, maxDelay ti
 		if err := c.Connect(ctx, opts); err == nil {
 			return nil
 		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(delay):
+		if err := waitReconnectBackoff(ctx, timer, delay); err != nil {
+			return err
 		}
 		delay *= 2
 		if delay > maxDelay {
 			delay = maxDelay
 		}
+	}
+}
+
+func waitReconnectBackoff(ctx context.Context, timer *time.Timer, delay time.Duration) error {
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
+	timer.Reset(delay)
+	select {
+	case <-ctx.Done():
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		return ctx.Err()
+	case <-timer.C:
+		return nil
 	}
 }
