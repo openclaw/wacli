@@ -49,7 +49,6 @@ func extractMedia(m *waProto.Message, pm *ParsedMessage) {
 		}
 		pm.Media = &Media{
 			Type:          "audio",
-			Caption:       pm.Text,
 			MimeType:      aud.GetMimetype(),
 			DirectPath:    aud.GetDirectPath(),
 			MediaKey:      clone(aud.GetMediaKey()),

@@ -5,6 +5,8 @@ import (
 	"time"
 
 	waProto "go.mau.fi/whatsmeow/binary/proto"
+	"go.mau.fi/whatsmeow/proto/waCommon"
+	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
@@ -59,9 +61,12 @@ func TestMarkUnhandledPayloadIgnoresMessageContextInfo(t *testing.T) {
 		MessageContextInfo: &waProto.MessageContextInfo{
 			MessageSecret: []byte{1, 2, 3},
 		},
+		StickerSyncRmrMessage: &waProto.StickerSyncRMRMessage{
+			Filehash: []string{"abc"},
+		},
 	}))
-	if pm.UnhandledPayload != "" {
-		t.Fatalf("expected context-info-only message to be ignored, got %q", pm.UnhandledPayload)
+	if pm.UnhandledPayload != "stickerSyncRmrMessage" {
+		t.Fatalf("expected stickerSyncRmrMessage, got %q", pm.UnhandledPayload)
 	}
 }
 
@@ -108,13 +113,13 @@ func TestMarkUnhandledPayloadIgnoresRevoke(t *testing.T) {
 	}
 }
 
-// A payload wrapped in deviceSentMessage must be named by its leaf. Reporting
-// the wrapper would send an operator looking at the envelope instead of the
-// content that went missing.
-func TestMarkUnhandledPayloadNamesLeafInsideDeviceSent(t *testing.T) {
+// deviceSentMessage is the first wrapper shape the parser unwraps. The test
+// proves the unhandled name attaches to the leaf payload rather than the
+// wrapper, matching what the user sees in the store.
+func TestMarkUnhandledPayloadNamesLeafInsideDeviceSentMessage(t *testing.T) {
 	pm := ParseLiveMessage(liveEvent(&waProto.Message{
 		DeviceSentMessage: &waProto.DeviceSentMessage{
-			DestinationJID: proto.String("456@s.whatsapp.net"),
+			DestinationJID: proto.String("15551234567@s.whatsapp.net"),
 			Message: &waProto.Message{
 				StickerSyncRmrMessage: &waProto.StickerSyncRMRMessage{
 					Filehash: []string{"abc"},
@@ -122,18 +127,22 @@ func TestMarkUnhandledPayloadNamesLeafInsideDeviceSent(t *testing.T) {
 			},
 		},
 	}))
+	if !pm.FromMe {
+		t.Fatal("expected message to be marked FromMe")
+	}
 	if pm.UnhandledPayload != "stickerSyncRmrMessage" {
 		t.Fatalf("expected the leaf payload, got %q", pm.UnhandledPayload)
 	}
 }
 
-// The edit case is the reason this diagnostic exists: naming protocolMessage
-// here would report every unhandled edit as the same generic wrapper.
+// protocolMessage with MESSAGE_EDIT is another wrapper shape that has a leaf.
 func TestMarkUnhandledPayloadNamesLeafInsideProtocolEdit(t *testing.T) {
 	pm := ParseLiveMessage(liveEvent(&waProto.Message{
 		ProtocolMessage: &waProto.ProtocolMessage{
 			Type: waProto.ProtocolMessage_MESSAGE_EDIT.Enum(),
-			Key:  &waProto.MessageKey{ID: proto.String("ORIGINAL")},
+			Key: &waProto.MessageKey{
+				ID: proto.String("ORIGINAL"),
+			},
 			EditedMessage: &waProto.Message{
 				StickerSyncRmrMessage: &waProto.StickerSyncRMRMessage{
 					Filehash: []string{"abc"},
@@ -180,5 +189,78 @@ func TestMarkUnhandledPayloadIgnoresWrappedText(t *testing.T) {
 	}
 	if pm.UnhandledPayload != "" {
 		t.Fatalf("expected no unhandled payload, got %q", pm.UnhandledPayload)
+	}
+}
+
+func TestParseLiveMessageExtractsCommentMessage(t *testing.T) {
+	pm := ParseLiveMessage(liveEvent(&waProto.Message{
+		CommentMessage: &waE2E.CommentMessage{
+			TargetMessageKey: &waCommon.MessageKey{
+				ID: proto.String("TARGET-123"),
+			},
+			Message: &waProto.Message{
+				Conversation: proto.String("this is a comment"),
+			},
+		},
+	}))
+	if pm.Text != "this is a comment" {
+		t.Fatalf("expected comment text, got %q", pm.Text)
+	}
+	if pm.ReplyToID != "TARGET-123" {
+		t.Fatalf("expected ReplyToID TARGET-123, got %q", pm.ReplyToID)
+	}
+	if pm.UnhandledPayload != "" {
+		t.Fatalf("expected no unhandled payload, got %q", pm.UnhandledPayload)
+	}
+}
+
+func TestParseLiveMessageExtractsAlbumMessage(t *testing.T) {
+	pm := ParseLiveMessage(liveEvent(&waProto.Message{
+		AlbumMessage: &waE2E.AlbumMessage{
+			ExpectedImageCount: proto.Uint32(3),
+			ExpectedVideoCount: proto.Uint32(1),
+		},
+	}))
+	if pm.Text != "[Album: 3 images, 1 videos]" {
+		t.Fatalf("expected album text, got %q", pm.Text)
+	}
+	if pm.UnhandledPayload != "" {
+		t.Fatalf("expected no unhandled payload, got %q", pm.UnhandledPayload)
+	}
+}
+
+func TestParseLiveMessageLeavesAudioCaptionEmpty(t *testing.T) {
+	pm := ParseLiveMessage(liveEvent(&waProto.Message{
+		AudioMessage: &waProto.AudioMessage{
+			Mimetype: proto.String("audio/ogg; codecs=opus"),
+			PTT:      proto.Bool(true),
+		},
+	}))
+	if pm.Media == nil {
+		t.Fatal("expected audio media to be extracted")
+	}
+	if pm.Media.Type != "audio" {
+		t.Fatalf("expected media type audio, got %q", pm.Media.Type)
+	}
+	if pm.Media.Caption != "" {
+		t.Fatalf("expected empty caption, got %q", pm.Media.Caption)
+	}
+	if pm.Text != "[Audio]" {
+		t.Fatalf("expected [Audio] text placeholder, got %q", pm.Text)
+	}
+}
+
+func TestParseLiveMessageKeepsImageCaption(t *testing.T) {
+	pm := ParseLiveMessage(liveEvent(&waProto.Message{
+		ImageMessage: &waProto.ImageMessage{
+			Mimetype: proto.String("image/jpeg"),
+			Caption:  proto.String("receipt picture"),
+		},
+	}))
+	if pm.Media == nil {
+		t.Fatal("expected image media to be extracted")
+	}
+	if pm.Media.Caption != "receipt picture" {
+		t.Fatalf("expected image caption to survive, got %q", pm.Media.Caption)
 	}
 }

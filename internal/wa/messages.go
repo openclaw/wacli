@@ -1,6 +1,7 @@
 package wa
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -220,6 +221,12 @@ func extractWAProto(m *waProto.Message, pm *ParsedMessage) *waProto.Message {
 		}
 		return m
 	}
+	if comment := m.GetCommentMessage(); comment.GetMessage() != nil {
+		if target := comment.GetTargetMessageKey(); target != nil && pm.ReplyToID == "" {
+			pm.ReplyToID = target.GetID()
+		}
+		return extractWAProto(comment.GetMessage(), pm)
+	}
 	extractReaction(m, pm)
 	extractPlainText(m, pm)
 	extractMedia(m, pm)
@@ -230,6 +237,7 @@ func extractWAProto(m *waProto.Message, pm *ParsedMessage) *waProto.Message {
 	extractPollAddOption(m, pm)
 	extractPollUpdate(m, pm)
 	extractCallLog(m, pm)
+	extractAlbum(m, pm)
 
 	if ctx := contextInfoForMessage(m); ctx != nil {
 		if id := strings.TrimSpace(ctx.GetStanzaID()); id != "" {
@@ -446,4 +454,25 @@ func clone(b []byte) []byte {
 	out := make([]byte, len(b))
 	copy(out, b)
 	return out
+}
+
+func extractAlbum(m *waProto.Message, pm *ParsedMessage) {
+	album := m.GetAlbumMessage()
+	if album == nil {
+		return
+	}
+	if pm.Text == "" {
+		imgs := album.GetExpectedImageCount()
+		vids := album.GetExpectedVideoCount()
+		switch {
+		case imgs > 0 && vids > 0:
+			pm.Text = fmt.Sprintf("[Album: %d images, %d videos]", imgs, vids)
+		case imgs > 0:
+			pm.Text = fmt.Sprintf("[Album: %d images]", imgs)
+		case vids > 0:
+			pm.Text = fmt.Sprintf("[Album: %d videos]", vids)
+		default:
+			pm.Text = "[Album]"
+		}
+	}
 }
