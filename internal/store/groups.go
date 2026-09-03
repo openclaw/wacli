@@ -110,6 +110,27 @@ func (d *DB) ReplaceGroupParticipants(groupJID string, participants []GroupParti
 	return tx.Commit()
 }
 
+func (d *DB) ListGroupParticipants(groupJID string) ([]GroupParticipant, error) {
+	groupJID = strings.TrimSpace(groupJID)
+	if groupJID == "" {
+		return nil, fmt.Errorf("group JID is required")
+	}
+	rows, err := d.q.ListGroupParticipants(storeCtx(), groupJID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]GroupParticipant, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, GroupParticipant{
+			GroupJID:  r.GroupJid,
+			UserJID:   r.UserJid,
+			Role:      r.Role,
+			UpdatedAt: fromUnix(r.UpdatedAt),
+		})
+	}
+	return out, nil
+}
+
 func (d *DB) ListGroups(query string, limit int) ([]Group, error) {
 	if limit <= 0 {
 		limit = 50
