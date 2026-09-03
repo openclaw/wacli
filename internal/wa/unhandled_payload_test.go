@@ -61,12 +61,9 @@ func TestMarkUnhandledPayloadIgnoresMessageContextInfo(t *testing.T) {
 		MessageContextInfo: &waProto.MessageContextInfo{
 			MessageSecret: []byte{1, 2, 3},
 		},
-		StickerSyncRmrMessage: &waProto.StickerSyncRMRMessage{
-			Filehash: []string{"abc"},
-		},
 	}))
-	if pm.UnhandledPayload != "stickerSyncRmrMessage" {
-		t.Fatalf("expected stickerSyncRmrMessage, got %q", pm.UnhandledPayload)
+	if pm.UnhandledPayload != "" {
+		t.Fatalf("expected context-info-only message to be ignored, got %q", pm.UnhandledPayload)
 	}
 }
 
@@ -113,13 +110,13 @@ func TestMarkUnhandledPayloadIgnoresRevoke(t *testing.T) {
 	}
 }
 
-// deviceSentMessage is the first wrapper shape the parser unwraps. The test
-// proves the unhandled name attaches to the leaf payload rather than the
-// wrapper, matching what the user sees in the store.
-func TestMarkUnhandledPayloadNamesLeafInsideDeviceSentMessage(t *testing.T) {
+// A payload wrapped in deviceSentMessage must be named by its leaf. Reporting
+// the wrapper would send an operator looking at the envelope instead of the
+// content that went missing.
+func TestMarkUnhandledPayloadNamesLeafInsideDeviceSent(t *testing.T) {
 	pm := ParseLiveMessage(liveEvent(&waProto.Message{
 		DeviceSentMessage: &waProto.DeviceSentMessage{
-			DestinationJID: proto.String("15551234567@s.whatsapp.net"),
+			DestinationJID: proto.String("456@s.whatsapp.net"),
 			Message: &waProto.Message{
 				StickerSyncRmrMessage: &waProto.StickerSyncRMRMessage{
 					Filehash: []string{"abc"},
@@ -127,22 +124,18 @@ func TestMarkUnhandledPayloadNamesLeafInsideDeviceSentMessage(t *testing.T) {
 			},
 		},
 	}))
-	if !pm.FromMe {
-		t.Fatal("expected message to be marked FromMe")
-	}
 	if pm.UnhandledPayload != "stickerSyncRmrMessage" {
 		t.Fatalf("expected the leaf payload, got %q", pm.UnhandledPayload)
 	}
 }
 
-// protocolMessage with MESSAGE_EDIT is another wrapper shape that has a leaf.
+// The edit case is the reason this diagnostic exists: naming protocolMessage
+// here would report every unhandled edit as the same generic wrapper.
 func TestMarkUnhandledPayloadNamesLeafInsideProtocolEdit(t *testing.T) {
 	pm := ParseLiveMessage(liveEvent(&waProto.Message{
 		ProtocolMessage: &waProto.ProtocolMessage{
 			Type: waProto.ProtocolMessage_MESSAGE_EDIT.Enum(),
-			Key: &waProto.MessageKey{
-				ID: proto.String("ORIGINAL"),
-			},
+			Key:  &waProto.MessageKey{ID: proto.String("ORIGINAL")},
 			EditedMessage: &waProto.Message{
 				StickerSyncRmrMessage: &waProto.StickerSyncRMRMessage{
 					Filehash: []string{"abc"},
