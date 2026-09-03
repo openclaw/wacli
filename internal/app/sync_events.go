@@ -500,16 +500,35 @@ func (a *App) handleAppStateSyncError(ctx context.Context, evt *events.AppStateS
 		return
 	}
 
-	a.emitWarning(
-		"app_state_lthash_mismatch",
-		fmt.Sprintf("warning: app state %s hit an LTHash mismatch; requesting recovery snapshot", name),
-		map[string]any{"name": name},
-	)
 	go func() {
 		reqCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
+
+		a.emitWarning(
+			"app_state_lthash_mismatch",
+			fmt.Sprintf("warning: app state %s hit an LTHash mismatch; attempting full sync", name),
+			map[string]any{"name": name},
+		)
+
+		if err := a.wa.FetchAppState(reqCtx, name, true, false); err == nil {
+			recoveries.Delete(name)
+			if a.eventsEnabled() {
+				a.emitEvent("app_state_full_sync_completed", map[string]any{"name": name})
+			} else {
+				fmt.Fprintf(os.Stderr, "\rApp state %s resolved via full sync\n", name)
+			}
+			return
+		} else {
+			a.emitWarning(
+				"app_state_full_sync_failed",
+				fmt.Sprintf("warning: app state %s full sync failed: %v; requesting recovery snapshot", name, err),
+				map[string]any{"name": name, "error": err.Error()},
+			)
+		}
+
 		reqID, err := a.wa.RequestAppStateRecovery(reqCtx, name)
 		if err != nil {
+			recoveries.Delete(name)
 			a.emitWarning(
 				"app_state_recovery_failed",
 				fmt.Sprintf("warning: app state %s recovery request failed: %v", name, err),
