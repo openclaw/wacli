@@ -60,6 +60,7 @@ type sendDelegateRequest struct {
 	Selectable           int      `json:"selectable,omitempty"`
 	PresenceState        string   `json:"presence_state,omitempty"`
 	PresenceMedia        string   `json:"presence_media,omitempty"`
+	Read                 *bool    `json:"read,omitempty"`
 	PostSendWaitMS       int64    `json:"post_send_wait_ms,omitempty"`
 	TimeoutMS            int64    `json:"timeout_ms,omitempty"`
 	DeadlineUnixMS       int64    `json:"deadline_unix_ms,omitempty"`
@@ -79,6 +80,8 @@ type sendDelegateResponse struct {
 	SelectedOption *selectOption     `json:"selected_option,omitempty"`
 	File           map[string]string `json:"file,omitempty"`
 	StoreWarning   string            `json:"store_warning,omitempty"`
+	Chat           string            `json:"chat,omitempty"`
+	Action         string            `json:"action,omitempty"`
 }
 
 func sendDelegateSocketPath(storeDir string) string {
@@ -292,9 +295,30 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 		return executeDelegatedPresence(ctx, a, req)
 	case "edit":
 		return executeDelegatedEdit(ctx, a, req)
+	case "mark_read":
+		return executeDelegatedMarkRead(ctx, a, req)
 	default:
 		return sendDelegateResponse{}, fmt.Errorf("unsupported send kind %q", req.Kind)
 	}
+}
+
+func executeDelegatedMarkRead(ctx context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {
+	toJID, err := resolveRecipient(a, req.To, recipientOptions{pick: req.Pick, asJSON: true})
+	if err != nil {
+		return sendDelegateResponse{}, err
+	}
+	read := true
+	if req.Read != nil {
+		read = *req.Read
+	}
+	if err := a.MarkChatRead(ctx, toJID, read); err != nil {
+		return sendDelegateResponse{}, err
+	}
+	action := "mark-read"
+	if !read {
+		action = "mark-unread"
+	}
+	return sendDelegateResponse{OK: true, Chat: toJID.String(), Action: action}, nil
 }
 
 func executeDelegatedPresence(ctx context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {

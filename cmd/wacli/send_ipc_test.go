@@ -261,3 +261,144 @@ func TestExecuteDelegatedSendAcceptsEditKind(t *testing.T) {
 		t.Fatalf("edit rejected as unsupported kind: %v", err)
 	}
 }
+
+func TestSendDelegateRequestPreservesMarkReadInJSON(t *testing.T) {
+	read := true
+	raw, err := json.Marshal(sendDelegateRequest{
+		Version: sendDelegateVersion,
+		Kind:    "mark_read",
+		To:      "123@s.whatsapp.net",
+		Read:    &read,
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), `"read":true`) {
+		t.Fatalf("encoded request missing read flag: %s", raw)
+	}
+
+	var got sendDelegateRequest
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if got.Kind != "mark_read" {
+		t.Fatalf("Kind = %q, want mark_read", got.Kind)
+	}
+	if got.Read == nil || !*got.Read {
+		t.Fatalf("Read = %v, want true", got.Read)
+	}
+
+	unread := false
+	rawUnread, err := json.Marshal(sendDelegateRequest{
+		Version: sendDelegateVersion,
+		Kind:    "mark_read",
+		To:      "123@s.whatsapp.net",
+		Read:    &unread,
+	})
+	if err != nil {
+		t.Fatalf("Marshal unread: %v", err)
+	}
+	var gotUnread sendDelegateRequest
+	if err := json.Unmarshal(rawUnread, &gotUnread); err != nil {
+		t.Fatalf("Unmarshal unread: %v", err)
+	}
+	if gotUnread.Read == nil || *gotUnread.Read {
+		t.Fatalf("Read = %v, want false", gotUnread.Read)
+	}
+}
+
+func TestExecuteDelegatedSendAcceptsMarkReadKind(t *testing.T) {
+	defer func() { _ = recover() }()
+	read := true
+	_, err := executeDelegatedSend(context.Background(), nil, sendDelegateRequest{
+		Version: sendDelegateVersion,
+		Kind:    "mark_read",
+		To:      "123@s.whatsapp.net",
+		Read:    &read,
+	})
+	if err != nil && strings.Contains(err.Error(), "unsupported send kind") {
+		t.Fatalf("mark_read rejected as unsupported kind: %v", err)
+	}
+}
+
+func TestChatsMarkReadDelegatesThroughSendSocketWhenStoreLocked(t *testing.T) {
+	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
+	storeDir := shortPresenceDelegateStoreDir(t)
+	lk, err := lock.Acquire(storeDir)
+	if err != nil {
+		t.Fatalf("lock store: %v", err)
+	}
+	defer lk.Release()
+
+	server := startPresenceDelegateTestSocket(t, storeDir, func(req sendDelegateRequest) sendDelegateResponse {
+		return sendDelegateResponse{
+			OK: true, Chat: "123@s.whatsapp.net", Action: "mark-read",
+		}
+	})
+	defer server.stop()
+
+	stdout, stderr, err := runPresenceDelegateHelper(t, []string{
+		"--store", storeDir, "--json", "--timeout", "750ms",
+		"chats", "mark-read", "--chat", "123@s.whatsapp.net",
+	})
+	if err != nil {
+		t.Fatalf("chats mark-read failed: %v stdout=%q stderr=%q", err, stdout, stderr)
+	}
+
+	req := server.nextRequest(t)
+	if req.Version != sendDelegateVersion || req.Kind != "mark_read" {
+		t.Fatalf("delegate version/kind = %d/%q", req.Version, req.Kind)
+	}
+	if req.To != "123@s.whatsapp.net" || req.Read == nil || !*req.Read {
+		t.Fatalf("delegate request = %+v", req)
+	}
+	if strings.Contains(stderr, "store is locked") {
+		t.Fatalf("delegated command tried the direct store path: stderr=%q", stderr)
+	}
+	for _, want := range []string{`"ok":true`, `"action":"mark-read"`, `"chat":"123@s.whatsapp.net"`} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("stdout %q missing %s", stdout, want)
+		}
+	}
+}
+
+func TestChatsMarkUnreadDelegatesThroughSendSocketWhenStoreLocked(t *testing.T) {
+	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
+	storeDir := shortPresenceDelegateStoreDir(t)
+	lk, err := lock.Acquire(storeDir)
+	if err != nil {
+		t.Fatalf("lock store: %v", err)
+	}
+	defer lk.Release()
+
+	server := startPresenceDelegateTestSocket(t, storeDir, func(req sendDelegateRequest) sendDelegateResponse {
+		return sendDelegateResponse{
+			OK: true, Chat: "123@s.whatsapp.net", Action: "mark-unread",
+		}
+	})
+	defer server.stop()
+
+	stdout, stderr, err := runPresenceDelegateHelper(t, []string{
+		"--store", storeDir, "--json", "--timeout", "750ms",
+		"chats", "mark-unread", "--chat", "123@s.whatsapp.net",
+	})
+	if err != nil {
+		t.Fatalf("chats mark-unread failed: %v stdout=%q stderr=%q", err, stdout, stderr)
+	}
+
+	req := server.nextRequest(t)
+	if req.Version != sendDelegateVersion || req.Kind != "mark_read" {
+		t.Fatalf("delegate version/kind = %d/%q", req.Version, req.Kind)
+	}
+	if req.To != "123@s.whatsapp.net" || req.Read == nil || *req.Read {
+		t.Fatalf("delegate request = %+v", req)
+	}
+	if strings.Contains(stderr, "store is locked") {
+		t.Fatalf("delegated command tried the direct store path: stderr=%q", stderr)
+	}
+	for _, want := range []string{`"ok":true`, `"action":"mark-unread"`, `"chat":"123@s.whatsapp.net"`} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("stdout %q missing %s", stdout, want)
+		}
+	}
+}
