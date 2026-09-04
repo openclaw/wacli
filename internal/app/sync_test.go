@@ -558,10 +558,38 @@ func TestAppStateCallLogDeleteRemovesStoredCallEvent(t *testing.T) {
 	}
 }
 
-func TestAppStateLTHashMismatchRequestsRecoveryOnce(t *testing.T) {
+func TestAppStateLTHashMismatchAttemptsFullSyncFirst(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
 	a.wa = f
+
+	var recoveries sync.Map
+	err := fmt.Errorf("failed to verify patch v5848: %w", appstate.ErrMismatchingLTHash)
+	a.handleAppStateSyncError(context.Background(), &events.AppStateSyncError{
+		Name:  appstate.WAPatchRegularLow,
+		Error: err,
+	}, &recoveries)
+
+	waitForCondition(t, time.Second, func() bool {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		return len(f.appStateFetches) == 1
+	})
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if got := f.appStateFetches[0]; got.name != string(appstate.WAPatchRegularLow) || !got.fullSync {
+		t.Fatalf("unexpected fetch = %+v", got)
+	}
+	if len(f.appStateRecoveries) != 0 {
+		t.Fatalf("recovery requested when full sync succeeded: %v", f.appStateRecoveries)
+	}
+}
+
+func TestAppStateLTHashMismatchRequestsRecoveryWhenFullSyncFails(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+	f.appStateFetchErr = appstate.ErrMismatchingLTHash
 
 	var recoveries sync.Map
 	err := fmt.Errorf("failed to verify patch v5848: %w", appstate.ErrMismatchingLTHash)
