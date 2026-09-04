@@ -104,9 +104,12 @@ type ParsedMessage struct {
 
 func ParseLiveMessage(evt *events.Message) ParsedMessage {
 	msg := ParsedMessage{
-		Chat:      evt.Info.Chat,
-		ID:        evt.Info.ID,
-		Timestamp: evt.Info.Timestamp,
+		Chat: evt.Info.Chat,
+		ID:   evt.Info.ID,
+		// UTC, matching ParseHistoryMessage: this value is marshalled straight
+		// into webhook payloads, where the host's zone would otherwise decide
+		// the wire format. The instant is unchanged.
+		Timestamp: evt.Info.Timestamp.UTC(),
 		FromMe:    evt.Info.IsFromMe,
 		PushName:  evt.Info.PushName,
 	}

@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Sync: serialize webhook `Timestamp` as UTC for message and receipt payloads, so the wire format no longer follows the host's zone and matches the documented examples, the store, and CLI JSON output. (#386)
+
 - Messages: extract comment bodies and album summaries in live/history sync, preserving comment reply targets and matching quote metadata. (#383 - thanks @shishiv and @Entretoize)
 
 - CLI: keep successful JSON commands successful when a pipe reader closes early, including Unix stdout SIGPIPE and Windows closed-pipe errors. (#366 - thanks @SebTardif)
