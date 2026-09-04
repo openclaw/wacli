@@ -31,6 +31,10 @@ wacli messages forward --chat JID --id MSG_ID --to RECIPIENT [--pick N] [--post-
 - `--starred` restricts list/search results to messages marked as starred by WhatsApp.
 - Time filters accept RFC3339 or `YYYY-MM-DD`.
 
+## Media captions
+
+Plain audio messages have an empty `MediaCaption`. Their `Text` keeps the `[Audio]` display fallback, so they can still match searches for `Audio`. Text supplied alongside an audio payload remains its caption, including a literal `[Audio]` supplied by the sender. Existing rows are not migrated; an ordinary live or history re-ingestion can replace a legacy synthetic caption, subject to the existing edit and deletion rules.
+
 ## Starred
 
 - `messages starred` lists starred messages ordered by star time when app-state events provide it; history-imported rows fall back to message time.

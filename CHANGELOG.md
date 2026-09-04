@@ -10,6 +10,7 @@
 - Groups: warn on stderr when `groups list` truncates matching results, including JSON output, and keep `--events` warnings machine-readable. (#360 - thanks @hchittanuru3)
 - Sync: update whatsmeow so incoming socket frames use the active connection context.
 - History: retry an unanswered backfill anchor once with the next local message, report both anchors, and keep retries bounded without deleting history or filtering message IDs. (#371 - thanks @Entretoize)
+- Messages: omit synthetic audio captions while preserving supplied text and the `[Audio]` display fallback; ordinary re-ingestion can correct legacy captions without migrating untouched rows. (#378 - thanks @hchittanuru3)
 
 ### Chore
 
