@@ -300,6 +300,52 @@ func TestQRChannelEventError(t *testing.T) {
 	}
 }
 
+func TestWaitReconnectBackoffStopsTimerOnCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	timer := time.NewTimer(time.Hour)
+	defer timer.Stop()
+
+	err := waitReconnectBackoff(ctx, timer, time.Hour)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("waitReconnectBackoff err = %v, want context.Canceled", err)
+	}
+	if timer.Stop() {
+		t.Fatal("backoff timer still active after context cancel")
+	}
+}
+
+func TestReconnectWithBackoffHonorsContextCancelDuringBackoff(t *testing.T) {
+	c, err := New(Options{StorePath: filepath.Join(t.TempDir(), "session.db")})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer c.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- c.ReconnectWithBackoff(ctx, time.Hour, time.Hour, ConnectOptions{})
+	}()
+
+	select {
+	case err := <-done:
+		t.Fatalf("reconnect returned before cancel: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	cancel()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("reconnect err = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("reconnect did not return after context cancel")
+	}
+}
+
 func TestBestContactName(t *testing.T) {
 	if BestContactName(types.ContactInfo{Found: false, FullName: "x"}) != "" {
 		t.Fatalf("expected empty for not found")
