@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Media: point `media download` at `--read-only` when the store lock is held, and document that the read-only path takes no lock, so media can be fetched while `sync --follow` is running.
+
 - Messages: extract comment bodies and album summaries in live/history sync, preserving comment reply targets and matching quote metadata. (#383 - thanks @shishiv and @Entretoize)
 
 - CLI: keep successful JSON commands successful when a pipe reader closes early, including Unix stdout SIGPIPE and Windows closed-pipe errors. (#366 - thanks @SebTardif)
