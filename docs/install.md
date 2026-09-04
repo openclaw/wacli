@@ -61,6 +61,8 @@ GCC 15 has stricter brace-init warnings; the `-Wno-error=missing-braces` flag ke
 The Makefile is a thin wrapper over the existing pnpm scripts. `make build`
 writes `./dist/wacli`; `make check` runs the complete local CI gate.
 
+Repository development, CI, and Docker builds select Go 1.27.1 for its compiler, runtime, cgo, and standard-library fixes. The `toolchain` directive in `go.mod` selects that build version without raising the Go 1.27.0 source minimum; normal Go toolchain auto-selection downloads it when needed.
+
 ## Verify the install
 
 ```bash

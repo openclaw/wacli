@@ -34,7 +34,7 @@ fmt:
 
 lint:
 	GOWORK=off pnpm --silent lint
-	@test "$$(GOWORK=off go env GOVERSION)" = go1.27.0
+	@test "$$(GOWORK=off go env GOVERSION)" = go1.27.1
 	GOWORK=off pnpm --silent govulncheck:source
 	@set -e; \
 	output_file="$$(mktemp)"; \

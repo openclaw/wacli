@@ -11,6 +11,8 @@
 
 ### Chore
 
+- Builds: use Go 1.27.1 for development, CI, release verification, and Docker while retaining the Go 1.27.0 source minimum.
+
 - Dependencies: update whatsmeow, x/crypto, gqlparser, pnpm 11, and the Pages deployment action; keep Corepack bootstrap compatible with a verified integrity pin. (#384 - thanks @thedavidweng)
 - Dependencies: update Go modules, pnpm, CI actions, GoReleaser, and Docker images; require Go 1.27.0 and align local, CI, and release toolchain checks.
 

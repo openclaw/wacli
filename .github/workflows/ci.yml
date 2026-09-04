@@ -32,8 +32,8 @@ jobs:
       - name: pnpm lint
         run: pnpm lint
 
-      - name: Verify exact Go security floor
-        run: test "$(go env GOVERSION)" = "go1.27.0"
+      - name: Verify exact Go build toolchain
+        run: test "$(go env GOVERSION)" = "go1.27.1"
 
       - name: govulncheck source
         run: pnpm govulncheck:source

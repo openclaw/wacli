@@ -5,8 +5,10 @@ import { RELEASE_GO_TOOLCHAIN, RELEASE_GO_VERSION } from "./release-common.mjs";
 
 const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
 
-test("build and release gates use the Go version declared in go.mod", () => {
-  const version = read("go.mod").match(/^go (\S+)$/m)[1];
+test("build and release gates use the preferred Go toolchain without raising the source minimum", () => {
+  const module = read("go.mod");
+  assert.equal(module.match(/^go (\S+)$/m)[1], "1.27.0");
+  const version = module.match(/^toolchain go(\S+)$/m)[1];
   assert.equal(RELEASE_GO_VERSION, `go${version}`);
   assert.equal(RELEASE_GO_TOOLCHAIN, `go${version}`);
   assert.equal(read("Makefile").match(/GOVERSION\)" = (go\S+)/)[1], `go${version}`);

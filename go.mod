@@ -2,6 +2,8 @@ module github.com/openclaw/wacli
 
 go 1.27.0
 
+toolchain go1.27.1
+
 require (
 	github.com/mattn/go-sqlite3 v1.14.50
 	github.com/mdp/qrterminal/v3 v3.2.1
