@@ -11,6 +11,7 @@
 
 ### Chore
 
+- Dependencies: update whatsmeow, x/crypto, gqlparser, pnpm 11, and the Pages deployment action; keep Corepack bootstrap compatible with a verified integrity pin. (#384 - thanks @thedavidweng)
 - Dependencies: update Go modules, pnpm, CI actions, GoReleaser, and Docker images; require Go 1.27.0 and align local, CI, and release toolchain checks.
 
 ## v0.17.1 - 2026-08-14

@@ -15,7 +15,10 @@ test("build and release gates use the Go version declared in go.mod", () => {
 });
 
 test("pnpm setup uses the package manifest and hydration pins the same version", () => {
-  const version = JSON.parse(read("package.json")).packageManager.match(/^pnpm@([^+]+)/)[1];
+  const { packageManager } = JSON.parse(read("package.json"));
+  assert.match(packageManager, /^pnpm@\d+\.\d+\.\d+\+sha512\.[a-f0-9]{128}$/,
+    "Corepack requires the complete pin to use a hexadecimal integrity digest");
+  const version = packageManager.match(/^pnpm@([^+]+)/)[1];
   const setup = read(".github/actions/setup-ci-env/action.yml");
   assert.match(setup, /uses: pnpm\/action-setup@/);
   assert.doesNotMatch(setup, /corepack (enable|prepare)/);
