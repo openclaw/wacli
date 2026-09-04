@@ -529,6 +529,11 @@ func (a *App) handleLiveSyncMessage(ctx context.Context, opts SyncOptions, v *ev
 	if historySyncNotificationFromMessage(v) != nil {
 		return
 	}
+	var ok bool
+	v, ok = a.decryptSecretEdit(ctx, v)
+	if !ok {
+		return
+	}
 	pm := wa.ParseLiveMessage(v)
 	if pm.ReactionToID != "" && pm.ReactionEmoji == "" && v.Message != nil && v.Message.GetEncReactionMessage() != nil {
 		a.decryptEncryptedReaction(ctx, &pm, v)
@@ -647,6 +652,22 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 			pm := wa.ParseHistoryMessage(chatID, m.Message)
 			if pm.ID == "" || pm.Chat.IsEmpty() {
 				continue
+			}
+			if isSecretEdit(m.Message.GetMessage()) {
+				evt, err := a.wa.ParseWebMessage(pm.Chat, m.Message)
+				if err != nil {
+					a.emitWarning(
+						"encrypted_edit_parse_failed",
+						fmt.Sprintf("warning: failed to parse encrypted edit %s: %v", pm.ID, err),
+						map[string]any{"message_id": pm.ID, "error": err.Error()},
+					)
+					continue
+				}
+				evt, ok := a.decryptSecretEdit(ctx, evt)
+				if !ok {
+					continue
+				}
+				pm = wa.ParseLiveMessage(evt)
 			}
 			var pollEvt *events.Message
 			if normalized, evt, ok := a.normalizeHistoryPollMessage(pm, m.Message); ok {
@@ -802,6 +823,56 @@ func (a *App) decryptEncryptedReaction(ctx context.Context, pm *wa.ParsedMessage
 			pm.ReactionToID = key.GetID()
 		}
 	}
+}
+
+func isSecretEdit(msg *waE2E.Message) bool {
+	return msg != nil &&
+		msg.GetSecretEncryptedMessage().GetSecretEncType() == waE2E.SecretEncryptedMessage_MESSAGE_EDIT
+}
+
+func (a *App) decryptSecretEdit(ctx context.Context, evt *events.Message) (*events.Message, bool) {
+	if evt == nil || !isSecretEdit(evt.Message) {
+		return evt, true
+	}
+	messageID := evt.Info.ID
+	secret := evt.Message.GetSecretEncryptedMessage()
+	target := secret.GetTargetMessageKey()
+	if strings.TrimSpace(target.GetID()) == "" {
+		a.emitWarning(
+			"encrypted_edit_invalid_target",
+			fmt.Sprintf("warning: encrypted edit %s has no target message ID", messageID),
+			map[string]any{"message_id": messageID},
+		)
+		return nil, false
+	}
+	decrypted, err := a.wa.DecryptSecretEncryptedMessage(ctx, evt)
+	if err != nil {
+		a.emitWarning(
+			"encrypted_edit_decrypt_failed",
+			fmt.Sprintf("warning: failed to decrypt message edit %s: %v", messageID, err),
+			map[string]any{"message_id": messageID, "error": err.Error()},
+		)
+		return nil, false
+	}
+	protocol := decrypted.GetProtocolMessage()
+	if protocol.GetType() != waE2E.ProtocolMessage_MESSAGE_EDIT || protocol.GetEditedMessage() == nil {
+		a.emitWarning(
+			"encrypted_edit_invalid_payload",
+			fmt.Sprintf("warning: encrypted edit %s decrypted to an unexpected payload", messageID),
+			map[string]any{"message_id": messageID},
+		)
+		return nil, false
+	}
+	if decryptedTarget := strings.TrimSpace(protocol.GetKey().GetID()); decryptedTarget != "" && decryptedTarget != target.GetID() {
+		a.emitWarning(
+			"encrypted_edit_target_mismatch",
+			fmt.Sprintf("warning: encrypted edit %s target does not match decrypted payload", messageID),
+			map[string]any{"message_id": messageID},
+		)
+		return nil, false
+	}
+	protocol.Key = target
+	return &events.Message{Info: evt.Info, Message: decrypted}, true
 }
 
 // sendPresence sends a global presence update if the WhatsApp client is ready.
