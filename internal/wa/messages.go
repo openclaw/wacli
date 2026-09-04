@@ -222,10 +222,20 @@ func extractWAProto(m *waProto.Message, pm *ParsedMessage) *waProto.Message {
 		return m
 	}
 	if comment := m.GetCommentMessage(); comment.GetMessage() != nil {
-		if target := comment.GetTargetMessageKey(); target != nil && pm.ReplyToID == "" {
-			pm.ReplyToID = target.GetID()
+		leaf := extractWAProto(comment.GetMessage(), pm)
+		if target := comment.GetTargetMessageKey(); strings.TrimSpace(target.GetID()) != "" {
+			id := strings.TrimSpace(target.GetID())
+			if pm.ReplyToID != id {
+				// Inner quoted content describes a different target.
+				pm.ReplyToSenderJID = ""
+				pm.ReplyToDisplay = ""
+			}
+			pm.ReplyToID = id
+			if sender := strings.TrimSpace(target.GetParticipant()); sender != "" {
+				pm.ReplyToSenderJID = sender
+			}
 		}
-		return extractWAProto(comment.GetMessage(), pm)
+		return leaf
 	}
 	extractReaction(m, pm)
 	extractPlainText(m, pm)

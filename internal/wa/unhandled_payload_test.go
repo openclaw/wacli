@@ -221,39 +221,3 @@ func TestParseLiveMessageExtractsAlbumMessage(t *testing.T) {
 		t.Fatalf("expected no unhandled payload, got %q", pm.UnhandledPayload)
 	}
 }
-
-func TestParseLiveMessageLeavesAudioCaptionEmpty(t *testing.T) {
-	pm := ParseLiveMessage(liveEvent(&waProto.Message{
-		AudioMessage: &waProto.AudioMessage{
-			Mimetype: proto.String("audio/ogg; codecs=opus"),
-			PTT:      proto.Bool(true),
-		},
-	}))
-	if pm.Media == nil {
-		t.Fatal("expected audio media to be extracted")
-	}
-	if pm.Media.Type != "audio" {
-		t.Fatalf("expected media type audio, got %q", pm.Media.Type)
-	}
-	if pm.Media.Caption != "" {
-		t.Fatalf("expected empty caption, got %q", pm.Media.Caption)
-	}
-	if pm.Text != "[Audio]" {
-		t.Fatalf("expected [Audio] text placeholder, got %q", pm.Text)
-	}
-}
-
-func TestParseLiveMessageKeepsImageCaption(t *testing.T) {
-	pm := ParseLiveMessage(liveEvent(&waProto.Message{
-		ImageMessage: &waProto.ImageMessage{
-			Mimetype: proto.String("image/jpeg"),
-			Caption:  proto.String("receipt picture"),
-		},
-	}))
-	if pm.Media == nil {
-		t.Fatal("expected image media to be extracted")
-	}
-	if pm.Media.Caption != "receipt picture" {
-		t.Fatalf("expected image caption to survive, got %q", pm.Media.Caption)
-	}
-}

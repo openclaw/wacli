@@ -71,11 +71,6 @@ func contextInfoForMessage(m *waProto.Message) *waProto.ContextInfo {
 	if alb := m.GetAlbumMessage(); alb != nil {
 		return alb.GetContextInfo()
 	}
-	if cmt := m.GetCommentMessage(); cmt != nil {
-		if inner := cmt.GetMessage(); inner != nil {
-			return contextInfoForMessage(inner)
-		}
-	}
 	return nil
 }
 
