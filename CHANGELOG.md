@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.17.2 - 2026-09-05
 
 **Highlights:** more complete searchable message history, bounded backfill retries, and clearer guidance for commands used alongside continuous sync.
 
