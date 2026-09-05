@@ -4,6 +4,8 @@ Read when: running continuous capture, one-shot sync, contact/group refresh, or 
 
 `wacli sync` requires an existing authenticated store and never displays a QR code. It captures WhatsApp Web events into the local SQLite store.
 
+If WhatsApp revokes the linked session while sync is running, the command exits nonzero. JSON mode emits the normal failure envelope instead of a successful `synced: true` result. Idle exit and an operator interrupt remain successful stops.
+
 ## Command
 
 ```bash

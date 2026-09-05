@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Sync: return a nonzero terminal error when WhatsApp revokes the session, persist the revoked state for honest auth/doctor output, and expose `newest_message_at` as the accurate name for the backward-compatible `last_sync_at` message timestamp.
+
 - Messages: extract comment bodies and album summaries in live/history sync, preserving comment reply targets and matching quote metadata. (#383 - thanks @shishiv and @Entretoize)
 
 - CLI: keep successful JSON commands successful when a pipe reader closes early, including Unix stdout SIGPIPE and Windows closed-pipe errors. (#366 - thanks @SebTardif)

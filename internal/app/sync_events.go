@@ -130,6 +130,13 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 				}
 			}
 		case *events.Connected:
+			if err := ClearSessionRevoked(a.opts.StoreDir); err != nil {
+				a.emitWarning(
+					"session_revoked_marker_clear_failed",
+					fmt.Sprintf("warning: failed to clear session revoked marker: %v", err),
+					map[string]any{"error": err.Error()},
+				)
+			}
 			a.emitOrPrint("connected", nil, "\nConnected.\n")
 			ps.mu.Lock()
 			if !ps.cleanupStarted && opts.PresenceMode.SendsAvailablePresence() {
@@ -166,6 +173,13 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 			// or a logout/ban). whatsmeow reconnects on Disconnected, so without
 			// this the follow loop spins forever against a dead session. Surface
 			// the logout and signal the loop to stop instead of reconnecting.
+			if err := MarkSessionRevoked(a.opts.StoreDir, v.Reason.String()); err != nil {
+				a.emitWarning(
+					"session_revoked_marker_write_failed",
+					fmt.Sprintf("warning: failed to record revoked session state: %v", err),
+					map[string]any{"error": err.Error()},
+				)
+			}
 			a.emitOrPrint("logged_out", map[string]any{
 				"reason":      v.Reason.String(),
 				"reason_code": int(v.Reason),

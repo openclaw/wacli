@@ -9,6 +9,18 @@ import (
 	"github.com/openclaw/wacli/internal/wa"
 )
 
+// SyncTerminalError reports a terminal remote condition that ended sync. It is
+// distinct from a successful idle exit or an operator-requested cancellation.
+type SyncTerminalError struct {
+	Reason string
+}
+
+func (e *SyncTerminalError) Error() string {
+	return fmt.Sprintf("sync stopped: WhatsApp session %s", e.Reason)
+}
+
+var ErrSyncLoggedOut = &SyncTerminalError{Reason: "logged out"}
+
 // loggedOutPending does a non-blocking receive on the terminal logout signal.
 // A revocation delivers Disconnected and LoggedOut back to back, and with both
 // buffered channels ready select picks a branch at random — so every reconnect
@@ -30,7 +42,7 @@ func (a *App) stopLoggedOut(messagesStored *atomic.Int64) (SyncResult, error) {
 		"messages_synced": messagesStored.Load(),
 		"reason":          "logged_out",
 	}, "\nStopping sync (logged out).\n")
-	return SyncResult{MessagesStored: messagesStored.Load()}, nil
+	return SyncResult{MessagesStored: messagesStored.Load()}, ErrSyncLoggedOut
 }
 
 func (a *App) runSyncFollow(ctx context.Context, maxReconnect time.Duration, presenceMode SyncPresenceMode, messagesStored, connectionEpoch *atomic.Int64, disconnected <-chan struct{}, loggedOut <-chan struct{}, staleReconnect <-chan staleReconnectRequest) (SyncResult, error) {
