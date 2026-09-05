@@ -14,7 +14,7 @@ import (
 )
 
 func TestReadContactsCommand(t *testing.T) {
-	for _, mode := range []string{"boundary", "oversized", "denied", "stderr", "invalid"} {
+	for _, mode := range []string{"boundary", "oversized", "descendant", "denied", "stderr", "invalid"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
@@ -29,7 +29,7 @@ func TestReadContactsCommand(t *testing.T) {
 				if err != nil || len(contacts) != 1 || contacts[0].Name() != "Alice" {
 					t.Fatalf("10 MiB helper: contacts=%v err=%v", contacts, err)
 				}
-			case "oversized":
+			case "oversized", "descendant":
 				if err == nil || !strings.Contains(err.Error(), "contacts export too large") {
 					t.Fatalf("oversized helper error = %v", err)
 				}
@@ -56,6 +56,13 @@ func TestContactsHelperProcess(t *testing.T) {
 		return
 	}
 	switch mode {
+	case "descendant":
+		child := exec.Command(os.Args[0], "-test.run=^TestContactsHelperProcess$")
+		child.Env = append(os.Environ(), "WACLI_TEST_CONTACTS_HELPER=oversized")
+		child.Stdout, child.Stderr = os.Stdout, os.Stderr
+		if err := child.Run(); err != nil {
+			os.Exit(1)
+		}
 	case "boundary":
 		const contact = `[{"full_name":"Alice","phones":["+15551234567"]}]`
 		_, _ = fmt.Fprint(os.Stdout, contact)

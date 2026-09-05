@@ -24,18 +24,18 @@ help:
 		'  verify-release  Verify existing release artifacts.'
 
 build:
-	GOWORK=off pnpm -s build
+	GOWORK=off pnpm --silent build
 
 test:
-	GOWORK=off pnpm -s test
+	GOWORK=off pnpm --silent test
 
 fmt:
-	GOWORK=off pnpm -s format:check
+	GOWORK=off pnpm --silent format:check
 
 lint:
-	GOWORK=off pnpm -s lint
-	@test "$$(GOWORK=off go env GOVERSION)" = go1.27.0
-	GOWORK=off pnpm -s govulncheck:source
+	GOWORK=off pnpm --silent lint
+	@test "$$(GOWORK=off go env GOVERSION)" = go1.27.1
+	GOWORK=off pnpm --silent govulncheck:source
 	@set -e; \
 	output_file="$$(mktemp)"; \
 	trap 'rm -f "$$output_file"' EXIT; \

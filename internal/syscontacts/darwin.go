@@ -6,10 +6,13 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
+	"time"
 
 	"github.com/openclaw/wacli/internal/fsutil"
 )
@@ -33,6 +36,12 @@ func ReadSystem(ctx context.Context) ([]Contact, error) {
 }
 
 func readContactsCommand(cmd *exec.Cmd) ([]Contact, error) {
+	// Swift can spawn a compiler or script child that inherits its output pipes.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if cmd.Cancel != nil {
+		cmd.Cancel = func() error { return stopContactsCommand(cmd) }
+	}
+	cmd.WaitDelay = 2 * time.Second
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("open swift Contacts helper output: %w", err)
@@ -47,7 +56,8 @@ func readContactsCommand(cmd *exec.Cmd) ([]Contact, error) {
 	raw, readErr := readContactsExport(stdout)
 	if readErr != nil {
 		// Stop the producer at the byte budget before waiting for it.
-		_ = cmd.Process.Kill()
+		_ = stdout.Close()
+		_ = stopContactsCommand(cmd)
 	}
 	err = cmd.Wait()
 	if readErr != nil {
@@ -60,6 +70,14 @@ func readContactsCommand(cmd *exec.Cmd) ([]Contact, error) {
 		return nil, fmt.Errorf("run swift Contacts helper: %w", err)
 	}
 	return Decode(bytes.NewReader(raw))
+}
+
+func stopContactsCommand(cmd *exec.Cmd) error {
+	err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	if errors.Is(err, syscall.ESRCH) {
+		return os.ErrProcessDone
+	}
+	return err
 }
 
 type contactsStderr struct{ buffer bytes.Buffer }

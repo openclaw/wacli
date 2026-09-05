@@ -68,6 +68,9 @@ func contextInfoForMessage(m *waProto.Message) *waProto.ContextInfo {
 	if creation := pickPollCreation(m); creation != nil {
 		return creation.GetContextInfo()
 	}
+	if alb := m.GetAlbumMessage(); alb != nil {
+		return alb.GetContextInfo()
+	}
 	return nil
 }
 

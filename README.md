@@ -104,7 +104,7 @@ See [accounts](docs/accounts.md) for store selection and [sync](docs/sync.md) fo
 
 ## Development
 
-Development requires Go 1.27.0, Node.js 24 or newer, pnpm, cgo, and a C compiler.
+Development uses the Go 1.27.1 toolchain selected by `go.mod`, Node.js 24 or newer, pnpm, cgo, and a C compiler. The source minimum remains Go 1.27.0.
 
 ```sh
 pnpm install --frozen-lockfile
