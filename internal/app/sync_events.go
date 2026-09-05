@@ -129,6 +129,20 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 					enqueueWebhook(job)
 				}
 			}
+		case *events.OfflineSyncPreview:
+			// Emitted right after connecting when the server is about to send
+			// what this device missed while it was down.
+			a.emitOrPrint("offline_sync_preview", map[string]any{
+				"total":            v.Total,
+				"messages":         v.Messages,
+				"receipts":         v.Receipts,
+				"notifications":    v.Notifications,
+				"app_data_changes": v.AppDataChanges,
+			}, "\nReplaying offline backlog: %d message(s), %d event(s) total.\n", v.Messages, v.Total)
+		case *events.OfflineSyncCompleted:
+			a.emitOrPrint("offline_sync_completed", map[string]any{
+				"count": v.Count,
+			}, "\nOffline backlog replayed (%d event(s)).\n", v.Count)
 		case *events.Connected:
 			a.emitOrPrint("connected", nil, "\nConnected.\n")
 			ps.mu.Lock()

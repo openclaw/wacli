@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Sync: report the offline backlog a reconnect replays with `offline_sync_preview` and `offline_sync_completed` lifecycle events, so a consumer can tell a replayed backlog from live traffic. Webhook payloads are unchanged.
+
 ### Fixed
 
 - Messages: extract comment bodies and album summaries in live/history sync, preserving comment reply targets and matching quote metadata. (#383 - thanks @shishiv and @Entretoize)
