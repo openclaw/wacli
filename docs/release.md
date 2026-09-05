@@ -19,7 +19,7 @@ wacli uses the fleet-standard reusable Go CLI workflow from `openclaw/release-wo
 ## Dispatch
 
 ```bash
-gh workflow run release.yml --repo openclaw/wacli --ref main -f version=0.15.1
+gh workflow run release.yml --repo openclaw/wacli --ref main -f version=0.17.2
 ```
 
 Watch the exact run through completion. A successful run is not sufficient on its own: verify the public release is non-draft and non-prerelease, its tag peels to the frozen protected-main commit, every expected asset is present, `checksums.txt` validates the downloaded assets, both native macOS verifier jobs passed, the Homebrew update run succeeded, and the closeout PR was opened.
