@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Sync: report the offline backlog a reconnect replays with `offline_sync_preview` and `offline_sync_completed` lifecycle events, so a consumer can tell a replayed backlog from live traffic. Webhook payloads are unchanged.
+
 ### Fixed
 
 - Contacts: bound system-contact exports while reading the macOS helper, preserving the existing 10 MiB file-import limit. (#376 - thanks @SebTardif)
