@@ -289,6 +289,13 @@ func (a *App) connectForSync(ctx context.Context, opts SyncOptions) error {
 	for attempt := 1; attempt <= attempts; attempt++ {
 		err := a.wa.Connect(ctx, connectOpts)
 		if err == nil {
+			if clearErr := ClearSessionRevoked(a.opts.StoreDir); clearErr != nil {
+				a.emitWarning(
+					"session_revoked_marker_clear_failed",
+					fmt.Sprintf("warning: failed to clear session revoked marker: %v", clearErr),
+					map[string]any{"error": clearErr.Error()},
+				)
+			}
 			return nil
 		}
 		if attempt == attempts || ctx.Err() != nil || !isRetryableAuthConnectError(err) {

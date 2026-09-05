@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	appPkg "github.com/openclaw/wacli/internal/app"
 )
 
 func TestAuthStatusPayloadIncludesLinkedJID(t *testing.T) {
@@ -105,6 +107,34 @@ func TestReadOnlyAuthStatusNormalizesDeviceJID(t *testing.T) {
 		t.Fatalf("clean session read-only URI must avoid creating WAL sidecars")
 	}
 	assertNoAuthSQLiteSidecars(t, filepath.Join(storeDir, "session.db"))
+}
+
+func TestReadOnlyAuthStatusRejectsRevokedSessionMarker(t *testing.T) {
+	storeDir := t.TempDir()
+	db, err := sql.Open("sqlite3", filepath.Join(storeDir, "session.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE whatsmeow_device (jid TEXT)`); err != nil {
+		t.Fatalf("Create table: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO whatsmeow_device (jid) VALUES (?)`, "15551234567@s.whatsapp.net"); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := appPkg.MarkSessionRevoked(storeDir, "logged_out"); err != nil {
+		t.Fatalf("MarkSessionRevoked: %v", err)
+	}
+
+	authed, linkedJID, err := readOnlyAuthStatus(storeDir)
+	if err != nil {
+		t.Fatalf("readOnlyAuthStatus: %v", err)
+	}
+	if authed || linkedJID != "" {
+		t.Fatalf("status = %v, %q; want revoked session to be unauthenticated", authed, linkedJID)
+	}
 }
 
 func TestReadOnlyAuthStatusReadsLiveWALSidecars(t *testing.T) {
