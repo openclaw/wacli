@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Contacts: bound system-contact exports while reading the macOS helper, preserving the existing 10 MiB file-import limit. (#376 - thanks @SebTardif)
 - CLI: keep successful JSON commands successful when a pipe reader closes early, including Unix stdout SIGPIPE and Windows closed-pipe errors. (#366 - thanks @SebTardif)
 - Groups: warn on stderr when `groups list` truncates matching results, including JSON output, and keep `--events` warnings machine-readable. (#360 - thanks @hchittanuru3)
 - Sync: update whatsmeow so incoming socket frames use the active connection context.

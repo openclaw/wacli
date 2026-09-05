@@ -49,6 +49,15 @@ func TestDecodeRejectsOversizeStream(t *testing.T) {
 	}
 }
 
+func TestDecodeAcceptsFullImportBudget(t *testing.T) {
+	const contact = `[{"full_name":"Alice","phones":["+15551234567"]}]`
+	input := contact + strings.Repeat(" ", MaxContactsDecodeBytes-len(contact))
+	contacts, err := Decode(strings.NewReader(input))
+	if err != nil || len(contacts) != 1 || contacts[0].Name() != "Alice" {
+		t.Fatalf("Decode at 10 MiB boundary: contacts=%v err=%v", contacts, err)
+	}
+}
+
 type repeatReader struct{ ch byte }
 
 func (r repeatReader) Read(p []byte) (int, error) {

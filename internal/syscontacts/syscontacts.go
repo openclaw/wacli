@@ -9,7 +9,7 @@ import (
 	"unicode"
 )
 
-const MaxContactsDecodeBytes = 8 << 20
+const MaxContactsDecodeBytes = 10 << 20
 
 type Contact struct {
 	FirstName string   `json:"first_name"`
@@ -25,13 +25,21 @@ func (c Contact) Name() string {
 	return strings.TrimSpace(strings.Join([]string{c.FirstName, c.LastName}, " "))
 }
 
-func Decode(r io.Reader) ([]Contact, error) {
+func readContactsExport(r io.Reader) ([]byte, error) {
 	raw, err := io.ReadAll(io.LimitReader(r, int64(MaxContactsDecodeBytes)+1))
 	if err != nil {
 		return nil, err
 	}
 	if len(raw) > MaxContactsDecodeBytes {
 		return nil, fmt.Errorf("contacts export too large; maximum size is %d bytes", MaxContactsDecodeBytes)
+	}
+	return raw, nil
+}
+
+func Decode(r io.Reader) ([]Contact, error) {
+	raw, err := readContactsExport(r)
+	if err != nil {
+		return nil, err
 	}
 	trimmed := strings.TrimSpace(string(raw))
 	if trimmed == "" {

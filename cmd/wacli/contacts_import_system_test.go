@@ -1,14 +1,36 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/openclaw/wacli/internal/fsutil"
 	"github.com/openclaw/wacli/internal/store"
 )
+
+func TestReadSystemContactsPreservesTenMiBInputLimit(t *testing.T) {
+	input := filepath.Join(t.TempDir(), "contacts.json")
+	const contact = `[{"full_name":"Alice","phones":["+15551234567"]}]`
+	data := contact + strings.Repeat(" ", 10*1024*1024-len(contact))
+	if err := os.WriteFile(input, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	contacts, err := readSystemContacts(context.Background(), input)
+	if err != nil || len(contacts) != 1 {
+		t.Fatalf("10 MiB import: contacts=%v err=%v", contacts, err)
+	}
+	if err := os.WriteFile(input, []byte(data+" "), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readSystemContacts(context.Background(), input); err == nil {
+		t.Fatal("expected oversized file to be rejected")
+	}
+}
 
 func TestContactsImportSystemFromInputDryRunDoesNotWrite(t *testing.T) {
 	storeDir, input := seedSystemImportStore(t)
