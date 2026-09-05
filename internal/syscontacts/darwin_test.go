@@ -4,6 +4,7 @@ package syscontacts
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,7 +15,7 @@ import (
 )
 
 func TestReadContactsCommand(t *testing.T) {
-	for _, mode := range []string{"boundary", "oversized", "descendant", "denied", "stderr", "invalid"} {
+	for _, mode := range []string{"boundary", "oversized", "descendant", "inherited", "denied", "stderr", "invalid"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
@@ -37,6 +38,10 @@ func TestReadContactsCommand(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), "Contacts access denied") {
 					t.Fatalf("helper diagnostic lost: %v", err)
 				}
+			case "inherited":
+				if !errors.Is(err, exec.ErrWaitDelay) {
+					t.Fatalf("inherited pipe error = %v, want WaitDelay", err)
+				}
 			case "stderr":
 				if err == nil || len(err.Error()) > (64<<10)+100 {
 					t.Fatal("helper stderr was not bounded")
@@ -56,6 +61,16 @@ func TestContactsHelperProcess(t *testing.T) {
 		return
 	}
 	switch mode {
+	case "inherited":
+		child := exec.Command(os.Args[0], "-test.run=^TestContactsHelperProcess$")
+		child.Env = append(os.Environ(), "WACLI_TEST_CONTACTS_HELPER=hold")
+		child.Stdout, child.Stderr = os.Stdout, os.Stderr
+		if err := child.Start(); err != nil {
+			os.Exit(1)
+		}
+	case "hold":
+		_, _ = fmt.Fprint(os.Stdout, "[]")
+		time.Sleep(time.Minute)
 	case "descendant":
 		child := exec.Command(os.Args[0], "-test.run=^TestContactsHelperProcess$")
 		child.Env = append(os.Environ(), "WACLI_TEST_CONTACTS_HELPER=oversized")

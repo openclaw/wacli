@@ -11,6 +11,8 @@ import (
 
 const MaxContactsDecodeBytes = 10 << 20
 
+var errContactsExportTooLarge = fmt.Errorf("contacts export too large; maximum size is %d bytes", MaxContactsDecodeBytes)
+
 type Contact struct {
 	FirstName string   `json:"first_name"`
 	LastName  string   `json:"last_name"`
@@ -25,21 +27,13 @@ func (c Contact) Name() string {
 	return strings.TrimSpace(strings.Join([]string{c.FirstName, c.LastName}, " "))
 }
 
-func readContactsExport(r io.Reader) ([]byte, error) {
+func Decode(r io.Reader) ([]Contact, error) {
 	raw, err := io.ReadAll(io.LimitReader(r, int64(MaxContactsDecodeBytes)+1))
 	if err != nil {
 		return nil, err
 	}
 	if len(raw) > MaxContactsDecodeBytes {
-		return nil, fmt.Errorf("contacts export too large; maximum size is %d bytes", MaxContactsDecodeBytes)
-	}
-	return raw, nil
-}
-
-func Decode(r io.Reader) ([]Contact, error) {
-	raw, err := readContactsExport(r)
-	if err != nil {
-		return nil, err
+		return nil, errContactsExportTooLarge
 	}
 	trimmed := strings.TrimSpace(string(raw))
 	if trimmed == "" {

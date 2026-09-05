@@ -42,34 +42,24 @@ func readContactsCommand(cmd *exec.Cmd) ([]Contact, error) {
 		cmd.Cancel = func() error { return stopContactsCommand(cmd) }
 	}
 	cmd.WaitDelay = 2 * time.Second
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("open swift Contacts helper output: %w", err)
-	}
-	// Output normally bounds captured stderr; retain that bound when streaming stdout.
+	// Let exec own both pipe readers so WaitDelay also covers inherited stdout.
+	stdout := &contactsStdout{cmd: cmd}
 	stderr := &contactsStderr{}
-	cmd.Stderr = stderr
-	if err := cmd.Start(); err != nil {
-		_ = stdout.Close()
-		return nil, fmt.Errorf("run swift Contacts helper: %w", err)
-	}
-	raw, readErr := readContactsExport(stdout)
-	if readErr != nil {
-		// Stop the producer at the byte budget before waiting for it.
-		_ = stdout.Close()
-		_ = stopContactsCommand(cmd)
-	}
-	err = cmd.Wait()
-	if readErr != nil {
-		return nil, readErr
-	}
+	cmd.Stdout, cmd.Stderr = stdout, stderr
+	err := cmd.Run()
 	if err != nil {
+		if cmd.Process != nil {
+			_ = stopContactsCommand(cmd)
+		}
+		if stdout.err != nil {
+			return nil, stdout.err
+		}
 		if _, ok := err.(*exec.ExitError); ok {
 			return nil, fmt.Errorf("read macOS Contacts: %s", stderr.String())
 		}
 		return nil, fmt.Errorf("run swift Contacts helper: %w", err)
 	}
-	return Decode(bytes.NewReader(raw))
+	return Decode(bytes.NewReader(stdout.buffer.Bytes()))
 }
 
 func stopContactsCommand(cmd *exec.Cmd) error {
@@ -81,6 +71,21 @@ func stopContactsCommand(cmd *exec.Cmd) error {
 }
 
 type contactsStderr struct{ buffer bytes.Buffer }
+
+type contactsStdout struct {
+	buffer bytes.Buffer
+	cmd    *exec.Cmd
+	err    error
+}
+
+func (b *contactsStdout) Write(p []byte) (int, error) {
+	if len(p) > MaxContactsDecodeBytes-b.buffer.Len() {
+		b.err = errContactsExportTooLarge
+		_ = stopContactsCommand(b.cmd)
+		return 0, b.err
+	}
+	return b.buffer.Write(p)
+}
 
 func (b *contactsStderr) String() string { return b.buffer.String() }
 
