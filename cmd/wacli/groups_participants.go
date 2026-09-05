@@ -17,10 +17,54 @@ func newGroupsParticipantsCmd(flags *rootFlags) *cobra.Command {
 		Use:   "participants",
 		Short: "Manage group participants",
 	}
+	cmd.AddCommand(newGroupsParticipantsListCmd(flags))
 	cmd.AddCommand(newGroupsParticipantsActionCmd(flags, "add"))
 	cmd.AddCommand(newGroupsParticipantsActionCmd(flags, "remove"))
 	cmd.AddCommand(newGroupsParticipantsActionCmd(flags, "promote"))
 	cmd.AddCommand(newGroupsParticipantsActionCmd(flags, "demote"))
+	return cmd
+}
+
+func newGroupsParticipantsListCmd(flags *rootFlags) *cobra.Command {
+	var group string
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List participants of a group (from local DB)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if strings.TrimSpace(group) == "" {
+				return fmt.Errorf("--jid is required")
+			}
+			ctx, cancel := withTimeout(context.Background(), flags)
+			defer cancel()
+
+			a, lk, err := newApp(ctx, flags, false, false)
+			if err != nil {
+				return err
+			}
+			defer closeApp(a, lk)
+
+			participants, err := a.DB().ListGroupParticipants(group)
+			if err != nil {
+				return err
+			}
+
+			if flags.asJSON {
+				return out.WriteJSON(os.Stdout, participants)
+			}
+
+			w := newTableWriter(os.Stdout)
+			fmt.Fprintln(w, "USER JID\tROLE\tUPDATED")
+			for _, p := range participants {
+				updated := "-"
+				if !p.UpdatedAt.IsZero() {
+					updated = p.UpdatedAt.Local().Format("2006-01-02 15:04:05")
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\n", p.UserJID, p.Role, updated)
+			}
+			return w.Flush()
+		},
+	}
+	cmd.Flags().StringVar(&group, "jid", "", "group JID (…@g.us)")
 	return cmd
 }
 
