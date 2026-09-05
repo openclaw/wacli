@@ -14,6 +14,8 @@
 
 ### Chore
 
+- Dependencies: update SQLite, WhatsApp transport, SQL tooling, protobuf APIs, pnpm 12.3.1, and its setup action while retaining the Go and Node source minimums.
+
 - Builds: use Go 1.27.1 for development, CI, release verification, and Docker while retaining the Go 1.27.0 source minimum.
 
 - Dependencies: update whatsmeow, x/crypto, gqlparser, pnpm 11, and the Pages deployment action; keep Corepack bootstrap compatible with a verified integrity pin. (#384 - thanks @thedavidweng)
