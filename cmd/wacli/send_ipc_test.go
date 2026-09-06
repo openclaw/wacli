@@ -5,12 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/openclaw/wacli/internal/app"
 	"github.com/openclaw/wacli/internal/fsutil"
 	"github.com/openclaw/wacli/internal/lock"
+	"github.com/openclaw/wacli/internal/store"
+	"go.mau.fi/whatsmeow/types"
 )
 
 func TestTryDelegateSendFallsBackWhenSocketUnavailable(t *testing.T) {
@@ -259,5 +263,163 @@ func TestExecuteDelegatedSendAcceptsEditKind(t *testing.T) {
 	})
 	if err != nil && strings.Contains(err.Error(), "unsupported send kind") {
 		t.Fatalf("edit rejected as unsupported kind: %v", err)
+	}
+}
+
+func TestSendDelegateRequestPreservesMarkReadInJSON(t *testing.T) {
+	read := true
+	raw, err := json.Marshal(sendDelegateRequest{
+		Version: sendDelegateVersion,
+		Kind:    "mark_read",
+		To:      "123@s.whatsapp.net",
+		Read:    &read,
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), `"read":true`) {
+		t.Fatalf("encoded request missing read flag: %s", raw)
+	}
+
+	var got sendDelegateRequest
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if got.Kind != "mark_read" {
+		t.Fatalf("Kind = %q, want mark_read", got.Kind)
+	}
+	if got.Read == nil || !*got.Read {
+		t.Fatalf("Read = %v, want true", got.Read)
+	}
+
+	unread := false
+	rawUnread, err := json.Marshal(sendDelegateRequest{
+		Version: sendDelegateVersion,
+		Kind:    "mark_read",
+		To:      "123@s.whatsapp.net",
+		Read:    &unread,
+	})
+	if err != nil {
+		t.Fatalf("Marshal unread: %v", err)
+	}
+	var gotUnread sendDelegateRequest
+	if err := json.Unmarshal(rawUnread, &gotUnread); err != nil {
+		t.Fatalf("Unmarshal unread: %v", err)
+	}
+	if gotUnread.Read == nil || *gotUnread.Read {
+		t.Fatalf("Read = %v, want false", gotUnread.Read)
+	}
+}
+
+func TestExecuteDelegatedSendRoutesMarkRead(t *testing.T) {
+	a, err := app.New(app.Options{StoreDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("new app: %v", err)
+	}
+	t.Cleanup(a.Close)
+
+	_, err = executeDelegatedSend(context.Background(), a, sendDelegateRequest{
+		Version: sendDelegateVersion,
+		Kind:    "mark_read",
+	})
+	if err == nil || !strings.Contains(err.Error(), "--to is required") {
+		t.Fatalf("error = %v, want mark-read recipient validation", err)
+	}
+}
+
+type delegatedMarkReadCall struct {
+	chat types.JID
+	read bool
+}
+
+type fakeDelegatedMarkReadApp struct {
+	calls chan delegatedMarkReadCall
+}
+
+func (f *fakeDelegatedMarkReadApp) DB() *store.DB { return nil }
+
+func (f *fakeDelegatedMarkReadApp) MarkChatRead(_ context.Context, chat types.JID, read bool) error {
+	f.calls <- delegatedMarkReadCall{chat: chat, read: read}
+	return nil
+}
+
+func TestChatsMarkReadDelegatesThroughProductionServerWhenStoreLocked(t *testing.T) {
+	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
+	storeDir := shortPresenceDelegateStoreDir(t)
+	lk, err := lock.Acquire(storeDir)
+	if err != nil {
+		t.Fatalf("lock store: %v", err)
+	}
+	defer lk.Release()
+
+	fake := &fakeDelegatedMarkReadApp{calls: make(chan delegatedMarkReadCall, 2)}
+	stop, err := startSendDelegateServerForStore(context.Background(), storeDir, sendSpacing{}, func(ctx context.Context, req sendDelegateRequest) (sendDelegateResponse, error) {
+		if req.Version != sendDelegateVersion {
+			return sendDelegateResponse{}, fmt.Errorf("unexpected delegated version %d", req.Version)
+		}
+		if req.Kind != "mark_read" {
+			return sendDelegateResponse{}, fmt.Errorf("unexpected delegated kind %q", req.Kind)
+		}
+		return executeDelegatedMarkRead(ctx, fake, req)
+	})
+	if err != nil {
+		t.Fatalf("start production delegate server: %v", err)
+	}
+	stopped := false
+	defer func() {
+		if !stopped {
+			stop()
+		}
+	}()
+
+	socketPath := sendDelegateSocketPath(storeDir)
+	info, err := os.Lstat(socketPath)
+	if err != nil {
+		t.Fatalf("stat delegate socket: %v", err)
+	}
+	if info.Mode()&os.ModeSocket == 0 || info.Mode().Perm() != 0o600 {
+		t.Fatalf("delegate socket mode = %v, want socket 0600", info.Mode())
+	}
+
+	tests := []struct {
+		command string
+		read    bool
+	}{
+		{command: "mark-read", read: true},
+		{command: "mark-unread", read: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.command, func(t *testing.T) {
+			stdout, stderr, err := runPresenceDelegateHelper(t, []string{
+				"--store", storeDir, "--json", "--timeout", "750ms",
+				"chats", tt.command, "--chat", "123@s.whatsapp.net",
+			})
+			if err != nil {
+				t.Fatalf("chats %s failed: %v stdout=%q stderr=%q", tt.command, err, stdout, stderr)
+			}
+
+			select {
+			case call := <-fake.calls:
+				if call.chat.String() != "123@s.whatsapp.net" || call.read != tt.read {
+					t.Fatalf("fake mark-read call = %+v, want chat 123@s.whatsapp.net read %t", call, tt.read)
+				}
+			case <-contextWithTestTimeout(t).Done():
+				t.Fatal("timed out waiting for delegated mark-read call")
+			}
+			if strings.Contains(stderr, "store is locked") {
+				t.Fatalf("delegated command returned lock error: stderr=%q", stderr)
+			}
+			for _, want := range []string{`"ok":true`, `"action":"` + tt.command + `"`, `"chat":"123@s.whatsapp.net"`} {
+				if !strings.Contains(stdout, want) {
+					t.Fatalf("stdout %q missing %s", stdout, want)
+				}
+			}
+		})
+	}
+
+	stop()
+	stopped = true
+	if _, err := os.Lstat(socketPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("delegate socket remains after stop: %v", err)
 	}
 }

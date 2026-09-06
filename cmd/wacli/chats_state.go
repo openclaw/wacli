@@ -127,6 +127,29 @@ func runChatState(flags *rootFlags, opts chatStateOptions, action string, run fu
 
 	a, lk, err := newApp(ctx, flags, true, false)
 	if err != nil {
+		if action == "mark-read" || action == "mark-unread" {
+			read := action == "mark-read"
+			resp, delegated, delegateErr := tryDelegateSend(ctx, flags, err, sendDelegateRequest{
+				Kind: "mark_read",
+				To:   opts.chat,
+				Pick: opts.pick,
+				Read: &read,
+			})
+			if delegated {
+				if delegateErr != nil {
+					return delegateErr
+				}
+				if flags.asJSON {
+					return out.WriteJSON(os.Stdout, map[string]any{
+						"ok":     true,
+						"action": action,
+						"chat":   resp.Chat,
+					})
+				}
+				fmt.Fprintf(os.Stdout, "%s: %s\n", action, resp.Chat)
+				return nil
+			}
+		}
 		return err
 	}
 	defer closeApp(a, lk)
