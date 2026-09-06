@@ -84,6 +84,8 @@ type sendDelegateResponse struct {
 	Action         string            `json:"action,omitempty"`
 }
 
+type sendDelegateExecutor func(context.Context, sendDelegateRequest) (sendDelegateResponse, error)
+
 func sendDelegateSocketPath(storeDir string) string {
 	return filepath.Join(storeDir, sendDelegateSocketName)
 }
@@ -135,7 +137,13 @@ func tryDelegateSend(ctx context.Context, flags *rootFlags, lockErr error, req s
 }
 
 func startSendDelegateServer(ctx context.Context, a *app.App, spacing sendSpacing) (func(), error) {
-	path := sendDelegateSocketPath(a.StoreDir())
+	return startSendDelegateServerForStore(ctx, a.StoreDir(), spacing, func(ctx context.Context, req sendDelegateRequest) (sendDelegateResponse, error) {
+		return executeDelegatedSend(ctx, a, req)
+	})
+}
+
+func startSendDelegateServerForStore(ctx context.Context, storeDir string, spacing sendSpacing, execute sendDelegateExecutor) (func(), error) {
+	path := sendDelegateSocketPath(storeDir)
 	if err := removeStaleSendDelegateSocket(path); err != nil {
 		return nil, err
 	}
@@ -167,7 +175,7 @@ func startSendDelegateServer(ctx context.Context, a *app.App, spacing sendSpacin
 			if err != nil {
 				return
 			}
-			go handleSendDelegateConn(ctx, conn, a, &sendMu, pacedSendSlot, pacer)
+			go handleSendDelegateConn(ctx, conn, execute, &sendMu, pacedSendSlot, pacer)
 		}
 	}()
 
@@ -193,7 +201,7 @@ func removeStaleSendDelegateSocket(path string) error {
 	return os.Remove(path)
 }
 
-func handleSendDelegateConn(ctx context.Context, conn net.Conn, a *app.App, sendMu *sync.Mutex, pacedSendSlot chan struct{}, pacer *sendPacer) {
+func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDelegateExecutor, sendMu *sync.Mutex, pacedSendSlot chan struct{}, pacer *sendPacer) {
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(5 * time.Minute))
 
@@ -254,7 +262,7 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, a *app.App, send
 		}
 	}
 
-	resp, err := executeDelegatedSend(requestCtx, a, req)
+	resp, err := execute(requestCtx, req)
 	if pacer.enabled() {
 		// Record completion, not handler entry: recipient resolution, media
 		// preparation, and the actual wire send all happen inside execute.
@@ -302,7 +310,12 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 	}
 }
 
-func executeDelegatedMarkRead(ctx context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {
+type delegatedMarkReadApp interface {
+	recipientResolverApp
+	MarkChatRead(context.Context, types.JID, bool) error
+}
+
+func executeDelegatedMarkRead(ctx context.Context, a delegatedMarkReadApp, req sendDelegateRequest) (sendDelegateResponse, error) {
 	toJID, err := resolveRecipient(a, req.To, recipientOptions{pick: req.Pick, asJSON: true})
 	if err != nil {
 		return sendDelegateResponse{}, err
