@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Groups: add a read-only `groups participants list` command for local roster snapshots and refresh those snapshots with `sync --refresh-groups`.
+
 ### Fixed
 
 - CLI: keep successful JSON commands successful when a pipe reader closes early, including Unix stdout SIGPIPE and Windows closed-pipe errors. (#366 - thanks @SebTardif)

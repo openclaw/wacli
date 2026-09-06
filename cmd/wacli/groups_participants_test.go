@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"path/filepath"
 	"strings"
@@ -91,6 +92,28 @@ func TestGroupsParticipantsListCommand(t *testing.T) {
 		err := cmd.Execute()
 		if err == nil || !strings.Contains(err.Error(), "--jid is required") {
 			t.Fatalf("expected --jid is required error, got: %v", err)
+		}
+	}
+}
+
+func TestGroupsParticipantsListHelpDescribesLocalSnapshotRefresh(t *testing.T) {
+	cmd := newGroupsParticipantsListCmd(&rootFlags{})
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetArgs([]string{"--help"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute help: %v", err)
+	}
+	help := stdout.String()
+	for _, want := range []string{
+		"last group snapshot saved in the local database",
+		"does not connect to WhatsApp",
+		"snapshot can be empty or stale",
+		"wacli sync --once --refresh-groups",
+	} {
+		if !strings.Contains(help, want) {
+			t.Errorf("help missing %q:\n%s", want, help)
 		}
 	}
 }

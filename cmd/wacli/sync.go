@@ -149,7 +149,7 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().StringVar(&sendSpacingFlag, "send-spacing", "", "pace delegated sends in follow mode by a fixed duration or random min-max range (e.g. 2s or 500ms-5s; default: disabled)")
 	cmd.Flags().BoolVar(&downloadMedia, "download-media", false, "download media in the background during sync")
 	cmd.Flags().BoolVar(&refreshContacts, "refresh-contacts", false, "refresh contacts from session store into local DB")
-	cmd.Flags().BoolVar(&refreshGroups, "refresh-groups", false, "refresh joined groups (live) into local DB")
+	cmd.Flags().BoolVar(&refreshGroups, "refresh-groups", false, "refresh joined groups and participant snapshots (live)")
 	cmd.Flags().BoolVar(&refreshChannels, "refresh-channels", false, "refresh subscribed channels (live) into local DB")
 	cmd.Flags().StringVar(&webhookURL, "webhook", "", "URL to POST live message JSON")
 	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "HMAC-SHA256 secret for X-Wacli-Signature header")

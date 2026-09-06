@@ -110,6 +110,58 @@ func TestRefreshGroupsPreservesChatLastMessageTimestamp(t *testing.T) {
 	}
 }
 
+func TestRefreshGroupsReplacesParticipantSnapshot(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	gid := types.JID{User: "12345", Server: types.GroupServer}
+	first := types.JID{User: "15550000001", Server: types.DefaultUserServer}
+	f.groups[gid] = &types.GroupInfo{
+		JID: gid,
+		Participants: []types.GroupParticipant{
+			{JID: first},
+		},
+	}
+
+	if err := a.refreshGroups(context.Background()); err != nil {
+		t.Fatalf("first refreshGroups: %v", err)
+	}
+	participants, err := a.db.ListGroupParticipants(gid.String())
+	if err != nil {
+		t.Fatalf("ListGroupParticipants after first refresh: %v", err)
+	}
+	if len(participants) != 1 || participants[0].UserJID != first.String() {
+		t.Fatalf("first participant snapshot = %+v, want %s", participants, first)
+	}
+
+	adminLID := types.JID{User: "999123456789", Server: types.HiddenUserServer}
+	adminPN := types.JID{User: "15550000002", Server: types.DefaultUserServer}
+	member := types.JID{User: "15550000003", Server: types.DefaultUserServer}
+	f.lids[adminLID] = adminPN
+	f.groups[gid].Participants = []types.GroupParticipant{
+		{JID: adminLID, IsAdmin: true},
+		{JID: member},
+	}
+
+	if err := a.refreshGroups(context.Background()); err != nil {
+		t.Fatalf("second refreshGroups: %v", err)
+	}
+	participants, err = a.db.ListGroupParticipants(gid.String())
+	if err != nil {
+		t.Fatalf("ListGroupParticipants after second refresh: %v", err)
+	}
+	if len(participants) != 2 {
+		t.Fatalf("second participant snapshot = %+v, want 2 participants", participants)
+	}
+	if participants[0].UserJID != adminPN.String() || participants[0].Role != "admin" {
+		t.Fatalf("first refreshed participant = %+v, want resolved admin %s", participants[0], adminPN)
+	}
+	if participants[1].UserJID != member.String() || participants[1].Role != "member" {
+		t.Fatalf("second refreshed participant = %+v, want member %s", participants[1], member)
+	}
+}
+
 func TestRefreshNewslettersStoresChats(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()

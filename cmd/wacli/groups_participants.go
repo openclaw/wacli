@@ -29,7 +29,12 @@ func newGroupsParticipantsListCmd(flags *rootFlags) *cobra.Command {
 	var group string
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List participants of a group (from local DB)",
+		Short: "List participants (local snapshot; sync --refresh-groups to update)",
+		Long: `List participants from the last group snapshot saved in the local database.
+
+This command does not connect to WhatsApp. The snapshot can be empty or stale.
+Run "wacli sync --once --refresh-groups" to fetch joined groups and replace
+their local participant snapshots.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(group) == "" {
 				return fmt.Errorf("--jid is required")
