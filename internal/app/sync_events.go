@@ -482,6 +482,8 @@ func (a *App) handleStarEvent(ctx context.Context, evt *events.Star) error {
 	return nil
 }
 
+const appStateRecoveryStepTimeout = 30 * time.Second
+
 func (a *App) handleAppStateSyncError(ctx context.Context, evt *events.AppStateSyncError, recoveries *sync.Map) {
 	if evt == nil || !errors.Is(evt.Error, appstate.ErrMismatchingLTHash) {
 		return
@@ -500,29 +502,57 @@ func (a *App) handleAppStateSyncError(ctx context.Context, evt *events.AppStateS
 		return
 	}
 
+	go a.recoverAppStateAfterLTHashMismatch(ctx, name, recoveries, appStateRecoveryStepTimeout)
+}
+
+func (a *App) recoverAppStateAfterLTHashMismatch(ctx context.Context, name string, recoveries *sync.Map, timeout time.Duration) {
+	fetchCtx, cancelFetch := context.WithTimeout(ctx, timeout)
+
 	a.emitWarning(
 		"app_state_lthash_mismatch",
-		fmt.Sprintf("warning: app state %s hit an LTHash mismatch; requesting recovery snapshot", name),
+		fmt.Sprintf("warning: app state %s hit an LTHash mismatch; attempting full sync", name),
 		map[string]any{"name": name},
 	)
-	go func() {
-		reqCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
-		reqID, err := a.wa.RequestAppStateRecovery(reqCtx, name)
-		if err != nil {
-			a.emitWarning(
-				"app_state_recovery_failed",
-				fmt.Sprintf("warning: app state %s recovery request failed: %v", name, err),
-				map[string]any{"name": name, "error": err.Error()},
-			)
-			return
-		}
+
+	fetchErr := a.wa.FetchAppState(fetchCtx, name, true, false)
+	cancelFetch()
+	if fetchErr == nil {
+		recoveries.Delete(name)
 		if a.eventsEnabled() {
-			a.emitEvent("app_state_recovery_requested", map[string]any{"name": name, "id": string(reqID)})
+			a.emitEvent("app_state_full_sync_completed", map[string]any{"name": name})
 		} else {
-			fmt.Fprintf(os.Stderr, "\rRequested app state %s recovery (id %s)\n", name, reqID)
+			fmt.Fprintf(os.Stderr, "\rApp state %s resolved via full sync\n", name)
 		}
-	}()
+		return
+	}
+	if ctx.Err() != nil {
+		recoveries.Delete(name)
+		return
+	}
+	a.emitWarning(
+		"app_state_full_sync_failed",
+		fmt.Sprintf("warning: app state %s full sync failed: %v; requesting recovery snapshot", name, fetchErr),
+		map[string]any{"name": name, "error": fetchErr.Error()},
+	)
+
+	// A timed-out full sync must not consume the recovery request's budget.
+	recoveryCtx, cancelRecovery := context.WithTimeout(ctx, timeout)
+	defer cancelRecovery()
+	reqID, err := a.wa.RequestAppStateRecovery(recoveryCtx, name)
+	if err != nil {
+		recoveries.Delete(name)
+		a.emitWarning(
+			"app_state_recovery_failed",
+			fmt.Sprintf("warning: app state %s recovery request failed: %v", name, err),
+			map[string]any{"name": name, "error": err.Error()},
+		)
+		return
+	}
+	if a.eventsEnabled() {
+		a.emitEvent("app_state_recovery_requested", map[string]any{"name": name, "id": string(reqID)})
+	} else {
+		fmt.Fprintf(os.Stderr, "\rRequested app state %s recovery (id %s)\n", name, reqID)
+	}
 }
 
 func (a *App) handleLiveSyncMessage(ctx context.Context, opts SyncOptions, v *events.Message, messagesStored *atomic.Int64, enqueueMedia func(string, string), enqueueWebhook func(wa.ParsedMessage), limits ...*syncStorageLimits) {

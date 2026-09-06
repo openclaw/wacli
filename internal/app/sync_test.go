@@ -558,10 +558,137 @@ func TestAppStateCallLogDeleteRemovesStoredCallEvent(t *testing.T) {
 	}
 }
 
-func TestAppStateLTHashMismatchRequestsRecoveryOnce(t *testing.T) {
+type appStateContextWA struct {
+	*fakeWA
+	fetchAppState           func(context.Context, string, bool, bool) error
+	requestAppStateRecovery func(context.Context, string) (types.MessageID, error)
+}
+
+func (f *appStateContextWA) FetchAppState(ctx context.Context, name string, fullSync, onlyIfNotSynced bool) error {
+	return f.fetchAppState(ctx, name, fullSync, onlyIfNotSynced)
+}
+
+func (f *appStateContextWA) RequestAppStateRecovery(ctx context.Context, name string) (types.MessageID, error) {
+	return f.requestAppStateRecovery(ctx, name)
+}
+
+func TestAppStateLTHashMismatchRecoveryGetsFreshTimeoutAfterFullSyncExpires(t *testing.T) {
+	a := newTestApp(t)
+	var fetchErr error
+	var recoveryErr error
+	recoveryHasDeadline := false
+	recoveryCalls := 0
+	f := &appStateContextWA{fakeWA: newFakeWA()}
+	f.fetchAppState = func(ctx context.Context, name string, fullSync, onlyIfNotSynced bool) error {
+		<-ctx.Done()
+		fetchErr = ctx.Err()
+		return fetchErr
+	}
+	f.requestAppStateRecovery = func(ctx context.Context, name string) (types.MessageID, error) {
+		recoveryCalls++
+		recoveryErr = ctx.Err()
+		_, recoveryHasDeadline = ctx.Deadline()
+		return types.MessageID("recovery-req"), recoveryErr
+	}
+	a.wa = f
+
+	var recoveries sync.Map
+	name := string(appstate.WAPatchRegularLow)
+	recoveries.Store(name, struct{}{})
+	a.recoverAppStateAfterLTHashMismatch(context.Background(), name, &recoveries, 10*time.Millisecond)
+
+	if !errors.Is(fetchErr, context.DeadlineExceeded) {
+		t.Fatalf("full sync context error = %v, want deadline exceeded", fetchErr)
+	}
+	if recoveryCalls != 1 {
+		t.Fatalf("recovery calls = %d, want 1", recoveryCalls)
+	}
+	if recoveryErr != nil {
+		t.Fatalf("recovery context was already expired: %v", recoveryErr)
+	}
+	if !recoveryHasDeadline {
+		t.Fatal("recovery context has no timeout")
+	}
+}
+
+func TestAppStateLTHashMismatchRecoveryRetainsParentCancellation(t *testing.T) {
+	a := newTestApp(t)
+	parentCtx, cancelParent := context.WithCancel(context.Background())
+	defer cancelParent()
+	recoveryStarted := make(chan struct{})
+	var recoveryErr error
+	f := &appStateContextWA{fakeWA: newFakeWA()}
+	f.fetchAppState = func(ctx context.Context, name string, fullSync, onlyIfNotSynced bool) error {
+		return errors.New("full sync failed")
+	}
+	f.requestAppStateRecovery = func(ctx context.Context, name string) (types.MessageID, error) {
+		close(recoveryStarted)
+		<-ctx.Done()
+		recoveryErr = ctx.Err()
+		return "", recoveryErr
+	}
+	a.wa = f
+
+	var recoveries sync.Map
+	name := string(appstate.WAPatchRegularLow)
+	recoveries.Store(name, struct{}{})
+	done := make(chan struct{})
+	go func() {
+		a.recoverAppStateAfterLTHashMismatch(parentCtx, name, &recoveries, 100*time.Millisecond)
+		close(done)
+	}()
+	select {
+	case <-recoveryStarted:
+	case <-time.After(time.Second):
+		t.Fatal("app state recovery fallback did not start")
+	}
+	cancelParent()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("app state recovery did not stop after parent cancellation")
+	}
+
+	if !errors.Is(recoveryErr, context.Canceled) {
+		t.Fatalf("recovery context error = %v, want parent cancellation", recoveryErr)
+	}
+	if _, loaded := recoveries.Load(name); loaded {
+		t.Fatal("recovery guard remained set after parent cancellation")
+	}
+}
+
+func TestAppStateLTHashMismatchAttemptsFullSyncFirst(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
 	a.wa = f
+
+	var recoveries sync.Map
+	err := fmt.Errorf("failed to verify patch v5848: %w", appstate.ErrMismatchingLTHash)
+	a.handleAppStateSyncError(context.Background(), &events.AppStateSyncError{
+		Name:  appstate.WAPatchRegularLow,
+		Error: err,
+	}, &recoveries)
+
+	waitForCondition(t, time.Second, func() bool {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		return len(f.appStateFetches) == 1
+	})
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if got := f.appStateFetches[0]; got.name != string(appstate.WAPatchRegularLow) || !got.fullSync {
+		t.Fatalf("unexpected fetch = %+v", got)
+	}
+	if len(f.appStateRecoveries) != 0 {
+		t.Fatalf("recovery requested when full sync succeeded: %v", f.appStateRecoveries)
+	}
+}
+
+func TestAppStateLTHashMismatchRequestsRecoveryWhenFullSyncFails(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+	f.appStateFetchErr = appstate.ErrMismatchingLTHash
 
 	var recoveries sync.Map
 	err := fmt.Errorf("failed to verify patch v5848: %w", appstate.ErrMismatchingLTHash)
