@@ -6,6 +6,8 @@
 
 **Highlights:** more complete searchable message history, bounded backfill retries, and clearer guidance for commands used alongside continuous sync.
 
+- Sync: return a nonzero terminal error when WhatsApp revokes the session, persist the revoked state for honest auth/doctor output, and expose `newest_message_at` as the accurate name for the backward-compatible `last_sync_at` message timestamp.
+
 - Messages: extract comment bodies and album summaries in live/history sync, preserving comment reply targets and matching quote metadata. (#383 - thanks @shishiv and @Entretoize)
 - History: retry an unanswered backfill anchor once with the next local message, report both anchors, and keep retries bounded without deleting history or filtering message IDs. (#371 - thanks @Entretoize)
 - Sync: serialize message and receipt webhook timestamps as UTC, preserving their instants while replacing host-local offsets with the documented `Z` form. (#386, #388 - thanks @hchittanuru3)
