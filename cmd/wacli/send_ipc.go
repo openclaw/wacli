@@ -36,6 +36,7 @@ type sendDelegateRequest struct {
 	ReplyTo              string   `json:"reply_to,omitempty"`
 	ReplyToSender        string   `json:"reply_to_sender,omitempty"`
 	NoPreview            bool     `json:"no_preview,omitempty"`
+	AllowSelf            bool     `json:"allow_self,omitempty"`
 	Ephemeral            bool     `json:"ephemeral,omitempty"`
 	EphemeralDuration    string   `json:"ephemeral_duration,omitempty"`
 	EphemeralDurationSet bool     `json:"ephemeral_duration_set,omitempty"`
@@ -356,8 +357,10 @@ func executeDelegatedText(ctx context.Context, a *app.App, req sendDelegateReque
 	if err != nil {
 		return sendDelegateResponse{}, err
 	}
-	if err := validateTextRecipient(a.WA(), toJID); err != nil {
-		return sendDelegateResponse{}, err
+	if !req.AllowSelf {
+		if err := validateTextRecipient(a.WA(), toJID); err != nil {
+			return sendDelegateResponse{}, err
+		}
 	}
 	toJID = warmupDelegatedRecipient(ctx, a, toJID)
 	mentionedJIDs, err := parseMentionedJIDs(req.Mentions)
@@ -369,7 +372,7 @@ func executeDelegatedText(ctx context.Context, a *app.App, req sendDelegateReque
 	}
 	preview := fetchLinkPreview(ctx, req.Message, req.NoPreview)
 	msgID, err := runSendOperation(ctx, reconnectForSend(a), func(ctx context.Context) (types.MessageID, error) {
-		return sendTextMessage(ctx, a, toJID, req.Message, req.ReplyTo, req.ReplyToSender, preview, mentionedJIDs, ephemeral)
+		return sendTextMessageWithOptions(ctx, a, toJID, req.Message, req.ReplyTo, req.ReplyToSender, preview, mentionedJIDs, ephemeral, textSendOptions{allowSelf: req.AllowSelf})
 	})
 	if err != nil {
 		return sendDelegateResponse{}, err

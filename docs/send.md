@@ -9,7 +9,7 @@ When `sync --follow` is already running for the same store, send commands delega
 ## Commands
 
 ```bash
-wacli send text --to RECIPIENT --message TEXT [--message-escapes] [--pick N] [--mention USER] [--no-preview] [--ephemeral] [--ephemeral-duration DURATION] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
+wacli send text --to RECIPIENT --message TEXT [--message-escapes] [--pick N] [--mention USER] [--no-preview] [--allow-self] [--ephemeral] [--ephemeral-duration DURATION] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
 wacli send file --to RECIPIENT --file PATH [--pick N] [--caption TEXT] [--filename NAME] [--mime TYPE] [--as auto|document|audio|image|video] [--ptt] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
 wacli send sticker --to RECIPIENT --file PATH [--pick N] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
 wacli send voice --to RECIPIENT --file PATH [--pick N] [--mime TYPE] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
@@ -30,7 +30,7 @@ wacli polls list [--chat RECIPIENT] [--limit N] [--json]
 - If a name matches multiple recipients, interactive terminals prompt.
 - In scripts, use `--pick N` to choose a displayed match.
 - Phone numbers may use common formatting such as `+1 (234) 567-8900`.
-- `send text` rejects the linked account's own phone-number or LID target. WhatsApp may acknowledge these self-DMs without delivering them to Message Yourself, so wacli returns an explicit error instead of `sent: true`.
+- `send text` rejects the linked account's own phone-number or LID target by default. Pass `--allow-self` to explicitly attempt the send. WhatsApp may acknowledge these self-DMs without delivering them to Message Yourself, so `sent: true` still does not confirm device delivery. The flag also works when the send is delegated through a running `sync --follow` process.
 
 ## Replies and reactions
 

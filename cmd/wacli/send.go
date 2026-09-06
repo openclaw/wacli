@@ -46,6 +46,7 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 	var replyTo string
 	var replyToSender string
 	var noPreview bool
+	var allowSelf bool
 	var ephemeral bool
 	var ephemeralDuration string
 	var messageEscapes bool
@@ -91,6 +92,7 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 					ReplyTo:              replyTo,
 					ReplyToSender:        replyToSender,
 					NoPreview:            noPreview,
+					AllowSelf:            allowSelf,
 					Ephemeral:            ephemeralOpts.Enabled,
 					EphemeralDuration:    ephemeralOpts.Duration,
 					EphemeralDurationSet: ephemeralOpts.DurationSet,
@@ -114,8 +116,10 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := validateTextRecipient(a.WA(), toJID); err != nil {
-				return err
+			if !allowSelf {
+				if err := validateTextRecipient(a.WA(), toJID); err != nil {
+					return err
+				}
 			}
 			mentionedJIDs, err := parseMentionedJIDs(mentions)
 			if err != nil {
@@ -131,7 +135,7 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 
 			preview := fetchLinkPreview(ctx, message, noPreview)
 			msgID, err := runSendOperation(ctx, reconnectForSend(a), func(ctx context.Context) (types.MessageID, error) {
-				return sendTextMessage(ctx, a, toJID, message, replyTo, replyToSender, preview, mentionedJIDs, ephemeralOpts)
+				return sendTextMessageWithOptions(ctx, a, toJID, message, replyTo, replyToSender, preview, mentionedJIDs, ephemeralOpts, textSendOptions{allowSelf: allowSelf})
 			})
 			if err != nil {
 				return err
@@ -163,6 +167,7 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().StringVar(&replyTo, "reply-to", "", "message ID to quote/reply to")
 	cmd.Flags().StringVar(&replyToSender, "reply-to-sender", "", "sender JID of the quoted message (required for unsynced group replies)")
 	cmd.Flags().BoolVar(&noPreview, "no-preview", false, "disable automatic link previews for the first URL in text")
+	cmd.Flags().BoolVar(&allowSelf, "allow-self", false, "allow sending to the linked account itself (delivery is not guaranteed)")
 	cmd.Flags().BoolVar(&ephemeral, "ephemeral", false, "send with the disappearing-message timer for this chat")
 	cmd.Flags().StringVar(&ephemeralDuration, "ephemeral-duration", "", "disappearing-message timer override (for example 24h, 7d, 90d, 168h)")
 	cmd.Flags().BoolVar(&messageEscapes, "message-escapes", false, `interpret backslash escapes in --message (\n, \r, \t, \\, \")`)
@@ -230,6 +235,10 @@ type textEphemeralOptions struct {
 	DurationSet bool
 }
 
+type textSendOptions struct {
+	allowSelf bool
+}
+
 type resolvedTextEphemeral struct {
 	enabled       bool
 	hasExpiration bool
@@ -241,12 +250,22 @@ const defaultEphemeralExpiration uint32 = 7 * 24 * 60 * 60
 var errSelfTextRecipient = errors.New("send text to the linked account itself is not supported: WhatsApp can acknowledge self-messages without delivering them; use the official Message Yourself chat")
 
 func sendTextMessage(ctx context.Context, a sendTextApp, to types.JID, text, replyTo, replyToSender string, preview *linkpreview.Preview, mentionedJIDs []string, ephemeral textEphemeralOptions) (types.MessageID, error) {
-	return sendTextMessageWithSender(ctx, a.WA(), a.DB(), to, text, replyTo, replyToSender, preview, mentionedJIDs, ephemeral)
+	return sendTextMessageWithOptions(ctx, a, to, text, replyTo, replyToSender, preview, mentionedJIDs, ephemeral, textSendOptions{})
+}
+
+func sendTextMessageWithOptions(ctx context.Context, a sendTextApp, to types.JID, text, replyTo, replyToSender string, preview *linkpreview.Preview, mentionedJIDs []string, ephemeral textEphemeralOptions, options textSendOptions) (types.MessageID, error) {
+	return sendTextMessageWithSenderOptions(ctx, a.WA(), a.DB(), to, text, replyTo, replyToSender, preview, mentionedJIDs, ephemeral, options)
 }
 
 func sendTextMessageWithSender(ctx context.Context, sender textMessageSender, db *store.DB, to types.JID, text, replyTo, replyToSender string, preview *linkpreview.Preview, mentionedJIDs []string, ephemeral textEphemeralOptions) (types.MessageID, error) {
-	if err := validateTextRecipient(sender, to); err != nil {
-		return "", err
+	return sendTextMessageWithSenderOptions(ctx, sender, db, to, text, replyTo, replyToSender, preview, mentionedJIDs, ephemeral, textSendOptions{})
+}
+
+func sendTextMessageWithSenderOptions(ctx context.Context, sender textMessageSender, db *store.DB, to types.JID, text, replyTo, replyToSender string, preview *linkpreview.Preview, mentionedJIDs []string, ephemeral textEphemeralOptions, options textSendOptions) (types.MessageID, error) {
+	if !options.allowSelf {
+		if err := validateTextRecipient(sender, to); err != nil {
+			return "", err
+		}
 	}
 	var aliasTo types.JID
 	if strings.TrimSpace(replyTo) != "" {

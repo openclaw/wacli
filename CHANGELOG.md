@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Send: add opt-in `send text --allow-self` for deployments that intentionally attempt linked-account self-messages; keep the fail-closed default because WhatsApp may acknowledge these messages without delivering them to Message Yourself.
+
 ## 0.17.2 - 2026-09-05
 
 **Highlights:** more complete searchable message history, bounded backfill retries, and clearer guidance for commands used alongside continuous sync.
