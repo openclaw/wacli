@@ -179,6 +179,19 @@ func TestSendTextToOwnPNRejectsWithoutRegistrationCanonicalization(t *testing.T)
 	}
 }
 
+func TestSendTextToOwnPNAllowsExplicitOptIn(t *testing.T) {
+	pn := types.NewJID("15551234567", types.DefaultUserServer)
+	sender := &recordingTextSender{linkedJID: pn.String()}
+
+	_, err := sendTextMessageWithSenderOptions(context.Background(), sender, openSendTestDB(t), pn, "self-test", "", "", nil, nil, textEphemeralOptions{}, textSendOptions{allowSelf: true})
+	if err != nil {
+		t.Fatalf("sendTextMessageWithSenderOptions: %v", err)
+	}
+	if sender.textCalls != 1 || sender.textRecipient != pn || sender.text != "self-test" {
+		t.Fatalf("self-send protocol call = %d to %s text %q, want one call to %s", sender.textCalls, sender.textRecipient, sender.text, pn)
+	}
+}
+
 func TestPersistOutboundTextCanonicalizesSelfLIDToPN(t *testing.T) {
 	db := openSendTestDB(t)
 	pn := types.NewJID("15551234567", types.DefaultUserServer)
@@ -800,6 +813,17 @@ func TestSendTextCommandExposesNoPreviewFlag(t *testing.T) {
 	cmd := newSendTextCmd(&rootFlags{})
 	if cmd.Flags().Lookup("no-preview") == nil {
 		t.Fatalf("missing --no-preview flag")
+	}
+}
+
+func TestSendTextCommandExposesAllowSelfFlag(t *testing.T) {
+	cmd := newSendTextCmd(&rootFlags{})
+	flag := cmd.Flags().Lookup("allow-self")
+	if flag == nil {
+		t.Fatalf("missing --allow-self flag")
+	}
+	if flag.DefValue != "false" {
+		t.Fatalf("allow-self default = %q, want false", flag.DefValue)
 	}
 }
 

@@ -86,6 +86,68 @@ func TestSendDelegateRequestPreservesEphemeralInJSON(t *testing.T) {
 	}
 }
 
+func TestSendDelegateRequestPreservesAllowSelfInJSON(t *testing.T) {
+	raw, err := json.Marshal(sendDelegateRequest{
+		Version:   sendDelegateVersion,
+		Kind:      "text",
+		AllowSelf: true,
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), `"allow_self":true`) {
+		t.Fatalf("encoded request missing allow-self flag: %s", raw)
+	}
+
+	var got sendDelegateRequest
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if !got.AllowSelf {
+		t.Fatalf("AllowSelf = false, want true")
+	}
+}
+
+func TestSendTextAllowSelfDelegatesThroughSendSocketWhenStoreLocked(t *testing.T) {
+	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
+	storeDir := shortPresenceDelegateStoreDir(t)
+	lk, err := lock.Acquire(storeDir)
+	if err != nil {
+		t.Fatalf("lock store: %v", err)
+	}
+	defer lk.Release()
+
+	server := startPresenceDelegateTestSocket(t, storeDir, func(req sendDelegateRequest) sendDelegateResponse {
+		return sendDelegateResponse{OK: true, Sent: true, To: "15551234567@s.whatsapp.net", ID: "self-id"}
+	})
+	defer server.stop()
+
+	stdout, stderr, err := runPresenceDelegateHelper(t, []string{
+		"--store", storeDir, "--json", "--timeout", "750ms",
+		"send", "text", "--to", "+15551234567", "--message", "self-test", "--allow-self",
+	})
+	if err != nil {
+		t.Fatalf("send text failed: %v stdout=%q stderr=%q", err, stdout, stderr)
+	}
+
+	req := server.nextRequest(t)
+	if req.Version != sendDelegateVersion || req.Kind != "text" {
+		t.Fatalf("delegate version/kind = %d/%q", req.Version, req.Kind)
+	}
+	if !req.AllowSelf {
+		t.Fatalf("delegate AllowSelf = false, want true")
+	}
+	if req.To != "+15551234567" || req.Message != "self-test" {
+		t.Fatalf("delegate text request = %+v", req)
+	}
+	if strings.Contains(stderr, "store is locked") {
+		t.Fatalf("delegated command tried the direct store path: stderr=%q", stderr)
+	}
+	if !strings.Contains(stdout, `"sent":true`) || !strings.Contains(stdout, `"id":"self-id"`) {
+		t.Fatalf("stdout %q missing delegated success", stdout)
+	}
+}
+
 func TestSendDelegateRequestPreservesReplyInJSON(t *testing.T) {
 	raw, err := json.Marshal(sendDelegateRequest{
 		Version:       sendDelegateVersion,
