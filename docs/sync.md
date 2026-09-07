@@ -50,7 +50,9 @@ Webhook payloads remain flat JSON objects. Receipt and chat-presence payloads ca
 an `EventType` discriminator. Message payloads deliberately omit it so existing
 consumers retain the established object shape; a missing `EventType` means
 `message`. Every JID field uses the same identity namespace as the local store:
-known LIDs are resolved to phone JIDs, while unknown LIDs remain unchanged.
+known LIDs are resolved to phone JIDs, while unknown LIDs remain unchanged. Every
+`Timestamp` is UTC (RFC 3339, `Z`), independent of the host's zone, matching the
+store and the CLI's JSON output.
 
 Messages use the stored live message payload documented above:
 

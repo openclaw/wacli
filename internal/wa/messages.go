@@ -1,6 +1,7 @@
 package wa
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -103,9 +104,12 @@ type ParsedMessage struct {
 
 func ParseLiveMessage(evt *events.Message) ParsedMessage {
 	msg := ParsedMessage{
-		Chat:      evt.Info.Chat,
-		ID:        evt.Info.ID,
-		Timestamp: evt.Info.Timestamp,
+		Chat: evt.Info.Chat,
+		ID:   evt.Info.ID,
+		// UTC, matching ParseHistoryMessage: this value is marshalled straight
+		// into webhook payloads, where the host's zone would otherwise decide
+		// the wire format. The instant is unchanged.
+		Timestamp: evt.Info.Timestamp.UTC(),
 		FromMe:    evt.Info.IsFromMe,
 		PushName:  evt.Info.PushName,
 	}
@@ -220,6 +224,22 @@ func extractWAProto(m *waProto.Message, pm *ParsedMessage) *waProto.Message {
 		}
 		return m
 	}
+	if comment := m.GetCommentMessage(); comment.GetMessage() != nil {
+		leaf := extractWAProto(comment.GetMessage(), pm)
+		if target := comment.GetTargetMessageKey(); strings.TrimSpace(target.GetID()) != "" {
+			id := strings.TrimSpace(target.GetID())
+			if pm.ReplyToID != id {
+				// Inner quoted content describes a different target.
+				pm.ReplyToSenderJID = ""
+				pm.ReplyToDisplay = ""
+			}
+			pm.ReplyToID = id
+			if sender := strings.TrimSpace(target.GetParticipant()); sender != "" {
+				pm.ReplyToSenderJID = sender
+			}
+		}
+		return leaf
+	}
 	extractReaction(m, pm)
 	extractPlainText(m, pm)
 	extractMedia(m, pm)
@@ -230,6 +250,7 @@ func extractWAProto(m *waProto.Message, pm *ParsedMessage) *waProto.Message {
 	extractPollAddOption(m, pm)
 	extractPollUpdate(m, pm)
 	extractCallLog(m, pm)
+	extractAlbum(m, pm)
 
 	if ctx := contextInfoForMessage(m); ctx != nil {
 		if id := strings.TrimSpace(ctx.GetStanzaID()); id != "" {
@@ -446,4 +467,25 @@ func clone(b []byte) []byte {
 	out := make([]byte, len(b))
 	copy(out, b)
 	return out
+}
+
+func extractAlbum(m *waProto.Message, pm *ParsedMessage) {
+	album := m.GetAlbumMessage()
+	if album == nil {
+		return
+	}
+	if pm.Text == "" {
+		imgs := album.GetExpectedImageCount()
+		vids := album.GetExpectedVideoCount()
+		switch {
+		case imgs > 0 && vids > 0:
+			pm.Text = fmt.Sprintf("[Album: %d images, %d videos]", imgs, vids)
+		case imgs > 0:
+			pm.Text = fmt.Sprintf("[Album: %d images]", imgs)
+		case vids > 0:
+			pm.Text = fmt.Sprintf("[Album: %d videos]", vids)
+		default:
+			pm.Text = "[Album]"
+		}
+	}
 }

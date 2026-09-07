@@ -27,16 +27,16 @@ jobs:
           apt-packages: "build-essential"
 
       - name: pnpm format:check
-        run: pnpm -s format:check
+        run: pnpm format:check
 
       - name: pnpm lint
-        run: pnpm -s lint
+        run: pnpm lint
 
-      - name: Verify exact Go security floor
-        run: test "$(go env GOVERSION)" = "go1.27.0"
+      - name: Verify exact Go build toolchain
+        run: test "$(go env GOVERSION)" = "go1.27.1"
 
       - name: govulncheck source
-        run: pnpm -s govulncheck:source
+        run: pnpm govulncheck:source
 
       - name: deadcode
         env:
@@ -52,12 +52,12 @@ jobs:
       - name: pnpm test
         env:
           CGO_ENABLED: "1"
-        run: pnpm -s test
+        run: pnpm test
 
       - name: pnpm build
         env:
           CGO_ENABLED: "1"
-        run: pnpm -s build
+        run: pnpm build
 
   linux-release-builds:
     runs-on: ubuntu-latest

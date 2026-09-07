@@ -6,8 +6,8 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 export const RELEASE_REPOSITORY = "openclaw/wacli";
-export const RELEASE_GO_VERSION = "go1.27.0";
-export const RELEASE_GO_TOOLCHAIN = "go1.27.0";
+export const RELEASE_GO_VERSION = "go1.27.1";
+export const RELEASE_GO_TOOLCHAIN = "go1.27.1";
 export const RELEASE_GOVULNCHECK_VERSION = "v1.7.0";
 export const RELEASE_IDENTIFIER = "org.openclaw.wacli";
 export const RELEASE_TEAM_ID = "FWJYW4S8P8";
@@ -47,7 +47,23 @@ export function releaseGoVersionForCommit(commit, options = {}) {
   if (matches.length !== 1) {
     throw new Error(`release commit ${commit} must declare one exact Go version in go.mod`);
   }
-  return `go${matches[0][1]}`;
+  const minimum = matches[0][1];
+  const toolchains = [...String(result.stdout).matchAll(/^toolchain (.+)$/gm)];
+  // Older release commits declared only a go directive.
+  if (toolchains.length === 0) return `go${minimum}`;
+  if (toolchains.length !== 1 || !/^go\d+\.\d+\.\d+$/.test(toolchains[0][1])) {
+    throw new Error(`release commit ${commit} must declare one exact Go toolchain`);
+  }
+  const toolchain = toolchains[0][1];
+  const selected = toolchain.slice(2).split(".").map(Number);
+  const required = minimum.split(".").map(Number);
+  for (let index = 0; index < required.length; index += 1) {
+    if (selected[index] > required[index]) break;
+    if (selected[index] < required[index]) {
+      throw new Error(`release toolchain ${toolchain} is older than go${minimum}`);
+    }
+  }
+  return toolchain;
 }
 
 export function archiveNames(version) {

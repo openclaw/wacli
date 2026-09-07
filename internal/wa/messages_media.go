@@ -44,12 +44,14 @@ func extractMedia(m *waProto.Message, pm *ParsedMessage) {
 	}
 
 	if aud := m.GetAudioMessage(); aud != nil {
+		// Preserve supplied text before adding the display-only fallback.
+		caption := pm.Text
 		if pm.Text == "" {
 			pm.Text = "[Audio]"
 		}
 		pm.Media = &Media{
 			Type:          "audio",
-			Caption:       pm.Text,
+			Caption:       caption,
 			MimeType:      aud.GetMimetype(),
 			DirectPath:    aud.GetDirectPath(),
 			MediaKey:      clone(aud.GetMediaKey()),
