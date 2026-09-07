@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- Release: require the exact version in dated changelog headings before local release preparation.
+
 ## 0.17.2 - 2026-09-05
 
 **Highlights:** more complete searchable message history, bounded backfill retries, and clearer guidance for commands used alongside continuous sync.
