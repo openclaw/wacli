@@ -4,6 +4,8 @@ Read when: running continuous capture, one-shot sync, contact/group refresh, or 
 
 `wacli sync` requires an existing authenticated store and never displays a QR code. It captures WhatsApp Web events into the local SQLite store.
 
+Startup repairs historical LID identities using indexed message lookups without rebuilding unchanged search content. Interrupting startup stops identity repair between individual identities; the next run resumes any remaining repairs.
+
 ## Command
 
 ```bash
@@ -22,7 +24,6 @@ wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--stale-t
 - `--download-media` runs a bounded media downloader for sync events. Clean one-shot and bootstrap runs finish queued downloads before exiting; cancellation, errors, and storage-limit exits stop immediately.
 - `--send-spacing DURATION|MIN-MAX` paces serialized sends delegated to a running follow process. A single duration such as `2s` sets a fixed minimum gap; a range such as `500ms-5s` chooses a fresh random gap for each send. It is disabled by default, so unset behavior remains unchanged. The caller's command timeout includes time queued behind earlier sends, pacing, and the send itself; a request that runs out of time is not dispatched.
 - `--refresh-contacts` imports contacts from the session store.
-- Startup repairs historical LID identities using indexed message lookups without rebuilding unchanged search content. Interrupting startup stops identity repair between individual identities; the next run resumes any remaining repairs.
 - `--refresh-groups` fetches joined groups live and updates the local DB.
 - `--refresh-channels` fetches subscribed WhatsApp Channels live and updates local chat rows.
 - `--webhook URL` posts successfully stored live message events as JSON on a bounded background worker. The payload includes `ChatName` when a locally resolved chat name is available.
