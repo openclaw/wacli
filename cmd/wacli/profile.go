@@ -65,7 +65,7 @@ func newProfileSetPictureCmd(flags *rootFlags) *cobra.Command {
 			}
 			defer closeApp(a, lk)
 
-			if err := a.EnsureAuthed(); err != nil {
+			if err := a.EnsureAuthed(ctx); err != nil {
 				return err
 			}
 			if err := a.Connect(ctx, false, nil); err != nil {
@@ -301,7 +301,7 @@ func openLiveProfileApp(flags *rootFlags, needLock bool) (context.Context, conte
 		cancel()
 		return nil, nil, nil, nil, err
 	}
-	if err := a.EnsureAuthed(); err != nil {
+	if err := a.EnsureAuthed(ctx); err != nil {
 		cancel()
 		closeApp(a, lk)
 		return nil, nil, nil, nil, err

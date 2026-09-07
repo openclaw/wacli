@@ -90,7 +90,7 @@ func newSendLocationCmd(flags *rootFlags) *cobra.Command {
 			}
 			defer closeApp(a, lk)
 
-			if err := a.EnsureAuthed(); err != nil {
+			if err := a.EnsureAuthed(ctx); err != nil {
 				return err
 			}
 			toJID, err := resolveRecipient(a, to, recipientOptions{pick: pick, asJSON: flags.asJSON})
