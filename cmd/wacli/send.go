@@ -135,7 +135,7 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 
 			preview := fetchLinkPreview(ctx, message, noPreview)
 			msgID, err := runSendOperation(ctx, reconnectForSend(a), func(ctx context.Context) (types.MessageID, error) {
-				return sendTextMessageWithOptions(ctx, a, toJID, message, replyTo, replyToSender, preview, mentionedJIDs, ephemeralOpts, textSendOptions{allowSelf: allowSelf})
+				return sendTextMessage(ctx, a, toJID, message, replyTo, replyToSender, preview, mentionedJIDs, ephemeralOpts, textSendOptions{allowSelf: allowSelf})
 			})
 			if err != nil {
 				return err
@@ -249,19 +249,11 @@ const defaultEphemeralExpiration uint32 = 7 * 24 * 60 * 60
 
 var errSelfTextRecipient = errors.New("send text to the linked account itself is not supported: WhatsApp can acknowledge self-messages without delivering them; use the official Message Yourself chat")
 
-func sendTextMessage(ctx context.Context, a sendTextApp, to types.JID, text, replyTo, replyToSender string, preview *linkpreview.Preview, mentionedJIDs []string, ephemeral textEphemeralOptions) (types.MessageID, error) {
-	return sendTextMessageWithOptions(ctx, a, to, text, replyTo, replyToSender, preview, mentionedJIDs, ephemeral, textSendOptions{})
+func sendTextMessage(ctx context.Context, a sendTextApp, to types.JID, text, replyTo, replyToSender string, preview *linkpreview.Preview, mentionedJIDs []string, ephemeral textEphemeralOptions, options textSendOptions) (types.MessageID, error) {
+	return sendTextMessageWithSender(ctx, a.WA(), a.DB(), to, text, replyTo, replyToSender, preview, mentionedJIDs, ephemeral, options)
 }
 
-func sendTextMessageWithOptions(ctx context.Context, a sendTextApp, to types.JID, text, replyTo, replyToSender string, preview *linkpreview.Preview, mentionedJIDs []string, ephemeral textEphemeralOptions, options textSendOptions) (types.MessageID, error) {
-	return sendTextMessageWithSenderOptions(ctx, a.WA(), a.DB(), to, text, replyTo, replyToSender, preview, mentionedJIDs, ephemeral, options)
-}
-
-func sendTextMessageWithSender(ctx context.Context, sender textMessageSender, db *store.DB, to types.JID, text, replyTo, replyToSender string, preview *linkpreview.Preview, mentionedJIDs []string, ephemeral textEphemeralOptions) (types.MessageID, error) {
-	return sendTextMessageWithSenderOptions(ctx, sender, db, to, text, replyTo, replyToSender, preview, mentionedJIDs, ephemeral, textSendOptions{})
-}
-
-func sendTextMessageWithSenderOptions(ctx context.Context, sender textMessageSender, db *store.DB, to types.JID, text, replyTo, replyToSender string, preview *linkpreview.Preview, mentionedJIDs []string, ephemeral textEphemeralOptions, options textSendOptions) (types.MessageID, error) {
+func sendTextMessageWithSender(ctx context.Context, sender textMessageSender, db *store.DB, to types.JID, text, replyTo, replyToSender string, preview *linkpreview.Preview, mentionedJIDs []string, ephemeral textEphemeralOptions, options textSendOptions) (types.MessageID, error) {
 	if !options.allowSelf {
 		if err := validateTextRecipient(sender, to); err != nil {
 			return "", err
