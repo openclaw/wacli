@@ -68,7 +68,8 @@ function assertReleaseSource(version, commit, run) {
     throw new Error(`cmd/wacli/root.go does not default to ${version}`);
   }
   const changelog = fs.readFileSync(path.join(repoRoot, "CHANGELOG.md"), "utf8");
-  if (!new RegExp(`^## ${version} - \\d{4}-\\d{2}-\\d{2}$`, "m").test(changelog)) {
+  const datedHeadings = [...changelog.matchAll(/^## (\S+) - \d{4}-\d{2}-\d{2}$/gm)];
+  if (!datedHeadings.some(([, headingVersion]) => headingVersion === version)) {
     throw new Error(`CHANGELOG.md section ${version} must be dated before official preparation`);
   }
 }
