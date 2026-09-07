@@ -148,6 +148,31 @@ func TestSendTextAllowSelfDelegatesThroughSendSocketWhenStoreLocked(t *testing.T
 	}
 }
 
+func TestSendTextAllowSelfPreservesOlderDelegateRejection(t *testing.T) {
+	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
+	storeDir := shortPresenceDelegateStoreDir(t)
+	lk, err := lock.Acquire(storeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lk.Release()
+	server := startPresenceDelegateTestSocket(t, storeDir, func(req sendDelegateRequest) sendDelegateResponse {
+		// Older daemons ignore allow_self and retain their self-recipient guard.
+		return sendDelegateResponse{OK: false, Error: errSelfTextRecipient.Error()}
+	})
+	defer server.stop()
+	stdout, stderr, err := runPresenceDelegateHelper(t, []string{
+		"--store", storeDir, "--json", "--timeout", "2s",
+		"send", "text", "--to", "+15551234567", "--message", "self-test", "--allow-self",
+	})
+	if err == nil || !strings.Contains(stderr, errSelfTextRecipient.Error()) || strings.Contains(stdout, `"sent":true`) {
+		t.Fatalf("older delegate rejection: err=%v stdout=%q stderr=%q", err, stdout, stderr)
+	}
+	if !server.nextRequest(t).AllowSelf {
+		t.Fatal("opt-in did not reach the delegate")
+	}
+}
+
 func TestSendDelegateRequestPreservesReplyInJSON(t *testing.T) {
 	raw, err := json.Marshal(sendDelegateRequest{
 		Version:       sendDelegateVersion,

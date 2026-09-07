@@ -31,6 +31,7 @@ wacli polls list [--chat RECIPIENT] [--limit N] [--json]
 - In scripts, use `--pick N` to choose a displayed match.
 - Phone numbers may use common formatting such as `+1 (234) 567-8900`.
 - `send text` rejects the linked account's own phone-number or LID target by default. Pass `--allow-self` to explicitly attempt the send. WhatsApp may acknowledge these self-DMs without delivering them to Message Yourself, so `sent: true` still does not confirm device delivery. The flag also works when the send is delegated through a running `sync --follow` process.
+- Restart `sync --follow` after upgrading before using `--allow-self`: an older daemon retains its self-send rejection, which the CLI reports as an error. Upgrading the CLI does not change an already-running daemon.
 
 ## Replies and reactions
 
