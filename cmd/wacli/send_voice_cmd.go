@@ -60,7 +60,7 @@ func newSendVoiceCmd(flags *rootFlags) *cobra.Command {
 			}
 			defer closeApp(a, lk)
 
-			if err := a.EnsureAuthed(); err != nil {
+			if err := a.EnsureAuthed(ctx); err != nil {
 				return err
 			}
 

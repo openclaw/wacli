@@ -18,11 +18,17 @@ func (a *App) migrateHistoricalLIDs(ctx context.Context) error {
 		return fmt.Errorf("load historical LID rows: %w", err)
 	}
 	for _, raw := range lids {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		lid, err := types.ParseJID(strings.TrimSpace(raw))
 		if err != nil || lid.Server != types.HiddenUserServer {
 			continue
 		}
 		pn := a.wa.ResolveLIDToPN(ctx, lid)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if pn.IsEmpty() || pn.Server != types.DefaultUserServer {
 			continue
 		}
