@@ -2,9 +2,14 @@
 
 ## Unreleased
 
-### Fixed
+**Highlights:** faster, interruptible upgrades, offline group rosters, and explicit opt-in self-chat sends.
 
-- Release: require the exact version in dated changelog headings before local release preparation.
+- Sync: speed up historical identity repair with indexed lookups and selective search-index updates, and honor cancellation between identities during startup. (#395, #398 - thanks @amitav13)
+- Groups: add `groups participants list` for offline roster snapshots with roles and timestamps, and refresh participant snapshots with `sync --refresh-groups`. (#359, #381 - thanks @shishiv)
+- Send: add default-off `send text --allow-self` for direct and delegated self-chat attempts, retaining the default rejection and documenting acknowledgement-only delivery and daemon restart requirements. (#396 - thanks @frdteknikelektro)
+- Sync: expose server backlog preview and completion lifecycle events without changing webhook payloads; document that they do not classify individual deliveries or indicate a drained webhook queue. (#379 - thanks @hchittanuru3)
+- Builds: refresh pnpm to 12.3.4 with its verified integrity pin and identify source builds as the upcoming 0.18.0 minor.
+- Release: require the exact version in dated changelog headings before local release preparation. (#397 - thanks @vincentkoc)
 
 ## 0.17.2 - 2026-09-05
 
