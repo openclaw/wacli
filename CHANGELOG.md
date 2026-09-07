@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.18.0 - 2026-09-07
 
 **Highlights:** faster, interruptible upgrades, offline group rosters, and explicit opt-in self-chat sends.
 
