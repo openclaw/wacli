@@ -6,6 +6,12 @@
 
 - Sync: try a full app-state refresh before requesting phone recovery after an LTHash mismatch, with independent timeouts and once-per-collection failure throttling. (#367)
 
+## 0.18.1 - 2026-09-07
+
+**Highlights:** bounded memory use when generating waveforms for long voice notes.
+
+- Send: cap voice-note waveform decoding at 2 MiB (about 131 seconds), preserve full audio and duration, and omit partial waveforms when ffmpeg fails. (#402 - thanks @SebTardif)
+
 ## 0.18.0 - 2026-09-07
 
 **Highlights:** faster, interruptible upgrades, offline group rosters, and explicit opt-in self-chat sends.
