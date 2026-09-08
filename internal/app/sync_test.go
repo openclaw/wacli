@@ -751,6 +751,71 @@ func TestAppStateLTHashMismatchThrottlesAfterRecoveryFailure(t *testing.T) {
 	}
 }
 
+func TestAppStateLTHashMismatchRepeatsFullSyncButCapsSnapshotRequests(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		recoveryError error
+	}{
+		{name: "snapshot-success"},
+		{name: "snapshot-failure", recoveryError: errors.New("recovery request failed")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := newTestApp(t)
+			var fetches, snapshots atomic.Int32
+			var failFetch atomic.Bool
+			f := &appStateContextWA{fakeWA: newFakeWA()}
+			f.fetchAppState = func(context.Context, string, bool, bool) error {
+				fetches.Add(1)
+				if failFetch.Load() {
+					return errors.New("full sync failed")
+				}
+				return nil
+			}
+			f.requestAppStateRecovery = func(context.Context, string) (types.MessageID, error) {
+				snapshots.Add(1)
+				return "recovery-req", tc.recoveryError
+			}
+			a.wa = f
+			var recoveries sync.Map
+			collection := string(appstate.WAPatchRegularLow)
+			event := &events.AppStateSyncError{
+				Name:  appstate.WAPatchRegularLow,
+				Error: fmt.Errorf("failed to verify patch v5848: %w", appstate.ErrMismatchingLTHash),
+			}
+			for attempt := int32(1); attempt <= 3; attempt++ {
+				a.handleAppStateSyncError(context.Background(), event, &recoveries)
+				waitForCondition(t, time.Second, func() bool {
+					_, retained := recoveries.Load(collection)
+					return fetches.Load() == attempt && !retained
+				})
+			}
+			if got := snapshots.Load(); got != 0 {
+				t.Fatalf("successful full syncs requested %d snapshots, want zero", got)
+			}
+
+			failFetch.Store(true)
+			// Run the failure path synchronously so assertions observe the guard
+			// after the entire recovery attempt, not just the fake request call.
+			if _, loaded := recoveries.LoadOrStore(collection, struct{}{}); loaded {
+				t.Fatal("recovery guard remained set after successful full sync")
+			}
+			a.recoverAppStateAfterLTHashMismatch(context.Background(), collection, &recoveries, time.Second)
+			if _, retained := recoveries.Load(collection); !retained {
+				t.Fatal("snapshot attempt did not retain recovery guard")
+			}
+			for range 10 {
+				a.handleAppStateSyncError(context.Background(), event, &recoveries)
+			}
+			if got := fetches.Load(); got != 4 {
+				t.Fatalf("full sync calls = %d, want 4", got)
+			}
+			if got := snapshots.Load(); got != 1 {
+				t.Fatalf("snapshot calls = %d, want 1", got)
+			}
+		})
+	}
+}
+
 func TestAppStateNonLTHashErrorDoesNotRequestRecovery(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
