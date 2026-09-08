@@ -540,7 +540,11 @@ func (a *App) recoverAppStateAfterLTHashMismatch(ctx context.Context, name strin
 	defer cancelRecovery()
 	reqID, err := a.wa.RequestAppStateRecovery(recoveryCtx, name)
 	if err != nil {
-		recoveries.Delete(name)
+		// Parent cancellation ends this sync run. Otherwise keep the marker so
+		// repeated mismatch events don't retry a failing recovery immediately.
+		if ctx.Err() != nil {
+			recoveries.Delete(name)
+		}
 		a.emitWarning(
 			"app_state_recovery_failed",
 			fmt.Sprintf("warning: app state %s recovery request failed: %v", name, err),

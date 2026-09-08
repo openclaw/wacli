@@ -713,6 +713,44 @@ func TestAppStateLTHashMismatchRequestsRecoveryWhenFullSyncFails(t *testing.T) {
 	}
 }
 
+func TestAppStateLTHashMismatchThrottlesAfterRecoveryFailure(t *testing.T) {
+	a := newTestApp(t)
+	var fetchCalls atomic.Int32
+	var recoveryCalls atomic.Int32
+	f := &appStateContextWA{fakeWA: newFakeWA()}
+	f.fetchAppState = func(context.Context, string, bool, bool) error {
+		fetchCalls.Add(1)
+		return errors.New("full sync failed")
+	}
+	f.requestAppStateRecovery = func(context.Context, string) (types.MessageID, error) {
+		recoveryCalls.Add(1)
+		return "", errors.New("recovery request failed")
+	}
+	a.wa = f
+
+	var recoveries sync.Map
+	name := string(appstate.WAPatchRegularLow)
+	recoveries.Store(name, struct{}{})
+	a.recoverAppStateAfterLTHashMismatch(context.Background(), name, &recoveries, time.Second)
+
+	if _, loaded := recoveries.Load(name); !loaded {
+		t.Fatal("recovery guard was cleared after recovery request failure")
+	}
+	err := fmt.Errorf("failed to verify patch v5848: %w", appstate.ErrMismatchingLTHash)
+	a.handleAppStateSyncError(context.Background(), &events.AppStateSyncError{
+		Name:  appstate.WAPatchRegularLow,
+		Error: err,
+	}, &recoveries)
+	time.Sleep(20 * time.Millisecond)
+
+	if got := fetchCalls.Load(); got != 1 {
+		t.Fatalf("full sync calls = %d, want 1", got)
+	}
+	if got := recoveryCalls.Load(); got != 1 {
+		t.Fatalf("recovery calls = %d, want 1", got)
+	}
+}
+
 func TestAppStateNonLTHashErrorDoesNotRequestRecovery(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
