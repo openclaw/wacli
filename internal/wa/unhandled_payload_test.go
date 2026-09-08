@@ -5,6 +5,8 @@ import (
 	"time"
 
 	waProto "go.mau.fi/whatsmeow/binary/proto"
+	"go.mau.fi/whatsmeow/proto/waCommon"
+	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
@@ -177,6 +179,43 @@ func TestMarkUnhandledPayloadIgnoresWrappedText(t *testing.T) {
 	}))
 	if pm.Text != "hello" {
 		t.Fatalf("expected wrapped text to be extracted, got %q", pm.Text)
+	}
+	if pm.UnhandledPayload != "" {
+		t.Fatalf("expected no unhandled payload, got %q", pm.UnhandledPayload)
+	}
+}
+
+func TestParseLiveMessageExtractsCommentMessage(t *testing.T) {
+	pm := ParseLiveMessage(liveEvent(&waProto.Message{
+		CommentMessage: &waE2E.CommentMessage{
+			TargetMessageKey: &waCommon.MessageKey{
+				ID: proto.String("TARGET-123"),
+			},
+			Message: &waProto.Message{
+				Conversation: proto.String("this is a comment"),
+			},
+		},
+	}))
+	if pm.Text != "this is a comment" {
+		t.Fatalf("expected comment text, got %q", pm.Text)
+	}
+	if pm.ReplyToID != "TARGET-123" {
+		t.Fatalf("expected ReplyToID TARGET-123, got %q", pm.ReplyToID)
+	}
+	if pm.UnhandledPayload != "" {
+		t.Fatalf("expected no unhandled payload, got %q", pm.UnhandledPayload)
+	}
+}
+
+func TestParseLiveMessageExtractsAlbumMessage(t *testing.T) {
+	pm := ParseLiveMessage(liveEvent(&waProto.Message{
+		AlbumMessage: &waE2E.AlbumMessage{
+			ExpectedImageCount: proto.Uint32(3),
+			ExpectedVideoCount: proto.Uint32(1),
+		},
+	}))
+	if pm.Text != "[Album: 3 images, 1 videos]" {
+		t.Fatalf("expected album text, got %q", pm.Text)
 	}
 	if pm.UnhandledPayload != "" {
 		t.Fatalf("expected no unhandled payload, got %q", pm.UnhandledPayload)

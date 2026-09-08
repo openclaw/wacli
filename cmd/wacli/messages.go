@@ -502,7 +502,7 @@ func newMessagesDeleteCmd(flags *rootFlags) *cobra.Command {
 			}
 			defer closeApp(a, lk)
 
-			if err := a.EnsureAuthed(); err != nil {
+			if err := a.EnsureAuthed(ctx); err != nil {
 				return err
 			}
 			msg, chatJID, err := loadMessageMutationTarget(ctx, a, chat, id)
@@ -623,7 +623,7 @@ func newMessagesRevokeCmd(flags *rootFlags) *cobra.Command {
 			}
 			defer closeApp(a, lk)
 
-			if err := a.EnsureAuthed(); err != nil {
+			if err := a.EnsureAuthed(ctx); err != nil {
 				return err
 			}
 			msg, chatJID, found, err := loadMessageRevokeTarget(ctx, a, chat, id)
@@ -726,7 +726,7 @@ func newMessagesEditCmd(flags *rootFlags) *cobra.Command {
 			}
 			defer closeApp(a, lk)
 
-			if err := a.EnsureAuthed(); err != nil {
+			if err := a.EnsureAuthed(ctx); err != nil {
 				return err
 			}
 			msg, chatJID, err := loadMessageMutationTarget(ctx, a, chat, id)
@@ -801,7 +801,7 @@ func newMessagesForwardCmd(flags *rootFlags) *cobra.Command {
 			}
 			defer closeApp(a, lk)
 
-			if err := a.EnsureAuthed(); err != nil {
+			if err := a.EnsureAuthed(ctx); err != nil {
 				return err
 			}
 			source, _, err := loadMessageMutationTarget(ctx, a, chat, id)

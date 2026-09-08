@@ -74,6 +74,8 @@ The JSON response is wrapped in the standard envelope. Import details live under
 
 Use `--input FILE` to import from a JSON array or newline-delimited JSON instead of opening macOS Contacts:
 
+Exports are limited to 10 MiB, whether read from a file or the macOS Contacts helper. An oversized helper is stopped before its full output is buffered; no contact names are imported from an oversized export.
+
 ```bash
 wacli contacts import-system --input contacts.json --dry-run
 wacli contacts import-system --input contacts.ndjson

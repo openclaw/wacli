@@ -39,6 +39,21 @@ var schemaMigrations = []migration{
 	{version: 23, name: "app state recovery markers", up: migrateAppStateRecoveryMarkers},
 	{version: 24, name: "app state recovery intents", up: migrateAppStateRecoveryIntents},
 	{version: 25, name: "message locations", up: migrateMessageLocations},
+	{version: 26, name: "message identity indexes and selective fts updates", up: migrateMessageIdentityIndexes},
+}
+
+func migrateMessageIdentityIndexes(d *DB) error {
+	hasMessages, err := d.tableExists("messages")
+	if err != nil || !hasMessages {
+		return err
+	}
+	if _, err := d.sql.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_messages_sender_jid ON messages(sender_jid);
+		CREATE INDEX IF NOT EXISTS idx_messages_quoted_sender_jid ON messages(quoted_sender_jid);
+	`); err != nil {
+		return fmt.Errorf("create message identity indexes: %w", err)
+	}
+	return migrateMessagesFTS(d)
 }
 
 func migrateMessageLocations(d *DB) error {
@@ -800,7 +815,16 @@ func migrateMessagesFTS(d *DB) error {
 			DELETE FROM messages_fts WHERE rowid = old.rowid;
 		END;
 
-		CREATE TRIGGER messages_au AFTER UPDATE ON messages BEGIN
+		CREATE TRIGGER messages_au AFTER UPDATE ON messages
+		WHEN old.rowid IS NOT new.rowid
+			OR old.deleted_at IS NOT new.deleted_at
+			OR old.text IS NOT new.text
+			OR old.media_caption IS NOT new.media_caption
+			OR old.filename IS NOT new.filename
+			OR old.chat_name IS NOT new.chat_name
+			OR old.sender_name IS NOT new.sender_name
+			OR old.display_text IS NOT new.display_text
+		BEGIN
 			DELETE FROM messages_fts WHERE rowid = old.rowid;
 			INSERT INTO messages_fts(rowid, text, media_caption, filename, chat_name, sender_name, display_text)
 			SELECT new.rowid, COALESCE(new.text,''), COALESCE(new.media_caption,''), COALESCE(new.filename,''), COALESCE(new.chat_name,''), COALESCE(new.sender_name,''), COALESCE(new.display_text,'')

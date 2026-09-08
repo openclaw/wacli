@@ -27,6 +27,7 @@ import {
   parseChecksums,
   parseCliArgs,
   releaseAssetNames,
+  releaseGoVersionForCommit,
   releaseManifestDigest,
   runCommand,
   sanitizedExecutionEnv,
@@ -59,16 +60,16 @@ function assertReleaseSource(version, commit, run) {
   if (head !== commit) throw new Error(`release commit ${commit} is not checked out (HEAD is ${head})`);
   run("git", ["merge-base", "--is-ancestor", commit, "origin/main"], { cwd: repoRoot });
 
-  const goMod = fs.readFileSync(path.join(repoRoot, "go.mod"), "utf8");
-  if (goMod.match(/^go (\S+)$/m)?.[1] !== RELEASE_GO_VERSION.slice(2)) {
-    throw new Error(`go.mod must require exact ${RELEASE_GO_VERSION}`);
+  if (releaseGoVersionForCommit(commit, { run }) !== RELEASE_GO_VERSION) {
+    throw new Error(`release commit must select exact ${RELEASE_GO_VERSION}`);
   }
   const rootSource = fs.readFileSync(path.join(repoRoot, "cmd/wacli/root.go"), "utf8");
   if (!rootSource.includes(`const sourceVersion = \"${version}\"`)) {
     throw new Error(`cmd/wacli/root.go does not default to ${version}`);
   }
   const changelog = fs.readFileSync(path.join(repoRoot, "CHANGELOG.md"), "utf8");
-  if (!new RegExp(`^## ${version} - \\d{4}-\\d{2}-\\d{2}$`, "m").test(changelog)) {
+  const datedHeadings = [...changelog.matchAll(/^## (\S+) - \d{4}-\d{2}-\d{2}$/gm)];
+  if (!datedHeadings.some(([, headingVersion]) => headingVersion === version)) {
     throw new Error(`CHANGELOG.md section ${version} must be dated before official preparation`);
   }
 }

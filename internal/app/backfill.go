@@ -62,7 +62,7 @@ func (a *App) BackfillHistory(ctx context.Context, opts BackfillOptions) (Backfi
 		return BackfillResult{}, err
 	}
 
-	if err := a.EnsureAuthed(); err != nil {
+	if err := a.EnsureAuthed(ctx); err != nil {
 		return BackfillResult{}, err
 	}
 	if err := a.OpenWA(); err != nil {

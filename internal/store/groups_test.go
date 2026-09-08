@@ -164,3 +164,57 @@ func TestMarkGroupsMissingFrom(t *testing.T) {
 		t.Fatalf("expected only active group, got %+v", gs)
 	}
 }
+
+func TestListGroupParticipants(t *testing.T) {
+	db := openTestDB(t)
+
+	gid := "123@g.us"
+	if err := db.UpsertGroup(gid, "Test Group", "owner@s.whatsapp.net", time.Now()); err != nil {
+		t.Fatalf("UpsertGroup: %v", err)
+	}
+
+	participants := []GroupParticipant{
+		{GroupJID: gid, UserJID: "charlie@s.whatsapp.net", Role: "member"},
+		{GroupJID: gid, UserJID: "alice@s.whatsapp.net", Role: "admin"},
+		{GroupJID: gid, UserJID: "boss@s.whatsapp.net", Role: "superadmin"},
+		{GroupJID: gid, UserJID: "bob@s.whatsapp.net", Role: "member"},
+	}
+	if err := db.ReplaceGroupParticipants(gid, participants); err != nil {
+		t.Fatalf("ReplaceGroupParticipants: %v", err)
+	}
+
+	got, err := db.ListGroupParticipants(gid)
+	if err != nil {
+		t.Fatalf("ListGroupParticipants: %v", err)
+	}
+	if len(got) != 4 {
+		t.Fatalf("got %d participants, want 4", len(got))
+	}
+
+	expectedOrder := []struct {
+		jid  string
+		role string
+	}{
+		{"boss@s.whatsapp.net", "superadmin"},
+		{"alice@s.whatsapp.net", "admin"},
+		{"bob@s.whatsapp.net", "member"},
+		{"charlie@s.whatsapp.net", "member"},
+	}
+	for i, want := range expectedOrder {
+		if got[i].UserJID != want.jid || got[i].Role != want.role {
+			t.Errorf("item %d = {%s, %s}, want {%s, %s}", i, got[i].UserJID, got[i].Role, want.jid, want.role)
+		}
+	}
+
+	empty, err := db.ListGroupParticipants("other@g.us")
+	if err != nil {
+		t.Fatalf("ListGroupParticipants unknown: %v", err)
+	}
+	if len(empty) != 0 {
+		t.Fatalf("expected 0 participants for unknown group, got %d", len(empty))
+	}
+
+	if _, err := db.ListGroupParticipants("  "); err == nil {
+		t.Fatal("expected error for blank group JID")
+	}
+}
