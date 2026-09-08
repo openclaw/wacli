@@ -12,8 +12,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const maxSystemContactsInputBytes = 10 * 1024 * 1024
-
 type systemContactMatch struct {
 	JID           string `json:"jid"`
 	Phone         string `json:"phone"`
@@ -109,7 +107,7 @@ and phones.`,
 
 func readSystemContacts(ctx context.Context, input string) ([]syscontacts.Contact, error) {
 	if input != "" {
-		data, err := readRegularFileLimited(input, maxSystemContactsInputBytes)
+		data, err := readRegularFileLimited(input, syscontacts.MaxContactsDecodeBytes)
 		if err != nil {
 			return nil, err
 		}

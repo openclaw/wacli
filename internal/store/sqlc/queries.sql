@@ -159,6 +159,16 @@ DELETE FROM group_participants WHERE group_jid = ?;
 INSERT INTO group_participants(group_jid, user_jid, role, updated_at)
 VALUES(?, ?, ?, ?);
 
+-- name: ListGroupParticipants :many
+SELECT group_jid, user_jid, COALESCE(role, 'member') AS role, updated_at
+FROM group_participants
+WHERE group_jid = ?
+ORDER BY CASE role
+    WHEN 'superadmin' THEN 1
+    WHEN 'admin' THEN 2
+    ELSE 3
+END, user_jid ASC;
+
 -- name: DeleteGroup :exec
 DELETE FROM groups WHERE jid = ?;
 

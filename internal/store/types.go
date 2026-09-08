@@ -36,10 +36,10 @@ type Group struct {
 }
 
 type GroupParticipant struct {
-	GroupJID  string
-	UserJID   string
-	Role      string
-	UpdatedAt time.Time
+	GroupJID  string    `json:"group_jid"`
+	UserJID   string    `json:"user_jid"`
+	Role      string    `json:"role"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type MediaDownloadInfo struct {

@@ -781,6 +781,52 @@ func (q *Queries) ListContacts(ctx context.Context, limit int64) ([]ListContacts
 	return items, nil
 }
 
+const listGroupParticipants = `-- name: ListGroupParticipants :many
+SELECT group_jid, user_jid, COALESCE(role, 'member') AS role, updated_at
+FROM group_participants
+WHERE group_jid = ?
+ORDER BY CASE role
+    WHEN 'superadmin' THEN 1
+    WHEN 'admin' THEN 2
+    ELSE 3
+END, user_jid ASC
+`
+
+type ListGroupParticipantsRow struct {
+	GroupJid  string
+	UserJid   string
+	Role      string
+	UpdatedAt int64
+}
+
+func (q *Queries) ListGroupParticipants(ctx context.Context, groupJid string) ([]ListGroupParticipantsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listGroupParticipants, groupJid)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListGroupParticipantsRow
+	for rows.Next() {
+		var i ListGroupParticipantsRow
+		if err := rows.Scan(
+			&i.GroupJid,
+			&i.UserJid,
+			&i.Role,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listJoinedGroupJIDs = `-- name: ListJoinedGroupJIDs :many
 SELECT jid FROM groups WHERE left_at IS NULL
 `

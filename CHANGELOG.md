@@ -6,16 +6,33 @@
 
 - Chats: delegate `mark-read` and `mark-unread` through the local socket after a same-store `sync --follow` process finishes startup. (#361)
 
-### Fixed
+## 0.18.0 - 2026-09-07
 
-- CLI: keep successful JSON commands successful when a pipe reader closes early, including Unix stdout SIGPIPE and Windows closed-pipe errors. (#366 - thanks @SebTardif)
-- Groups: warn on stderr when `groups list` truncates matching results, including JSON output, and keep `--events` warnings machine-readable. (#360 - thanks @hchittanuru3)
-- Sync: update whatsmeow so incoming socket frames use the active connection context.
+**Highlights:** faster, interruptible upgrades, offline group rosters, and explicit opt-in self-chat sends.
+
+- Sync: speed up historical identity repair with indexed lookups and selective search-index updates, and honor cancellation between identities during startup. (#395, #398 - thanks @amitav13)
+- Groups: add `groups participants list` for offline roster snapshots with roles and timestamps, and refresh participant snapshots with `sync --refresh-groups`. (#359, #381 - thanks @shishiv)
+- Send: add default-off `send text --allow-self` for direct and delegated self-chat attempts, retaining the default rejection and documenting acknowledgement-only delivery and daemon restart requirements. (#396 - thanks @frdteknikelektro)
+- Sync: expose server backlog preview and completion lifecycle events without changing webhook payloads; document that they do not classify individual deliveries or indicate a drained webhook queue. (#379 - thanks @hchittanuru3)
+- Builds: refresh pnpm to 12.3.4 with its verified integrity pin and identify source builds as the upcoming 0.18.0 minor.
+- Release: require the exact version in dated changelog headings before local release preparation. (#397 - thanks @vincentkoc)
+
+## 0.17.2 - 2026-09-05
+
+**Highlights:** more complete searchable message history, bounded backfill retries, and clearer guidance for commands used alongside continuous sync.
+
+- Messages: extract comment bodies and album summaries in live/history sync, preserving comment reply targets and matching quote metadata. (#383 - thanks @shishiv and @Entretoize)
 - History: retry an unanswered backfill anchor once with the next local message, report both anchors, and keep retries bounded without deleting history or filtering message IDs. (#371 - thanks @Entretoize)
-
-### Chore
-
-- Dependencies: update Go modules, pnpm, CI actions, GoReleaser, and Docker images; require Go 1.27.0 and align local, CI, and release toolchain checks.
+- Sync: serialize message and receipt webhook timestamps as UTC, preserving their instants while replacing host-local offsets with the documented `Z` form. (#386, #388 - thanks @hchittanuru3)
+- Media: explain how `media download --read-only --output PATH` bypasses the store lock held by continuous sync. (#387 - thanks @hchittanuru3)
+- Messages: omit synthetic audio captions while preserving supplied text and the `[Audio]` display fallback; re-ingestion can correct legacy captions without migrating untouched rows. (#378 - thanks @hchittanuru3)
+- CLI: keep successful JSON commands successful when a pipe reader closes early, including Unix SIGPIPE and Windows closed-pipe errors. (#366 - thanks @SebTardif)
+- Groups: warn on stderr when `groups list` truncates matching results, including JSON output, and keep `--events` warnings machine-readable. (#360 - thanks @hchittanuru3)
+- Contacts: bound system-contact exports and their helper processes while preserving the existing 10 MiB file-import limit. (#376 - thanks @SebTardif)
+- Docs: render nested heading links and table-of-contents labels safely, preserving links and stable heading anchors. (#370 - thanks @vincentkoc)
+- WhatsApp compatibility: update socket-context handling, message identity parsing, group deletion handling, and disconnect event processing through whatsmeow updates.
+- Builds: use Go 1.27.1 for development, CI, release verification, and Docker while retaining the Go 1.27.0 source minimum; source builds now identify the upcoming 0.17.2 patch.
+- Dependencies: refresh Go modules, pnpm 12.3.1, CI actions, GoReleaser, and Docker images, retaining a verified package-manager integrity pin. (#384 - thanks @thedavidweng)
 
 ## v0.17.1 - 2026-08-14
 

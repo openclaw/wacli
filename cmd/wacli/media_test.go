@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openclaw/wacli/internal/lock"
 	"github.com/spf13/cobra"
 )
 
@@ -65,5 +66,40 @@ func TestMediaDownloadReadOnlyRequiresOutput(t *testing.T) {
 	err := execute([]string{"--read-only", "media", "download", "--chat", "chat@s.whatsapp.net", "--id", "mid"})
 	if err == nil || !strings.Contains(err.Error(), "--output is required in read-only mode") {
 		t.Fatalf("execute error = %v, want read-only output requirement", err)
+	}
+}
+
+// `sync --follow` holds the store lock for its entire run, so waiting cannot
+// clear it and the caller has to be told about the path that needs no lock.
+func TestMediaDownloadLockedStoreNamesTheReadOnlyPath(t *testing.T) {
+	storeDir := t.TempDir()
+	lk, err := lock.Acquire(storeDir)
+	if err != nil {
+		t.Fatalf("lock store: %v", err)
+	}
+	defer lk.Release()
+
+	err = execute([]string{"--store", storeDir, "media", "download",
+		"--chat", "15551234567@s.whatsapp.net", "--id", "mid"})
+	if err == nil {
+		t.Fatal("media download unexpectedly succeeded against a locked store")
+	}
+	if !strings.Contains(err.Error(), "store is locked") {
+		t.Fatalf("error = %v, want the original lock error preserved", err)
+	}
+	if !strings.Contains(err.Error(), "--read-only") {
+		t.Fatalf("error = %v, want it to name --read-only", err)
+	}
+}
+
+// The hint belongs to the lock case only: an unrelated failure must not be
+// dressed up as one.
+func TestMediaDownloadReadOnlyLockHintIsNotAddedToOtherErrors(t *testing.T) {
+	err := execute([]string{"--store", t.TempDir(), "media", "download", "--chat", "", "--id", ""})
+	if err == nil {
+		t.Fatal("expected missing-argument failure")
+	}
+	if strings.Contains(err.Error(), "--read-only") {
+		t.Fatalf("error = %v, want no lock hint on an argument error", err)
 	}
 }

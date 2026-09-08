@@ -195,7 +195,10 @@ func (a *App) Close() {
 	}
 }
 
-func (a *App) EnsureAuthed() error {
+func (a *App) EnsureAuthed(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := a.OpenWA(); err != nil {
 		return err
 	}
@@ -203,7 +206,7 @@ func (a *App) EnsureAuthed() error {
 		if a.opts.ReadOnly {
 			return nil
 		}
-		return a.migrateHistoricalLIDs(context.Background())
+		return a.migrateHistoricalLIDs(ctx)
 	}
 	return fmt.Errorf("not authenticated; run `wacli auth`")
 }

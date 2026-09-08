@@ -1,6 +1,8 @@
 package app
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,6 +11,33 @@ import (
 	"github.com/openclaw/wacli/internal/store"
 	"go.mau.fi/whatsmeow/types"
 )
+
+type cancelingLIDResolver struct {
+	WAClient
+	cancel context.CancelFunc
+}
+
+func (f cancelingLIDResolver) ResolveLIDToPN(ctx context.Context, jid types.JID) types.JID {
+	f.cancel()
+	return types.JID{User: "15550000001", Server: types.DefaultUserServer}
+}
+
+func TestEnsureAuthedStopsHistoricalMigrationOnCancellation(t *testing.T) {
+	a := newTestApp(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	a.wa = cancelingLIDResolver{WAClient: newFakeWA(), cancel: cancel}
+	if err := a.db.UpsertChat("123@lid", "dm", "Synthetic", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.EnsureAuthed(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("EnsureAuthed = %v, want context.Canceled", err)
+	}
+	lids, err := a.db.HistoricalLIDJIDs()
+	if err != nil || len(lids) != 1 || lids[0] != "123@lid" {
+		t.Fatalf("canceled migration changed historical identities: %v, %v", lids, err)
+	}
+}
 
 func TestEnsureAuthedMigratesHistoricalLIDs(t *testing.T) {
 	a := newTestApp(t)
@@ -34,7 +63,7 @@ func TestEnsureAuthedMigratesHistoricalLIDs(t *testing.T) {
 		t.Fatalf("UpsertMessage lid: %v", err)
 	}
 
-	if err := a.EnsureAuthed(); err != nil {
+	if err := a.EnsureAuthed(t.Context()); err != nil {
 		t.Fatalf("EnsureAuthed: %v", err)
 	}
 
@@ -87,7 +116,7 @@ func TestEnsureAuthedRemovesPurgedAliasMediaBeforeLIDMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := a.EnsureAuthed(); err != nil {
+	if err := a.EnsureAuthed(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(aliasPath); !os.IsNotExist(err) {
@@ -133,7 +162,7 @@ func TestEnsureAuthedPreservesDuplicateAliasMediaForLaterPurge(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := a.EnsureAuthed(); err != nil {
+	if err := a.EnsureAuthed(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(lidPath); err != nil {
@@ -187,7 +216,7 @@ func TestEnsureAuthedPreservesAliasMediaWhenDestinationPathIsStale(t *testing.T)
 		t.Fatal(err)
 	}
 
-	if err := a.EnsureAuthed(); err != nil {
+	if err := a.EnsureAuthed(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(lidPath); err != nil {
@@ -234,7 +263,7 @@ func TestEnsureAuthedKeepsMediaWhenDuplicatePathsIdentifySameFile(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	if err := a.EnsureAuthed(); err != nil {
+	if err := a.EnsureAuthed(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(mediaPath); err != nil {
@@ -260,7 +289,7 @@ func TestEnsureAuthedLeavesUnresolvedHistoricalLIDs(t *testing.T) {
 		t.Fatalf("UpsertChat lid: %v", err)
 	}
 
-	if err := a.EnsureAuthed(); err != nil {
+	if err := a.EnsureAuthed(t.Context()); err != nil {
 		t.Fatalf("EnsureAuthed: %v", err)
 	}
 	lids, err := a.db.HistoricalLIDJIDs()
@@ -296,7 +325,7 @@ func TestEnsureAuthedSkipsHistoricalLIDMigrationReadOnly(t *testing.T) {
 	f.lids[lid.ToNonAD()] = pn
 	reader.wa = f
 
-	if err := reader.EnsureAuthed(); err != nil {
+	if err := reader.EnsureAuthed(t.Context()); err != nil {
 		t.Fatalf("EnsureAuthed read-only: %v", err)
 	}
 	lids, err := reader.db.HistoricalLIDJIDs()

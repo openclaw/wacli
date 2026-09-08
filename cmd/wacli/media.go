@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/openclaw/wacli/internal/app"
+	"github.com/openclaw/wacli/internal/lock"
 	"github.com/openclaw/wacli/internal/out"
 	"github.com/openclaw/wacli/internal/wa"
 	"github.com/spf13/cobra"
@@ -65,7 +66,7 @@ func newMediaRetryCmd(flags *rootFlags) *cobra.Command {
 			}
 			defer closeApp(a, lk)
 
-			if err := a.EnsureAuthed(); err != nil {
+			if err := a.EnsureAuthed(ctx); err != nil {
 				return err
 			}
 			if err := a.Connect(ctx, false, nil); err != nil {
@@ -154,7 +155,7 @@ func newMediaBackfillCmd(flags *rootFlags) *cobra.Command {
 			}
 			defer closeApp(a, lk)
 
-			if err := a.EnsureAuthed(); err != nil {
+			if err := a.EnsureAuthed(ctx); err != nil {
 				return err
 			}
 			if err := a.Connect(ctx, false, nil); err != nil {
@@ -242,12 +243,18 @@ func newMediaDownloadCmd(flags *rootFlags) *cobra.Command {
 
 			a, lk, err := newApp(ctx, flags, !readOnly, false)
 			if err != nil {
+				// A `sync --follow` holds the lock for its whole run, so waiting
+				// cannot clear it. Name the flag that does not need the lock
+				// rather than leaving the caller to stop their sync.
+				if lock.IsLocked(err) {
+					return fmt.Errorf("%w; to download while sync is running, use --read-only with --output PATH (it takes no store lock, and does not record local_path)", err)
+				}
 				return err
 			}
 			defer closeApp(a, lk)
 
 			if !readOnly {
-				if err := a.EnsureAuthed(); err != nil {
+				if err := a.EnsureAuthed(ctx); err != nil {
 					return err
 				}
 			}
