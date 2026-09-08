@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Chats: delegate `mark-read` and `mark-unread` through the local socket after a same-store `sync --follow` process finishes startup. (#361)
+
 ### Fixed
 
 - CLI: keep successful JSON commands successful when a pipe reader closes early, including Unix stdout SIGPIPE and Windows closed-pipe errors. (#366 - thanks @SebTardif)

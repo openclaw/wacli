@@ -29,6 +29,7 @@ wacli chats cleanup [--days N] [--jid JID] [--dry-run] [--confirm]
 - `mark-unread` sets the unread marker without inventing an unread count; `mark-read` clears both the marker and count.
 - `show` accepts the stored JID. If a phone JID maps to a historical `@lid` row, it can show that row too.
 - State commands use `--chat` and resolve names, phone numbers, groups, and JIDs like send commands. Use `--pick N` for ambiguous matches.
+- After a same-store `sync --follow` process finishes startup and opens its local delegate socket, `mark-read` and `mark-unread` are delegated to it while it owns the store lock. Other state commands still require direct access to the lock.
 - State commands print a compact success line by default and a stable JSON object with `--json`.
 - `mute --duration 0` or omitting `--duration` mutes forever. Use `unmute` to clear it.
 - Run `wacli sync` to catch up chat-state changes made on other devices; run `wacli contacts refresh` to improve chat names.
