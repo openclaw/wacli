@@ -6,6 +6,12 @@
 
 - Chats: delegate `mark-read` and `mark-unread` through the local socket after a same-store `sync --follow` process finishes startup. (#361)
 
+## 0.18.1 - 2026-09-07
+
+**Highlights:** bounded memory use when generating waveforms for long voice notes.
+
+- Send: cap voice-note waveform decoding at 2 MiB (about 131 seconds), preserve full audio and duration, and omit partial waveforms when ffmpeg fails. (#402 - thanks @SebTardif)
+
 ## 0.18.0 - 2026-09-07
 
 **Highlights:** faster, interruptible upgrades, offline group rosters, and explicit opt-in self-chat sends.

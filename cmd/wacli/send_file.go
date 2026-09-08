@@ -36,6 +36,8 @@ const imageThumbnailMaxDimension = 96
 const imageThumbnailMaxPixels = 40_000_000
 const voiceWaveformSamples = 64
 const voiceWaveformMax = 100
+const voiceWaveformSampleRate = 8000
+const maxWaveformPCMBytes = 2 << 20 // 2 MiB of 8 kHz s16le is ~131s of PCM
 
 const sendMediaTypeAuto = "auto"
 
@@ -510,16 +512,34 @@ func probeAudioWaveform(ctx context.Context, filePath string) []byte {
 	probeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	out, err := exec.CommandContext(probeCtx, "ffmpeg",
+	probeSeconds := float64(maxWaveformPCMBytes) / float64(voiceWaveformSampleRate*2)
+	cmd := exec.CommandContext(probeCtx, "ffmpeg",
 		"-v", "error",
 		"-i", filePath,
+		"-t", strconv.FormatFloat(probeSeconds, 'f', 3, 64),
 		"-ac", "1",
-		"-ar", "8000",
+		"-ar", strconv.Itoa(voiceWaveformSampleRate),
 		"-f", "s16le",
 		"-acodec", "pcm_s16le",
+		"-fs", strconv.Itoa(maxWaveformPCMBytes),
 		"-",
-	).Output()
+	)
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		return nil
+	}
+	if err := cmd.Start(); err != nil {
+		return nil
+	}
+	out, err := io.ReadAll(io.LimitReader(stdout, int64(maxWaveformPCMBytes)))
+	reachedLimit := len(out) == maxWaveformPCMBytes
+	if reachedLimit {
+		cancel()
+	}
+	waitErr := cmd.Wait()
+	// Killing the decoder at the byte limit is expected; other failures must
+	// not turn a partial decode into a valid waveform.
+	if err != nil || len(out) == 0 || (!reachedLimit && waitErr != nil) {
 		return nil
 	}
 	return waveformFromPCM16LE(out)
