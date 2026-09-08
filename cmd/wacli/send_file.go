@@ -532,9 +532,14 @@ func probeAudioWaveform(ctx context.Context, filePath string) []byte {
 		return nil
 	}
 	out, err := io.ReadAll(io.LimitReader(stdout, int64(maxWaveformPCMBytes)))
-	cancel()
-	_ = cmd.Wait()
-	if err != nil || len(out) == 0 {
+	reachedLimit := len(out) == maxWaveformPCMBytes
+	if reachedLimit {
+		cancel()
+	}
+	waitErr := cmd.Wait()
+	// Killing the decoder at the byte limit is expected; other failures must
+	// not turn a partial decode into a valid waveform.
+	if err != nil || len(out) == 0 || (!reachedLimit && waitErr != nil) {
 		return nil
 	}
 	return waveformFromPCM16LE(out)

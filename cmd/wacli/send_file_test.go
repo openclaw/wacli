@@ -379,6 +379,25 @@ func TestProbeAudioWaveformCapsFFmpegStdout(t *testing.T) {
 	}
 }
 
+func TestProbeAudioWaveformShortDecodeExitStatus(t *testing.T) {
+	for _, exitCode := range []int{0, 1} {
+		t.Run(strconv.Itoa(exitCode), func(t *testing.T) {
+			installFakeFFmpegPCMWriter(t, 512, 1024)
+			t.Setenv("FAKE_FFMPEG_EXIT", strconv.Itoa(exitCode))
+			got := probeAudioWaveform(context.Background(), "voice.ogg")
+			if exitCode != 0 {
+				if got != nil {
+					t.Fatal("failed decoder returned a waveform from partial PCM")
+				}
+				return
+			}
+			if want := waveformFromPCM16LE(patternedWaveformPCM(512, 1024)); !bytes.Equal(got, want) {
+				t.Fatalf("short waveform = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
 func patternedWaveformPCM(prefix, total int) []byte {
 	buf := make([]byte, total)
 	for i := 0; i < prefix; i += 2 {
@@ -416,6 +435,8 @@ func main() {
 		binary.LittleEndian.PutUint16(buf[i:i+2], 10000)
 	}
 	_, _ = os.Stdout.Write(buf)
+	exitCode, _ := strconv.Atoi(os.Getenv("FAKE_FFMPEG_EXIT"))
+	os.Exit(exitCode)
 }
 `
 	if err := os.WriteFile(src, []byte(program), 0o600); err != nil {

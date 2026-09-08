@@ -110,6 +110,7 @@ wacli polls list [--chat RECIPIENT] [--limit N] [--json]
 - `send voice` is a shortcut for `send file --ptt`.
 - Voice notes require OGG/Opus audio (`audio/ogg; codecs=opus`).
 - When available, `ffprobe` sets voice-note duration and `ffmpeg` generates the 64-sample waveform from decoded PCM audio.
+- Waveform decoding is capped at 2 MiB (about 131 seconds). Longer voice notes use that initial segment for the waveform; the complete audio file and its full duration are still sent. Failed decodes omit the optional waveform.
 
 ## Examples
 
