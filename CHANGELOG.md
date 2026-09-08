@@ -1,5 +1,7 @@
 # Changelog
 
+## Unreleased
+
 ## 0.18.1 - 2026-09-07
 
 **Highlights:** bounded memory use when generating waveforms for long voice notes.
