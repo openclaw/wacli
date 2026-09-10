@@ -547,6 +547,11 @@ func (a *App) handleLiveSyncMessage(ctx context.Context, opts SyncOptions, v *ev
 	if pm.ReactionToID != "" && pm.ReactionEmoji == "" && v.Message != nil && v.Message.GetEncReactionMessage() != nil {
 		a.decryptEncryptedReaction(ctx, &pm, v)
 	}
+	if a.decryptSecretEncryptedEdit(ctx, &pm, v) {
+		// The envelope carries no content of its own: everything worth storing
+		// came from the decrypted edit, already merged onto the original id.
+		pm.UnhandledPayload = ""
+	}
 	incrementUnread := a.shouldIncrementLiveUnread(ctx, pm)
 	if err := a.storeParsedMessageForSync(ctx, pm, limits...); err == nil {
 		if incrementUnread {
@@ -816,6 +821,60 @@ func (a *App) decryptEncryptedReaction(ctx context.Context, pm *wa.ParsedMessage
 			pm.ReactionToID = key.GetID()
 		}
 	}
+}
+
+// decryptSecretEncryptedEdit applies an incoming message edit that arrives
+// wrapped in a SecretEncryptedMessage envelope, and reports whether it did.
+//
+// An edit is not delivered as a bare ProtocolMessage: the server sends a
+// SecretEncryptedMessage whose SecretEncType is MESSAGE_EDIT and whose
+// TargetMessageKey points at the original. Only POLL_ADD_OPTION was decrypted,
+// so an edit was stored as a second content-less row while the original kept
+// its superseded text. That is worse than a visible gap: a reader gets stale
+// content that looks valid, with nothing marking it as outdated.
+func (a *App) decryptSecretEncryptedEdit(ctx context.Context, pm *wa.ParsedMessage, msg *events.Message) bool {
+	if pm == nil || msg == nil {
+		return false
+	}
+	secret := msg.Message.GetSecretEncryptedMessage()
+	if secret.GetSecretEncType() != waE2E.SecretEncryptedMessage_MESSAGE_EDIT {
+		return false
+	}
+	target := strings.TrimSpace(secret.GetTargetMessageKey().GetID())
+	if target == "" {
+		return false
+	}
+
+	decrypted, err := a.wa.DecryptSecretEncryptedMessage(ctx, msg)
+	if err != nil {
+		a.emitWarning(
+			"secret_edit_decrypt_failed",
+			fmt.Sprintf("warning: failed to decrypt edit for message %s: %v", target, err),
+			map[string]any{"message_id": target, "error": err.Error()},
+		)
+		return false
+	}
+	if decrypted == nil {
+		return false
+	}
+
+	// Re-parse the plaintext so the edited body goes through the same
+	// extractors as any other message, rather than a second copy of that logic.
+	edited := wa.ParseLiveMessage(&events.Message{Info: msg.Info, Message: decrypted})
+	if !edited.Edited && strings.TrimSpace(edited.Text) == "" && edited.Media == nil {
+		return false
+	}
+
+	// Keep the envelope's identity out of the store: the edit belongs to the
+	// original row, which is what every reader already points at.
+	edited.ID = target
+	edited.Chat = pm.Chat
+	edited.SenderJID = pm.SenderJID
+	edited.PushName = pm.PushName
+	edited.Timestamp = pm.Timestamp
+	edited.Edited = true
+	*pm = edited
+	return true
 }
 
 // sendPresence sends a global presence update if the WhatsApp client is ready.
