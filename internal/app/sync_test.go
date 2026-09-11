@@ -307,6 +307,149 @@ func TestLiveSyncRejectsSecretMessageEditWithUnhandledPayload(t *testing.T) {
 	}
 }
 
+func TestLiveSyncAcceptsIncomingSecretMessageEditWithSenderRelativeFromMe(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	chat := types.JID{User: "123", Server: types.DefaultUserServer}
+	base := time.Date(2024, 1, 3, 0, 0, 0, 0, time.UTC)
+	var messagesStored atomic.Int64
+	a.handleLiveSyncMessage(context.Background(), SyncOptions{}, &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{Chat: chat, Sender: chat, IsFromMe: false},
+			ID:            "original-id",
+			Timestamp:     base,
+		},
+		Message: &waProto.Message{Conversation: proto.String("original body")},
+	}, &messagesStored, func(string, string) {}, nil)
+
+	f.decryptSecretFunc = func(_ *events.Message) (*waE2E.Message, error) {
+		return decryptedProtocolEdit("edited body"), nil
+	}
+	envelope := secretEditEnvelope(chat, "original-id")
+	envelope.SecretEncryptedMessage.TargetMessageKey.FromMe = proto.Bool(true)
+	a.handleLiveSyncMessage(context.Background(), SyncOptions{}, &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{Chat: chat, Sender: chat, IsFromMe: false},
+			ID:            "edit-event",
+			Timestamp:     base.Add(time.Minute),
+		},
+		Message: envelope,
+	}, &messagesStored, func(string, string) {}, nil)
+
+	msg, err := a.db.GetMessage(chat.String(), "original-id")
+	if err != nil {
+		t.Fatalf("GetMessage edited original: %v", err)
+	}
+	if msg.Text != "edited body" || !msg.Edited || msg.FromMe {
+		t.Fatalf("sender-relative edit was not normalized: %+v", msg)
+	}
+}
+
+func TestLiveSyncRejectsSecretMessageEditWithRedirectedChat(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	group := types.JID{User: "120363000000", Server: types.GroupServer}
+	otherGroup := types.JID{User: "120363000001", Server: types.GroupServer}
+	sender := types.JID{User: "15550000001", Server: types.DefaultUserServer}
+	base := time.Date(2024, 1, 3, 0, 0, 0, 0, time.UTC)
+	var messagesStored atomic.Int64
+	a.handleLiveSyncMessage(context.Background(), SyncOptions{}, &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{Chat: group, Sender: sender, IsGroup: true},
+			ID:            "original-id",
+			Timestamp:     base,
+		},
+		Message: &waProto.Message{Conversation: proto.String("original body")},
+	}, &messagesStored, func(string, string) {}, nil)
+
+	f.decryptSecretFunc = func(_ *events.Message) (*waE2E.Message, error) {
+		return decryptedProtocolEdit("redirected body"), nil
+	}
+	webhooks := 0
+	out := captureStderr(t, func() {
+		a.handleLiveSyncMessage(context.Background(), SyncOptions{}, &events.Message{
+			Info: types.MessageInfo{
+				MessageSource: types.MessageSource{Chat: group, Sender: sender, IsGroup: true},
+				ID:            "edit-event",
+				Timestamp:     base.Add(time.Minute),
+			},
+			Message: secretGroupEditEnvelope(otherGroup, sender, "original-id"),
+		}, &messagesStored, func(string, string) {}, func(wa.ParsedMessage) { webhooks++ })
+	})
+
+	if !strings.Contains(out, "target chat does not match the authenticated chat") {
+		t.Fatalf("expected chat mismatch warning, got:\n%s", out)
+	}
+	msg, err := a.db.GetMessage(group.String(), "original-id")
+	if err != nil {
+		t.Fatalf("GetMessage original: %v", err)
+	}
+	if msg.Text != "original body" || msg.Edited {
+		t.Fatalf("redirected edit changed original: %+v", msg)
+	}
+	if webhooks != 0 {
+		t.Fatalf("redirected edit published %d webhooks", webhooks)
+	}
+}
+
+func TestLiveSyncRejectsSecretMessageEditWithNestedMutation(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	chat := types.JID{User: "123", Server: types.DefaultUserServer}
+	base := time.Date(2024, 1, 3, 0, 0, 0, 0, time.UTC)
+	var messagesStored atomic.Int64
+	a.handleLiveSyncMessage(context.Background(), SyncOptions{}, &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{Chat: chat, Sender: chat},
+			ID:            "original-id",
+			Timestamp:     base,
+		},
+		Message: &waProto.Message{Conversation: proto.String("original body")},
+	}, &messagesStored, func(string, string) {}, nil)
+
+	f.decryptSecretFunc = func(_ *events.Message) (*waE2E.Message, error) {
+		return &waE2E.Message{ProtocolMessage: &waE2E.ProtocolMessage{
+			Type: waE2E.ProtocolMessage_MESSAGE_EDIT.Enum(),
+			EditedMessage: &waE2E.Message{ProtocolMessage: &waE2E.ProtocolMessage{
+				Type:          waE2E.ProtocolMessage_MESSAGE_EDIT.Enum(),
+				Key:           &waCommon.MessageKey{ID: proto.String("other-id"), RemoteJID: proto.String(chat.String())},
+				EditedMessage: &waE2E.Message{Conversation: proto.String("redirected body")},
+			}},
+		}}, nil
+	}
+	webhooks := 0
+	out := captureStderr(t, func() {
+		a.handleLiveSyncMessage(context.Background(), SyncOptions{}, &events.Message{
+			Info: types.MessageInfo{
+				MessageSource: types.MessageSource{Chat: chat, Sender: chat},
+				ID:            "edit-event",
+				Timestamp:     base.Add(time.Minute),
+			},
+			Message: secretEditEnvelope(chat, "original-id"),
+		}, &messagesStored, func(string, string) {}, func(wa.ParsedMessage) { webhooks++ })
+	})
+
+	if !strings.Contains(out, "contains a nested protocol mutation") {
+		t.Fatalf("expected nested mutation warning, got:\n%s", out)
+	}
+	msg, err := a.db.GetMessage(chat.String(), "original-id")
+	if err != nil {
+		t.Fatalf("GetMessage original: %v", err)
+	}
+	if msg.Text != "original body" || msg.Edited {
+		t.Fatalf("nested edit changed original: %+v", msg)
+	}
+	if webhooks != 0 {
+		t.Fatalf("nested edit published %d webhooks", webhooks)
+	}
+}
+
 func TestLiveSyncIncrementsUnreadCountForIncomingMessages(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
@@ -3114,6 +3257,57 @@ func TestHistorySyncRejectsSecretMessageEditFromDifferentGroupParticipant(t *tes
 	}
 	if n, err := a.db.CountMessages(); err != nil || n != 1 {
 		t.Fatalf("expected only the original row, got %d (err=%v)", n, err)
+	}
+}
+
+func TestHistorySyncAcceptsIncomingSecretMessageEditWithSenderRelativeFromMe(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	chat := types.JID{User: "123", Server: types.DefaultUserServer}
+	base := time.Date(2024, 1, 3, 0, 0, 0, 0, time.UTC)
+	f.decryptSecretFunc = func(_ *events.Message) (*waE2E.Message, error) {
+		return decryptedProtocolEdit("edited body"), nil
+	}
+	envelope := secretEditEnvelope(chat, "original-id")
+	envelope.SecretEncryptedMessage.TargetMessageKey.FromMe = proto.Bool(true)
+	editMsg := &waWeb.WebMessageInfo{
+		Key: &waCommon.MessageKey{
+			RemoteJID: proto.String(chat.String()),
+			FromMe:    proto.Bool(false),
+			ID:        proto.String("edit-event"),
+		},
+		MessageTimestamp: proto.Uint64(uint64(base.Add(time.Minute).Unix())),
+		Message:          envelope,
+	}
+	originalMsg := &waWeb.WebMessageInfo{
+		Key: &waCommon.MessageKey{
+			RemoteJID: proto.String(chat.String()),
+			FromMe:    proto.Bool(false),
+			ID:        proto.String("original-id"),
+		},
+		MessageTimestamp: proto.Uint64(uint64(base.Unix())),
+		Message:          &waProto.Message{Conversation: proto.String("original body")},
+	}
+	history := &events.HistorySync{Data: &waHistorySync.HistorySync{
+		SyncType: waHistorySync.HistorySync_FULL.Enum(),
+		Conversations: []*waHistorySync.Conversation{{
+			ID:       proto.String(chat.String()),
+			Messages: []*waHistorySync.HistorySyncMsg{{Message: editMsg}, {Message: originalMsg}},
+		}},
+	}}
+
+	var messagesStored atomic.Int64
+	var lastEvent atomic.Int64
+	a.handleHistorySync(context.Background(), SyncOptions{}, history, &messagesStored, &lastEvent, func(string, string) {})
+
+	msg, err := a.db.GetMessage(chat.String(), "original-id")
+	if err != nil {
+		t.Fatalf("GetMessage edited original: %v", err)
+	}
+	if msg.Text != "edited body" || !msg.Edited || msg.FromMe {
+		t.Fatalf("sender-relative history edit was not normalized: %+v", msg)
 	}
 }
 

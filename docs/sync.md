@@ -35,6 +35,7 @@ wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--stale-t
 - While `sync --follow` is running, `send text`, `send file`, `send sticker`, `send voice`, `send react`, and `messages edit` commands for the same store are delegated to the running sync process so they do not fail on the store lock.
 - After connecting, sync fetches WhatsApp chat app-state deltas (`regular_high` and `regular_low`) so starred, delete-for-me, mute, archive, pin, and mark-read changes made while `wacli` was offline are caught up instead of relying only on live push notifications.
 - Sync imports messages sent from your other linked devices into the destination chat with `from_me=true`, so local history covers both incoming and outgoing conversation sides.
+- Sync decrypts encrypted message edits and updates the original local row only when the authenticated sender, chat, and target message match. Malformed, redirected, or unsupported edits are rejected without changing local history or emitting a message webhook.
 - If whatsmeow reports an app-state LTHash mismatch, sync asks the primary device for the official recovery snapshot once for that app-state collection. If recovery also fails, the warning is printed and sync keeps handling normal message/history events.
 - Sync stores WhatsApp call signaling and call-log metadata in `call_events`; inspect it with `wacli calls list`.
 - Sync stores WhatsApp status broadcasts in `status_messages`, separate from normal chat `messages`.

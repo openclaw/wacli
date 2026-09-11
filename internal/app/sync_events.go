@@ -845,12 +845,20 @@ func isSecretEdit(msg *waE2E.Message) bool {
 		msg.GetSecretEncryptedMessage().GetSecretEncType() == waE2E.SecretEncryptedMessage_MESSAGE_EDIT
 }
 
+func (a *App) sameCanonicalIdentity(ctx context.Context, left, right types.JID) bool {
+	left = a.canonicalStoreJID(ctx, left).ToNonAD()
+	right = a.canonicalStoreJID(ctx, right).ToNonAD()
+	return !left.IsEmpty() && left == right
+}
+
 func (a *App) secretEditSenderMatches(ctx context.Context, evt *events.Message, target *waCommon.MessageKey) bool {
-	if target.GetFromMe() {
-		return evt.Info.IsFromMe
-	}
-	if evt.Info.IsFromMe || evt.Info.Sender.IsEmpty() {
+	if evt.Info.Sender.IsEmpty() {
 		return false
+	}
+	// whatsmeow treats target.FromMe as "same sender as the envelope",
+	// not necessarily as the locally linked account.
+	if target.GetFromMe() {
+		return true
 	}
 
 	originalSenderRaw := target.GetParticipant()
@@ -862,9 +870,34 @@ func (a *App) secretEditSenderMatches(ctx context.Context, evt *events.Message, 
 		return false
 	}
 
-	editor := a.canonicalStoreJID(ctx, evt.Info.Sender).ToNonAD()
-	originalSender = a.canonicalStoreJID(ctx, originalSender).ToNonAD()
-	return editor == originalSender
+	return a.sameCanonicalIdentity(ctx, evt.Info.Sender, originalSender)
+}
+
+func (a *App) secretEditChatMatches(ctx context.Context, evt *events.Message, target *waCommon.MessageKey) bool {
+	targetChatRaw := strings.TrimSpace(target.GetRemoteJID())
+	if targetChatRaw == "" {
+		return true
+	}
+	targetChat, err := types.ParseJID(targetChatRaw)
+	if err != nil || targetChat.IsEmpty() {
+		return false
+	}
+	return a.sameCanonicalIdentity(ctx, evt.Info.Chat, targetChat)
+}
+
+func normalizedSecretEditTarget(evt *events.Message, targetID string) *waCommon.MessageKey {
+	chat := evt.Info.Chat.ToNonAD().String()
+	fromMe := evt.Info.IsFromMe
+	target := &waCommon.MessageKey{
+		ID:        &targetID,
+		RemoteJID: &chat,
+		FromMe:    &fromMe,
+	}
+	if evt.Info.Chat.Server != types.DefaultUserServer && evt.Info.Chat.Server != types.HiddenUserServer {
+		participant := evt.Info.Sender.ToNonAD().String()
+		target.Participant = &participant
+	}
+	return target
 }
 
 func (a *App) decryptSecretEdit(ctx context.Context, evt *events.Message) (*events.Message, bool) {
@@ -908,6 +941,14 @@ func (a *App) decryptSecretEdit(ctx context.Context, evt *events.Message) (*even
 		)
 		return nil, false
 	}
+	if !a.secretEditChatMatches(ctx, evt, target) {
+		a.emitWarning(
+			"encrypted_edit_chat_mismatch",
+			fmt.Sprintf("warning: encrypted edit %s target chat does not match the authenticated chat", messageID),
+			map[string]any{"message_id": messageID},
+		)
+		return nil, false
+	}
 	if !a.secretEditSenderMatches(ctx, evt, target) {
 		a.emitWarning(
 			"encrypted_edit_sender_mismatch",
@@ -916,6 +957,15 @@ func (a *App) decryptSecretEdit(ctx context.Context, evt *events.Message) (*even
 		)
 		return nil, false
 	}
+	if protocol.GetEditedMessage().GetProtocolMessage() != nil {
+		a.emitWarning(
+			"encrypted_edit_nested_mutation",
+			fmt.Sprintf("warning: encrypted edit %s contains a nested protocol mutation", messageID),
+			map[string]any{"message_id": messageID},
+		)
+		return nil, false
+	}
+	protocol.Key = normalizedSecretEditTarget(evt, target.GetID())
 	parsed := wa.ParseLiveMessage(&events.Message{Info: evt.Info, Message: decrypted})
 	if parsed.UnhandledPayload != "" {
 		a.emitWarning(
@@ -925,7 +975,17 @@ func (a *App) decryptSecretEdit(ctx context.Context, evt *events.Message) (*even
 		)
 		return nil, false
 	}
-	protocol.Key = target
+	parsedSender, err := types.ParseJID(strings.TrimSpace(parsed.SenderJID))
+	if err != nil || !parsed.Edited || parsed.ID != target.GetID() || parsed.FromMe != evt.Info.IsFromMe ||
+		!a.sameCanonicalIdentity(ctx, evt.Info.Chat, parsed.Chat) ||
+		!a.sameCanonicalIdentity(ctx, evt.Info.Sender, parsedSender) {
+		a.emitWarning(
+			"encrypted_edit_final_target_mismatch",
+			fmt.Sprintf("warning: encrypted edit %s changed identity while parsing", messageID),
+			map[string]any{"message_id": messageID},
+		)
+		return nil, false
+	}
 	return &events.Message{Info: evt.Info, Message: decrypted}, true
 }
 

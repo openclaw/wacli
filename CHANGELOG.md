@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Sync: decrypt encrypted message edits while binding every update to the authenticated sender, chat, and target message; malformed or unsupported edits are rejected without changing local history.
+
 ## 0.18.1 - 2026-09-07
 
 **Highlights:** bounded memory use when generating waveforms for long voice notes.
