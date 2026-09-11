@@ -27,7 +27,7 @@ Download the matching archive from the [latest release](https://github.com/openc
 
 ## Build from source
 
-`wacli` requires Go 1.26.5 or newer and uses `go-sqlite3`, so source builds require cgo and a C toolchain:
+`wacli` requires Go 1.27.0 or newer and uses `go-sqlite3`, so source builds require cgo and a C toolchain:
 
 - macOS: Xcode Command Line Tools.
 - Debian / Ubuntu: `sudo apt install build-essential`.
@@ -41,6 +41,10 @@ CGO_ENABLED=1 CGO_CFLAGS="-Wno-error=missing-braces" \
 ```
 
 For local development:
+
+Install Node.js 24 or newer and the pnpm version pinned in `package.json`.
+Corepack users can run `corepack pnpm install --frozen-lockfile`
+from the checkout to download and verify that pinned version.
 
 ```bash
 git clone https://github.com/openclaw/wacli.git
@@ -56,6 +60,8 @@ GCC 15 has stricter brace-init warnings; the `-Wno-error=missing-braces` flag ke
 
 The Makefile is a thin wrapper over the existing pnpm scripts. `make build`
 writes `./dist/wacli`; `make check` runs the complete local CI gate.
+
+Repository development, CI, and Docker builds select Go 1.27.1 for its compiler, runtime, cgo, and standard-library fixes. The `toolchain` directive in `go.mod` selects that build version without raising the Go 1.27.0 source minimum; normal Go toolchain auto-selection downloads it when needed.
 
 ## Verify the install
 

@@ -1,12 +1,12 @@
 {
   "name": "wacli",
   "private": true,
-  "packageManager": "pnpm@11.20.0+sha512.9a6f330a95b66446ea088faf1521405a8a01f07fde7124cc9958dfed52d4bb436737e65b08f85f37b46fcba375092558ac51262b816844b22f63406ed166bfee",
+  "packageManager": "pnpm@12.3.4+sha512.961aa41fb077da3a04a441d9f8e15ebc0c96da8ef710b2eb67bf9ee7cb0610eabd48f1fd85f51cffe73846785fa0f87c56a3a872a1d893f8446741b5cce45457",
   "scripts": {
-    "wacli": "bash -lc 'pnpm -s build >/dev/null && exec ./dist/wacli \"$@\"' _",
+    "wacli": "bash -lc 'pnpm --silent build >/dev/null && exec ./dist/wacli \"$@\"' _",
     "build": "mkdir -p dist && CGO_ENABLED=1 CGO_CFLAGS=\"${CGO_CFLAGS:+$CGO_CFLAGS }-Wno-error=missing-braces\" go build -tags sqlite_fts5 -o dist/wacli ./cmd/wacli",
-    "start": "pnpm -s build && ./dist/wacli",
-    "test": "pnpm -s test:go && pnpm -s test:fts && pnpm -s test:windows-lock && pnpm -s test:cgo-required && pnpm -s test:docs",
+    "start": "pnpm --silent build && ./dist/wacli",
+    "test": "pnpm --silent test:go && pnpm --silent test:fts && pnpm --silent test:windows-lock && pnpm --silent test:cgo-required && pnpm --silent test:docs",
     "test:go": "go test ./...",
     "test:fts": "go test -tags sqlite_fts5 ./...",
     "test:windows-lock": "bash -euc 'tmp=\"${TMPDIR:-/tmp}/wacli-lock-windows.test.exe\"; trap \"rm -f \\\"$tmp\\\"\" EXIT; GOOS=windows GOARCH=amd64 go test -c ./internal/lock -o \"$tmp\"'",

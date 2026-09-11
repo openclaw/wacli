@@ -599,6 +599,44 @@ func (q *Queries) GetMessageLocation(ctx context.Context, arg GetMessageLocation
 	return i, err
 }
 
+const getNextMessageInfo = `-- name: GetNextMessageInfo :one
+SELECT m.chat_jid, m.msg_id, m.ts, m.from_me, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,'')
+FROM messages m
+JOIN messages anchor ON anchor.chat_jid = m.chat_jid
+WHERE anchor.chat_jid = ? AND anchor.msg_id = ?
+  AND (m.ts, m.rowid) > (anchor.ts, anchor.rowid)
+ORDER BY m.ts ASC, m.rowid ASC
+LIMIT 1
+`
+
+type GetNextMessageInfoParams struct {
+	ChatJid string
+	MsgID   string
+}
+
+type GetNextMessageInfoRow struct {
+	ChatJid    string
+	MsgID      string
+	Ts         int64
+	FromMe     int64
+	SenderJid  string
+	SenderName string
+}
+
+func (q *Queries) GetNextMessageInfo(ctx context.Context, arg GetNextMessageInfoParams) (GetNextMessageInfoRow, error) {
+	row := q.db.QueryRowContext(ctx, getNextMessageInfo, arg.ChatJid, arg.MsgID)
+	var i GetNextMessageInfoRow
+	err := row.Scan(
+		&i.ChatJid,
+		&i.MsgID,
+		&i.Ts,
+		&i.FromMe,
+		&i.SenderJid,
+		&i.SenderName,
+	)
+	return i, err
+}
+
 const getOldestMessageInfo = `-- name: GetOldestMessageInfo :one
 SELECT m.chat_jid, m.msg_id, m.ts, m.from_me, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,'')
 FROM messages m
@@ -728,6 +766,52 @@ func (q *Queries) ListContacts(ctx context.Context, limit int64) ([]ListContacts
 			&i.Alias,
 			&i.SystemName,
 			&i.Name,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listGroupParticipants = `-- name: ListGroupParticipants :many
+SELECT group_jid, user_jid, COALESCE(role, 'member') AS role, updated_at
+FROM group_participants
+WHERE group_jid = ?
+ORDER BY CASE role
+    WHEN 'superadmin' THEN 1
+    WHEN 'admin' THEN 2
+    ELSE 3
+END, user_jid ASC
+`
+
+type ListGroupParticipantsRow struct {
+	GroupJid  string
+	UserJid   string
+	Role      string
+	UpdatedAt int64
+}
+
+func (q *Queries) ListGroupParticipants(ctx context.Context, groupJid string) ([]ListGroupParticipantsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listGroupParticipants, groupJid)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListGroupParticipantsRow
+	for rows.Next() {
+		var i ListGroupParticipantsRow
+		if err := rows.Scan(
+			&i.GroupJid,
+			&i.UserJid,
+			&i.Role,
 			&i.UpdatedAt,
 		); err != nil {
 			return nil, err

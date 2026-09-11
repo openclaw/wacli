@@ -15,6 +15,7 @@ import (
 	"github.com/openclaw/wacli/internal/store"
 	"github.com/openclaw/wacli/internal/wa"
 	"go.mau.fi/whatsmeow/appstate"
+	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/types"
@@ -129,6 +130,20 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 					enqueueWebhook(job)
 				}
 			}
+		case *events.OfflineSyncPreview:
+			// Emitted right after connecting when the server is about to send
+			// what this device missed while it was down.
+			a.emitOrPrint("offline_sync_preview", map[string]any{
+				"total":            v.Total,
+				"messages":         v.Messages,
+				"receipts":         v.Receipts,
+				"notifications":    v.Notifications,
+				"app_data_changes": v.AppDataChanges,
+			}, "\nReplaying offline backlog: %d message(s), %d event(s) total.\n", v.Messages, v.Total)
+		case *events.OfflineSyncCompleted:
+			a.emitOrPrint("offline_sync_completed", map[string]any{
+				"count": v.Count,
+			}, "\nOffline backlog replayed (%d event(s)).\n", v.Count)
 		case *events.Connected:
 			a.emitOrPrint("connected", nil, "\nConnected.\n")
 			ps.mu.Lock()
@@ -830,6 +845,28 @@ func isSecretEdit(msg *waE2E.Message) bool {
 		msg.GetSecretEncryptedMessage().GetSecretEncType() == waE2E.SecretEncryptedMessage_MESSAGE_EDIT
 }
 
+func (a *App) secretEditSenderMatches(ctx context.Context, evt *events.Message, target *waCommon.MessageKey) bool {
+	if target.GetFromMe() {
+		return evt.Info.IsFromMe
+	}
+	if evt.Info.IsFromMe || evt.Info.Sender.IsEmpty() {
+		return false
+	}
+
+	originalSenderRaw := target.GetParticipant()
+	if evt.Info.Chat.Server == types.DefaultUserServer || evt.Info.Chat.Server == types.HiddenUserServer {
+		originalSenderRaw = target.GetRemoteJID()
+	}
+	originalSender, err := types.ParseJID(strings.TrimSpace(originalSenderRaw))
+	if err != nil || originalSender.IsEmpty() {
+		return false
+	}
+
+	editor := a.canonicalStoreJID(ctx, evt.Info.Sender).ToNonAD()
+	originalSender = a.canonicalStoreJID(ctx, originalSender).ToNonAD()
+	return editor == originalSender
+}
+
 func (a *App) decryptSecretEdit(ctx context.Context, evt *events.Message) (*events.Message, bool) {
 	if evt == nil || !isSecretEdit(evt.Message) {
 		return evt, true
@@ -868,6 +905,23 @@ func (a *App) decryptSecretEdit(ctx context.Context, evt *events.Message) (*even
 			"encrypted_edit_target_mismatch",
 			fmt.Sprintf("warning: encrypted edit %s target does not match decrypted payload", messageID),
 			map[string]any{"message_id": messageID},
+		)
+		return nil, false
+	}
+	if !a.secretEditSenderMatches(ctx, evt, target) {
+		a.emitWarning(
+			"encrypted_edit_sender_mismatch",
+			fmt.Sprintf("warning: encrypted edit %s sender does not own the target message", messageID),
+			map[string]any{"message_id": messageID},
+		)
+		return nil, false
+	}
+	parsed := wa.ParseLiveMessage(&events.Message{Info: evt.Info, Message: decrypted})
+	if parsed.UnhandledPayload != "" {
+		a.emitWarning(
+			"encrypted_edit_unhandled_payload",
+			fmt.Sprintf("warning: encrypted edit %s contains unsupported payload %s", messageID, parsed.UnhandledPayload),
+			map[string]any{"message_id": messageID, "payload": parsed.UnhandledPayload},
 		)
 		return nil, false
 	}

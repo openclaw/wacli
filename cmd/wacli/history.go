@@ -180,7 +180,7 @@ func newHistoryBackfillCmd(flags *rootFlags) *cobra.Command {
 
 	cmd.Flags().StringVar(&chat, "chat", "", "chat JID")
 	cmd.Flags().IntVar(&count, "count", app.DefaultBackfillCount, "number of messages to request per on-demand sync")
-	cmd.Flags().IntVar(&requests, "requests", app.DefaultBackfillRequests, "number of on-demand requests to attempt")
+	cmd.Flags().IntVar(&requests, "requests", app.DefaultBackfillRequests, "number of history batches to request (each may retry once after a timeout)")
 	cmd.Flags().DurationVar(&wait, "wait", 60*time.Second, "time to wait for an on-demand response per request")
 	cmd.Flags().DurationVar(&idleExit, "idle-exit", 5*time.Second, "exit after being idle (after backfill requests)")
 	return cmd

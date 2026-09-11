@@ -11,6 +11,7 @@ Read when: you need the user-facing command map, global flags, store model, or l
 - Override the store with `--store DIR` or `WACLI_STORE_DIR`.
 - Human-readable tables are the default.
 - Use `--json` for scriptable output.
+- A successful JSON command exits successfully if its pipe reader closes early. Other output errors and command failures still return a nonzero exit status.
 - Use `--full` to avoid table truncation.
 - Write commands acquire the store lock; use `--lock-wait DURATION` to wait.
 - Use `--read-only` or `WACLI_READONLY=1` to reject commands that write WhatsApp or local state.

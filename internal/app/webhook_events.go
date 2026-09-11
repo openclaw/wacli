@@ -163,7 +163,7 @@ func newSyncWebhookReceiptEvent(evt *events.Receipt) (syncWebhookEvent, bool) {
 			Chat:       evt.Chat,
 			Sender:     evt.Sender,
 			MessageIDs: ids,
-			Timestamp:  evt.Timestamp,
+			Timestamp:  evt.Timestamp.UTC(), // see ParseLiveMessage: the wire format must not follow the host's zone
 			Type:       receiptType,
 			IsFromMe:   evt.IsFromMe,
 		},

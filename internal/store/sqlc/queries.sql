@@ -159,6 +159,16 @@ DELETE FROM group_participants WHERE group_jid = ?;
 INSERT INTO group_participants(group_jid, user_jid, role, updated_at)
 VALUES(?, ?, ?, ?);
 
+-- name: ListGroupParticipants :many
+SELECT group_jid, user_jid, COALESCE(role, 'member') AS role, updated_at
+FROM group_participants
+WHERE group_jid = ?
+ORDER BY CASE role
+    WHEN 'superadmin' THEN 1
+    WHEN 'admin' THEN 2
+    ELSE 3
+END, user_jid ASC;
+
 -- name: DeleteGroup :exec
 DELETE FROM groups WHERE jid = ?;
 
@@ -296,6 +306,15 @@ SELECT m.chat_jid, m.msg_id, m.ts, m.from_me, COALESCE(m.sender_jid,''), COALESC
 FROM messages m
 WHERE m.chat_jid = ?
 ORDER BY m.ts DESC, m.rowid DESC
+LIMIT 1;
+
+-- name: GetNextMessageInfo :one
+SELECT m.chat_jid, m.msg_id, m.ts, m.from_me, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,'')
+FROM messages m
+JOIN messages anchor ON anchor.chat_jid = m.chat_jid
+WHERE anchor.chat_jid = ? AND anchor.msg_id = ?
+  AND (m.ts, m.rowid) > (anchor.ts, anchor.rowid)
+ORDER BY m.ts ASC, m.rowid ASC
 LIMIT 1;
 
 -- name: MessageContextBefore :many

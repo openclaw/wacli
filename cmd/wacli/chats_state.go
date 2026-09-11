@@ -131,7 +131,7 @@ func runChatState(flags *rootFlags, opts chatStateOptions, action string, run fu
 	}
 	defer closeApp(a, lk)
 
-	if err := a.EnsureAuthed(); err != nil {
+	if err := a.EnsureAuthed(ctx); err != nil {
 		return err
 	}
 	removePersistenceHandler, err := a.AddChatStatePersistenceHandler(ctx)

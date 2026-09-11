@@ -11,6 +11,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -349,6 +351,112 @@ func TestProbeAudioMetadataWithFFmpeg(t *testing.T) {
 	if !hasNonZero {
 		t.Fatalf("waveform is all zero")
 	}
+}
+
+// Keep in sync with maxWaveformPCMBytes.
+const testWaveformPCMCap = 2 << 20
+
+func TestProbeAudioWaveformCapsFFmpegStdout(t *testing.T) {
+	installFakeFFmpegPCMWriter(t, testWaveformPCMCap, testWaveformPCMCap*2)
+
+	input := filepath.Join(t.TempDir(), "voice.ogg")
+	if err := os.WriteFile(input, []byte("placeholder"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got := probeAudioWaveform(context.Background(), input)
+	full := patternedWaveformPCM(testWaveformPCMCap, testWaveformPCMCap*2)
+	want := waveformFromPCM16LE(full[:testWaveformPCMCap])
+	uncapped := waveformFromPCM16LE(full)
+	if bytes.Equal(want, uncapped) {
+		t.Fatal("fixture prefix and full PCM produce the same waveform")
+	}
+	if bytes.Equal(got, uncapped) {
+		t.Fatalf("waveform matches uncapped %d-byte PCM; ffmpeg stdout was not capped", len(full))
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("waveform = %v, want prefix of %d bytes", got, testWaveformPCMCap)
+	}
+}
+
+func TestProbeAudioWaveformShortDecodeExitStatus(t *testing.T) {
+	for _, exitCode := range []int{0, 1} {
+		t.Run(strconv.Itoa(exitCode), func(t *testing.T) {
+			installFakeFFmpegPCMWriter(t, 512, 1024)
+			t.Setenv("FAKE_FFMPEG_EXIT", strconv.Itoa(exitCode))
+			got := probeAudioWaveform(context.Background(), "voice.ogg")
+			if exitCode != 0 {
+				if got != nil {
+					t.Fatal("failed decoder returned a waveform from partial PCM")
+				}
+				return
+			}
+			if want := waveformFromPCM16LE(patternedWaveformPCM(512, 1024)); !bytes.Equal(got, want) {
+				t.Fatalf("short waveform = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+func patternedWaveformPCM(prefix, total int) []byte {
+	buf := make([]byte, total)
+	for i := 0; i < prefix; i += 2 {
+		binary.LittleEndian.PutUint16(buf[i:i+2], 100)
+	}
+	for i := prefix; i < total; i += 2 {
+		binary.LittleEndian.PutUint16(buf[i:i+2], 10000)
+	}
+	return buf
+}
+
+func installFakeFFmpegPCMWriter(t *testing.T, prefix, total int) {
+	t.Helper()
+	dir := t.TempDir()
+	src := filepath.Join(dir, "main.go")
+	program := `package main
+
+import (
+	"encoding/binary"
+	"os"
+	"strconv"
+)
+
+func main() {
+	prefix, _ := strconv.Atoi(os.Getenv("FAKE_FFMPEG_PREFIX"))
+	total, _ := strconv.Atoi(os.Getenv("FAKE_FFMPEG_TOTAL"))
+	if prefix <= 0 || total < prefix || total%2 != 0 || prefix%2 != 0 {
+		os.Exit(2)
+	}
+	buf := make([]byte, total)
+	for i := 0; i < prefix; i += 2 {
+		binary.LittleEndian.PutUint16(buf[i:i+2], 100)
+	}
+	for i := prefix; i < total; i += 2 {
+		binary.LittleEndian.PutUint16(buf[i:i+2], 10000)
+	}
+	_, _ = os.Stdout.Write(buf)
+	exitCode, _ := strconv.Atoi(os.Getenv("FAKE_FFMPEG_EXIT"))
+	os.Exit(exitCode)
+}
+`
+	if err := os.WriteFile(src, []byte(program), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module fakefmpeg\n\ngo 1.22\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "ffmpeg")
+	if runtime.GOOS == "windows" {
+		out += ".exe"
+	}
+	build := exec.Command("go", "build", "-o", out, src)
+	build.Dir = dir
+	if b, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build fake ffmpeg: %v\n%s", err, b)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("FAKE_FFMPEG_PREFIX", strconv.Itoa(prefix))
+	t.Setenv("FAKE_FFMPEG_TOTAL", strconv.Itoa(total))
 }
 
 func TestAttachSendFileReplyContext(t *testing.T) {

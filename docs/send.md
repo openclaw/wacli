@@ -9,7 +9,7 @@ When `sync --follow` is already running for the same store, send commands delega
 ## Commands
 
 ```bash
-wacli send text --to RECIPIENT --message TEXT [--message-escapes] [--pick N] [--mention USER] [--no-preview] [--ephemeral] [--ephemeral-duration DURATION] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
+wacli send text --to RECIPIENT --message TEXT [--message-escapes] [--pick N] [--mention USER] [--no-preview] [--allow-self] [--ephemeral] [--ephemeral-duration DURATION] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
 wacli send file --to RECIPIENT --file PATH [--pick N] [--caption TEXT] [--filename NAME] [--mime TYPE] [--as auto|document|audio|image|video] [--ptt] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
 wacli send sticker --to RECIPIENT --file PATH [--pick N] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
 wacli send voice --to RECIPIENT --file PATH [--pick N] [--mime TYPE] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
@@ -30,7 +30,8 @@ wacli polls list [--chat RECIPIENT] [--limit N] [--json]
 - If a name matches multiple recipients, interactive terminals prompt.
 - In scripts, use `--pick N` to choose a displayed match.
 - Phone numbers may use common formatting such as `+1 (234) 567-8900`.
-- `send text` rejects the linked account's own phone-number or LID target. WhatsApp may acknowledge these self-DMs without delivering them to Message Yourself, so wacli returns an explicit error instead of `sent: true`.
+- `send text` rejects the linked account's own phone-number or LID target by default. Pass `--allow-self` to explicitly attempt the send. WhatsApp may acknowledge these self-DMs without delivering them to Message Yourself, so `sent: true` still does not confirm device delivery. The flag also works when the send is delegated through a running `sync --follow` process.
+- Restart `sync --follow` after upgrading before using `--allow-self`: an older daemon retains its self-send rejection, which the CLI reports as an error. Upgrading the CLI does not change an already-running daemon.
 
 ## Replies and reactions
 
@@ -109,6 +110,7 @@ wacli polls list [--chat RECIPIENT] [--limit N] [--json]
 - `send voice` is a shortcut for `send file --ptt`.
 - Voice notes require OGG/Opus audio (`audio/ogg; codecs=opus`).
 - When available, `ffprobe` sets voice-note duration and `ffmpeg` generates the 64-sample waveform from decoded PCM audio.
+- Waveform decoding is capped at 2 MiB (about 131 seconds). Longer voice notes use that initial segment for the waveform; the complete audio file and its full duration are still sent. Failed decodes omit the optional waveform.
 
 ## Examples
 

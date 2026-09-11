@@ -23,6 +23,7 @@ Downloads media for a single message.
 - `--output` may be a file path or directory.
 - If `--output` is omitted, media is written under the store media directory.
 - `--read-only` is supported only with explicit `--output`; it writes the file without opening the WhatsApp session store or recording `local_path` / `downloaded_at`.
+- Because it never opens the store for writing, `--read-only` also takes **no store lock**, so it is the way to fetch media while `sync --follow` is running. A follow session holds the lock for its entire run, so a plain `media download` cannot proceed until it stops, and `--lock-wait` only turns the immediate failure into a timeout.
 
 ### Examples
 

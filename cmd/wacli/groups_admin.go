@@ -44,7 +44,7 @@ func newGroupsCreateCmd(flags *rootFlags) *cobra.Command {
 			}
 			defer closeApp(a, lk)
 
-			if err := a.EnsureAuthed(); err != nil {
+			if err := a.EnsureAuthed(ctx); err != nil {
 				return err
 			}
 			if err := a.Connect(ctx, false, nil); err != nil {
@@ -121,7 +121,7 @@ func newGroupsTopicCmd(flags *rootFlags, use string) *cobra.Command {
 			}
 			defer closeApp(a, lk)
 
-			if err := a.EnsureAuthed(); err != nil {
+			if err := a.EnsureAuthed(ctx); err != nil {
 				return err
 			}
 			if err := a.Connect(ctx, false, nil); err != nil {
@@ -188,7 +188,7 @@ func newGroupsToggleCmd(flags *rootFlags, use, short string, apply func(context.
 			}
 			defer closeApp(a, lk)
 
-			if err := a.EnsureAuthed(); err != nil {
+			if err := a.EnsureAuthed(ctx); err != nil {
 				return err
 			}
 			if err := a.Connect(ctx, false, nil); err != nil {
@@ -272,7 +272,7 @@ func newGroupsRequestsListCmd(flags *rootFlags) *cobra.Command {
 			}
 			defer closeApp(a, lk)
 
-			if err := a.EnsureAuthed(); err != nil {
+			if err := a.EnsureAuthed(ctx); err != nil {
 				return err
 			}
 			if err := a.Connect(ctx, false, nil); err != nil {
@@ -324,7 +324,7 @@ func newGroupsRequestsActionCmd(flags *rootFlags, action string) *cobra.Command 
 			}
 			defer closeApp(a, lk)
 
-			if err := a.EnsureAuthed(); err != nil {
+			if err := a.EnsureAuthed(ctx); err != nil {
 				return err
 			}
 			if err := a.Connect(ctx, false, nil); err != nil {
