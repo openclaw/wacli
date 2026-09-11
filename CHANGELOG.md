@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+**Highlights:** mark chats read or unread while continuous sync owns the store.
+
+- Chats: delegate `mark-read` and `mark-unread` through the same-store follow process, preserving read-only checks and command output; restart older daemons after upgrading. (#361, #380 - thanks @shishiv)
+- Dependencies: refresh whatsmeow, Go networking and database tooling, the dead-code checker, GoReleaser 2.18.1, and pnpm 12.4.0 while retaining the 48-hour package release-age window.
+- Builds: identify source builds as the upcoming 0.18.2 patch.
+
 ## 0.18.1 - 2026-09-07
 
 **Highlights:** bounded memory use when generating waveforms for long voice notes.
