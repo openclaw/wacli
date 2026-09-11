@@ -450,6 +450,53 @@ func TestLiveSyncRejectsSecretMessageEditWithNestedMutation(t *testing.T) {
 	}
 }
 
+func TestLiveSyncRejectsSecretMessageEditWithWrappedRevoke(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	chat := types.JID{User: "123", Server: types.DefaultUserServer}
+	base := time.Date(2024, 1, 3, 0, 0, 0, 0, time.UTC)
+	var messagesStored atomic.Int64
+	a.handleLiveSyncMessage(context.Background(), SyncOptions{}, &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{Chat: chat, Sender: chat},
+			ID:            "original-id",
+			Timestamp:     base,
+		},
+		Message: &waProto.Message{Conversation: proto.String("original body")},
+	}, &messagesStored, func(string, string) {}, nil)
+
+	f.decryptSecretFunc = func(_ *events.Message) (*waE2E.Message, error) {
+		return wrappedRevokeProtocolEdit(chat, "original-id"), nil
+	}
+	webhooks := 0
+	out := captureStderr(t, func() {
+		a.handleLiveSyncMessage(context.Background(), SyncOptions{}, &events.Message{
+			Info: types.MessageInfo{
+				MessageSource: types.MessageSource{Chat: chat, Sender: chat},
+				ID:            "edit-event",
+				Timestamp:     base.Add(time.Minute),
+			},
+			Message: secretEditEnvelope(chat, "original-id"),
+		}, &messagesStored, func(string, string) {}, func(wa.ParsedMessage) { webhooks++ })
+	})
+
+	if !strings.Contains(out, "contains a nested protocol mutation") {
+		t.Fatalf("expected nested mutation warning, got:\n%s", out)
+	}
+	msg, err := a.db.GetMessage(chat.String(), "original-id")
+	if err != nil {
+		t.Fatalf("GetMessage original: %v", err)
+	}
+	if msg.Text != "original body" || msg.Edited || msg.Revoked {
+		t.Fatalf("wrapped revoke changed original: %+v", msg)
+	}
+	if webhooks != 0 {
+		t.Fatalf("wrapped revoke published %d webhooks", webhooks)
+	}
+}
+
 func TestLiveSyncIncrementsUnreadCountForIncomingMessages(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
@@ -3311,6 +3358,63 @@ func TestHistorySyncAcceptsIncomingSecretMessageEditWithSenderRelativeFromMe(t *
 	}
 }
 
+func TestHistorySyncRejectsSecretMessageEditWithWrappedRevoke(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	chat := types.JID{User: "123", Server: types.DefaultUserServer}
+	base := time.Date(2024, 1, 3, 0, 0, 0, 0, time.UTC)
+	f.decryptSecretFunc = func(_ *events.Message) (*waE2E.Message, error) {
+		return wrappedRevokeProtocolEdit(chat, "original-id"), nil
+	}
+	editMsg := &waWeb.WebMessageInfo{
+		Key: &waCommon.MessageKey{
+			RemoteJID: proto.String(chat.String()),
+			FromMe:    proto.Bool(false),
+			ID:        proto.String("edit-event"),
+		},
+		MessageTimestamp: proto.Uint64(uint64(base.Add(time.Minute).Unix())),
+		Message:          secretEditEnvelope(chat, "original-id"),
+	}
+	originalMsg := &waWeb.WebMessageInfo{
+		Key: &waCommon.MessageKey{
+			RemoteJID: proto.String(chat.String()),
+			FromMe:    proto.Bool(false),
+			ID:        proto.String("original-id"),
+		},
+		MessageTimestamp: proto.Uint64(uint64(base.Unix())),
+		Message:          &waProto.Message{Conversation: proto.String("original body")},
+	}
+	history := &events.HistorySync{Data: &waHistorySync.HistorySync{
+		SyncType: waHistorySync.HistorySync_FULL.Enum(),
+		Conversations: []*waHistorySync.Conversation{{
+			ID:       proto.String(chat.String()),
+			Messages: []*waHistorySync.HistorySyncMsg{{Message: editMsg}, {Message: originalMsg}},
+		}},
+	}}
+
+	var messagesStored atomic.Int64
+	var lastEvent atomic.Int64
+	out := captureStderr(t, func() {
+		a.handleHistorySync(context.Background(), SyncOptions{}, history, &messagesStored, &lastEvent, func(string, string) {})
+	})
+
+	if !strings.Contains(out, "contains a nested protocol mutation") {
+		t.Fatalf("expected nested mutation warning, got:\n%s", out)
+	}
+	msg, err := a.db.GetMessage(chat.String(), "original-id")
+	if err != nil {
+		t.Fatalf("GetMessage original: %v", err)
+	}
+	if msg.Text != "original body" || msg.Edited || msg.Revoked {
+		t.Fatalf("wrapped history revoke changed original: %+v", msg)
+	}
+	if n, err := a.db.CountMessages(); err != nil || n != 1 {
+		t.Fatalf("expected only the original row, got %d (err=%v)", n, err)
+	}
+}
+
 func secretEditEnvelope(chat types.JID, targetID string) *waProto.Message {
 	return &waProto.Message{
 		SecretEncryptedMessage: &waE2E.SecretEncryptedMessage{
@@ -3336,6 +3440,21 @@ func decryptedProtocolEdit(body string) *waE2E.Message {
 			EditedMessage: &waE2E.Message{Conversation: proto.String(body)},
 		},
 	}
+}
+
+func wrappedRevokeProtocolEdit(chat types.JID, targetID string) *waE2E.Message {
+	return &waE2E.Message{ProtocolMessage: &waE2E.ProtocolMessage{
+		Type: waE2E.ProtocolMessage_MESSAGE_EDIT.Enum(),
+		EditedMessage: &waE2E.Message{EditedMessage: &waE2E.FutureProofMessage{
+			Message: &waE2E.Message{ProtocolMessage: &waE2E.ProtocolMessage{
+				Type: waE2E.ProtocolMessage_REVOKE.Enum(),
+				Key: &waCommon.MessageKey{
+					ID:        proto.String(targetID),
+					RemoteJID: proto.String(chat.String()),
+				},
+			}},
+		}},
+	}}
 }
 
 func TestSyncStoresLiveAndHistoryMessages(t *testing.T) {

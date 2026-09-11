@@ -900,6 +900,18 @@ func normalizedSecretEditTarget(evt *events.Message, targetID string) *waCommon.
 	return target
 }
 
+func containsNestedProtocolMutation(msg *waE2E.Message) bool {
+	if msg == nil {
+		return false
+	}
+	if msg.GetProtocolMessage() != nil {
+		return true
+	}
+	return containsNestedProtocolMutation(msg.GetDeviceSentMessage().GetMessage()) ||
+		containsNestedProtocolMutation(msg.GetEditedMessage().GetMessage()) ||
+		containsNestedProtocolMutation(msg.GetCommentMessage().GetMessage())
+}
+
 func (a *App) decryptSecretEdit(ctx context.Context, evt *events.Message) (*events.Message, bool) {
 	if evt == nil || !isSecretEdit(evt.Message) {
 		return evt, true
@@ -957,7 +969,7 @@ func (a *App) decryptSecretEdit(ctx context.Context, evt *events.Message) (*even
 		)
 		return nil, false
 	}
-	if protocol.GetEditedMessage().GetProtocolMessage() != nil {
+	if containsNestedProtocolMutation(protocol.GetEditedMessage()) {
 		a.emitWarning(
 			"encrypted_edit_nested_mutation",
 			fmt.Sprintf("warning: encrypted edit %s contains a nested protocol mutation", messageID),
@@ -976,7 +988,7 @@ func (a *App) decryptSecretEdit(ctx context.Context, evt *events.Message) (*even
 		return nil, false
 	}
 	parsedSender, err := types.ParseJID(strings.TrimSpace(parsed.SenderJID))
-	if err != nil || !parsed.Edited || parsed.ID != target.GetID() || parsed.FromMe != evt.Info.IsFromMe ||
+	if err != nil || !parsed.Edited || parsed.Revoked || parsed.ID != target.GetID() || parsed.FromMe != evt.Info.IsFromMe ||
 		!a.sameCanonicalIdentity(ctx, evt.Info.Chat, parsed.Chat) ||
 		!a.sameCanonicalIdentity(ctx, evt.Info.Sender, parsedSender) {
 		a.emitWarning(
