@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 export const RELEASE_REPOSITORY = "openclaw/wacli";
 export const RELEASE_GO_VERSION = "go1.27.1";
 export const RELEASE_GO_TOOLCHAIN = "go1.27.1";
-export const RELEASE_GOVULNCHECK_VERSION = "v1.7.0";
+export const RELEASE_GOVULNCHECK_VERSION = "v1.8.0";
 export const RELEASE_IDENTIFIER = "org.openclaw.wacli";
 export const RELEASE_TEAM_ID = "FWJYW4S8P8";
 export const RELEASE_AUTHORITY = `Developer ID Application: OpenClaw Foundation (${RELEASE_TEAM_ID})`;
