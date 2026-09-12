@@ -176,7 +176,7 @@ func boolToInt64(b bool) int64 {
 	return 0
 }
 
-func nullIfEmpty(s string) interface{} {
+func nullIfEmpty(s string) any {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return nil

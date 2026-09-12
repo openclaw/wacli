@@ -54,7 +54,7 @@ func (d *DB) ListHistoryCoverage(p ListHistoryCoverageParams) ([]HistoryCoverage
 			GROUP BY chat_jid
 		) ms ON ms.chat_jid = c.jid
 		WHERE 1=1`
-	args := make([]interface{}, 0, 8)
+	args := make([]any, 0, 8)
 
 	if q := strings.TrimSpace(p.Query); q != "" {
 		needle := likeContains(q)

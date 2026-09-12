@@ -17,7 +17,7 @@ import (
 // with the given name, failing the test if none is present.
 func findEventByName(t *testing.T, raw, name string) map[string]any {
 	t.Helper()
-	for _, line := range strings.Split(strings.TrimSpace(raw), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(raw), "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
@@ -202,7 +202,7 @@ func TestRunSyncFollowLoggedOutWinsOverPendingReconnect(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			for i := 0; i < 50; i++ {
+			for i := range 50 {
 				a := newTestApp(t)
 				f := newFakeWA()
 				a.wa = f
@@ -320,7 +320,7 @@ func TestRunSyncUntilIdleStopsOnLoggedOut(t *testing.T) {
 // Same pairing race in the idle loop: with disconnected and loggedOut both
 // queued, the loop must stop without reconnecting.
 func TestRunSyncUntilIdleLoggedOutWinsOverDisconnected(t *testing.T) {
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		a := newTestApp(t)
 		f := newFakeWA()
 		a.wa = f

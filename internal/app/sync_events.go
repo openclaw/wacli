@@ -62,7 +62,7 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 	if !opts.WebhookEvents.Enabled(SyncWebhookEventMessage) {
 		enqueueWebhookMessage = func(wa.ParsedMessage) {}
 	}
-	return a.wa.AddEventHandler(func(evt interface{}) {
+	return a.wa.AddEventHandler(func(evt any) {
 		if mediaQ != nil {
 			if !mediaQ.beginProducer() {
 				return
@@ -215,7 +215,7 @@ func (a *App) handleKeepAliveTimeout(opts SyncOptions, evt *events.KeepAliveTime
 	}
 }
 
-func syncActivityEvent(evt interface{}) bool {
+func syncActivityEvent(evt any) bool {
 	switch evt.(type) {
 	case nil,
 		*events.KeepAliveTimeout,
@@ -237,7 +237,7 @@ func syncActivityEvent(evt interface{}) bool {
 	}
 }
 
-func (a *App) handleAppStatePersistenceEvent(ctx context.Context, evt interface{}, tracker *appStatePersistenceTracker) {
+func (a *App) handleAppStatePersistenceEvent(ctx context.Context, evt any, tracker *appStatePersistenceTracker) {
 	if tracker != nil {
 		a.persistAppStateEvent(ctx, evt, tracker)
 		return
@@ -290,7 +290,7 @@ type appStateRecoveryMarker struct {
 	generation int64
 }
 
-func (a *App) markLiveAppStateRecovery(evt interface{}) ([]appStateRecoveryMarker, error) {
+func (a *App) markLiveAppStateRecovery(evt any) ([]appStateRecoveryMarker, error) {
 	collections := appStateCollectionsForEvent(evt)
 	names := make([]string, len(collections))
 	for i, collection := range collections {
@@ -319,7 +319,7 @@ func (a *App) clearLiveAppStateRecovery(markers []appStateRecoveryMarker) {
 	}
 }
 
-func (a *App) persistAppStateEvent(ctx context.Context, evt interface{}, tracker *appStatePersistenceTracker) error {
+func (a *App) persistAppStateEvent(ctx context.Context, evt any, tracker *appStatePersistenceTracker) error {
 	var err error
 	switch v := evt.(type) {
 	case *events.AppState:
@@ -337,7 +337,7 @@ func (a *App) persistAppStateEvent(ctx context.Context, evt interface{}, tracker
 	return err
 }
 
-func appStateCollectionsForEvent(evt interface{}) []appstate.WAPatchName {
+func appStateCollectionsForEvent(evt any) []appstate.WAPatchName {
 	switch v := evt.(type) {
 	case *events.Archive, *events.Pin, *events.MarkChatAsRead:
 		return []appstate.WAPatchName{appstate.WAPatchRegularLow}
@@ -406,7 +406,7 @@ func (a *App) handleDeleteForMeEvent(ctx context.Context, evt *events.DeleteForM
 	return nil
 }
 
-func (a *App) handleLiveCallEvent(ctx context.Context, evt interface{}) error {
+func (a *App) handleLiveCallEvent(ctx context.Context, evt any) error {
 	self := a.linkedLiveCallIdentity()
 	var alternateSelf []types.JID
 	if _, ok := evt.(*events.AppState); ok {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -198,10 +199,8 @@ func (a *App) handlePollAddOption(ctx context.Context, pm wa.ParsedMessage, evt 
 			return
 		}
 	}
-	for _, existing := range poll.Options {
-		if existing == option {
-			return
-		}
+	if slices.Contains(poll.Options, option) {
+		return
 	}
 	poll.Options = append(poll.Options, option)
 	if err := a.db.UpsertPoll(poll); err != nil {

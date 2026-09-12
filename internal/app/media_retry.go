@@ -111,7 +111,7 @@ func (a *App) RetryMedia(ctx context.Context, opts RetryMediaOptions) (MediaRetr
 	infos := make(map[mediaRetryKey]store.MediaDownloadInfo, len(pending))
 	notifs := make(map[mediaRetryKey]retryNotif, len(pending))
 
-	handlerID := a.wa.AddEventHandler(func(evt interface{}) {
+	handlerID := a.wa.AddEventHandler(func(evt any) {
 		mr, ok := evt.(*events.MediaRetry)
 		if !ok {
 			return
@@ -266,10 +266,7 @@ func (a *App) RetryMedia(ctx context.Context, opts RetryMediaOptions) (MediaRetr
 		if ctx.Err() != nil {
 			break
 		}
-		end := start + opts.BatchSize
-		if end > len(orderedKeys) {
-			end = len(orderedKeys)
-		}
+		end := min(start+opts.BatchSize, len(orderedKeys))
 		batch := orderedKeys[start:end]
 
 		for _, key := range batch {

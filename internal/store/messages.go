@@ -375,7 +375,7 @@ func (d *DB) ListMessages(p ListMessagesParams) ([]Message, error) {
 		LEFT JOIN chats c ON c.jid = m.chat_jid
 		LEFT JOIN starred s ON s.chat_jid = m.chat_jid AND s.msg_id = m.msg_id
 		WHERE m.deleted_at IS NULL`
-	var args []interface{}
+	var args []any
 	query, args = appendStringFilter(query, args, "m.chat_jid", p.ChatJID, p.ChatJIDs)
 	if p.After != nil {
 		query += " AND m.ts > ?"
@@ -408,7 +408,7 @@ func (d *DB) ListMessages(p ListMessagesParams) ([]Message, error) {
 	return d.scanMessages(query, args...)
 }
 
-func appendStringFilter(query string, args []interface{}, column, value string, values []string) (string, []interface{}) {
+func appendStringFilter(query string, args []any, column, value string, values []string) (string, []any) {
 	filterValues := uniqueNonEmptyStrings(append([]string{value}, values...))
 	switch len(filterValues) {
 	case 0:
@@ -552,7 +552,7 @@ func (d *DB) MessageContext(chatJID, msgID string, before, after int) ([]Message
 	return out, nil
 }
 
-func (d *DB) scanMessages(query string, args ...interface{}) ([]Message, error) {
+func (d *DB) scanMessages(query string, args ...any) ([]Message, error) {
 	rows, err := d.sql.Query(query, args...)
 	if err != nil {
 		return nil, err

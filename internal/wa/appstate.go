@@ -20,7 +20,7 @@ func (c *Client) SendAppState(ctx context.Context, patch appstate.PatchInfo) err
 	return cli.SendAppState(ctx, patch)
 }
 
-func (c *Client) sendAppStateWithBoundary(ctx context.Context, patch appstate.PatchInfo, beforeApply func()) ([]interface{}, error) {
+func (c *Client) sendAppStateWithBoundary(ctx context.Context, patch appstate.PatchInfo, beforeApply func()) ([]any, error) {
 	// Reserve wacli persistence before whatsmeow can advance app state. The
 	// durable recovery intent remains after return because canonical sends
 	// dispatch their resulting events asynchronously.
@@ -28,18 +28,18 @@ func (c *Client) sendAppStateWithBoundary(ctx context.Context, patch appstate.Pa
 	return nil, c.SendAppState(ctx, patch)
 }
 
-func (c *Client) ArchiveChat(ctx context.Context, target types.JID, archive bool, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey, beforeApply func()) ([]interface{}, error) {
+func (c *Client) ArchiveChat(ctx context.Context, target types.JID, archive bool, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey, beforeApply func()) ([]any, error) {
 	return c.sendAppStateWithBoundary(ctx, appstate.BuildArchive(target, archive, lastMsgTS, lastMsgKey), beforeApply)
 }
 
-func (c *Client) PinChat(ctx context.Context, target types.JID, pin bool, beforeApply func()) ([]interface{}, error) {
+func (c *Client) PinChat(ctx context.Context, target types.JID, pin bool, beforeApply func()) ([]any, error) {
 	return c.sendAppStateWithBoundary(ctx, appstate.BuildPin(target, pin), beforeApply)
 }
 
-func (c *Client) MuteChat(ctx context.Context, target types.JID, mute bool, duration time.Duration, beforeApply func()) ([]interface{}, error) {
+func (c *Client) MuteChat(ctx context.Context, target types.JID, mute bool, duration time.Duration, beforeApply func()) ([]any, error) {
 	return c.sendAppStateWithBoundary(ctx, appstate.BuildMute(target, mute, duration), beforeApply)
 }
 
-func (c *Client) MarkChatAsRead(ctx context.Context, target types.JID, read bool, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey, beforeApply func()) ([]interface{}, error) {
+func (c *Client) MarkChatAsRead(ctx context.Context, target types.JID, read bool, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey, beforeApply func()) ([]any, error) {
 	return c.sendAppStateWithBoundary(ctx, appstate.BuildMarkChatAsRead(target, read, lastMsgTS, lastMsgKey), beforeApply)
 }

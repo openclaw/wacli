@@ -42,7 +42,7 @@ func newAuthCmd(flags *rootFlags) *cobra.Command {
 			}
 
 			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]interface{}{
+				return out.WriteJSON(os.Stdout, map[string]any{
 					"authenticated":   true,
 					"messages_stored": res.MessagesStored,
 				})

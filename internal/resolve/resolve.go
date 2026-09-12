@@ -219,7 +219,7 @@ func rank(query string, haystacks ...string) int {
 }
 
 func hasWordPrefix(h, q string) bool {
-	for _, word := range strings.Fields(h) {
+	for word := range strings.FieldsSeq(h) {
 		if strings.HasPrefix(word, q) {
 			return true
 		}

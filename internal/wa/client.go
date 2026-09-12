@@ -261,7 +261,7 @@ func qrChannelEventError(evt whatsmeow.QRChannelItem) error {
 	}
 }
 
-func (c *Client) AddEventHandler(handler func(interface{})) uint32 {
+func (c *Client) AddEventHandler(handler func(any)) uint32 {
 	c.mu.Lock()
 	cli := c.client
 	c.mu.Unlock()
@@ -716,7 +716,7 @@ func (c *Client) FetchAppState(ctx context.Context, name string, fullSync, onlyI
 // FetchAppStateEvents fetches one collection without globally dispatching the
 // resulting events, so callers can persist that exact collection atomically
 // with their own recovery marker protocol.
-func (c *Client) FetchAppStateEvents(ctx context.Context, name string, fullSync, onlyIfNotSynced bool) ([]interface{}, error) {
+func (c *Client) FetchAppStateEvents(ctx context.Context, name string, fullSync, onlyIfNotSynced bool) ([]any, error) {
 	c.mu.Lock()
 	cli := c.client
 	c.mu.Unlock()
@@ -921,7 +921,7 @@ func (c *Client) SetProfilePicture(ctx context.Context, avatar []byte) (string, 
 		return "", fmt.Errorf("not connected")
 	}
 
-	var content interface{}
+	var content any
 	if avatar != nil {
 		content = []waBinary.Node{{
 			Tag:     "picture",

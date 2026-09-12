@@ -54,7 +54,7 @@ func TestSyncSendsAvailablePresenceOnPushNameSetting(t *testing.T) {
 	a.wa = f
 
 	// Fake the server sending a pushname update after the initial connect.
-	f.connectEvents = []interface{}{&events.PushNameSetting{}}
+	f.connectEvents = []any{&events.PushNameSetting{}}
 
 	raw := captureStderr(t, func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -84,10 +84,10 @@ func TestSyncSendsAvailablePresenceOnPushNameSetting(t *testing.T) {
 func TestSyncQuietPresenceModeSkipsAvailablePresence(t *testing.T) {
 	tests := []struct {
 		name          string
-		connectEvents []interface{}
+		connectEvents []any
 	}{
 		{name: "connected only"},
-		{name: "push name", connectEvents: []interface{}{&events.PushNameSetting{}}},
+		{name: "push name", connectEvents: []any{&events.PushNameSetting{}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

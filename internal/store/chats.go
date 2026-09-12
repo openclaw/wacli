@@ -54,7 +54,7 @@ func (d *DB) ListChatsFiltered(f ChatListFilter) ([]Chat, error) {
 		f.Limit = 50
 	}
 	q := `SELECT jid, kind, COALESCE(name,''), COALESCE(last_message_ts,0), COALESCE(archived,0), COALESCE(pinned,0), COALESCE(muted_until,0), COALESCE(unread,0), COALESCE(unread_count,0) FROM chats WHERE 1=1`
-	var args []interface{}
+	var args []any
 	if strings.TrimSpace(f.Query) != "" {
 		q += ` AND (LOWER(name) LIKE LOWER(?) ESCAPE '\' OR LOWER(jid) LIKE LOWER(?) ESCAPE '\')`
 		needle := likeContains(f.Query)
@@ -343,11 +343,7 @@ func chatFromRow(row storedb.GetChatRow) Chat {
 
 func applyChatUnread(c *Chat, unread, unreadCount int) {
 	c.Unread = unread != 0
-	if unreadCount > 0 {
-		c.UnreadCount = unreadCount
-	} else {
-		c.UnreadCount = 0
-	}
+	c.UnreadCount = max(unreadCount, 0)
 }
 
 func sqlNullInt64(n int64) sql.NullInt64 {
