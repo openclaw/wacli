@@ -25,7 +25,7 @@ func TestSyncStopsAtMaxMessages(t *testing.T) {
 
 	chat := types.JID{User: "123", Server: types.DefaultUserServer}
 	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-	f.connectEvents = []interface{}{historySyncWithTextMessages(chat, base, "m1", "m2", "m3")}
+	f.connectEvents = []any{historySyncWithTextMessages(chat, base, "m1", "m2", "m3")}
 
 	res, err := a.Sync(context.Background(), SyncOptions{
 		Mode:        SyncModeFollow,
@@ -50,7 +50,7 @@ func TestSyncFlushesHistoryPollsAtMaxMessages(t *testing.T) {
 
 	chat := types.JID{User: "123", Server: types.DefaultUserServer}
 	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-	f.connectEvents = []interface{}{historySyncWithPollAndText(chat, base, "poll-limit", "after-limit")}
+	f.connectEvents = []any{historySyncWithPollAndText(chat, base, "poll-limit", "after-limit")}
 
 	res, err := a.Sync(context.Background(), SyncOptions{
 		Mode:        SyncModeFollow,
@@ -95,7 +95,7 @@ func TestSyncFlushesFinalHistoryPollVoteAtMaxMessages(t *testing.T) {
 	f.decryptPollVoteFunc = func(_ *events.Message) (*waE2E.PollVoteMessage, error) {
 		return &waE2E.PollVoteMessage{SelectedOptions: whatsmeow.HashPollOptions([]string{"Yes"})}, nil
 	}
-	f.connectEvents = []interface{}{historySyncWithPollVote(chat, voter, base, pollMsgID, "vote-final-limit")}
+	f.connectEvents = []any{historySyncWithPollVote(chat, voter, base, pollMsgID, "vote-final-limit")}
 
 	res, err := a.Sync(context.Background(), SyncOptions{
 		Mode:        SyncModeFollow,
@@ -140,7 +140,7 @@ func TestSyncFlushesFinalLivePollVoteAtMaxMessages(t *testing.T) {
 	f.decryptPollVoteFunc = func(_ *events.Message) (*waE2E.PollVoteMessage, error) {
 		return &waE2E.PollVoteMessage{SelectedOptions: whatsmeow.HashPollOptions([]string{"Yes"})}, nil
 	}
-	f.connectEvents = []interface{}{livePollVote(chat, voter, base, pollMsgID, "vote-live-limit")}
+	f.connectEvents = []any{livePollVote(chat, voter, base, pollMsgID, "vote-live-limit")}
 
 	res, err := a.Sync(context.Background(), SyncOptions{
 		Mode:        SyncModeFollow,

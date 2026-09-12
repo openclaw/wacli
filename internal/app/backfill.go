@@ -104,7 +104,7 @@ func (a *App) BackfillHistory(ctx context.Context, opts BackfillOptions) (Backfi
 			return
 		}
 	}
-	handlerID := a.wa.AddEventHandler(func(evt interface{}) {
+	handlerID := a.wa.AddEventHandler(func(evt any) {
 		switch v := evt.(type) {
 		case *events.HistorySync:
 			handleOnDemand(v)

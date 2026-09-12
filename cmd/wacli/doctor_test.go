@@ -42,10 +42,8 @@ func TestDoctorConnectionState(t *testing.T) {
 		connected bool
 		lockHeld  bool
 		connect   bool
-		revoked   bool
 		want      string
 	}{
-		{name: "live connection wins over stale marker", authed: true, connected: true, revoked: true, want: "connected"},
 		{name: "connected wins", authed: true, connected: true, lockHeld: true, want: "connected"},
 		{name: "locked paired session", authed: true, lockHeld: true, want: "locked_by_other_process"},
 		{name: "connect requested stays disconnected", authed: true, lockHeld: true, connect: true, want: "disconnected"},
@@ -53,7 +51,7 @@ func TestDoctorConnectionState(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := doctorConnectionState(tc.authed, tc.connected, tc.lockHeld, tc.connect, tc.revoked)
+			got := doctorConnectionState(tc.authed, tc.connected, tc.lockHeld, tc.connect, false)
 			if got != tc.want {
 				t.Fatalf("doctorConnectionState() = %q, want %q", got, tc.want)
 			}
@@ -79,9 +77,6 @@ func TestDoctorStoreStatsFromStoreStats(t *testing.T) {
 	if got.LastSyncAt != "2024-04-01T10:30:00Z" {
 		t.Fatalf("LastSyncAt = %q", got.LastSyncAt)
 	}
-	if got.NewestMessageAt != "2024-04-01T10:30:00Z" {
-		t.Fatalf("NewestMessageAt = %q", got.NewestMessageAt)
-	}
 }
 
 func TestWriteDoctorReportIncludesLinkedJIDAndStats(t *testing.T) {
@@ -93,13 +88,12 @@ func TestWriteDoctorReportIncludesLinkedJIDAndStats(t *testing.T) {
 		ConnectionState: "disconnected",
 		FTSEnabled:      true,
 		Store: &doctorStoreStats{
-			StatsKnown:      true,
-			Messages:        9,
-			Chats:           8,
-			Contacts:        7,
-			Groups:          6,
-			LastSyncAt:      "2024-04-01T10:30:00Z",
-			NewestMessageAt: "2024-04-01T10:30:00Z",
+			StatsKnown: true,
+			Messages:   9,
+			Chats:      8,
+			Contacts:   7,
+			Groups:     6,
+			LastSyncAt: "2024-04-01T10:30:00Z",
 		},
 	})
 
@@ -116,7 +110,6 @@ func TestWriteDoctorReportIncludesLinkedJIDAndStats(t *testing.T) {
 		"GROUPS",
 		"6",
 		"LAST_SYNC",
-		"NEWEST_MESSAGE",
 		"2024-04-01T10:30:00Z",
 	} {
 		if !strings.Contains(out, want) {
@@ -205,28 +198,6 @@ func TestDoctorReportsLastActivityFromHeartbeat(t *testing.T) {
 	}
 }
 
-func TestDoctorReportsRevokedSessionAsLoggedOut(t *testing.T) {
-	storeDir := t.TempDir()
-	if err := appPkg.MarkSessionRevoked(storeDir, "logged_out"); err != nil {
-		t.Fatalf("MarkSessionRevoked: %v", err)
-	}
-
-	stdout := captureRootStdout(t, func() {
-		if err := execute([]string{"--store", storeDir, "--read-only", "--json", "doctor"}); err != nil {
-			t.Fatalf("execute doctor: %v", err)
-		}
-	})
-	var got struct {
-		Data doctorReport `json:"data"`
-	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &got); err != nil {
-		t.Fatalf("unmarshal: %v\n%s", err, stdout)
-	}
-	if got.Data.Authed || !got.Data.SessionRevoked || got.Data.ConnectionState != "logged_out" {
-		t.Fatalf("revoked doctor state = %+v", got.Data)
-	}
-}
-
 func TestDoctorReportsLastActivityWhenStoreDBMissing(t *testing.T) {
 	storeDir := filepath.Join(t.TempDir(), "store")
 	if err := os.MkdirAll(storeDir, 0o700); err != nil {
@@ -300,5 +271,27 @@ func TestDoctorReportsCorruptStore(t *testing.T) {
 	}
 	if got.Data.StoreError == "" {
 		t.Fatalf("store_error is empty for corrupt store: %s", stdout)
+	}
+}
+
+func TestDoctorReportsRevokedSessionAsLoggedOut(t *testing.T) {
+	storeDir := t.TempDir()
+	if err := appPkg.MarkSessionRevoked(storeDir, "logged_out"); err != nil {
+		t.Fatalf("MarkSessionRevoked: %v", err)
+	}
+
+	stdout := captureRootStdout(t, func() {
+		if err := execute([]string{"--store", storeDir, "--read-only", "--json", "doctor"}); err != nil {
+			t.Fatalf("execute doctor: %v", err)
+		}
+	})
+	var got struct {
+		Data doctorReport `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &got); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, stdout)
+	}
+	if got.Data.Authed || !got.Data.SessionRevoked || got.Data.ConnectionState != "logged_out" {
+		t.Fatalf("revoked doctor state = %+v", got.Data)
 	}
 }

@@ -482,10 +482,6 @@ func decodeMessageEscapes(s string) (string, error) {
 	return b.String(), nil
 }
 
-func buildTextMessage(db *store.DB, to types.JID, text, replyTo, replyToSender string, preview *linkpreview.Preview, mentionedJIDs []string) (*waProto.Message, bool, error) {
-	return buildTextMessageWithSelf(db, to, types.EmptyJID, text, replyTo, replyToSender, "", preview, mentionedJIDs)
-}
-
 func buildTextMessageWithSelf(db *store.DB, to, aliasTo types.JID, text, replyTo, replyToSender, selfJID string, preview *linkpreview.Preview, mentionedJIDs []string) (*waProto.Message, bool, error) {
 	info, err := buildTextContextInfo(db, to, aliasTo, replyTo, replyToSender, selfJID, mentionedJIDs)
 	if err != nil {

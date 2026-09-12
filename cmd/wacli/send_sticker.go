@@ -126,11 +126,6 @@ func newStickerMessage(up whatsmeow.UploadResponse, info *waProto.ContextInfo, m
 	}
 }
 
-func isWebPStickerData(data []byte) bool {
-	_, err := parseWebPStickerMetadata(data)
-	return err == nil
-}
-
 func validateWebPSticker(data []byte) (webPStickerMetadata, error) {
 	meta, err := parseWebPStickerMetadata(data)
 	if err != nil {

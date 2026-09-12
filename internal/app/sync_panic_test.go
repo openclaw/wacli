@@ -7,7 +7,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"go.mau.fi/whatsmeow/types/events"
 )
@@ -22,6 +21,8 @@ func captureStderr(t *testing.T, fn func()) string {
 	if err != nil {
 		t.Fatalf("os.Pipe: %v", err)
 	}
+	defer r.Close()
+	defer w.Close()
 	os.Stderr = w
 	defer func() { os.Stderr = orig }()
 
@@ -52,15 +53,19 @@ func TestSyncEventHandlerPanicHasStackAndCounter(t *testing.T) {
 	// Sync is running forces the handler to recover twice, so we can check
 	// the counter increments.
 	var nilMsg *events.Message
-	f.connectEvents = []interface{}{nilMsg, nilMsg}
+	f.connectEvents = []any{nilMsg, nilMsg}
 
 	out := captureStderr(t, func() {
-		ctx, cancel := context.WithCancel(context.Background())
-		go func() {
-			time.Sleep(100 * time.Millisecond)
-			cancel()
-		}()
-		if _, err := a.Sync(ctx, SyncOptions{Mode: SyncModeFollow, AllowQR: false}); err != nil {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		if _, err := a.Sync(ctx, SyncOptions{
+			Mode:    SyncModeFollow,
+			AllowQR: false,
+			AfterConnect: func(context.Context) error {
+				cancel()
+				return nil
+			},
+		}); err != nil {
 			t.Fatalf("Sync: %v", err)
 		}
 	})

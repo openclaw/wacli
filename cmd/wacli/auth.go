@@ -42,7 +42,7 @@ func newAuthCmd(flags *rootFlags) *cobra.Command {
 			}
 
 			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]interface{}{
+				return out.WriteJSON(os.Stdout, map[string]any{
 					"authenticated":   true,
 					"messages_stored": res.MessagesStored,
 				})
@@ -229,18 +229,12 @@ func newAuthStatusCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 			authed := a.WA().IsAuthed()
+			revoked, err := appPkg.SessionRevoked(a.StoreDir())
+			if err != nil {
+				return err
+			}
+			authed = authed && !revoked
 			var linkedJID string
-			storeDir, err := resolveStoreDir(flags)
-			if err != nil {
-				return err
-			}
-			revoked, err := appPkg.SessionRevoked(storeDir)
-			if err != nil {
-				return err
-			}
-			if revoked {
-				authed = false
-			}
 			if authed {
 				linkedJID = a.WA().LinkedJID()
 			}

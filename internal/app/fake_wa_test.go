@@ -28,13 +28,14 @@ type fakeWA struct {
 
 	authed        bool
 	connected     bool
+	loggedIn      bool
 	autoReconnect bool
 	linkedLID     string
 
 	nextHandlerID uint32
-	handlers      map[uint32]func(interface{})
+	handlers      map[uint32]func(any)
 
-	connectEvents  []interface{}
+	connectEvents  []any
 	connectErrs    []error
 	connectCalls   int
 	connectDelay   time.Duration
@@ -42,7 +43,7 @@ type fakeWA struct {
 	downloadDelay  time.Duration
 	downloadErr    error
 
-	onMediaRetry       func(info *types.MessageInfo, mediaKey []byte) interface{}
+	onMediaRetry       func(info *types.MessageInfo, mediaKey []byte) any
 	mediaRetryReceipts []string
 
 	contacts map[types.JID]types.ContactInfo
@@ -60,7 +61,7 @@ type fakeWA struct {
 	decryptPollVoteFunc         func(evt *events.Message) (*waE2E.PollVoteMessage, error)
 	decryptSecretFunc           func(evt *events.Message) (*waE2E.Message, error)
 	onDemandHistory             func(lastKnown types.MessageInfo, count int) *events.HistorySync
-	onDemandEvent               func(lastKnown types.MessageInfo, count int) interface{}
+	onDemandEvent               func(lastKnown types.MessageInfo, count int) any
 	onDemandErr                 error
 	downloadHistory             func(notif *waE2E.HistorySyncNotification) (*waHistorySync.HistorySync, error)
 	deleteHistoryCalls          []*waE2E.HistorySyncNotification
@@ -68,8 +69,8 @@ type fakeWA struct {
 	onAppStateRecovery          func(name string)
 	appStateFetchErr            error
 	appStateFetchErrs           []error
-	appStateFetchEvent          func(name string, fullSync, onlyIfNotSynced bool) interface{}
-	archiveEvent                func() interface{}
+	appStateFetchEvent          func(name string, fullSync, onlyIfNotSynced bool) any
+	archiveEvent                func() any
 	archiveErr                  error
 	archiveCalls                []fakeArchiveCall
 	pinCalls                    []fakePinCall
@@ -132,7 +133,7 @@ func newFakeWA() *fakeWA {
 	return &fakeWA{
 		authed:        true,
 		autoReconnect: true,
-		handlers:      map[uint32]func(interface{}){},
+		handlers:      map[uint32]func(any){},
 		contacts:      map[types.JID]types.ContactInfo{},
 		groups:        map[types.JID]*types.GroupInfo{},
 		news:          map[types.JID]*types.NewsletterMetadata{},
@@ -141,9 +142,15 @@ func newFakeWA() *fakeWA {
 	}
 }
 
-func (f *fakeWA) emit(evt interface{}) {
+func (f *fakeWA) emit(evt any) {
 	f.mu.Lock()
-	handlers := make([]func(interface{}), 0, len(f.handlers))
+	switch evt.(type) {
+	case *events.Connected:
+		f.loggedIn = true
+	case *events.LoggedOut, *events.Disconnected, *events.ConnectFailure:
+		f.loggedIn = false
+	}
+	handlers := make([]func(any), 0, len(f.handlers))
 	for _, h := range f.handlers {
 		handlers = append(handlers, h)
 	}
@@ -153,9 +160,11 @@ func (f *fakeWA) emit(evt interface{}) {
 	}
 }
 
-func (f *fakeWA) Close() { f.mu.Lock(); f.connected = false; f.mu.Unlock() }
+func (f *fakeWA) Close() { f.mu.Lock(); f.connected = false; f.loggedIn = false; f.mu.Unlock() }
 
-func (f *fakeWA) IsAuthed() bool { f.mu.Lock(); defer f.mu.Unlock(); return f.authed }
+func (f *fakeWA) IsAuthed() bool   { f.mu.Lock(); defer f.mu.Unlock(); return f.authed }
+func (f *fakeWA) IsLoggedIn() bool { f.mu.Lock(); defer f.mu.Unlock(); return f.loggedIn }
+
 func (f *fakeWA) IsConnected() bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -193,7 +202,7 @@ func (f *fakeWA) Connect(ctx context.Context, opts wa.ConnectOptions) error {
 		f.connectErrs = f.connectErrs[1:]
 	}
 	f.connected = true
-	eventsToEmit := append([]interface{}{}, f.connectEvents...)
+	eventsToEmit := append([]any{}, f.connectEvents...)
 	f.mu.Unlock()
 
 	if !authed && !opts.AllowQR {
@@ -225,7 +234,7 @@ func (f *fakeWA) Connect(ctx context.Context, opts wa.ConnectOptions) error {
 	return nil
 }
 
-func (f *fakeWA) AddEventHandler(handler func(interface{})) uint32 {
+func (f *fakeWA) AddEventHandler(handler func(any)) uint32 {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	id := f.nextHandlerID
@@ -738,7 +747,7 @@ func (f *fakeWA) DeleteMessageForMe(ctx context.Context, info types.MessageInfo,
 	return nil
 }
 
-func (f *fakeWA) ArchiveChat(ctx context.Context, target types.JID, archive bool, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey, beforeApply func()) ([]interface{}, error) {
+func (f *fakeWA) ArchiveChat(ctx context.Context, target types.JID, archive bool, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey, beforeApply func()) ([]any, error) {
 	f.mu.Lock()
 	f.archiveCalls = append(f.archiveCalls, fakeArchiveCall{target: target, archive: archive, lastMsgTS: lastMsgTS, lastMsgKey: lastMsgKey})
 	eventCB := f.archiveEvent
@@ -746,13 +755,13 @@ func (f *fakeWA) ArchiveChat(ctx context.Context, target types.JID, archive bool
 	beforeApply()
 	if eventCB != nil {
 		if evt := eventCB(); evt != nil {
-			return []interface{}{evt}, f.archiveErr
+			return []any{evt}, f.archiveErr
 		}
 	}
 	return nil, f.archiveErr
 }
 
-func (f *fakeWA) PinChat(ctx context.Context, target types.JID, pin bool, beforeApply func()) ([]interface{}, error) {
+func (f *fakeWA) PinChat(ctx context.Context, target types.JID, pin bool, beforeApply func()) ([]any, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.pinCalls = append(f.pinCalls, fakePinCall{target: target, pin: pin})
@@ -760,7 +769,7 @@ func (f *fakeWA) PinChat(ctx context.Context, target types.JID, pin bool, before
 	return nil, nil
 }
 
-func (f *fakeWA) MuteChat(ctx context.Context, target types.JID, mute bool, duration time.Duration, beforeApply func()) ([]interface{}, error) {
+func (f *fakeWA) MuteChat(ctx context.Context, target types.JID, mute bool, duration time.Duration, beforeApply func()) ([]any, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.muteCalls = append(f.muteCalls, fakeMuteCall{target: target, mute: mute, duration: duration})
@@ -768,7 +777,7 @@ func (f *fakeWA) MuteChat(ctx context.Context, target types.JID, mute bool, dura
 	return nil, nil
 }
 
-func (f *fakeWA) MarkChatAsRead(ctx context.Context, target types.JID, read bool, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey, beforeApply func()) ([]interface{}, error) {
+func (f *fakeWA) MarkChatAsRead(ctx context.Context, target types.JID, read bool, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey, beforeApply func()) ([]any, error) {
 	f.mu.Lock()
 	f.markReadCalls = append(f.markReadCalls, fakeMarkReadCall{target: target, read: read, lastMsgTS: lastMsgTS, lastMsgKey: lastMsgKey})
 	hook := f.markReadBeforeApply
@@ -805,7 +814,7 @@ func (f *fakeWA) FetchAppState(ctx context.Context, name string, fullSync, onlyI
 	return nil
 }
 
-func (f *fakeWA) FetchAppStateEvents(ctx context.Context, name string, fullSync, onlyIfNotSynced bool) ([]interface{}, error) {
+func (f *fakeWA) FetchAppStateEvents(ctx context.Context, name string, fullSync, onlyIfNotSynced bool) ([]any, error) {
 	f.mu.Lock()
 	f.appStateFetches = append(f.appStateFetches, fakeAppStateFetch{
 		name:            name,
@@ -832,7 +841,7 @@ func (f *fakeWA) FetchAppStateEvents(ctx context.Context, name string, fullSync,
 	if evt == nil {
 		return nil, nil
 	}
-	return []interface{}{evt}, nil
+	return []any{evt}, nil
 }
 
 func (f *fakeWA) Logout(ctx context.Context) error {

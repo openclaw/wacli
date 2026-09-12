@@ -300,7 +300,7 @@ func TestSyncFollowEmitsStaleEvent(t *testing.T) {
 		Data  map[string]any `json:"data"`
 	}
 	var found bool
-	for _, line := range bytes.Split(bytes.TrimSpace(eventsOut.Bytes()), []byte("\n")) {
+	for line := range bytes.SplitSeq(bytes.TrimSpace(eventsOut.Bytes()), []byte("\n")) {
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}

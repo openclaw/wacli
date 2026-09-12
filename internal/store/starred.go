@@ -61,7 +61,7 @@ func (d *DB) ListStarredMessages(p ListStarredMessagesParams) ([]Message, error)
 		LEFT JOIN chats c ON c.jid = m.chat_jid
 		JOIN starred s ON s.chat_jid = m.chat_jid AND s.msg_id = m.msg_id
 		WHERE m.deleted_at IS NULL`
-	var args []interface{}
+	var args []any
 	query, args = appendStringFilter(query, args, "m.chat_jid", p.ChatJID, p.ChatJIDs)
 	if p.After != nil {
 		query += " AND s.starred_at > ?"

@@ -34,10 +34,10 @@ func parseLockOwnerPID(lockInfo string) int {
 
 func doctorConnectionState(authed, connected, lockHeld, connect, sessionRevoked bool) string {
 	switch {
-	case connected:
-		return "connected"
 	case sessionRevoked:
 		return "logged_out"
+	case connected:
+		return "connected"
 	case authed && lockHeld && !connect:
 		return "locked_by_other_process"
 	default:
@@ -46,30 +46,27 @@ func doctorConnectionState(authed, connected, lockHeld, connect, sessionRevoked 
 }
 
 type doctorStoreStats struct {
-	StatsKnown      bool   `json:"-"`
-	Messages        int64  `json:"messages"`
-	Chats           int64  `json:"chats"`
-	Contacts        int64  `json:"contacts"`
-	Groups          int64  `json:"groups"`
-	NewestMessageAt string `json:"newest_message_at,omitempty"`
-	LastSyncAt      string `json:"last_sync_at,omitempty"`
-	LastActivityAt  string `json:"last_activity_at,omitempty"`
+	StatsKnown     bool   `json:"-"`
+	Messages       int64  `json:"messages"`
+	Chats          int64  `json:"chats"`
+	Contacts       int64  `json:"contacts"`
+	Groups         int64  `json:"groups"`
+	LastSyncAt     string `json:"last_sync_at,omitempty"`
+	LastActivityAt string `json:"last_activity_at,omitempty"`
 }
 
 func (s doctorStoreStats) MarshalJSON() ([]byte, error) {
 	type storeStatsJSON struct {
-		Messages        *int64 `json:"messages,omitempty"`
-		Chats           *int64 `json:"chats,omitempty"`
-		Contacts        *int64 `json:"contacts,omitempty"`
-		Groups          *int64 `json:"groups,omitempty"`
-		NewestMessageAt string `json:"newest_message_at,omitempty"`
-		LastSyncAt      string `json:"last_sync_at,omitempty"`
-		LastActivityAt  string `json:"last_activity_at,omitempty"`
+		Messages       *int64 `json:"messages,omitempty"`
+		Chats          *int64 `json:"chats,omitempty"`
+		Contacts       *int64 `json:"contacts,omitempty"`
+		Groups         *int64 `json:"groups,omitempty"`
+		LastSyncAt     string `json:"last_sync_at,omitempty"`
+		LastActivityAt string `json:"last_activity_at,omitempty"`
 	}
 	out := storeStatsJSON{
-		NewestMessageAt: s.NewestMessageAt,
-		LastSyncAt:      s.LastSyncAt,
-		LastActivityAt:  s.LastActivityAt,
+		LastSyncAt:     s.LastSyncAt,
+		LastActivityAt: s.LastActivityAt,
 	}
 	if s.StatsKnown {
 		out.Messages = &s.Messages
@@ -104,8 +101,7 @@ func doctorStoreStatsFromStoreStats(stats store.StoreStats) doctorStoreStats {
 		Groups:     stats.Groups,
 	}
 	if stats.LastMessageTS > 0 {
-		out.NewestMessageAt = time.Unix(stats.LastMessageTS, 0).UTC().Format(time.RFC3339)
-		out.LastSyncAt = out.NewestMessageAt
+		out.LastSyncAt = time.Unix(stats.LastMessageTS, 0).UTC().Format(time.RFC3339)
 	}
 	return out
 }
@@ -120,8 +116,8 @@ func writeDoctorReport(w io.Writer, rep doctorReport) {
 	if rep.LockOwnerPID > 0 {
 		fmt.Fprintf(tw, "LOCK_OWNER_PID\t%d\n", rep.LockOwnerPID)
 	}
-	fmt.Fprintf(tw, "AUTHENTICATED	%v\n", rep.Authed)
-	fmt.Fprintf(tw, "SESSION_REVOKED	%v\n", rep.SessionRevoked)
+	fmt.Fprintf(tw, "AUTHENTICATED\t%v\n", rep.Authed)
+	fmt.Fprintf(tw, "SESSION_REVOKED\t%v\n", rep.SessionRevoked)
 	if rep.LinkedJID != "" {
 		fmt.Fprintf(tw, "LINKED_JID\t%s\n", sanitize(rep.LinkedJID))
 	}
@@ -136,10 +132,7 @@ func writeDoctorReport(w io.Writer, rep doctorReport) {
 			fmt.Fprintf(tw, "GROUPS\t%d\n", rep.Store.Groups)
 		}
 		if rep.Store.LastSyncAt != "" {
-			fmt.Fprintf(tw, "LAST_SYNC	%s\n", rep.Store.LastSyncAt)
-		}
-		if rep.Store.NewestMessageAt != "" {
-			fmt.Fprintf(tw, "NEWEST_MESSAGE	%s\n", rep.Store.NewestMessageAt)
+			fmt.Fprintf(tw, "LAST_SYNC\t%s\n", rep.Store.LastSyncAt)
 		}
 		if rep.Store.LastActivityAt != "" {
 			fmt.Fprintf(tw, "LAST_ACTIVITY\t%s\n", rep.Store.LastActivityAt)
@@ -215,10 +208,6 @@ func newDoctorCmd(flags *rootFlags) *cobra.Command {
 			var authed bool
 			var connected bool
 			var linkedJID string
-			sessionRevoked, sessionStateErr := appPkg.SessionRevoked(storeDir)
-			if sessionStateErr != nil && storeErr == "" {
-				storeErr = sessionStateErr.Error()
-			}
 			if flags.isReadOnly() {
 				if roAuthed, roLinkedJID, err := readOnlyAuthStatus(storeDir); err == nil {
 					authed = roAuthed
@@ -237,13 +226,13 @@ func newDoctorCmd(flags *rootFlags) *cobra.Command {
 					}
 				}
 			}
-			if connected {
-				if err := appPkg.ClearSessionRevoked(storeDir); err != nil && storeErr == "" {
-					storeErr = err.Error()
-				}
-				sessionRevoked = false
-			} else if sessionRevoked {
+			sessionRevoked, sessionStateErr := appPkg.SessionRevoked(storeDir)
+			if sessionStateErr != nil && storeErr == "" {
+				storeErr = sessionStateErr.Error()
+			}
+			if sessionRevoked {
 				authed = false
+				connected = false
 				linkedJID = ""
 			}
 			lockOwnerPID := parseLockOwnerPID(lockInfo)

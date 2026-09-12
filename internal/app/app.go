@@ -26,10 +26,11 @@ type WAClient interface {
 	Close()
 	IsAuthed() bool
 	IsConnected() bool
+	IsLoggedIn() bool
 	SetAutoReconnect(enabled bool) (previous bool, ok bool)
 	Connect(ctx context.Context, opts wa.ConnectOptions) error
 
-	AddEventHandler(handler func(interface{})) uint32
+	AddEventHandler(handler func(any)) uint32
 	RemoveEventHandler(id uint32)
 	ReconnectWithBackoff(ctx context.Context, minDelay, maxDelay time.Duration, opts wa.ConnectOptions) error
 
@@ -72,10 +73,10 @@ type WAClient interface {
 	RevokeMessage(ctx context.Context, chat types.JID, targetID types.MessageID) (types.MessageID, error)
 	DeleteMessageForMe(ctx context.Context, info types.MessageInfo, deleteMedia bool) error
 	EditMessage(ctx context.Context, chat types.JID, targetID types.MessageID, text string) (types.MessageID, error)
-	ArchiveChat(ctx context.Context, target types.JID, archive bool, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey, beforeApply func()) ([]interface{}, error)
-	PinChat(ctx context.Context, target types.JID, pin bool, beforeApply func()) ([]interface{}, error)
-	MuteChat(ctx context.Context, target types.JID, mute bool, duration time.Duration, beforeApply func()) ([]interface{}, error)
-	MarkChatAsRead(ctx context.Context, target types.JID, read bool, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey, beforeApply func()) ([]interface{}, error)
+	ArchiveChat(ctx context.Context, target types.JID, archive bool, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey, beforeApply func()) ([]any, error)
+	PinChat(ctx context.Context, target types.JID, pin bool, beforeApply func()) ([]any, error)
+	MuteChat(ctx context.Context, target types.JID, mute bool, duration time.Duration, beforeApply func()) ([]any, error)
+	MarkChatAsRead(ctx context.Context, target types.JID, read bool, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey, beforeApply func()) ([]any, error)
 	Upload(ctx context.Context, data []byte, mediaType whatsmeow.MediaType) (whatsmeow.UploadResponse, error)
 	UploadNewsletter(ctx context.Context, data []byte, mediaType whatsmeow.MediaType) (whatsmeow.UploadResponse, error)
 	DownloadMediaToFile(ctx context.Context, directPath string, encFileHash, fileHash, mediaKey []byte, fileLength uint64, mediaType, mmsType string, targetPath string) (int64, error)
@@ -90,7 +91,7 @@ type WAClient interface {
 	DeleteHistorySyncMedia(ctx context.Context, notif *waE2E.HistorySyncNotification) error
 	RequestHistorySyncOnDemand(ctx context.Context, lastKnown types.MessageInfo, count int) (types.MessageID, error)
 	FetchAppState(ctx context.Context, name string, fullSync, onlyIfNotSynced bool) error
-	FetchAppStateEvents(ctx context.Context, name string, fullSync, onlyIfNotSynced bool) ([]interface{}, error)
+	FetchAppStateEvents(ctx context.Context, name string, fullSync, onlyIfNotSynced bool) ([]any, error)
 	RequestAppStateRecovery(ctx context.Context, name string) (types.MessageID, error)
 	Logout(ctx context.Context) error
 	LinkedJID() string
@@ -257,8 +258,22 @@ func (a *App) Connect(ctx context.Context, allowQR bool, qrWriter func(string)) 
 	if err := a.OpenWA(); err != nil {
 		return err
 	}
-	return a.wa.Connect(ctx, wa.ConnectOptions{
+	state := newSessionObservation(a.opts.StoreDir, a.wa.IsLoggedIn)
+	handlerID := a.wa.AddEventHandler(func(evt any) {
+		switch evt.(type) {
+		case *events.Connected, *events.LoggedOut, *events.ConnectFailure, *events.Disconnected:
+			a.observeSessionState(state, evt)
+		}
+	})
+	defer a.wa.RemoveEventHandler(handlerID)
+	if err := a.wa.Connect(ctx, wa.ConnectOptions{
 		AllowQR:  allowQR,
 		OnQRCode: qrWriter,
-	})
+	}); err != nil {
+		return err
+	}
+	if err := state.confirmLogin(); err != nil {
+		return err
+	}
+	return state.waitForLogin(ctx)
 }

@@ -237,8 +237,8 @@ func newContactsAliasCmd(flags *rootFlags) *cobra.Command {
 		},
 	})
 
-	_ = cmd.PersistentFlags().String("jid", "", "contact JID")
-	_ = cmd.PersistentFlags().String("alias", "", "alias")
+	cmd.PersistentFlags().String("jid", "", "contact JID")
+	cmd.PersistentFlags().String("alias", "", "alias")
 	return cmd
 }
 
@@ -306,7 +306,7 @@ func newContactsTagsCmd(flags *rootFlags) *cobra.Command {
 		},
 	})
 
-	_ = cmd.PersistentFlags().String("jid", "", "contact JID")
-	_ = cmd.PersistentFlags().String("tag", "", "tag")
+	cmd.PersistentFlags().String("jid", "", "contact JID")
+	cmd.PersistentFlags().String("tag", "", "tag")
 	return cmd
 }

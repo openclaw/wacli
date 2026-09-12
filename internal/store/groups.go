@@ -136,7 +136,7 @@ func (d *DB) ListGroups(query string, limit int) ([]Group, error) {
 		limit = 50
 	}
 	q := `SELECT jid, COALESCE(name,''), COALESCE(owner_jid,''), is_parent, COALESCE(linked_parent_jid,''), COALESCE(created_ts,0), COALESCE(left_at,0), updated_at FROM groups WHERE left_at IS NULL`
-	var args []interface{}
+	var args []any
 	if strings.TrimSpace(query) != "" {
 		needle := likeContains(query)
 		q += ` AND (LOWER(name) LIKE LOWER(?) ESCAPE '\' OR LOWER(jid) LIKE LOWER(?) ESCAPE '\')`

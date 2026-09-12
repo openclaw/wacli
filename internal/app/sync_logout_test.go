@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -18,7 +17,7 @@ import (
 // with the given name, failing the test if none is present.
 func findEventByName(t *testing.T, raw, name string) map[string]any {
 	t.Helper()
-	for _, line := range strings.Split(strings.TrimSpace(raw), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(raw), "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
@@ -137,13 +136,6 @@ func TestSyncLoggedOutHumanOutputIncludesRecoveryHint(t *testing.T) {
 	defer f.RemoveEventHandler(handlerID)
 
 	f.emit(&events.LoggedOut{OnConnect: true, Reason: events.ConnectFailureLoggedOut})
-	if revoked, err := SessionRevoked(a.opts.StoreDir); err != nil || !revoked {
-		t.Fatalf("SessionRevoked() = %v, %v; want true after logout", revoked, err)
-	}
-	f.emit(&events.Connected{})
-	if revoked, err := SessionRevoked(a.opts.StoreDir); err != nil || revoked {
-		t.Fatalf("SessionRevoked() = %v, %v; want false after connected", revoked, err)
-	}
 
 	got := human.String()
 	if !strings.Contains(got, "Logged out of WhatsApp") {
@@ -154,7 +146,7 @@ func TestSyncLoggedOutHumanOutputIncludesRecoveryHint(t *testing.T) {
 	}
 }
 
-// The follow loop must stop with a terminal logout error without attempting a
+// The follow loop must stop (return nil) on a logout signal without attempting a
 // reconnect. Uses a background context so the ONLY way to return is the logout
 // signal — proving it, not context cancellation, ends the loop.
 func TestRunSyncFollowStopsOnLoggedOut(t *testing.T) {
@@ -176,8 +168,8 @@ func TestRunSyncFollowStopsOnLoggedOut(t *testing.T) {
 
 	select {
 	case err := <-done:
-		if !errors.Is(err, ErrSyncLoggedOut) {
-			t.Fatalf("runSyncFollow error = %v, want ErrSyncLoggedOut", err)
+		if err != nil {
+			t.Fatalf("runSyncFollow returned error on logout: %v", err)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("runSyncFollow did not stop after logged_out signal")
@@ -188,42 +180,6 @@ func TestRunSyncFollowStopsOnLoggedOut(t *testing.T) {
 	f.mu.Unlock()
 	if calls != 0 {
 		t.Fatalf("logged-out follow loop reconnected (connectCalls=%d), want 0", calls)
-	}
-}
-
-func TestRunSyncFollowCancellationRemainsSuccessful(t *testing.T) {
-	a := newTestApp(t)
-	var messagesStored, connectionEpoch atomic.Int64
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	_, err := a.runSyncFollow(
-		ctx,
-		time.Second,
-		SyncPresenceModeNormal,
-		&messagesStored,
-		&connectionEpoch,
-		make(chan struct{}, 1),
-		make(chan struct{}, 1),
-		make(chan staleReconnectRequest, 1),
-	)
-	if err != nil {
-		t.Fatalf("operator cancellation returned error: %v", err)
-	}
-}
-
-func TestConnectForSyncClearsRevokedMarker(t *testing.T) {
-	a := newTestApp(t)
-	a.wa = newFakeWA()
-	if err := MarkSessionRevoked(a.opts.StoreDir, "logged_out"); err != nil {
-		t.Fatalf("MarkSessionRevoked: %v", err)
-	}
-
-	if err := a.connectForSync(context.Background(), SyncOptions{AllowQR: true}); err != nil {
-		t.Fatalf("connectForSync: %v", err)
-	}
-	if revoked, err := SessionRevoked(a.opts.StoreDir); err != nil || revoked {
-		t.Fatalf("SessionRevoked() = %v, %v; want false after successful connect", revoked, err)
 	}
 }
 
@@ -246,7 +202,7 @@ func TestRunSyncFollowLoggedOutWinsOverPendingReconnect(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			for i := 0; i < 50; i++ {
+			for i := range 50 {
 				a := newTestApp(t)
 				f := newFakeWA()
 				a.wa = f
@@ -266,8 +222,8 @@ func TestRunSyncFollowLoggedOutWinsOverPendingReconnect(t *testing.T) {
 
 				select {
 				case err := <-done:
-					if !errors.Is(err, ErrSyncLoggedOut) {
-						t.Fatalf("run %d: runSyncFollow error = %v, want ErrSyncLoggedOut", i, err)
+					if err != nil {
+						t.Fatalf("run %d: runSyncFollow returned error: %v", i, err)
 					}
 				case <-time.After(2 * time.Second):
 					t.Fatalf("run %d: runSyncFollow did not stop with paired signals queued", i)
@@ -317,8 +273,8 @@ func TestRunSyncFollowStopsWhenLoggedOutDuringReconnect(t *testing.T) {
 
 	select {
 	case err := <-done:
-		if !errors.Is(err, ErrSyncLoggedOut) {
-			t.Fatalf("runSyncFollow error = %v, want ErrSyncLoggedOut", err)
+		if err != nil {
+			t.Fatalf("runSyncFollow returned error on logout during reconnect: %v", err)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("runSyncFollow did not cancel reconnect after logged_out signal")
@@ -346,8 +302,8 @@ func TestRunSyncUntilIdleStopsOnLoggedOut(t *testing.T) {
 
 	select {
 	case err := <-done:
-		if !errors.Is(err, ErrSyncLoggedOut) {
-			t.Fatalf("runSyncUntilIdle error = %v, want ErrSyncLoggedOut", err)
+		if err != nil {
+			t.Fatalf("runSyncUntilIdle returned error on logout: %v", err)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("runSyncUntilIdle did not stop after logged_out signal")
@@ -364,7 +320,7 @@ func TestRunSyncUntilIdleStopsOnLoggedOut(t *testing.T) {
 // Same pairing race in the idle loop: with disconnected and loggedOut both
 // queued, the loop must stop without reconnecting.
 func TestRunSyncUntilIdleLoggedOutWinsOverDisconnected(t *testing.T) {
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		a := newTestApp(t)
 		f := newFakeWA()
 		a.wa = f
@@ -385,8 +341,8 @@ func TestRunSyncUntilIdleLoggedOutWinsOverDisconnected(t *testing.T) {
 
 		select {
 		case err := <-done:
-			if !errors.Is(err, ErrSyncLoggedOut) {
-				t.Fatalf("run %d: runSyncUntilIdle error = %v, want ErrSyncLoggedOut", i, err)
+			if err != nil {
+				t.Fatalf("run %d: runSyncUntilIdle returned error: %v", i, err)
 			}
 		case <-time.After(2 * time.Second):
 			t.Fatalf("run %d: runSyncUntilIdle did not stop with paired signals queued", i)
@@ -431,16 +387,16 @@ func TestRunSyncUntilIdleStopsWhenLoggedOutDuringReconnect(t *testing.T) {
 
 	select {
 	case err := <-done:
-		if !errors.Is(err, ErrSyncLoggedOut) {
-			t.Fatalf("runSyncUntilIdle error = %v, want ErrSyncLoggedOut", err)
+		if err != nil {
+			t.Fatalf("runSyncUntilIdle returned error on logout during reconnect: %v", err)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("runSyncUntilIdle did not cancel reconnect after logged_out signal")
 	}
 }
 
-// End-to-end: a LoggedOut delivered while `sync --follow` is running fails the
-// sync with a typed terminal error and never reconnects.
+// End-to-end: a LoggedOut delivered while `sync --follow` is running stops the
+// daemon cleanly (Sync returns nil) and never reconnects.
 func TestSyncFollowStopsWhenLoggedOut(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
@@ -460,8 +416,8 @@ func TestSyncFollowStopsWhenLoggedOut(t *testing.T) {
 
 	select {
 	case err := <-done:
-		if !errors.Is(err, ErrSyncLoggedOut) {
-			t.Fatalf("Sync error = %v, want ErrSyncLoggedOut", err)
+		if err != nil {
+			t.Fatalf("Sync --follow returned error on logout: %v", err)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Sync --follow did not stop after logout")
@@ -472,5 +428,26 @@ func TestSyncFollowStopsWhenLoggedOut(t *testing.T) {
 	f.mu.Unlock()
 	if calls != 1 {
 		t.Fatalf("connectCalls = %d after logout, want 1 (initial connect, no reconnect)", calls)
+	}
+}
+
+func TestRunSyncFollowCancellationRemainsSuccessful(t *testing.T) {
+	a := newTestApp(t)
+	var messagesStored, connectionEpoch atomic.Int64
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := a.runSyncFollow(
+		ctx,
+		time.Second,
+		SyncPresenceModeNormal,
+		&messagesStored,
+		&connectionEpoch,
+		make(chan struct{}, 1),
+		make(chan struct{}, 1),
+		make(chan staleReconnectRequest, 1),
+	)
+	if err != nil {
+		t.Fatalf("operator cancellation returned error: %v", err)
 	}
 }

@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -35,7 +36,7 @@ type SyncWebhookEventSet map[SyncWebhookEventKind]bool
 // empty value means the default: messages only.
 func ParseSyncWebhookEvents(raw string) (SyncWebhookEventSet, error) {
 	set := SyncWebhookEventSet{}
-	for _, part := range strings.Split(raw, ",") {
+	for part := range strings.SplitSeq(raw, ",") {
 		kind := SyncWebhookEventKind(strings.ToLower(strings.TrimSpace(part)))
 		if kind == "" {
 			continue
@@ -52,12 +53,7 @@ func ParseSyncWebhookEvents(raw string) (SyncWebhookEventSet, error) {
 }
 
 func (k SyncWebhookEventKind) valid() bool {
-	for _, known := range syncWebhookEventKinds {
-		if k == known {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(syncWebhookEventKinds, k)
 }
 
 func syncWebhookEventNames() []string {

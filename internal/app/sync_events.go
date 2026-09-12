@@ -55,6 +55,7 @@ type syncPresence struct {
 func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, messagesStored, lastEvent *atomic.Int64, disconnected chan<- struct{}, loggedOut chan<- struct{}, staleReconnect chan<- staleReconnectRequest, enqueueMedia func(string, string), enqueueWebhook func(syncWebhookEvent), limits *syncStorageLimits, ps *syncPresence, mediaQ *mediaQueue) uint32 {
 	var panicCount atomic.Int64
 	var appStateRecoveries sync.Map
+	sessionState := newSessionObservation(a.opts.StoreDir, a.wa.IsLoggedIn)
 	if enqueueWebhook == nil {
 		enqueueWebhook = func(syncWebhookEvent) {}
 	}
@@ -62,7 +63,7 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 	if !opts.WebhookEvents.Enabled(SyncWebhookEventMessage) {
 		enqueueWebhookMessage = func(wa.ParsedMessage) {}
 	}
-	return a.wa.AddEventHandler(func(evt interface{}) {
+	return a.wa.AddEventHandler(func(evt any) {
 		if mediaQ != nil {
 			if !mediaQ.beginProducer() {
 				return
@@ -144,13 +145,7 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 				"count": v.Count,
 			}, "\nOffline backlog replayed (%d event(s)).\n", v.Count)
 		case *events.Connected:
-			if err := ClearSessionRevoked(a.opts.StoreDir); err != nil {
-				a.emitWarning(
-					"session_revoked_marker_clear_failed",
-					fmt.Sprintf("warning: failed to clear session revoked marker: %v", err),
-					map[string]any{"error": err.Error()},
-				)
-			}
+			a.observeSessionState(sessionState, v)
 			a.emitOrPrint("connected", nil, "\nConnected.\n")
 			ps.mu.Lock()
 			if !ps.cleanupStarted && opts.PresenceMode.SendsAvailablePresence() {
@@ -187,13 +182,7 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 			// or a logout/ban). whatsmeow reconnects on Disconnected, so without
 			// this the follow loop spins forever against a dead session. Surface
 			// the logout and signal the loop to stop instead of reconnecting.
-			if err := MarkSessionRevoked(a.opts.StoreDir, v.Reason.String()); err != nil {
-				a.emitWarning(
-					"session_revoked_marker_write_failed",
-					fmt.Sprintf("warning: failed to record revoked session state: %v", err),
-					map[string]any{"error": err.Error()},
-				)
-			}
+			a.observeSessionState(sessionState, v)
 			a.emitOrPrint("logged_out", map[string]any{
 				"reason":      v.Reason.String(),
 				"reason_code": int(v.Reason),
@@ -229,7 +218,7 @@ func (a *App) handleKeepAliveTimeout(opts SyncOptions, evt *events.KeepAliveTime
 	}
 }
 
-func syncActivityEvent(evt interface{}) bool {
+func syncActivityEvent(evt any) bool {
 	switch evt.(type) {
 	case nil,
 		*events.KeepAliveTimeout,
@@ -251,7 +240,7 @@ func syncActivityEvent(evt interface{}) bool {
 	}
 }
 
-func (a *App) handleAppStatePersistenceEvent(ctx context.Context, evt interface{}, tracker *appStatePersistenceTracker) {
+func (a *App) handleAppStatePersistenceEvent(ctx context.Context, evt any, tracker *appStatePersistenceTracker) {
 	if tracker != nil {
 		a.persistAppStateEvent(ctx, evt, tracker)
 		return
@@ -304,7 +293,7 @@ type appStateRecoveryMarker struct {
 	generation int64
 }
 
-func (a *App) markLiveAppStateRecovery(evt interface{}) ([]appStateRecoveryMarker, error) {
+func (a *App) markLiveAppStateRecovery(evt any) ([]appStateRecoveryMarker, error) {
 	collections := appStateCollectionsForEvent(evt)
 	names := make([]string, len(collections))
 	for i, collection := range collections {
@@ -333,7 +322,7 @@ func (a *App) clearLiveAppStateRecovery(markers []appStateRecoveryMarker) {
 	}
 }
 
-func (a *App) persistAppStateEvent(ctx context.Context, evt interface{}, tracker *appStatePersistenceTracker) error {
+func (a *App) persistAppStateEvent(ctx context.Context, evt any, tracker *appStatePersistenceTracker) error {
 	var err error
 	switch v := evt.(type) {
 	case *events.AppState:
@@ -351,7 +340,7 @@ func (a *App) persistAppStateEvent(ctx context.Context, evt interface{}, tracker
 	return err
 }
 
-func appStateCollectionsForEvent(evt interface{}) []appstate.WAPatchName {
+func appStateCollectionsForEvent(evt any) []appstate.WAPatchName {
 	switch v := evt.(type) {
 	case *events.Archive, *events.Pin, *events.MarkChatAsRead:
 		return []appstate.WAPatchName{appstate.WAPatchRegularLow}
@@ -420,7 +409,7 @@ func (a *App) handleDeleteForMeEvent(ctx context.Context, evt *events.DeleteForM
 	return nil
 }
 
-func (a *App) handleLiveCallEvent(ctx context.Context, evt interface{}) error {
+func (a *App) handleLiveCallEvent(ctx context.Context, evt any) error {
 	self := a.linkedLiveCallIdentity()
 	var alternateSelf []types.JID
 	if _, ok := evt.(*events.AppState); ok {

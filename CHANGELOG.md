@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- Auth: retain observed session revocation in auth/doctor diagnostics until confirmed login, and wait for login confirmation before reporting a successful diagnostic connection. (#389 - thanks @0xble)
+
+- Builds: update pnpm to 12.4.1, share production/test dead-code checks between local and CI gates, validate documentation links in CI, and isolate concurrent Windows lock cross-builds.
+
+## 0.18.2 - 2026-09-11
+
+**Highlights:** mark chats read or unread while continuous sync owns the store.
+
+- Chats: delegate `mark-read` and `mark-unread` through the same-store follow process, preserving read-only checks and command output; restart older daemons after upgrading. (#361, #380 - thanks @shishiv)
+- Dependencies: refresh whatsmeow, Go networking and database tooling, vulnerability and dead-code checkers, GoReleaser 2.18.1, and pnpm 12.4.0 while retaining the 48-hour package release-age window.
+- Builds: identify source builds as the upcoming 0.18.2 patch.
+
+## 0.18.1 - 2026-09-07
+
+**Highlights:** bounded memory use when generating waveforms for long voice notes.
+
+- Send: cap voice-note waveform decoding at 2 MiB (about 131 seconds), preserve full audio and duration, and omit partial waveforms when ffmpeg fails. (#402 - thanks @SebTardif)
+
 ## 0.18.0 - 2026-09-07
 
 **Highlights:** faster, interruptible upgrades, offline group rosters, and explicit opt-in self-chat sends.
@@ -16,8 +34,6 @@
 ## 0.17.2 - 2026-09-05
 
 **Highlights:** more complete searchable message history, bounded backfill retries, and clearer guidance for commands used alongside continuous sync.
-
-- Sync: return a nonzero terminal error when WhatsApp revokes the session, persist the revoked state for honest auth/doctor output, and expose `newest_message_at` as the accurate name for the backward-compatible `last_sync_at` message timestamp.
 
 - Messages: extract comment bodies and album summaries in live/history sync, preserving comment reply targets and matching quote metadata. (#383 - thanks @shishiv and @Entretoize)
 - History: retry an unanswered backfill anchor once with the next local message, report both anchors, and keep retries bounded without deleting history or filtering message IDs. (#371 - thanks @Entretoize)
