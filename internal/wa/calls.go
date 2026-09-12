@@ -59,7 +59,7 @@ func extractCallLog(m *waProto.Message, pm *ParsedMessage) {
 	}
 }
 
-func ParseLiveCallEvent(evt interface{}, self types.JID, alternateSelf ...types.JID) (ParsedCallEvent, bool) {
+func ParseLiveCallEvent(evt any, self types.JID, alternateSelf ...types.JID) (ParsedCallEvent, bool) {
 	switch v := evt.(type) {
 	case *events.CallOffer:
 		return callEventFromMeta(v.BasicCallMeta, self, "offer", "", "", mediaFromCallNode(v.Data), ""), true
@@ -84,7 +84,7 @@ func ParseLiveCallEvent(evt interface{}, self types.JID, alternateSelf ...types.
 	}
 }
 
-func ParseCallLogDeleteEvent(evt interface{}) (ParsedCallDelete, bool) {
+func ParseCallLogDeleteEvent(evt any) (ParsedCallDelete, bool) {
 	v, ok := evt.(*events.AppState)
 	if !ok || v == nil || v.SyncActionValue == nil || v.GetDeleteIndividualCallLog() == nil {
 		return ParsedCallDelete{}, false

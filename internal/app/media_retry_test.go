@@ -13,7 +13,7 @@ import (
 	"go.mau.fi/whatsmeow/types/events"
 )
 
-func notOnPhoneHook(info *types.MessageInfo, _ []byte) interface{} {
+func notOnPhoneHook(info *types.MessageInfo, _ []byte) any {
 	return &events.MediaRetry{MessageID: types.MessageID(info.ID), ChatID: info.Chat, Error: &events.MediaRetryError{Code: 2}}
 }
 
@@ -243,7 +243,7 @@ func TestRetryMediaMatchesLIDNotificationToCanonicalChat(t *testing.T) {
 	pn := types.NewJID("123", types.DefaultUserServer)
 	lid := types.NewJID("999", types.HiddenUserServer)
 	f.lids[lid] = pn
-	f.onMediaRetry = func(info *types.MessageInfo, _ []byte) interface{} {
+	f.onMediaRetry = func(info *types.MessageInfo, _ []byte) any {
 		return &events.MediaRetry{MessageID: types.MessageID(info.ID), ChatID: lid, Error: &events.MediaRetryError{Code: 2}}
 	}
 
@@ -267,7 +267,7 @@ func TestRetryMediaTreatsBroadcastListsAsGroupLike(t *testing.T) {
 	a.wa = f
 	f.downloadErr = whatsmeow.ErrMediaDownloadFailedWith403
 	var receiptSource types.MessageSource
-	f.onMediaRetry = func(info *types.MessageInfo, _ []byte) interface{} {
+	f.onMediaRetry = func(info *types.MessageInfo, _ []byte) any {
 		receiptSource = info.MessageSource
 		return &events.MediaRetry{MessageID: types.MessageID(info.ID), ChatID: info.Chat, Error: &events.MediaRetryError{Code: 2}}
 	}
@@ -302,7 +302,7 @@ func TestRetryMediaUsesOwnSenderForOutgoingGroupMedia(t *testing.T) {
 	a.wa = f
 	f.downloadErr = whatsmeow.ErrMediaDownloadFailedWith403
 	var receiptSender types.JID
-	f.onMediaRetry = func(info *types.MessageInfo, _ []byte) interface{} {
+	f.onMediaRetry = func(info *types.MessageInfo, _ []byte) any {
 		receiptSender = info.Sender
 		return &events.MediaRetry{MessageID: types.MessageID(info.ID), ChatID: info.Chat, Error: &events.MediaRetryError{Code: 2}}
 	}

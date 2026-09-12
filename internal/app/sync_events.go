@@ -15,7 +15,6 @@ import (
 	"github.com/openclaw/wacli/internal/store"
 	"github.com/openclaw/wacli/internal/wa"
 	"go.mau.fi/whatsmeow/appstate"
-	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/types"
@@ -53,7 +52,7 @@ type syncPresence struct {
 	cleanupStarted bool
 }
 
-func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, messagesStored, lastEvent *atomic.Int64, disconnected chan<- struct{}, loggedOut chan<- struct{}, staleReconnect chan<- staleReconnectRequest, enqueueMedia func(string, string), enqueueWebhook func(syncWebhookEvent), limits *syncStorageLimits, ps *syncPresence, mediaQ *mediaQueue) uint32 {
+func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, messagesStored, lastEvent *atomic.Int64, disconnected chan<- struct{}, loggedOut chan<- struct{}, staleReconnect chan<- staleReconnectRequest, enqueueMedia func(string, string), enqueueWebhook func(syncWebhookEvent), limits *syncStorageLimits, ps *syncPresence, mediaQ *mediaQueue) (uint32, *sync.Map) {
 	var panicCount atomic.Int64
 	var appStateRecoveries sync.Map
 	if enqueueWebhook == nil {
@@ -63,7 +62,7 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 	if !opts.WebhookEvents.Enabled(SyncWebhookEventMessage) {
 		enqueueWebhookMessage = func(wa.ParsedMessage) {}
 	}
-	return a.wa.AddEventHandler(func(evt interface{}) {
+	handlerID := a.wa.AddEventHandler(func(evt any) {
 		if mediaQ != nil {
 			if !mediaQ.beginProducer() {
 				return
@@ -193,6 +192,7 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 			}
 		}
 	})
+	return handlerID, &appStateRecoveries
 }
 
 func (a *App) handleKeepAliveTimeout(opts SyncOptions, evt *events.KeepAliveTimeout, staleReconnect chan<- staleReconnectRequest) {
@@ -216,7 +216,7 @@ func (a *App) handleKeepAliveTimeout(opts SyncOptions, evt *events.KeepAliveTime
 	}
 }
 
-func syncActivityEvent(evt interface{}) bool {
+func syncActivityEvent(evt any) bool {
 	switch evt.(type) {
 	case nil,
 		*events.KeepAliveTimeout,
@@ -238,7 +238,7 @@ func syncActivityEvent(evt interface{}) bool {
 	}
 }
 
-func (a *App) handleAppStatePersistenceEvent(ctx context.Context, evt interface{}, tracker *appStatePersistenceTracker) {
+func (a *App) handleAppStatePersistenceEvent(ctx context.Context, evt any, tracker *appStatePersistenceTracker) {
 	if tracker != nil {
 		a.persistAppStateEvent(ctx, evt, tracker)
 		return
@@ -291,7 +291,7 @@ type appStateRecoveryMarker struct {
 	generation int64
 }
 
-func (a *App) markLiveAppStateRecovery(evt interface{}) ([]appStateRecoveryMarker, error) {
+func (a *App) markLiveAppStateRecovery(evt any) ([]appStateRecoveryMarker, error) {
 	collections := appStateCollectionsForEvent(evt)
 	names := make([]string, len(collections))
 	for i, collection := range collections {
@@ -320,7 +320,7 @@ func (a *App) clearLiveAppStateRecovery(markers []appStateRecoveryMarker) {
 	}
 }
 
-func (a *App) persistAppStateEvent(ctx context.Context, evt interface{}, tracker *appStatePersistenceTracker) error {
+func (a *App) persistAppStateEvent(ctx context.Context, evt any, tracker *appStatePersistenceTracker) error {
 	var err error
 	switch v := evt.(type) {
 	case *events.AppState:
@@ -338,7 +338,7 @@ func (a *App) persistAppStateEvent(ctx context.Context, evt interface{}, tracker
 	return err
 }
 
-func appStateCollectionsForEvent(evt interface{}) []appstate.WAPatchName {
+func appStateCollectionsForEvent(evt any) []appstate.WAPatchName {
 	switch v := evt.(type) {
 	case *events.Archive, *events.Pin, *events.MarkChatAsRead:
 		return []appstate.WAPatchName{appstate.WAPatchRegularLow}
@@ -407,7 +407,7 @@ func (a *App) handleDeleteForMeEvent(ctx context.Context, evt *events.DeleteForM
 	return nil
 }
 
-func (a *App) handleLiveCallEvent(ctx context.Context, evt interface{}) error {
+func (a *App) handleLiveCallEvent(ctx context.Context, evt any) error {
 	self := a.linkedLiveCallIdentity()
 	var alternateSelf []types.JID
 	if _, ok := evt.(*events.AppState); ok {
@@ -495,49 +495,6 @@ func (a *App) handleStarEvent(ctx context.Context, evt *events.Star) error {
 		return err
 	}
 	return nil
-}
-
-func (a *App) handleAppStateSyncError(ctx context.Context, evt *events.AppStateSyncError, recoveries *sync.Map) {
-	if evt == nil || !errors.Is(evt.Error, appstate.ErrMismatchingLTHash) {
-		return
-	}
-	if a.ownsManualAppStateFetch(evt.Name) {
-		return
-	}
-	name := strings.TrimSpace(string(evt.Name))
-	if name == "" {
-		return
-	}
-	if recoveries == nil {
-		recoveries = &sync.Map{}
-	}
-	if _, loaded := recoveries.LoadOrStore(name, struct{}{}); loaded {
-		return
-	}
-
-	a.emitWarning(
-		"app_state_lthash_mismatch",
-		fmt.Sprintf("warning: app state %s hit an LTHash mismatch; requesting recovery snapshot", name),
-		map[string]any{"name": name},
-	)
-	go func() {
-		reqCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
-		reqID, err := a.wa.RequestAppStateRecovery(reqCtx, name)
-		if err != nil {
-			a.emitWarning(
-				"app_state_recovery_failed",
-				fmt.Sprintf("warning: app state %s recovery request failed: %v", name, err),
-				map[string]any{"name": name, "error": err.Error()},
-			)
-			return
-		}
-		if a.eventsEnabled() {
-			a.emitEvent("app_state_recovery_requested", map[string]any{"name": name, "id": string(reqID)})
-		} else {
-			fmt.Fprintf(os.Stderr, "\rRequested app state %s recovery (id %s)\n", name, reqID)
-		}
-	}()
 }
 
 func (a *App) handleLiveSyncMessage(ctx context.Context, opts SyncOptions, v *events.Message, messagesStored *atomic.Int64, enqueueMedia func(string, string), enqueueWebhook func(wa.ParsedMessage), limits ...*syncStorageLimits) {
@@ -668,7 +625,8 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 			if pm.ID == "" || pm.Chat.IsEmpty() {
 				continue
 			}
-			if isSecretEdit(m.Message.GetMessage()) {
+			unwrapped := (&events.Message{RawMessage: m.Message.GetMessage()}).UnwrapRaw()
+			if isSecretEdit(unwrapped.Message) {
 				evt, err := a.wa.ParseWebMessage(pm.Chat, m.Message)
 				if err != nil {
 					a.emitWarning(
@@ -838,167 +796,6 @@ func (a *App) decryptEncryptedReaction(ctx context.Context, pm *wa.ParsedMessage
 			pm.ReactionToID = key.GetID()
 		}
 	}
-}
-
-func isSecretEdit(msg *waE2E.Message) bool {
-	return msg != nil &&
-		msg.GetSecretEncryptedMessage().GetSecretEncType() == waE2E.SecretEncryptedMessage_MESSAGE_EDIT
-}
-
-func (a *App) sameCanonicalIdentity(ctx context.Context, left, right types.JID) bool {
-	left = a.canonicalStoreJID(ctx, left).ToNonAD()
-	right = a.canonicalStoreJID(ctx, right).ToNonAD()
-	return !left.IsEmpty() && left == right
-}
-
-func (a *App) secretEditSenderMatches(ctx context.Context, evt *events.Message, target *waCommon.MessageKey) bool {
-	if evt.Info.Sender.IsEmpty() {
-		return false
-	}
-	// whatsmeow treats target.FromMe as "same sender as the envelope",
-	// not necessarily as the locally linked account.
-	if target.GetFromMe() {
-		return true
-	}
-
-	originalSenderRaw := target.GetParticipant()
-	if evt.Info.Chat.Server == types.DefaultUserServer || evt.Info.Chat.Server == types.HiddenUserServer {
-		originalSenderRaw = target.GetRemoteJID()
-	}
-	originalSender, err := types.ParseJID(strings.TrimSpace(originalSenderRaw))
-	if err != nil || originalSender.IsEmpty() {
-		return false
-	}
-
-	return a.sameCanonicalIdentity(ctx, evt.Info.Sender, originalSender)
-}
-
-func (a *App) secretEditChatMatches(ctx context.Context, evt *events.Message, target *waCommon.MessageKey) bool {
-	targetChatRaw := strings.TrimSpace(target.GetRemoteJID())
-	if targetChatRaw == "" {
-		return true
-	}
-	targetChat, err := types.ParseJID(targetChatRaw)
-	if err != nil || targetChat.IsEmpty() {
-		return false
-	}
-	return a.sameCanonicalIdentity(ctx, evt.Info.Chat, targetChat)
-}
-
-func normalizedSecretEditTarget(evt *events.Message, targetID string) *waCommon.MessageKey {
-	chat := evt.Info.Chat.ToNonAD().String()
-	fromMe := evt.Info.IsFromMe
-	target := &waCommon.MessageKey{
-		ID:        &targetID,
-		RemoteJID: &chat,
-		FromMe:    &fromMe,
-	}
-	if evt.Info.Chat.Server != types.DefaultUserServer && evt.Info.Chat.Server != types.HiddenUserServer {
-		participant := evt.Info.Sender.ToNonAD().String()
-		target.Participant = &participant
-	}
-	return target
-}
-
-func containsNestedProtocolMutation(msg *waE2E.Message) bool {
-	if msg == nil {
-		return false
-	}
-	if msg.GetProtocolMessage() != nil {
-		return true
-	}
-	return containsNestedProtocolMutation(msg.GetDeviceSentMessage().GetMessage()) ||
-		containsNestedProtocolMutation(msg.GetEditedMessage().GetMessage()) ||
-		containsNestedProtocolMutation(msg.GetCommentMessage().GetMessage())
-}
-
-func (a *App) decryptSecretEdit(ctx context.Context, evt *events.Message) (*events.Message, bool) {
-	if evt == nil || !isSecretEdit(evt.Message) {
-		return evt, true
-	}
-	messageID := evt.Info.ID
-	secret := evt.Message.GetSecretEncryptedMessage()
-	target := secret.GetTargetMessageKey()
-	if strings.TrimSpace(target.GetID()) == "" {
-		a.emitWarning(
-			"encrypted_edit_invalid_target",
-			fmt.Sprintf("warning: encrypted edit %s has no target message ID", messageID),
-			map[string]any{"message_id": messageID},
-		)
-		return nil, false
-	}
-	decrypted, err := a.wa.DecryptSecretEncryptedMessage(ctx, evt)
-	if err != nil {
-		a.emitWarning(
-			"encrypted_edit_decrypt_failed",
-			fmt.Sprintf("warning: failed to decrypt message edit %s: %v", messageID, err),
-			map[string]any{"message_id": messageID, "error": err.Error()},
-		)
-		return nil, false
-	}
-	protocol := decrypted.GetProtocolMessage()
-	if protocol.GetType() != waE2E.ProtocolMessage_MESSAGE_EDIT || protocol.GetEditedMessage() == nil {
-		a.emitWarning(
-			"encrypted_edit_invalid_payload",
-			fmt.Sprintf("warning: encrypted edit %s decrypted to an unexpected payload", messageID),
-			map[string]any{"message_id": messageID},
-		)
-		return nil, false
-	}
-	if decryptedTarget := strings.TrimSpace(protocol.GetKey().GetID()); decryptedTarget != "" && decryptedTarget != target.GetID() {
-		a.emitWarning(
-			"encrypted_edit_target_mismatch",
-			fmt.Sprintf("warning: encrypted edit %s target does not match decrypted payload", messageID),
-			map[string]any{"message_id": messageID},
-		)
-		return nil, false
-	}
-	if !a.secretEditChatMatches(ctx, evt, target) {
-		a.emitWarning(
-			"encrypted_edit_chat_mismatch",
-			fmt.Sprintf("warning: encrypted edit %s target chat does not match the authenticated chat", messageID),
-			map[string]any{"message_id": messageID},
-		)
-		return nil, false
-	}
-	if !a.secretEditSenderMatches(ctx, evt, target) {
-		a.emitWarning(
-			"encrypted_edit_sender_mismatch",
-			fmt.Sprintf("warning: encrypted edit %s sender does not own the target message", messageID),
-			map[string]any{"message_id": messageID},
-		)
-		return nil, false
-	}
-	if containsNestedProtocolMutation(protocol.GetEditedMessage()) {
-		a.emitWarning(
-			"encrypted_edit_nested_mutation",
-			fmt.Sprintf("warning: encrypted edit %s contains a nested protocol mutation", messageID),
-			map[string]any{"message_id": messageID},
-		)
-		return nil, false
-	}
-	protocol.Key = normalizedSecretEditTarget(evt, target.GetID())
-	parsed := wa.ParseLiveMessage(&events.Message{Info: evt.Info, Message: decrypted})
-	if parsed.UnhandledPayload != "" {
-		a.emitWarning(
-			"encrypted_edit_unhandled_payload",
-			fmt.Sprintf("warning: encrypted edit %s contains unsupported payload %s", messageID, parsed.UnhandledPayload),
-			map[string]any{"message_id": messageID, "payload": parsed.UnhandledPayload},
-		)
-		return nil, false
-	}
-	parsedSender, err := types.ParseJID(strings.TrimSpace(parsed.SenderJID))
-	if err != nil || !parsed.Edited || parsed.Revoked || parsed.ID != target.GetID() || parsed.FromMe != evt.Info.IsFromMe ||
-		!a.sameCanonicalIdentity(ctx, evt.Info.Chat, parsed.Chat) ||
-		!a.sameCanonicalIdentity(ctx, evt.Info.Sender, parsedSender) {
-		a.emitWarning(
-			"encrypted_edit_final_target_mismatch",
-			fmt.Sprintf("warning: encrypted edit %s changed identity while parsing", messageID),
-			map[string]any{"message_id": messageID},
-		)
-		return nil, false
-	}
-	return &events.Message{Info: evt.Info, Message: decrypted}, true
 }
 
 // sendPresence sends a global presence update if the WhatsApp client is ready.

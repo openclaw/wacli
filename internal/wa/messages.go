@@ -156,10 +156,10 @@ func ParseHistoryMessage(chatJID string, hist *waProto.WebMessageInfo) ParsedMes
 	return pm
 }
 
-// hasContent reports whether parsing produced anything storable. A message with
+// HasContent reports whether parsing produced anything storable. A message with
 // no content is persisted with a "(message)" placeholder, which is
 // indistinguishable from a message that genuinely carried nothing.
-func (pm ParsedMessage) hasContent() bool {
+func (pm ParsedMessage) HasContent() bool {
 	return strings.TrimSpace(pm.Text) != "" ||
 		pm.Media != nil ||
 		pm.Poll != nil ||
@@ -178,7 +178,7 @@ func (pm ParsedMessage) hasContent() bool {
 // discarding content. Field names come from the protobuf descriptor, so new
 // WhatsApp message types are reported without needing a code change here.
 func markUnhandledPayload(m *waProto.Message, pm *ParsedMessage) {
-	if m == nil || pm == nil || pm.hasContent() {
+	if m == nil || pm == nil || pm.HasContent() {
 		return
 	}
 	var names []string

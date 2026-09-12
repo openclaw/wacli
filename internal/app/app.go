@@ -29,7 +29,7 @@ type WAClient interface {
 	SetAutoReconnect(enabled bool) (previous bool, ok bool)
 	Connect(ctx context.Context, opts wa.ConnectOptions) error
 
-	AddEventHandler(handler func(interface{})) uint32
+	AddEventHandler(handler func(any)) uint32
 	RemoveEventHandler(id uint32)
 	ReconnectWithBackoff(ctx context.Context, minDelay, maxDelay time.Duration, opts wa.ConnectOptions) error
 
@@ -72,10 +72,10 @@ type WAClient interface {
 	RevokeMessage(ctx context.Context, chat types.JID, targetID types.MessageID) (types.MessageID, error)
 	DeleteMessageForMe(ctx context.Context, info types.MessageInfo, deleteMedia bool) error
 	EditMessage(ctx context.Context, chat types.JID, targetID types.MessageID, text string) (types.MessageID, error)
-	ArchiveChat(ctx context.Context, target types.JID, archive bool, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey, beforeApply func()) ([]interface{}, error)
-	PinChat(ctx context.Context, target types.JID, pin bool, beforeApply func()) ([]interface{}, error)
-	MuteChat(ctx context.Context, target types.JID, mute bool, duration time.Duration, beforeApply func()) ([]interface{}, error)
-	MarkChatAsRead(ctx context.Context, target types.JID, read bool, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey, beforeApply func()) ([]interface{}, error)
+	ArchiveChat(ctx context.Context, target types.JID, archive bool, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey, beforeApply func()) ([]any, error)
+	PinChat(ctx context.Context, target types.JID, pin bool, beforeApply func()) ([]any, error)
+	MuteChat(ctx context.Context, target types.JID, mute bool, duration time.Duration, beforeApply func()) ([]any, error)
+	MarkChatAsRead(ctx context.Context, target types.JID, read bool, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey, beforeApply func()) ([]any, error)
 	Upload(ctx context.Context, data []byte, mediaType whatsmeow.MediaType) (whatsmeow.UploadResponse, error)
 	UploadNewsletter(ctx context.Context, data []byte, mediaType whatsmeow.MediaType) (whatsmeow.UploadResponse, error)
 	DownloadMediaToFile(ctx context.Context, directPath string, encFileHash, fileHash, mediaKey []byte, fileLength uint64, mediaType, mmsType string, targetPath string) (int64, error)
@@ -90,7 +90,7 @@ type WAClient interface {
 	DeleteHistorySyncMedia(ctx context.Context, notif *waE2E.HistorySyncNotification) error
 	RequestHistorySyncOnDemand(ctx context.Context, lastKnown types.MessageInfo, count int) (types.MessageID, error)
 	FetchAppState(ctx context.Context, name string, fullSync, onlyIfNotSynced bool) error
-	FetchAppStateEvents(ctx context.Context, name string, fullSync, onlyIfNotSynced bool) ([]interface{}, error)
+	FetchAppStateEvents(ctx context.Context, name string, fullSync, onlyIfNotSynced bool) ([]any, error)
 	RequestAppStateRecovery(ctx context.Context, name string) (types.MessageID, error)
 	Logout(ctx context.Context) error
 	LinkedJID() string
@@ -113,18 +113,24 @@ type Options struct {
 }
 
 type App struct {
-	opts            Options
-	waMu            sync.Mutex
-	wa              WAClient
-	sessionResolver *readOnlySessionResolver
-	db              *store.DB
-	statusMu        sync.Mutex
-	status          *syncStatus
-	chatStateSync   chan struct{}
-	appStatePersist appStatePersistenceSequencer
-	manualFetchMu   sync.Mutex
-	manualFetches   map[string]int
-	heartbeatLast   atomic.Int64
+	opts                    Options
+	waMu                    sync.Mutex
+	wa                      WAClient
+	sessionState            *sessionObservation
+	sessionHandler          uint32
+	connectGate             chan struct{}
+	sessionResolver         *readOnlySessionResolver
+	db                      *store.DB
+	statusMu                sync.Mutex
+	status                  *syncStatus
+	chatStateSync           chan struct{}
+	appStatePersist         appStatePersistenceSequencer
+	appStateRecoveryWorkers sync.WaitGroup
+	appStateRecoveryMu      sync.Mutex
+	appStateRecoveryClosing bool
+	manualFetchMu           sync.Mutex
+	manualFetches           map[string]int
+	heartbeatLast           atomic.Int64
 }
 
 func New(opts Options) (*App, error) {
@@ -158,34 +164,48 @@ func New(opts Options) (*App, error) {
 func (a *App) OpenWA() error {
 	a.waMu.Lock()
 	defer a.waMu.Unlock()
-	if a.wa != nil {
-		return nil
-	}
 	if a.opts.ReadOnly {
+		if a.wa != nil {
+			return nil
+		}
 		return fmt.Errorf("read-only mode: command would open the WhatsApp session store")
 	}
-	sessionPath := filepath.Join(a.opts.StoreDir, "session.db")
-	cli, err := wa.New(wa.Options{
-		StorePath: sessionPath,
-	})
-	if err != nil {
-		return err
+	if a.wa == nil {
+		sessionPath := filepath.Join(a.opts.StoreDir, "session.db")
+		cli, err := wa.New(wa.Options{StorePath: sessionPath})
+		if err != nil {
+			return err
+		}
+		a.wa = cli
 	}
-
-	a.wa = cli
+	if a.sessionState == nil {
+		state := newSessionObservation(a.opts.StoreDir)
+		a.sessionState = state
+		a.sessionHandler = a.wa.AddEventHandler(func(evt any) { a.observeSessionState(state, evt) })
+		a.connectGate = make(chan struct{}, 1)
+		a.connectGate <- struct{}{}
+	}
 	return nil
 }
 
 func (a *App) Close() {
+	a.appStateRecoveryMu.Lock()
+	a.appStateRecoveryClosing = true
+	a.appStateRecoveryMu.Unlock()
 	a.waMu.Lock()
 	waClient := a.wa
 	sessionResolver := a.sessionResolver
+	sessionState, sessionHandler := a.sessionState, a.sessionHandler
 	a.waMu.Unlock()
 	if waClient != nil {
 		waClient.Close()
+		if sessionState != nil {
+			waClient.RemoveEventHandler(sessionHandler)
+		}
 	}
 	// A completed command frontier may hand later ready tasks to a background
 	// drainer. Keep SQLite open until that drainer has finished every write.
+	a.appStateRecoveryWorkers.Wait()
 	_ = a.appStatePersist.waitIdle(context.Background())
 	if sessionResolver != nil {
 		_ = sessionResolver.Close()
@@ -254,11 +274,29 @@ func (a *App) AllowUnauthed() bool { return a.opts.AllowUnauthed }
 func (a *App) ReadOnly() bool      { return a.opts.ReadOnly }
 
 func (a *App) Connect(ctx context.Context, allowQR bool, qrWriter func(string)) error {
+	if a.opts.ReadOnly {
+		return fmt.Errorf("read-only mode: command would connect to WhatsApp")
+	}
 	if err := a.OpenWA(); err != nil {
 		return err
 	}
-	return a.wa.Connect(ctx, wa.ConnectOptions{
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-a.connectGate:
+	}
+	defer func() { a.connectGate <- struct{}{} }()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := a.sessionState.prepareConnect(a.wa.IsConnected); err != nil {
+		return err
+	}
+	if err := a.wa.Connect(ctx, wa.ConnectOptions{
 		AllowQR:  allowQR,
 		OnQRCode: qrWriter,
-	})
+	}); err != nil {
+		return err
+	}
+	return a.sessionState.waitForLogin(ctx)
 }

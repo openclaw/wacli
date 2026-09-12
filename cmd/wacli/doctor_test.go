@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	appPkg "github.com/openclaw/wacli/internal/app"
 	"github.com/openclaw/wacli/internal/lock"
 	"github.com/openclaw/wacli/internal/store"
 )
@@ -50,7 +51,7 @@ func TestDoctorConnectionState(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := doctorConnectionState(tc.authed, tc.connected, tc.lockHeld, tc.connect)
+			got := doctorConnectionState(tc.authed, tc.connected, tc.lockHeld, tc.connect, false)
 			if got != tc.want {
 				t.Fatalf("doctorConnectionState() = %q, want %q", got, tc.want)
 			}
@@ -270,5 +271,27 @@ func TestDoctorReportsCorruptStore(t *testing.T) {
 	}
 	if got.Data.StoreError == "" {
 		t.Fatalf("store_error is empty for corrupt store: %s", stdout)
+	}
+}
+
+func TestDoctorReportsRevokedSessionAsLoggedOut(t *testing.T) {
+	storeDir := t.TempDir()
+	if err := appPkg.MarkSessionRevoked(storeDir, "logged_out"); err != nil {
+		t.Fatalf("MarkSessionRevoked: %v", err)
+	}
+
+	stdout := captureRootStdout(t, func() {
+		if err := execute([]string{"--store", storeDir, "--read-only", "--json", "doctor"}); err != nil {
+			t.Fatalf("execute doctor: %v", err)
+		}
+	})
+	var got struct {
+		Data doctorReport `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &got); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, stdout)
+	}
+	if got.Data.Authed || !got.Data.SessionRevoked || got.Data.ConnectionState != "logged_out" {
+		t.Fatalf("revoked doctor state = %+v", got.Data)
 	}
 }

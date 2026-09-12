@@ -22,7 +22,7 @@ func TestSyncWritesHeartbeatFileOnActivity(t *testing.T) {
 
 	var messagesStored atomic.Int64
 	var lastEvent atomic.Int64
-	handlerID := a.addSyncEventHandler(
+	handlerID, _ := a.addSyncEventHandler(
 		context.Background(),
 		SyncOptions{Mode: SyncModeFollow},
 		&messagesStored,
@@ -61,7 +61,7 @@ func TestSyncOnceDoesNotWriteHeartbeatFile(t *testing.T) {
 
 	var messagesStored atomic.Int64
 	var lastEvent atomic.Int64
-	handlerID := a.addSyncEventHandler(
+	handlerID, _ := a.addSyncEventHandler(
 		context.Background(),
 		SyncOptions{Mode: SyncModeOnce},
 		&messagesStored,
@@ -92,7 +92,7 @@ func TestSyncFollowDoesNotWriteHeartbeatOnKeepAliveTimeout(t *testing.T) {
 
 	var messagesStored atomic.Int64
 	var lastEvent atomic.Int64
-	handlerID := a.addSyncEventHandler(
+	handlerID, _ := a.addSyncEventHandler(
 		context.Background(),
 		SyncOptions{Mode: SyncModeFollow},
 		&messagesStored,
@@ -196,7 +196,7 @@ func TestSyncFollowDoesNotReconnectOnFreshKeepAliveTimeout(t *testing.T) {
 	disconnected := make(chan struct{}, 1)
 	loggedOut := make(chan struct{}, 1)
 	staleReconnect := make(chan staleReconnectRequest, 1)
-	handlerID := a.addSyncEventHandler(
+	handlerID, _ := a.addSyncEventHandler(
 		context.Background(),
 		SyncOptions{Mode: SyncModeFollow, StaleThreshold: time.Minute},
 		&messagesStored,
@@ -250,7 +250,7 @@ func TestSyncFollowEmitsStaleEvent(t *testing.T) {
 	disconnected := make(chan struct{}, 1)
 	loggedOut := make(chan struct{}, 1)
 	staleReconnect := make(chan staleReconnectRequest, 1)
-	handlerID := a.addSyncEventHandler(
+	handlerID, _ := a.addSyncEventHandler(
 		context.Background(),
 		SyncOptions{Mode: SyncModeFollow, StaleThreshold: 200 * time.Millisecond},
 		&messagesStored,
@@ -300,7 +300,7 @@ func TestSyncFollowEmitsStaleEvent(t *testing.T) {
 		Data  map[string]any `json:"data"`
 	}
 	var found bool
-	for _, line := range bytes.Split(bytes.TrimSpace(eventsOut.Bytes()), []byte("\n")) {
+	for line := range bytes.SplitSeq(bytes.TrimSpace(eventsOut.Bytes()), []byte("\n")) {
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}

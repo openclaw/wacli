@@ -341,10 +341,7 @@ func (f *limitedDownloadFile) ReadFrom(r io.Reader) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	remaining := f.max - off
-	if remaining < 0 {
-		remaining = 0
-	}
+	remaining := max(f.max-off, 0)
 	n, err := io.Copy(f.File, io.LimitReader(r, remaining))
 	f.noteWritten(off + n)
 	if err != nil {

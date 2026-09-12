@@ -98,6 +98,23 @@ func (d *DB) AppStateRecoveryRequired(collection string) (bool, error) {
 	return exists, nil
 }
 
+func (d *DB) AppStateRecoveryCollections() ([]string, error) {
+	rows, err := d.sql.Query(`SELECT DISTINCT collection FROM app_state_recovery_intents ORDER BY collection`)
+	if err != nil {
+		return nil, fmt.Errorf("list app state recovery intents: %w", err)
+	}
+	defer rows.Close()
+	var collections []string
+	for rows.Next() {
+		var collection string
+		if err := rows.Scan(&collection); err != nil {
+			return nil, err
+		}
+		collections = append(collections, collection)
+	}
+	return collections, rows.Err()
+}
+
 func (d *DB) ClearAppStateRecoveryRequired(collection string) error {
 	collection = strings.TrimSpace(collection)
 	if collection == "" {

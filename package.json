@@ -1,7 +1,7 @@
 {
   "name": "wacli",
   "private": true,
-  "packageManager": "pnpm@12.4.0+sha512.37536c26ed40ab4134b6511e09f6b27f3ebb45687468f2406ca3805279a4e5ca158c1931350ad9774d6ab2108d71b3dbaeb39943159294375e4d053e8e05685c",
+  "packageManager": "pnpm@12.4.1+sha512.2e81e399d73fe8390dab25e06aa788ab7a5908248d2f5a370f82b481147a6a7a367bf8048f9a6fdb6460f21a66f0542dedb8b94ca2c8723596741920b1656d4c",
   "scripts": {
     "wacli": "bash -lc 'pnpm --silent build >/dev/null && exec ./dist/wacli \"$@\"' _",
     "build": "mkdir -p dist && CGO_ENABLED=1 CGO_CFLAGS=\"${CGO_CFLAGS:+$CGO_CFLAGS }-Wno-error=missing-braces\" go build -tags sqlite_fts5 -o dist/wacli ./cmd/wacli",
@@ -9,12 +9,13 @@
     "test": "pnpm --silent test:go && pnpm --silent test:fts && pnpm --silent test:windows-lock && pnpm --silent test:cgo-required && pnpm --silent test:docs",
     "test:go": "go test ./...",
     "test:fts": "go test -tags sqlite_fts5 ./...",
-    "test:windows-lock": "bash -euc 'tmp=\"${TMPDIR:-/tmp}/wacli-lock-windows.test.exe\"; trap \"rm -f \\\"$tmp\\\"\" EXIT; GOOS=windows GOARCH=amd64 go test -c ./internal/lock -o \"$tmp\"'",
+    "test:windows-lock": "bash scripts/check-windows-lock.sh",
     "test:cgo-required": "bash -c 'set +e; out=$(CGO_ENABLED=0 go build ./cmd/wacli 2>&1); status=$?; set -e; echo \"$out\" | grep -q wacli_requires_cgo_enabled_1_for_go_sqlite3; test $status -ne 0'",
     "test:docs": "node --test scripts/*.test.mjs",
     "test:release": "node --test scripts/release-workflow.test.mjs",
     "test:e2e": "bash scripts/e2e-store-sqlc.sh",
     "lint": "go vet ./...",
+    "lint:deadcode": "bash scripts/check-deadcode.sh",
     "govulncheck:source": "node scripts/govulncheck-stdlib.mjs source",
     "govulncheck:binary": "node scripts/govulncheck-stdlib.mjs binary dist/wacli",
     "format": "gofmt -w .",

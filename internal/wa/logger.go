@@ -43,10 +43,10 @@ func newWhatsmeowLogger(module, minLevel string, w io.Writer) *whatsmeowLogger {
 	}
 }
 
-func (l *whatsmeowLogger) Errorf(msg string, args ...interface{}) { l.outputf("ERROR", msg, args...) }
-func (l *whatsmeowLogger) Warnf(msg string, args ...interface{})  { l.outputf("WARN", msg, args...) }
-func (l *whatsmeowLogger) Infof(msg string, args ...interface{})  { l.outputf("INFO", msg, args...) }
-func (l *whatsmeowLogger) Debugf(msg string, args ...interface{}) { l.outputf("DEBUG", msg, args...) }
+func (l *whatsmeowLogger) Errorf(msg string, args ...any) { l.outputf("ERROR", msg, args...) }
+func (l *whatsmeowLogger) Warnf(msg string, args ...any)  { l.outputf("WARN", msg, args...) }
+func (l *whatsmeowLogger) Infof(msg string, args ...any)  { l.outputf("INFO", msg, args...) }
+func (l *whatsmeowLogger) Debugf(msg string, args ...any) { l.outputf("DEBUG", msg, args...) }
 
 func (l *whatsmeowLogger) Sub(module string) waLog.Logger {
 	return &whatsmeowLogger{
@@ -57,7 +57,7 @@ func (l *whatsmeowLogger) Sub(module string) waLog.Logger {
 	}
 }
 
-func (l *whatsmeowLogger) outputf(level, msg string, args ...interface{}) {
+func (l *whatsmeowLogger) outputf(level, msg string, args ...any) {
 	levelValue, ok := whatsmeowLogLevels[level]
 	if !ok || levelValue < l.min {
 		return

@@ -63,7 +63,7 @@ func TestHistorySyncBoundsUnhandledPayloadWarnings(t *testing.T) {
 		t.Fatalf("stored messages = %d, want %d", got, messageCount)
 	}
 	var detailed, summaries int
-	for _, line := range strings.Split(strings.TrimSpace(eventsOut.String()), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(eventsOut.String()), "\n") {
 		var event struct {
 			Event string         `json:"event"`
 			Data  map[string]any `json:"data"`
