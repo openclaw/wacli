@@ -87,12 +87,6 @@ func (c *Client) IsConnected() bool {
 	return c.client != nil && c.client.IsConnected()
 }
 
-func (c *Client) IsLoggedIn() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.client != nil && c.client.IsLoggedIn()
-}
-
 func (c *Client) SetAutoReconnect(enabled bool) (bool, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

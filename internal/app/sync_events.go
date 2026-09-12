@@ -55,7 +55,6 @@ type syncPresence struct {
 func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, messagesStored, lastEvent *atomic.Int64, disconnected chan<- struct{}, loggedOut chan<- struct{}, staleReconnect chan<- staleReconnectRequest, enqueueMedia func(string, string), enqueueWebhook func(syncWebhookEvent), limits *syncStorageLimits, ps *syncPresence, mediaQ *mediaQueue) uint32 {
 	var panicCount atomic.Int64
 	var appStateRecoveries sync.Map
-	sessionState := newSessionObservation(a.opts.StoreDir, a.wa.IsLoggedIn)
 	if enqueueWebhook == nil {
 		enqueueWebhook = func(syncWebhookEvent) {}
 	}
@@ -145,7 +144,6 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 				"count": v.Count,
 			}, "\nOffline backlog replayed (%d event(s)).\n", v.Count)
 		case *events.Connected:
-			a.observeSessionState(sessionState, v)
 			a.emitOrPrint("connected", nil, "\nConnected.\n")
 			ps.mu.Lock()
 			if !ps.cleanupStarted && opts.PresenceMode.SendsAvailablePresence() {
@@ -182,7 +180,6 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 			// or a logout/ban). whatsmeow reconnects on Disconnected, so without
 			// this the follow loop spins forever against a dead session. Surface
 			// the logout and signal the loop to stop instead of reconnecting.
-			a.observeSessionState(sessionState, v)
 			a.emitOrPrint("logged_out", map[string]any{
 				"reason":      v.Reason.String(),
 				"reason_code": int(v.Reason),

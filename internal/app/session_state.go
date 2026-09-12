@@ -54,20 +54,20 @@ func ClearSessionRevoked(storeDir string) error {
 	return nil
 }
 
-// A terminal rejection cannot be undone by a late Connected callback from the
-// same attempt. A new command or sync run gets a new observation.
+// One observer owns marker writes for the client lifetime. Revocation remains
+// terminal for that client, including delayed Connected callbacks.
 type sessionObservation struct {
 	mu             sync.Mutex
 	storeDir       string
-	loggedIn       func() bool
+	revoked        bool
 	confirmed      bool
 	terminalErr    error
 	persistenceErr error
 	changed        chan struct{}
 }
 
-func newSessionObservation(storeDir string, loggedIn func() bool) *sessionObservation {
-	return &sessionObservation{storeDir: storeDir, loggedIn: loggedIn, changed: make(chan struct{}, 1)}
+func newSessionObservation(storeDir string) *sessionObservation {
+	return &sessionObservation{storeDir: storeDir, changed: make(chan struct{}, 1)}
 }
 
 func (s *sessionObservation) notify() {
@@ -77,44 +77,79 @@ func (s *sessionObservation) notify() {
 	}
 }
 
-func (s *sessionObservation) confirmLoginLocked() error {
-	if s.terminalErr != nil || s.confirmed || !s.loggedIn() {
-		return nil
+func (s *sessionObservation) prepareConnect(isConnected func() bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.revoked {
+		return s.terminalErr
 	}
-	s.persistenceErr = ClearSessionRevoked(s.storeDir)
-	s.confirmed = s.persistenceErr == nil
-	return s.persistenceErr
+	if !isConnected() {
+		s.confirmed = false
+		s.terminalErr = nil
+		s.persistenceErr = nil
+	}
+	return nil
 }
 
 func (s *sessionObservation) confirmLogin() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	defer s.notify()
-	return s.confirmLoginLocked()
+	if s.revoked || s.confirmed {
+		return nil
+	}
+	s.terminalErr = nil
+	s.persistenceErr = ClearSessionRevoked(s.storeDir)
+	s.confirmed = s.persistenceErr == nil
+	return s.persistenceErr
 }
 
 func (s *sessionObservation) observe(evt any) error {
+	switch v := evt.(type) {
+	case *events.Connected:
+		return s.confirmLogin()
+	case *events.LoggedOut:
+		return s.rejectLogin(fmt.Errorf("WhatsApp session was revoked: %s", v.Reason), v.Reason.String())
+	case *events.ConnectFailure:
+		var revokedReason string
+		if v.Reason.IsLoggedOut() {
+			revokedReason = v.Reason.String()
+		}
+		return s.rejectLogin(fmt.Errorf("WhatsApp login failed: %s", v.Reason), revokedReason)
+	case *events.ClientOutdated:
+		return s.rejectLogin(fmt.Errorf("WhatsApp client is outdated; update wacli and try again"), "")
+	case *events.TemporaryBan:
+		return s.rejectLogin(fmt.Errorf("WhatsApp account is temporarily banned: %s", v), "")
+	case *events.StreamReplaced:
+		return s.rejectLogin(fmt.Errorf("WhatsApp stream was replaced by another client"), "")
+	case *events.CATRefreshError:
+		return s.rejectLogin(fmt.Errorf("failed to refresh WhatsApp authentication token: %w", v.Error), "")
+	case *events.StreamError:
+		return s.rejectLogin(fmt.Errorf("WhatsApp stream error before login: %s", v.Code), "")
+	case *events.ManualLoginReconnect:
+		return s.rejectLogin(fmt.Errorf("WhatsApp login requires a reconnect"), "")
+	case *events.Disconnected:
+		s.mu.Lock()
+		s.confirmed = false
+		s.mu.Unlock()
+		s.notify()
+		return nil
+	default:
+		return nil
+	}
+}
+
+func (s *sessionObservation) rejectLogin(err error, revokedReason string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	defer s.notify()
-	switch v := evt.(type) {
-	case *events.Connected:
-		return s.confirmLoginLocked()
-	case *events.LoggedOut:
-		s.confirmed = false
-		s.terminalErr = fmt.Errorf("WhatsApp session was revoked: %s", v.Reason)
-		s.persistenceErr = MarkSessionRevoked(s.storeDir, v.Reason.String())
-	case *events.ConnectFailure:
-		s.confirmed = false
-		s.terminalErr = fmt.Errorf("WhatsApp login failed: %s", v.Reason)
-		if v.Reason.IsLoggedOut() {
-			s.persistenceErr = MarkSessionRevoked(s.storeDir, v.Reason.String())
-		}
-	case *events.Disconnected:
-		s.confirmed = false
-		if s.terminalErr == nil {
-			s.terminalErr = fmt.Errorf("disconnected before WhatsApp login completed")
-		}
+	s.confirmed = false
+	if s.terminalErr == nil || revokedReason != "" {
+		s.terminalErr = err
+	}
+	if revokedReason != "" {
+		s.revoked = true
+		s.persistenceErr = MarkSessionRevoked(s.storeDir, revokedReason)
 	}
 	return s.persistenceErr
 }

@@ -949,6 +949,8 @@ func TestChatStatePersistenceHandlerCoversOtherCollectionDuringWrite(t *testing.
 	if required {
 		t.Fatal("successful connect-time persistence left replay debt")
 	}
+	// Closing removes the app-owned observer, but cannot hide a leaked temporary handler.
+	a.Close()
 	f.mu.Lock()
 	handlerCount := len(f.handlers)
 	f.mu.Unlock()

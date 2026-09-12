@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -28,7 +29,6 @@ type fakeWA struct {
 
 	authed        bool
 	connected     bool
-	loggedIn      bool
 	autoReconnect bool
 	linkedLID     string
 
@@ -144,15 +144,14 @@ func newFakeWA() *fakeWA {
 
 func (f *fakeWA) emit(evt any) {
 	f.mu.Lock()
-	switch evt.(type) {
-	case *events.Connected:
-		f.loggedIn = true
-	case *events.LoggedOut, *events.Disconnected, *events.ConnectFailure:
-		f.loggedIn = false
+	ids := make([]uint32, 0, len(f.handlers))
+	for id := range f.handlers {
+		ids = append(ids, id)
 	}
-	handlers := make([]func(any), 0, len(f.handlers))
-	for _, h := range f.handlers {
-		handlers = append(handlers, h)
+	slices.Sort(ids)
+	handlers := make([]func(any), 0, len(ids))
+	for _, id := range ids {
+		handlers = append(handlers, f.handlers[id])
 	}
 	f.mu.Unlock()
 	for _, h := range handlers {
@@ -160,11 +159,9 @@ func (f *fakeWA) emit(evt any) {
 	}
 }
 
-func (f *fakeWA) Close() { f.mu.Lock(); f.connected = false; f.loggedIn = false; f.mu.Unlock() }
+func (f *fakeWA) Close() { f.mu.Lock(); f.connected = false; f.mu.Unlock() }
 
-func (f *fakeWA) IsAuthed() bool   { f.mu.Lock(); defer f.mu.Unlock(); return f.authed }
-func (f *fakeWA) IsLoggedIn() bool { f.mu.Lock(); defer f.mu.Unlock(); return f.loggedIn }
-
+func (f *fakeWA) IsAuthed() bool { f.mu.Lock(); defer f.mu.Unlock(); return f.authed }
 func (f *fakeWA) IsConnected() bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
