@@ -23,7 +23,7 @@ wacli --account work auth status
 - After pairing, auth runs bootstrap sync until idle unless `--follow` is set.
 - Bootstrap sync honors `WACLI_SYNC_MAX_MESSAGES` and `WACLI_SYNC_MAX_DB_SIZE` to cap local history growth.
 - `--events` emits NDJSON lifecycle events on stderr, including raw QR and phone-pairing codes for external renderers.
-- `auth status` reports whether the local store is authenticated.
+- `auth status` reports whether the local store is authenticated. A recorded remote logout overrides a stale device row until WhatsApp confirms a new login.
 - `auth logout` invalidates the linked-device session and requires writable mode.
 - For multiple accounts, prefer `wacli accounts add NAME`; it creates an isolated account store and runs the same auth/bootstrap flow.
 

@@ -876,7 +876,7 @@ func TestBuildTextMessageUsesPlainConversationWithoutReplyOrPreview(t *testing.T
 	db := openSendTestDB(t)
 	chat := types.JID{User: "15551234567", Server: types.DefaultUserServer}
 
-	msg, plain, err := buildTextMessage(db, chat, "hello", "", "", nil, nil)
+	msg, plain, err := buildTextMessageWithSelf(db, chat, types.EmptyJID, "hello", "", "", "", nil, nil)
 	if err != nil {
 		t.Fatalf("buildTextMessage: %v", err)
 	}
@@ -893,7 +893,7 @@ func TestBuildTextMessageAttachesMentions(t *testing.T) {
 	chat := types.JID{User: "12345", Server: types.GroupServer}
 	mentions := []string{"15551234567@s.whatsapp.net", "15557654321@s.whatsapp.net"}
 
-	msg, plain, err := buildTextMessage(db, chat, "hey @15551234567", "", "", nil, mentions)
+	msg, plain, err := buildTextMessageWithSelf(db, chat, types.EmptyJID, "hey @15551234567", "", "", "", nil, mentions)
 	if err != nil {
 		t.Fatalf("buildTextMessage: %v", err)
 	}
@@ -1099,7 +1099,7 @@ func TestBuildTextMessageCombinesReplyAndMentions(t *testing.T) {
 		t.Fatalf("UpsertMessage: %v", err)
 	}
 
-	msg, plain, err := buildTextMessage(db, chat, "replying @15551234567", "quoted", "+15557654321", nil, []string{"15551234567@s.whatsapp.net"})
+	msg, plain, err := buildTextMessageWithSelf(db, chat, types.EmptyJID, "replying @15551234567", "quoted", "+15557654321", "", nil, []string{"15551234567@s.whatsapp.net"})
 	if err != nil {
 		t.Fatalf("buildTextMessage: %v", err)
 	}
@@ -1131,7 +1131,7 @@ func TestBuildTextMessageAttachesLinkPreview(t *testing.T) {
 		Thumbnail:   []byte("jpeg"),
 	}
 
-	msg, plain, err := buildTextMessage(db, chat, "see https://example.com/post", "", "", preview, nil)
+	msg, plain, err := buildTextMessageWithSelf(db, chat, types.EmptyJID, "see https://example.com/post", "", "", "", preview, nil)
 	if err != nil {
 		t.Fatalf("buildTextMessage: %v", err)
 	}

@@ -341,11 +341,6 @@ func (d *DB) DeletePoll(chatJID, msgID string) error {
 	return tx.Commit()
 }
 
-// IsPollNotFound is a small convenience predicate.
-func IsPollNotFound(err error) bool {
-	return errors.Is(err, sql.ErrNoRows)
-}
-
 func limitOrAll(limit int) int {
 	if limit > 0 {
 		return limit

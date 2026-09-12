@@ -39,23 +39,6 @@ func (s *appStatePersistenceSequencer) reserveTask(blocksEarlier bool) uint64 {
 	return ticket
 }
 
-func (s *appStatePersistenceSequencer) enqueue(run func()) uint64 {
-	s.mu.Lock()
-	s.initLocked()
-	ticket := s.next
-	s.next++
-	s.tasks[ticket] = &appStatePersistenceTask{ready: true, run: run}
-	start := !s.running && ticket == s.serving
-	if start {
-		s.running = true
-	}
-	s.mu.Unlock()
-	if start {
-		s.drainThrough(ticket)
-	}
-	return ticket
-}
-
 func (s *appStatePersistenceSequencer) complete(ticket uint64, run func()) uint64 {
 	return s.completeTask(ticket, run, true)
 }

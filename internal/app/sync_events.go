@@ -52,7 +52,7 @@ type syncPresence struct {
 	cleanupStarted bool
 }
 
-func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, messagesStored, lastEvent *atomic.Int64, disconnected chan<- struct{}, loggedOut chan<- struct{}, staleReconnect chan<- staleReconnectRequest, enqueueMedia func(string, string), enqueueWebhook func(syncWebhookEvent), limits *syncStorageLimits, ps *syncPresence, mediaQ *mediaQueue) uint32 {
+func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, messagesStored, lastEvent *atomic.Int64, disconnected chan<- struct{}, loggedOut chan<- struct{}, staleReconnect chan<- staleReconnectRequest, enqueueMedia func(string, string), enqueueWebhook func(syncWebhookEvent), limits *syncStorageLimits, ps *syncPresence, mediaQ *mediaQueue) (uint32, *sync.Map) {
 	var panicCount atomic.Int64
 	var appStateRecoveries sync.Map
 	if enqueueWebhook == nil {
@@ -62,7 +62,7 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 	if !opts.WebhookEvents.Enabled(SyncWebhookEventMessage) {
 		enqueueWebhookMessage = func(wa.ParsedMessage) {}
 	}
-	return a.wa.AddEventHandler(func(evt interface{}) {
+	handlerID := a.wa.AddEventHandler(func(evt any) {
 		if mediaQ != nil {
 			if !mediaQ.beginProducer() {
 				return
@@ -192,6 +192,7 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 			}
 		}
 	})
+	return handlerID, &appStateRecoveries
 }
 
 func (a *App) handleKeepAliveTimeout(opts SyncOptions, evt *events.KeepAliveTimeout, staleReconnect chan<- staleReconnectRequest) {
@@ -215,7 +216,7 @@ func (a *App) handleKeepAliveTimeout(opts SyncOptions, evt *events.KeepAliveTime
 	}
 }
 
-func syncActivityEvent(evt interface{}) bool {
+func syncActivityEvent(evt any) bool {
 	switch evt.(type) {
 	case nil,
 		*events.KeepAliveTimeout,
@@ -237,7 +238,7 @@ func syncActivityEvent(evt interface{}) bool {
 	}
 }
 
-func (a *App) handleAppStatePersistenceEvent(ctx context.Context, evt interface{}, tracker *appStatePersistenceTracker) {
+func (a *App) handleAppStatePersistenceEvent(ctx context.Context, evt any, tracker *appStatePersistenceTracker) {
 	if tracker != nil {
 		a.persistAppStateEvent(ctx, evt, tracker)
 		return
@@ -290,7 +291,7 @@ type appStateRecoveryMarker struct {
 	generation int64
 }
 
-func (a *App) markLiveAppStateRecovery(evt interface{}) ([]appStateRecoveryMarker, error) {
+func (a *App) markLiveAppStateRecovery(evt any) ([]appStateRecoveryMarker, error) {
 	collections := appStateCollectionsForEvent(evt)
 	names := make([]string, len(collections))
 	for i, collection := range collections {
@@ -319,7 +320,7 @@ func (a *App) clearLiveAppStateRecovery(markers []appStateRecoveryMarker) {
 	}
 }
 
-func (a *App) persistAppStateEvent(ctx context.Context, evt interface{}, tracker *appStatePersistenceTracker) error {
+func (a *App) persistAppStateEvent(ctx context.Context, evt any, tracker *appStatePersistenceTracker) error {
 	var err error
 	switch v := evt.(type) {
 	case *events.AppState:
@@ -337,7 +338,7 @@ func (a *App) persistAppStateEvent(ctx context.Context, evt interface{}, tracker
 	return err
 }
 
-func appStateCollectionsForEvent(evt interface{}) []appstate.WAPatchName {
+func appStateCollectionsForEvent(evt any) []appstate.WAPatchName {
 	switch v := evt.(type) {
 	case *events.Archive, *events.Pin, *events.MarkChatAsRead:
 		return []appstate.WAPatchName{appstate.WAPatchRegularLow}
@@ -406,7 +407,7 @@ func (a *App) handleDeleteForMeEvent(ctx context.Context, evt *events.DeleteForM
 	return nil
 }
 
-func (a *App) handleLiveCallEvent(ctx context.Context, evt interface{}) error {
+func (a *App) handleLiveCallEvent(ctx context.Context, evt any) error {
 	self := a.linkedLiveCallIdentity()
 	var alternateSelf []types.JID
 	if _, ok := evt.(*events.AppState); ok {
@@ -494,83 +495,6 @@ func (a *App) handleStarEvent(ctx context.Context, evt *events.Star) error {
 		return err
 	}
 	return nil
-}
-
-const appStateRecoveryStepTimeout = 30 * time.Second
-
-func (a *App) handleAppStateSyncError(ctx context.Context, evt *events.AppStateSyncError, recoveries *sync.Map) {
-	if evt == nil || !errors.Is(evt.Error, appstate.ErrMismatchingLTHash) {
-		return
-	}
-	if a.ownsManualAppStateFetch(evt.Name) {
-		return
-	}
-	name := strings.TrimSpace(string(evt.Name))
-	if name == "" {
-		return
-	}
-	if recoveries == nil {
-		recoveries = &sync.Map{}
-	}
-	if _, loaded := recoveries.LoadOrStore(name, struct{}{}); loaded {
-		return
-	}
-
-	go a.recoverAppStateAfterLTHashMismatch(ctx, name, recoveries, appStateRecoveryStepTimeout)
-}
-
-func (a *App) recoverAppStateAfterLTHashMismatch(ctx context.Context, name string, recoveries *sync.Map, timeout time.Duration) {
-	fetchCtx, cancelFetch := context.WithTimeout(ctx, timeout)
-
-	a.emitWarning(
-		"app_state_lthash_mismatch",
-		fmt.Sprintf("warning: app state %s hit an LTHash mismatch; attempting full sync", name),
-		map[string]any{"name": name},
-	)
-
-	fetchErr := a.wa.FetchAppState(fetchCtx, name, true, false)
-	cancelFetch()
-	if fetchErr == nil {
-		recoveries.Delete(name)
-		if a.eventsEnabled() {
-			a.emitEvent("app_state_full_sync_completed", map[string]any{"name": name})
-		} else {
-			fmt.Fprintf(os.Stderr, "\rApp state %s resolved via full sync\n", name)
-		}
-		return
-	}
-	if ctx.Err() != nil {
-		recoveries.Delete(name)
-		return
-	}
-	a.emitWarning(
-		"app_state_full_sync_failed",
-		fmt.Sprintf("warning: app state %s full sync failed: %v; requesting recovery snapshot", name, fetchErr),
-		map[string]any{"name": name, "error": fetchErr.Error()},
-	)
-
-	// A timed-out full sync must not consume the recovery request's budget.
-	recoveryCtx, cancelRecovery := context.WithTimeout(ctx, timeout)
-	defer cancelRecovery()
-	reqID, err := a.wa.RequestAppStateRecovery(recoveryCtx, name)
-	if err != nil {
-		// Parent cancellation ends this sync run. Otherwise keep the marker so
-		// repeated mismatch events don't retry a failing recovery immediately.
-		if ctx.Err() != nil {
-			recoveries.Delete(name)
-		}
-		a.emitWarning(
-			"app_state_recovery_failed",
-			fmt.Sprintf("warning: app state %s recovery request failed: %v", name, err),
-			map[string]any{"name": name, "error": err.Error()},
-		)
-		return
-	}
-	if a.eventsEnabled() {
-		a.emitEvent("app_state_recovery_requested", map[string]any{"name": name, "id": string(reqID)})
-	} else {
-		fmt.Fprintf(os.Stderr, "\rRequested app state %s recovery (id %s)\n", name, reqID)
-	}
 }
 
 func (a *App) handleLiveSyncMessage(ctx context.Context, opts SyncOptions, v *events.Message, messagesStored *atomic.Int64, enqueueMedia func(string, string), enqueueWebhook func(wa.ParsedMessage), limits ...*syncStorageLimits) {

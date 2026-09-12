@@ -15,7 +15,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const sourceVersion = "0.18.1"
+const sourceVersion = "0.18.2"
 
 var version string
 

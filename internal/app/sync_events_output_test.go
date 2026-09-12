@@ -24,7 +24,7 @@ func TestSyncEventsOutputStaysNDJSONDuringProgress(t *testing.T) {
 	for i := range ids {
 		ids[i] = "m" + string(rune('a'+i))
 	}
-	f.connectEvents = []interface{}{historySyncWithTextMessages(chat, base, ids...)}
+	f.connectEvents = []any{historySyncWithTextMessages(chat, base, ids...)}
 
 	raw := captureStderr(t, func() {
 		a.opts.Events = out.NewEventWriter(os.Stderr, true)
@@ -46,7 +46,7 @@ func TestSyncEventsOutputStaysNDJSONDuringProgress(t *testing.T) {
 	}
 
 	var sawProgress bool
-	for _, line := range strings.Split(strings.TrimSpace(raw), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(raw), "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
@@ -82,7 +82,7 @@ func TestSyncTTYProgressUsesSingleStatusLine(t *testing.T) {
 	for i := range ids {
 		ids[i] = "m" + string(rune('a'+i))
 	}
-	f.connectEvents = []interface{}{historySyncWithTextMessages(chat, base, ids...)}
+	f.connectEvents = []any{historySyncWithTextMessages(chat, base, ids...)}
 
 	raw := captureStderr(t, func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

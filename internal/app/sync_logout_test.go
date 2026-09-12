@@ -17,7 +17,7 @@ import (
 // with the given name, failing the test if none is present.
 func findEventByName(t *testing.T, raw, name string) map[string]any {
 	t.Helper()
-	for _, line := range strings.Split(strings.TrimSpace(raw), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(raw), "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
@@ -56,7 +56,7 @@ func TestSyncEventHandlerEmitsLoggedOutAndSignals(t *testing.T) {
 
 			var messagesStored, lastEvent atomic.Int64
 			loggedOut := make(chan struct{}, 1)
-			handlerID := a.addSyncEventHandler(
+			handlerID, _ := a.addSyncEventHandler(
 				context.Background(),
 				SyncOptions{Mode: SyncModeFollow},
 				&messagesStored,
@@ -119,7 +119,7 @@ func TestSyncLoggedOutHumanOutputIncludesRecoveryHint(t *testing.T) {
 
 	var messagesStored, lastEvent atomic.Int64
 	loggedOut := make(chan struct{}, 1)
-	handlerID := a.addSyncEventHandler(
+	handlerID, _ := a.addSyncEventHandler(
 		context.Background(),
 		SyncOptions{Mode: SyncModeFollow},
 		&messagesStored,
@@ -202,7 +202,7 @@ func TestRunSyncFollowLoggedOutWinsOverPendingReconnect(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			for i := 0; i < 50; i++ {
+			for i := range 50 {
 				a := newTestApp(t)
 				f := newFakeWA()
 				a.wa = f
@@ -320,7 +320,7 @@ func TestRunSyncUntilIdleStopsOnLoggedOut(t *testing.T) {
 // Same pairing race in the idle loop: with disconnected and loggedOut both
 // queued, the loop must stop without reconnecting.
 func TestRunSyncUntilIdleLoggedOutWinsOverDisconnected(t *testing.T) {
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		a := newTestApp(t)
 		f := newFakeWA()
 		a.wa = f
@@ -428,5 +428,26 @@ func TestSyncFollowStopsWhenLoggedOut(t *testing.T) {
 	f.mu.Unlock()
 	if calls != 1 {
 		t.Fatalf("connectCalls = %d after logout, want 1 (initial connect, no reconnect)", calls)
+	}
+}
+
+func TestRunSyncFollowCancellationRemainsSuccessful(t *testing.T) {
+	a := newTestApp(t)
+	var messagesStored, connectionEpoch atomic.Int64
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := a.runSyncFollow(
+		ctx,
+		time.Second,
+		SyncPresenceModeNormal,
+		&messagesStored,
+		&connectionEpoch,
+		make(chan struct{}, 1),
+		make(chan struct{}, 1),
+		make(chan staleReconnectRequest, 1),
+	)
+	if err != nil {
+		t.Fatalf("operator cancellation returned error: %v", err)
 	}
 }

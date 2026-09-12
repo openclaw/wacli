@@ -37,8 +37,6 @@ Use --dry-run to preview what would be deleted.`,
 			}
 			defer closeApp(a, lk)
 
-			_ = ctx
-
 			chats, err := a.DB().ListChatsOlderThan(days)
 			if err != nil {
 				return err

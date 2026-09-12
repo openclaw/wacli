@@ -31,7 +31,7 @@ func (c *Client) SendMediaRetryReceipt(ctx context.Context, info *types.MessageI
 	if info == nil {
 		return fmt.Errorf("message info is required")
 	}
-	retryInfo := rewriteMediaRetryInfoForLID(ctx, cli, *info, c.resolvePNToLIDLocked)
+	retryInfo := rewriteMediaRetryInfoForLID(ctx, cli, *info, resolvePNToLID)
 	return cli.SendMediaRetryReceipt(ctx, &retryInfo, mediaKey)
 }
 

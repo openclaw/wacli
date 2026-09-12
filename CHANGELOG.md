@@ -2,9 +2,19 @@
 
 ## Unreleased
 
-### Fixed
+- Sync: repair LTHash mismatches with a durable full refresh before bounded phone recovery, and replay interrupted recovery at startup. (#367, #382 - thanks @shishiv)
 
-- Sync: try a full app-state refresh before requesting phone recovery after an LTHash mismatch, with independent timeouts and once-per-collection failure throttling. (#367)
+- Auth: retain observed session revocation in auth/doctor diagnostics until confirmed login, and wait for login confirmation before reporting a successful diagnostic connection. (#389 - thanks @0xble)
+
+- Builds: update pnpm to 12.4.1, share production/test dead-code checks between local and CI gates, validate documentation links in CI, and isolate concurrent Windows lock cross-builds.
+
+## 0.18.2 - 2026-09-11
+
+**Highlights:** mark chats read or unread while continuous sync owns the store.
+
+- Chats: delegate `mark-read` and `mark-unread` through the same-store follow process, preserving read-only checks and command output; restart older daemons after upgrading. (#361, #380 - thanks @shishiv)
+- Dependencies: refresh whatsmeow, Go networking and database tooling, vulnerability and dead-code checkers, GoReleaser 2.18.1, and pnpm 12.4.0 while retaining the 48-hour package release-age window.
+- Builds: identify source builds as the upcoming 0.18.2 patch.
 
 ## 0.18.1 - 2026-09-07
 

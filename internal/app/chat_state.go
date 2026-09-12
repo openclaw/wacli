@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -32,7 +33,7 @@ func (a *App) AddChatStatePersistenceHandler(ctx context.Context) (func(), error
 		return nil, err
 	}
 	waClient := a.WA()
-	handlerID := waClient.AddEventHandler(func(evt interface{}) {
+	handlerID := waClient.AddEventHandler(func(evt any) {
 		switch evt.(type) {
 		case *events.AppState, *events.Star, *events.DeleteForMe,
 			*events.Archive, *events.Pin, *events.Mute, *events.MarkChatAsRead:
@@ -141,13 +142,25 @@ func (a *App) MarkChatRead(ctx context.Context, jid types.JID, read bool) error 
 	})
 }
 
-func (a *App) beginChatStateWrite(ctx context.Context, collection appstate.WAPatchName) (func(), error) {
+func (a *App) acquireChatStateSync(ctx context.Context) (func(), error) {
 	select {
 	case <-ctx.Done():
 		return nil, fmt.Errorf("wait for chat state synchronization: %w", ctx.Err())
 	case <-a.chatStateSync:
 	}
 	release := func() { a.chatStateSync <- struct{}{} }
+	if err := ctx.Err(); err != nil {
+		release()
+		return nil, fmt.Errorf("wait for chat state synchronization: %w", err)
+	}
+	return release, nil
+}
+
+func (a *App) beginChatStateWrite(ctx context.Context, collection appstate.WAPatchName) (func(), error) {
+	release, err := a.acquireChatStateSync(ctx)
+	if err != nil {
+		return nil, err
+	}
 	if err := a.syncChatStateBeforeWrite(ctx, collection); err != nil {
 		release()
 		return nil, err
@@ -197,7 +210,7 @@ func (a *App) replayRequiredAppState(ctx context.Context, collection appstate.WA
 			return a.clearCompletedAppStateRecovery(collection, markerGeneration)
 		}
 		if errors.Is(fetchErr, appstate.ErrMismatchingLTHash) {
-			return a.recoverMismatchingAppState(ctx, collection, markerGeneration, tracker)
+			return a.recoverMismatchingAppState(ctx, collection, markerGeneration, tracker, nil)
 		}
 		if !errors.Is(fetchErr, appstate.ErrKeyNotFound) {
 			return fmt.Errorf("replay WhatsApp app state recovery for %s: %w", collection, fetchErr)
@@ -222,9 +235,9 @@ func (a *App) replayRequiredAppState(ctx context.Context, collection appstate.WA
 	}
 }
 
-func (a *App) recoverMismatchingAppState(ctx context.Context, collection appstate.WAPatchName, markerGeneration int64, tracker *appStatePersistenceTracker) error {
+func (a *App) recoverMismatchingAppState(ctx context.Context, collection appstate.WAPatchName, markerGeneration int64, tracker *appStatePersistenceTracker, onRequested func(types.MessageID)) error {
 	ticket := a.appStatePersist.reserve()
-	eventsToPersist, recoveryErr := a.waitForPrimaryAppStateRecovery(ctx, collection)
+	eventsToPersist, recoveryErr := a.waitForPrimaryAppStateRecovery(ctx, collection, onRequested)
 	persistCtx := context.WithoutCancel(ctx)
 	result := make(chan error, 1)
 	frontier := a.appStatePersist.complete(ticket, func() {
@@ -246,14 +259,14 @@ func (a *App) recoverMismatchingAppState(ctx context.Context, collection appstat
 	return a.clearCompletedAppStateRecovery(collection, markerGeneration)
 }
 
-func (a *App) waitForPrimaryAppStateRecovery(ctx context.Context, collection appstate.WAPatchName) ([]interface{}, error) {
-	completed := make(chan []interface{}, 1)
+func (a *App) waitForPrimaryAppStateRecovery(ctx context.Context, collection appstate.WAPatchName, onRequested func(types.MessageID)) ([]any, error) {
+	completed := make(chan []any, 1)
 	var mu sync.Mutex
-	var captured []interface{}
+	var captured []any
 	finished := false
 	// whatsmeow dispatches recovery mutations synchronously and emits this
 	// collection's AppStateSyncComplete last, so the sentinel closes the drain.
-	handlerID := a.wa.AddEventHandler(func(evt interface{}) {
+	handlerID := a.wa.AddEventHandler(func(evt any) {
 		mu.Lock()
 		defer mu.Unlock()
 		if finished {
@@ -262,24 +275,25 @@ func (a *App) waitForPrimaryAppStateRecovery(ctx context.Context, collection app
 		if syncComplete, ok := evt.(*events.AppStateSyncComplete); ok {
 			if syncComplete != nil && syncComplete.Recovery && syncComplete.Name == collection {
 				finished = true
-				completed <- append([]interface{}(nil), captured...)
+				completed <- append([]any(nil), captured...)
 			}
 			return
 		}
-		for _, eventCollection := range appStateCollectionsForEvent(evt) {
-			if eventCollection == collection {
-				captured = append(captured, evt)
-				break
-			}
+		if slices.Contains(appStateCollectionsForEvent(evt), collection) {
+			captured = append(captured, evt)
 		}
 	})
 	defer a.wa.RemoveEventHandler(handlerID)
 
-	if _, err := a.wa.RequestAppStateRecovery(ctx, string(collection)); err != nil {
+	requestID, err := a.wa.RequestAppStateRecovery(ctx, string(collection))
+	if err != nil {
 		mu.Lock()
 		finished = true
 		mu.Unlock()
 		return nil, fmt.Errorf("request WhatsApp app state recovery for %s: %w", collection, err)
+	}
+	if onRequested != nil {
+		onRequested(requestID)
 	}
 	select {
 	case eventsToPersist := <-completed:
@@ -294,7 +308,7 @@ func (a *App) waitForPrimaryAppStateRecovery(ctx context.Context, collection app
 
 func (a *App) fetchAndPersistAppState(ctx context.Context, collection appstate.WAPatchName, fullSync bool, tracker *appStatePersistenceTracker) (fetchErr, persistenceErr error) {
 	ticket := a.appStatePersist.reserve()
-	var eventsToPersist []interface{}
+	var eventsToPersist []any
 	func() {
 		releaseFetch := a.beginManualAppStateFetch(collection)
 		defer releaseFetch()
@@ -376,7 +390,7 @@ func (a *App) beginLocalAppStateWrite(collection appstate.WAPatchName) (pendingL
 	return pendingLocalAppStateWrite{collection: collection, generation: generation}, nil
 }
 
-func (a *App) failLocalAppStateWrite(ctx context.Context, pending *pendingLocalAppStateWrite, postSendEvents []interface{}) error {
+func (a *App) failLocalAppStateWrite(ctx context.Context, pending *pendingLocalAppStateWrite, postSendEvents []any) error {
 	if !pending.reserved {
 		return nil
 	}
@@ -392,7 +406,7 @@ func (a *App) failLocalAppStateWrite(ctx context.Context, pending *pendingLocalA
 	return <-result
 }
 
-func (a *App) completeLocalAppStateWrite(ctx context.Context, pending *pendingLocalAppStateWrite, postSendEvents []interface{}, persist func() error) error {
+func (a *App) completeLocalAppStateWrite(ctx context.Context, pending *pendingLocalAppStateWrite, postSendEvents []any, persist func() error) error {
 	result := make(chan error, 1)
 	persistCtx := context.WithoutCancel(ctx)
 	frontier := a.appStatePersist.complete(pending.ticket, func() {
@@ -413,7 +427,7 @@ func (a *App) completeLocalAppStateWrite(ctx context.Context, pending *pendingLo
 	return <-result
 }
 
-func (a *App) persistFetchedAppStateEvents(ctx context.Context, eventsToPersist []interface{}, tracker *appStatePersistenceTracker) error {
+func (a *App) persistFetchedAppStateEvents(ctx context.Context, eventsToPersist []any, tracker *appStatePersistenceTracker) error {
 	tracker.begin()
 	for _, evt := range eventsToPersist {
 		a.handleAppStatePersistenceEvent(ctx, evt, tracker)
@@ -451,7 +465,7 @@ func messageKeyFromStore(info store.MessageInfo) *waCommon.MessageKey {
 	return key
 }
 
-func (a *App) handleChatStateEvent(ctx context.Context, evt interface{}) error {
+func (a *App) handleChatStateEvent(ctx context.Context, evt any) error {
 	switch v := evt.(type) {
 	case *events.Archive:
 		if v == nil || v.JID.IsEmpty() || v.Action == nil {

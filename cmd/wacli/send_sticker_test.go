@@ -33,9 +33,9 @@ func TestSendStickerCommandExposesSharedSendFlags(t *testing.T) {
 	}
 }
 
-func TestIsWebPStickerData(t *testing.T) {
+func TestParseWebPStickerMetadataRejectsInvalidHeaders(t *testing.T) {
 	valid := testWebPVP8X(512, 512, false, nil)
-	if !isWebPStickerData(valid) {
+	if _, err := parseWebPStickerMetadata(valid); err != nil {
 		t.Fatalf("valid WebP header was rejected")
 	}
 	for _, data := range [][]byte{
@@ -43,7 +43,7 @@ func TestIsWebPStickerData(t *testing.T) {
 		[]byte("RIFF\x10\x00\x00\x00PNG "),
 		[]byte("not webp"),
 	} {
-		if isWebPStickerData(data) {
+		if _, err := parseWebPStickerMetadata(data); err == nil {
 			t.Fatalf("invalid WebP header was accepted: %q", string(data))
 		}
 	}

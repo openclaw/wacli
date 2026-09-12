@@ -54,7 +54,7 @@ func TestBackfillHistoryRetriesUnansweredAnchor(t *testing.T) {
 				t.Fatalf("oldest = %+v, err = %v", oldest, err)
 			}
 			warnings := 0
-			for _, line := range bytes.Split(bytes.TrimSpace(eventLog.Bytes()), []byte("\n")) {
+			for line := range bytes.SplitSeq(bytes.TrimSpace(eventLog.Bytes()), []byte("\n")) {
 				var event struct {
 					Data map[string]any `json:"data"`
 				}
@@ -291,7 +291,7 @@ func TestBackfillHistoryDownloadsManualOnDemandNotification(t *testing.T) {
 
 	syncType := waE2E.HistorySyncType_ON_DEMAND
 	notif := &waE2E.HistorySyncNotification{SyncType: &syncType}
-	f.onDemandEvent = func(lastKnown types.MessageInfo, count int) interface{} {
+	f.onDemandEvent = func(lastKnown types.MessageInfo, count int) any {
 		return &events.Message{
 			Message: &waProto.Message{
 				ProtocolMessage: &waProto.ProtocolMessage{

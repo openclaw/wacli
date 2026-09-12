@@ -23,8 +23,6 @@ func newStoreStatsCmd(flags *rootFlags) *cobra.Command {
 			}
 			defer closeApp(a, lk)
 
-			_ = ctx
-
 			chats, err := a.DB().CountChats()
 			if err != nil {
 				return err

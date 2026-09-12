@@ -8,11 +8,19 @@ import (
 	"path/filepath"
 	"strings"
 
+	appPkg "github.com/openclaw/wacli/internal/app"
 	"github.com/openclaw/wacli/internal/sqliteutil"
 	"go.mau.fi/whatsmeow/types"
 )
 
 func readOnlyAuthStatus(storeDir string) (bool, string, error) {
+	revoked, err := appPkg.SessionRevoked(storeDir)
+	if err != nil {
+		return false, "", err
+	}
+	if revoked {
+		return false, "", nil
+	}
 	sessionPath := filepath.Join(storeDir, "session.db")
 	if _, err := os.Stat(sessionPath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {

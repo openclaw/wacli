@@ -63,7 +63,7 @@ func (d *DB) searchLIKE(p SearchMessagesParams) ([]Message, error) {
 	WHERE m.deleted_at IS NULL AND (LOWER(m.text) LIKE LOWER(?) ESCAPE '\' OR LOWER(m.display_text) LIKE LOWER(?) ESCAPE '\' OR LOWER(m.media_caption) LIKE LOWER(?) ESCAPE '\' OR LOWER(m.filename) LIKE LOWER(?) ESCAPE '\' OR LOWER(COALESCE(m.chat_name,'')) LIKE LOWER(?) ESCAPE '\' OR LOWER(COALESCE(m.sender_name,'')) LIKE LOWER(?) ESCAPE '\' OR LOWER(COALESCE(c.name,'')) LIKE LOWER(?) ESCAPE '\')`
 	// Escape wildcards before wrapping in % so user input is literal (#56).
 	needle := likeContains(p.Query)
-	args := []interface{}{needle, needle, needle, needle, needle, needle, needle}
+	args := []any{needle, needle, needle, needle, needle, needle, needle}
 	query, args = applyMessageFilters(query, args, p)
 	query += " ORDER BY m.ts DESC, m.rowid DESC LIMIT ?"
 	args = append(args, p.Limit)
@@ -99,14 +99,14 @@ func (d *DB) searchFTS(p SearchMessagesParams) ([]Message, error) {
 	// Sanitize to prevent FTS5 query-syntax injection (#57).
 	// Each token is individually quoted so multi-word queries still work
 	// as implicit AND (both words present, any order).
-	args := []interface{}{sanitizeFTSQuery(p.Query)}
+	args := []any{sanitizeFTSQuery(p.Query)}
 	query, args = applyMessageFilters(query, args, p)
 	query += " ORDER BY bm25(messages_fts), m.rowid DESC LIMIT ?"
 	args = append(args, p.Limit)
 	return d.scanMessages(query, args...)
 }
 
-func applyMessageFilters(query string, args []interface{}, p SearchMessagesParams) (string, []interface{}) {
+func applyMessageFilters(query string, args []any, p SearchMessagesParams) (string, []any) {
 	query, args = appendStringFilter(query, args, "m.chat_jid", p.ChatJID, p.ChatJIDs)
 	if strings.TrimSpace(p.From) != "" {
 		query += " AND m.sender_jid = ?"

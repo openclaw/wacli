@@ -21,7 +21,7 @@ func TestAppStatePersistenceSequencerPreservesReservationOrder(t *testing.T) {
 	}
 
 	ticket := sequencer.reserve()
-	sequencer.enqueue(record(2))
+	enqueueAppStateTask(&sequencer, record(2))
 	frontier := sequencer.complete(ticket, record(1))
 	if err := sequencer.waitThrough(context.Background(), frontier); err != nil {
 		t.Fatalf("waitThrough: %v", err)
@@ -41,7 +41,7 @@ func TestAppStatePersistenceSequencerDoesNotOvertakeLiveEvent(t *testing.T) {
 	releaseLive := make(chan struct{})
 	liveDone := make(chan struct{})
 	go func() {
-		sequencer.enqueue(func() {
+		enqueueAppStateTask(&sequencer, func() {
 			close(liveStarted)
 			<-releaseLive
 			mu.Lock()
@@ -88,7 +88,7 @@ func TestAppStatePersistenceSequencerWaitsForFixedFrontier(t *testing.T) {
 	laterStarted := make(chan struct{})
 	releaseLater := make(chan struct{})
 	laterDone := make(chan struct{})
-	sequencer.enqueue(func() {
+	enqueueAppStateTask(&sequencer, func() {
 		close(laterStarted)
 		<-releaseLater
 		close(laterDone)
@@ -112,7 +112,7 @@ func TestAppCloseDrainsHandedOffAppStatePersistence(t *testing.T) {
 	releaseFirst := make(chan struct{})
 	firstDone := make(chan struct{})
 	go func() {
-		a.appStatePersist.enqueue(func() {
+		enqueueAppStateTask(&a.appStatePersist, func() {
 			close(firstStarted)
 			<-releaseFirst
 		})
@@ -123,7 +123,7 @@ func TestAppCloseDrainsHandedOffAppStatePersistence(t *testing.T) {
 	secondStarted := make(chan struct{})
 	releaseSecond := make(chan struct{})
 	writeErr := make(chan error, 1)
-	a.appStatePersist.enqueue(func() {
+	enqueueAppStateTask(&a.appStatePersist, func() {
 		close(secondStarted)
 		<-releaseSecond
 		writeErr <- a.db.UpsertChat("123@s.whatsapp.net", "dm", "Alice", time.Now().UTC())
@@ -251,4 +251,10 @@ func TestAppStatePersistenceSequencerDoesNotDrainPastUnreadyLiveTask(t *testing.
 	if !reflect.DeepEqual(order, []int{1, 2, 3}) {
 		t.Fatalf("persistence order = %v, want [1 2 3]", order)
 	}
+}
+
+func enqueueAppStateTask(s *appStatePersistenceSequencer, run func()) uint64 {
+	ticket := s.reserve()
+	s.completeOne(ticket, run)
+	return ticket
 }

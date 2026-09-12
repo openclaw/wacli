@@ -47,7 +47,7 @@ func (d *DB) UpsertCallEvent(p UpsertCallEventParams) error {
 		p.DurationSecs = 0
 	}
 
-	var participantsJSON interface{}
+	var participantsJSON any
 	if len(p.Participants) > 0 {
 		if b, err := json.Marshal(p.Participants); err == nil {
 			participantsJSON = string(b)
@@ -117,7 +117,7 @@ func (d *DB) singleCallEventRow(chatJID, callID, eventType string) (int64, bool,
 	return ids[0], true, nil
 }
 
-func (d *DB) updateCallEventRow(rowID int64, p UpsertCallEventParams, chatJID, callID, eventType string, ts int64, participantsJSON interface{}) error {
+func (d *DB) updateCallEventRow(rowID int64, p UpsertCallEventParams, chatJID, callID, eventType string, ts int64, participantsJSON any) error {
 	res, err := d.sql.Exec(`
 			UPDATE call_events SET
 				chat_jid=?,
@@ -167,7 +167,7 @@ func (d *DB) DeleteCallEvents(p DeleteCallEventsParams) (int64, error) {
 		return 0, fmt.Errorf("chat JID is required")
 	}
 	query := "DELETE FROM call_events WHERE chat_jid = ? AND event_type = 'call_log'"
-	args := []interface{}{chatJID}
+	args := []any{chatJID}
 	if direction := strings.TrimSpace(p.Direction); direction != "" {
 		query += " AND direction = ?"
 		args = append(args, direction)
@@ -190,7 +190,7 @@ func (d *DB) ListCallEvents(p ListCallEventsParams) ([]CallEvent, error) {
 		       ts, COALESCE(participants,'')
 		FROM call_events
 		WHERE 1=1`
-	var args []interface{}
+	var args []any
 	query, args = appendStringFilter(query, args, "chat_jid", p.ChatJID, p.ChatJIDs)
 	if p.After != nil {
 		query += " AND ts > ?"

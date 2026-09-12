@@ -13,7 +13,6 @@ import (
 	"github.com/openclaw/wacli/internal/store"
 	"github.com/openclaw/wacli/internal/wa"
 	"go.mau.fi/whatsmeow"
-	"go.mau.fi/whatsmeow/appstate"
 	"go.mau.fi/whatsmeow/types"
 )
 
@@ -174,7 +173,7 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	}
 
 	ps := &syncPresence{}
-	handlerID := a.addSyncEventHandler(syncCtx, opts, &messagesStored, &lastEvent, disconnected, loggedOut, staleReconnect, enqueueMedia, enqueueWebhook, limits, ps, mediaQ)
+	handlerID, appStateRecoveries := a.addSyncEventHandler(syncCtx, opts, &messagesStored, &lastEvent, disconnected, loggedOut, staleReconnect, enqueueMedia, enqueueWebhook, limits, ps, mediaQ)
 	defer a.wa.RemoveEventHandler(handlerID)
 
 	connectionEpoch.Store(nowUTC().UnixNano())
@@ -197,7 +196,7 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	if err := a.migrateHistoricalLIDs(syncCtx); err != nil {
 		return SyncResult{MessagesStored: messagesStored.Load()}, err
 	}
-	a.syncAppStateDeltas(syncCtx)
+	a.syncAppStateDeltas(syncCtx, appStateRecoveries)
 
 	// Optional: bootstrap imports (helps contacts/groups management without waiting for events).
 	if opts.RefreshContacts {
@@ -254,19 +253,6 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 		return SyncResult{MessagesStored: messagesStored.Load()}, err
 	}
 	return SyncResult{MessagesStored: messagesStored.Load()}, nil
-}
-
-func (a *App) syncAppStateDeltas(ctx context.Context) {
-	for _, name := range []appstate.WAPatchName{appstate.WAPatchRegularHigh, appstate.WAPatchRegularLow, appstate.WAPatchRegular} {
-		fullSync := name == appstate.WAPatchRegular
-		if err := a.wa.FetchAppState(ctx, string(name), fullSync, false); err != nil {
-			a.emitWarning(
-				"app_state_sync_failed",
-				fmt.Sprintf("warning: failed to sync WhatsApp app state %s: %v", name, err),
-				map[string]any{"name": string(name), "error": err.Error()},
-			)
-		}
-	}
 }
 
 func (a *App) connectForSync(ctx context.Context, opts SyncOptions) error {

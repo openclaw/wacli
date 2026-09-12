@@ -365,3 +365,16 @@ func TestAppStateRecoveryIntentBatchIsAtomic(t *testing.T) {
 		t.Fatal("failed marker batch committed a partial recovery intent")
 	}
 }
+
+func TestAppStateRecoveryCollectionsAreUniqueAndSorted(t *testing.T) {
+	db := openTestDB(t)
+	for _, name := range []string{"regular_low", "regular_high", "regular_low"} {
+		if err := db.MarkAppStateRecoveryRequired(name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := db.AppStateRecoveryCollections()
+	if err != nil || len(got) != 2 || got[0] != "regular_high" || got[1] != "regular_low" {
+		t.Fatalf("pending collections = %v, %v", got, err)
+	}
+}

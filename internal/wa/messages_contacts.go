@@ -2,6 +2,7 @@ package wa
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	waProto "go.mau.fi/whatsmeow/binary/proto"
@@ -108,10 +109,8 @@ func formatContactLine(name string, phones []string) string {
 }
 
 func appendUnique(values []string, value string) []string {
-	for _, existing := range values {
-		if existing == value {
-			return values
-		}
+	if slices.Contains(values, value) {
+		return values
 	}
 	return append(values, value)
 }
