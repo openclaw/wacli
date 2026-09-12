@@ -235,11 +235,6 @@ func loadMessageRevokeTarget(ctx context.Context, a *app.App, chat, id string) (
 	return store.Message{}, chatJID, false, nil
 }
 
-func deleteLocalMediaIfRequested(deleteMedia bool, localPath string) (bool, error) {
-	deleted, err := deleteLocalMediaPathsIfRequested(deleteMedia, []string{localPath})
-	return deleted > 0, err
-}
-
 func deleteLocalMediaPathsIfRequested(deleteMedia bool, paths []string) (int, error) {
 	if !deleteMedia {
 		return 0, nil

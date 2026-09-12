@@ -113,7 +113,12 @@ func TestBuildPollCreationMessageSelectsVersion(t *testing.T) {
 			if got := msg.GetPollCreationMessageV3() != nil; got != tt.wantV3 {
 				t.Fatalf("v3 = %t, want %t", got, tt.wantV3)
 			}
-			creation := pickOutboundPollCreation(msg)
+			creation := msg.GetPollCreationMessage()
+			if tt.wantV2 {
+				creation = msg.GetPollCreationMessageV2()
+			} else if tt.wantV3 {
+				creation = msg.GetPollCreationMessageV3()
+			}
 			if creation.GetName() != "Lunch?" {
 				t.Fatalf("name = %q", creation.GetName())
 			}

@@ -72,19 +72,6 @@ func isCommunityAnnouncementGroup(info *types.GroupInfo) bool {
 	return info != nil && info.IsAnnounce && info.IsParent
 }
 
-func pickOutboundPollCreation(msg *waE2E.Message) *waE2E.PollCreationMessage {
-	if msg == nil {
-		return nil
-	}
-	if msg.GetPollCreationMessage() != nil {
-		return msg.GetPollCreationMessage()
-	}
-	if msg.GetPollCreationMessageV2() != nil {
-		return msg.GetPollCreationMessageV2()
-	}
-	return msg.GetPollCreationMessageV3()
-}
-
 func wrapEphemeralPollMessage(msg *waE2E.Message) *waE2E.Message {
 	if msg == nil {
 		return nil

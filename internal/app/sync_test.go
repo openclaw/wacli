@@ -1862,7 +1862,7 @@ func TestLocalAppStateWriteFinishesAfterRequestCancellation(t *testing.T) {
 	a := newTestApp(t)
 	blockerStarted := make(chan struct{})
 	releaseBlocker := make(chan struct{})
-	go a.appStatePersist.enqueue(func() {
+	go enqueueAppStateTask(&a.appStatePersist, func() {
 		close(blockerStarted)
 		<-releaseBlocker
 	})

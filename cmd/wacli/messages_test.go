@@ -553,28 +553,28 @@ func TestWriteMessageShowIncludesForwardedMetadata(t *testing.T) {
 	}
 }
 
-func TestDeleteLocalMediaIfRequestedReportsActualRemoval(t *testing.T) {
+func TestDeleteLocalMediaPathsIfRequestedReportsActualRemoval(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "media.bin")
 	if err := os.WriteFile(path, []byte("media"), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	deleted, err := deleteLocalMediaIfRequested(true, path)
+	deleted, err := deleteLocalMediaPathsIfRequested(true, []string{path})
 	if err != nil {
-		t.Fatalf("deleteLocalMediaIfRequested: %v", err)
+		t.Fatalf("deleteLocalMediaPathsIfRequested: %v", err)
 	}
-	if !deleted {
-		t.Fatal("deleted = false, want true")
+	if deleted != 1 {
+		t.Fatalf("deleted = %d, want 1", deleted)
 	}
-	deleted, err = deleteLocalMediaIfRequested(true, path)
+	deleted, err = deleteLocalMediaPathsIfRequested(true, []string{path})
 	if err != nil {
 		t.Fatalf("delete stale media path: %v", err)
 	}
-	if deleted {
-		t.Fatal("deleted stale path = true, want false")
+	if deleted != 0 {
+		t.Fatalf("deleted stale path = %d, want 0", deleted)
 	}
-	deleted, err = deleteLocalMediaIfRequested(false, path)
-	if err != nil || deleted {
-		t.Fatalf("delete disabled = %v, %v; want false, nil", deleted, err)
+	deleted, err = deleteLocalMediaPathsIfRequested(false, []string{path})
+	if err != nil || deleted != 0 {
+		t.Fatalf("delete disabled = %d, %v; want 0, nil", deleted, err)
 	}
 }
 
