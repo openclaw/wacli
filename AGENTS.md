@@ -24,8 +24,8 @@
 ## Build, Test, and Development Commands
 - Build: `pnpm build` — compiles with `-tags sqlite_fts5` and `CGO_CFLAGS=-Wno-error=missing-braces` (required for GCC 15+).
 - Run: `pnpm wacli -- <args>` — rebuilds then runs.
-- Test: `pnpm test` — runs `go test ./...` (plain), `go test -tags sqlite_fts5 ./...` (FTS), and a Windows lock cross-compile check.
-- Lint: `pnpm lint` — `go vet ./...`.
+- Test: `pnpm test` — runs plain and FTS Go tests, the Windows lock cross-compile, cgo-required build check, and Node documentation/release-script tests.
+- Lint: `pnpm lint` — `go vet ./...`; `make lint` also runs vulnerability and dead-code checks.
 - Format fix: `pnpm format` — `gofmt -w .`.
 - Format check: `pnpm format:check` — fails if any file would change.
 - **Full gate** (must pass before every PR): `pnpm format:check && pnpm lint && pnpm test && pnpm build && git diff --check`.

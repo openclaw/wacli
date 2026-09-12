@@ -199,7 +199,7 @@ func TestResolvePNToLIDUsesOwnLIDWithoutCache(t *testing.T) {
 	lid := types.NewJID("999123456789", types.HiddenUserServer)
 	cli := &whatsmeow.Client{Store: &waStore.Device{ID: &pn, LID: lid, LIDMigrationTimestamp: 1}}
 
-	got := (&Client{}).resolvePNToLIDLocked(context.Background(), cli, pn)
+	got := resolvePNToLID(context.Background(), cli, pn)
 	if got != lid {
 		t.Fatalf("resolved = %s, want %s", got, lid)
 	}
