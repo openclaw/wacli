@@ -80,7 +80,9 @@ func containsNestedProtocolMutation(msg *waE2E.Message) bool {
 	if msg.GetProtocolMessage() != nil {
 		return true
 	}
-	return containsNestedProtocolMutation(msg.GetDeviceSentMessage().GetMessage()) ||
+	return containsNestedProtocolMutation(msg.GetAssociatedChildMessage().GetMessage()) ||
+		containsNestedProtocolMutation(msg.GetGroupStatusMentionMessage().GetMessage()) ||
+		containsNestedProtocolMutation(msg.GetDeviceSentMessage().GetMessage()) ||
 		containsNestedProtocolMutation(msg.GetEditedMessage().GetMessage()) ||
 		containsNestedProtocolMutation(msg.GetCommentMessage().GetMessage())
 }

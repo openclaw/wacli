@@ -224,6 +224,9 @@ func extractWAProto(m *waProto.Message, pm *ParsedMessage) *waProto.Message {
 		}
 		return m
 	}
+	if inner := contentWrapper(m); inner != nil {
+		return extractWAProto(inner, pm)
+	}
 	if comment := m.GetCommentMessage(); comment.GetMessage() != nil {
 		leaf := extractWAProto(comment.GetMessage(), pm)
 		if target := comment.GetTargetMessageKey(); strings.TrimSpace(target.GetID()) != "" {
@@ -457,6 +460,8 @@ func extractPlainText(m *waProto.Message, pm *ParsedMessage) {
 		pm.Text = m.GetConversation()
 	case m.GetExtendedTextMessage() != nil:
 		pm.Text = m.GetExtendedTextMessage().GetText()
+	case m.GetGroupInviteMessage() != nil:
+		pm.Text = groupInviteText(m.GetGroupInviteMessage())
 	}
 }
 
@@ -488,4 +493,22 @@ func extractAlbum(m *waProto.Message, pm *ParsedMessage) {
 			pm.Text = "[Album]"
 		}
 	}
+}
+
+// These envelopes retain the outer identity while carrying ordinary content.
+func contentWrapper(m *waProto.Message) *waProto.Message {
+	if inner := m.GetAssociatedChildMessage().GetMessage(); inner != nil {
+		return inner
+	}
+	return m.GetGroupStatusMentionMessage().GetMessage()
+}
+
+func groupInviteText(invite *waE2E.GroupInviteMessage) string {
+	if caption := invite.GetCaption(); strings.TrimSpace(caption) != "" {
+		return caption
+	}
+	if name := strings.TrimSpace(invite.GetGroupName()); name != "" {
+		return "Group invite: " + name
+	}
+	return "[Group invite]"
 }

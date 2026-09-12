@@ -68,6 +68,9 @@ func contextInfoForMessage(m *waProto.Message) *waProto.ContextInfo {
 	if creation := pickPollCreation(m); creation != nil {
 		return creation.GetContextInfo()
 	}
+	if invite := m.GetGroupInviteMessage(); invite != nil {
+		return invite.GetContextInfo()
+	}
 	if alb := m.GetAlbumMessage(); alb != nil {
 		return alb.GetContextInfo()
 	}
@@ -79,6 +82,12 @@ func displayTextForProto(m *waProto.Message) string {
 		return ""
 	}
 
+	if inner := contentWrapper(m); inner != nil {
+		return displayTextForProto(inner)
+	}
+	if invite := m.GetGroupInviteMessage(); invite != nil {
+		return groupInviteText(invite)
+	}
 	if img := m.GetImageMessage(); img != nil {
 		return "Sent image"
 	}
