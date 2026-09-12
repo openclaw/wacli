@@ -31,7 +31,7 @@ permissions:
 
 env:
   NODE_VERSION: "26"
-  PNPM_VERSION: "12.3.4"
+  PNPM_VERSION: "12.4.0"
 
 jobs:
   hydrate:

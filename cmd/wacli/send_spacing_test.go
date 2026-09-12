@@ -15,6 +15,10 @@ type deadlineRecordingConn struct {
 	deadlines []time.Time
 }
 
+func executeDelegatedSendWithoutApp(ctx context.Context, req sendDelegateRequest) (sendDelegateResponse, error) {
+	return executeDelegatedSend(ctx, nil, req)
+}
+
 func (c *deadlineRecordingConn) SetDeadline(deadline time.Time) error {
 	c.deadlines = append(c.deadlines, deadline)
 	return c.Conn.SetDeadline(deadline)
@@ -267,7 +271,7 @@ func TestSendPacingTimeoutCancelsQueueWait(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		handleSendDelegateConn(context.Background(), serverConn, nil, &sendMu, pacedSendSlot, pacer)
+		handleSendDelegateConn(context.Background(), serverConn, executeDelegatedSendWithoutApp, &sendMu, pacedSendSlot, pacer)
 	}()
 
 	req := sendDelegateRequest{
@@ -300,7 +304,7 @@ func TestSendPacingExtendsIPCDeadlineThroughResponse(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		handleSendDelegateConn(context.Background(), trackedServerConn, nil, &sendMu, pacedSendSlot, pacer)
+		handleSendDelegateConn(context.Background(), trackedServerConn, executeDelegatedSendWithoutApp, &sendMu, pacedSendSlot, pacer)
 	}()
 
 	const requestTimeout = 10 * time.Minute
@@ -342,7 +346,7 @@ func TestSendPacingHonorsAbsoluteCallerDeadline(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		handleSendDelegateConn(context.Background(), serverConn, nil, &sendMu, pacedSendSlot, pacer)
+		handleSendDelegateConn(context.Background(), serverConn, executeDelegatedSendWithoutApp, &sendMu, pacedSendSlot, pacer)
 	}()
 
 	req := sendDelegateRequest{
