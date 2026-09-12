@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -177,4 +178,20 @@ func getMessageContextByChatFilter(db *store.DB, chatJIDs []string, id string, b
 
 func isNoRows(err error) bool {
 	return errors.Is(err, sql.ErrNoRows)
+}
+
+func loadMessageMutationTarget(ctx context.Context, a *app.App, chat, id string) (store.Message, types.JID, error) {
+	chatJIDs, err := messageChatJIDFilter(ctx, a, chat)
+	if err != nil {
+		return store.Message{}, types.JID{}, err
+	}
+	msg, err := getMessageByChatFilter(a.DB(), chatJIDs, id)
+	if err != nil {
+		return store.Message{}, types.JID{}, err
+	}
+	chatJID, err := wa.ParseUserOrJID(msg.ChatJID)
+	if err != nil {
+		return store.Message{}, types.JID{}, fmt.Errorf("stored chat JID is invalid: %w", err)
+	}
+	return msg, chatJID, nil
 }
