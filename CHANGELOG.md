@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Builds: update pnpm to 12.4.1, share production/test dead-code checks between local and CI gates, validate documentation links in CI, and isolate concurrent Windows lock cross-builds.
+
 ## 0.18.2 - 2026-09-11
 
 **Highlights:** mark chats read or unread while continuous sync owns the store.
