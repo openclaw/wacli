@@ -3,12 +3,84 @@ package wa
 import (
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/openclaw/wacli/internal/out"
+	signalLog "go.mau.fi/libsignal/logger"
 	waLog "go.mau.fi/whatsmeow/util/log"
 )
+
+// libsignal has a separate process-global logger that defaults to stdout.
+// Install it once, before any session work or concurrent logging can start.
+func init() {
+	var logger signalLog.Loggable = libsignalLogger{}
+	signalLog.Setup(&logger)
+}
+
+var libsignalEvents atomic.Pointer[out.EventWriter]
+
+// SetLibsignalEvents selects the process-wide diagnostic sink before a command runs.
+func SetLibsignalEvents(events *out.EventWriter) {
+	libsignalEvents.Store(events)
+}
+
+type libsignalLogger struct{}
+
+// Debug can contain keys and ciphertext. Info has no production callers in
+// libsignal v0.2.2. Neither level is enabled, including via Configure("all").
+func (libsignalLogger) Debug(string, string) {}
+func (libsignalLogger) Info(string, string)  {}
+func (libsignalLogger) Configure(string)     {}
+
+func (l libsignalLogger) Warning(caller, message string) { l.output("warning", caller, message) }
+func (l libsignalLogger) Error(caller, message string)   { l.output("error", caller, message) }
+
+func (libsignalLogger) output(level, caller, message string) {
+	message = safeLibsignalMessage(message)
+	if events := libsignalEvents.Load(); events.Enabled() {
+		// Even ERROR may describe a failed attempt before a successful fallback,
+		// not a terminal command error. Preserve its level inside a warning event.
+		_ = events.Emit("warning", map[string]any{
+			"code": "libsignal_diagnostic", "level": level, "source": "libsignal",
+			"caller": caller, "message": message,
+		})
+		return
+	}
+	_ = out.WriteError(os.Stderr, false, fmt.Errorf("[libsignal %s] %s: %s", level, caller, message))
+}
+
+func safeLibsignalMessage(message string) string {
+	// Error details can include raw input (e.g. bytehelper.SplitThree).
+	// Retain only known operation labels, never their dynamic suffixes.
+	operation, _, _ := strings.Cut(message, ":")
+	switch operation {
+	case "Error getting receiverchain",
+		"Unable to get plain text from ciphertext", "Unable to decrypt message with state",
+		"Unable to get or create chain key", "Unable to get or create message keys",
+		"Unable to verify ciphertext mac", "Error split signal message",
+		"Error serializing signal message", "Error deserializing signal message",
+		"Error serializing prekey signal message", "Error deserializing prekey signal message",
+		"Error serializing senderkey distribution message", "Error deserializing senderkey distribution message",
+		"Error deserializing senderkey message",
+		"Error serializing signed prekey record", "Error deserializing signed prekey record",
+		"Error serializing prekey record", "Error deserializing prekey record",
+		"Error serializing session state", "Error deserializing session state",
+		"Error serializing session", "Error deserializing session":
+		return operation + " (details redacted)"
+	}
+	// The warning on session fallback can consist of a bare error.
+	switch message {
+	case "uninitialized session", "wrong message version", "mismatching MAC in signal message",
+		"message index is over 2000 messages into the future", "received message with old counter":
+		return message
+	default:
+		return "Signal diagnostic (details redacted)"
+	}
+}
 
 type whatsmeowLogger struct {
 	module string

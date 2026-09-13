@@ -11,6 +11,8 @@ Read when: you need the user-facing command map, global flags, store model, or l
 - Override the store with `--store DIR` or `WACLI_STORE_DIR`.
 - Human-readable tables are the default.
 - Use `--json` for scriptable output.
+- Libsignal warnings and errors go to stderr, not stdout. With `--events`, they use NDJSON `warning` events with `data.code=libsignal_diagnostic`, the original `level`, `source`, `caller`, and a safe `message`. These diagnostics can precede a successful fallback and do not themselves mean the command failed.
+- Libsignal diagnostics retain known operation labels or safe error categories, redact dynamic details, and report unknown messages generically. Debug and info logging are disabled to avoid exposing cryptographic material; libsignal v0.2.2 has no production info calls.
 - A successful JSON command exits successfully if its pipe reader closes early. Other output errors and command failures still return a nonzero exit status.
 - Use `--full` to avoid table truncation.
 - Write commands acquire the store lock; use `--lock-wait DURATION` to wait.
