@@ -414,6 +414,80 @@ func TestExecuteDelegatedSendRoutesMarkRead(t *testing.T) {
 	}
 }
 
+func TestExecuteDelegatedSendRoutesReadReceipt(t *testing.T) {
+	a, err := app.New(app.Options{StoreDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("new app: %v", err)
+	}
+	t.Cleanup(a.Close)
+
+	_, err = executeDelegatedSend(context.Background(), a, sendDelegateRequest{
+		Version: sendDelegateVersion,
+		Kind:    "read_receipt",
+		To:      "120363000000000000@g.us",
+	})
+	if err == nil || !strings.Contains(err.Error(), "--id is required") {
+		t.Fatalf("error = %v, want read-receipt id validation", err)
+	}
+	_, err = executeDelegatedSend(context.Background(), a, sendDelegateRequest{
+		Version: sendDelegateVersion,
+		Kind:    "read_receipt",
+		IDs:     []string{"MSG1"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "--to is required") {
+		t.Fatalf("error = %v, want read-receipt recipient validation", err)
+	}
+}
+
+type delegatedReadReceiptCall struct {
+	chat   types.JID
+	ids    []string
+	sender types.JID
+}
+
+type fakeDelegatedReadReceiptApp struct {
+	calls []delegatedReadReceiptCall
+}
+
+func (f *fakeDelegatedReadReceiptApp) DB() *store.DB { return nil }
+
+func (f *fakeDelegatedReadReceiptApp) MarkMessagesRead(_ context.Context, chat types.JID, ids []string, sender types.JID) (types.ReceiptType, error) {
+	f.calls = append(f.calls, delegatedReadReceiptCall{chat: chat, ids: ids, sender: sender})
+	return types.ReceiptTypeReadSelf, nil
+}
+
+func TestExecuteDelegatedReadReceiptPassesChatIDsAndSender(t *testing.T) {
+	fake := &fakeDelegatedReadReceiptApp{}
+	resp, err := executeDelegatedReadReceipt(context.Background(), fake, sendDelegateRequest{
+		Kind:   "read_receipt",
+		To:     "120363000000000000@g.us",
+		IDs:    []string{"MSG1", " ", "MSG2"},
+		Sender: "15551234567@s.whatsapp.net",
+	})
+	if err != nil {
+		t.Fatalf("executeDelegatedReadReceipt: %v", err)
+	}
+	if len(fake.calls) != 1 {
+		t.Fatalf("calls = %d, want 1", len(fake.calls))
+	}
+	call := fake.calls[0]
+	if call.chat.String() != "120363000000000000@g.us" {
+		t.Fatalf("chat = %s", call.chat)
+	}
+	if len(call.ids) != 2 || call.ids[0] != "MSG1" || call.ids[1] != "MSG2" {
+		t.Fatalf("ids = %v, want [MSG1 MSG2] (blank entries dropped)", call.ids)
+	}
+	if call.sender.String() != "15551234567@s.whatsapp.net" {
+		t.Fatalf("sender = %s", call.sender)
+	}
+	if !resp.OK || !resp.Sent || resp.Chat != "120363000000000000@g.us" || len(resp.IDs) != 2 {
+		t.Fatalf("resp = %+v", resp)
+	}
+	if resp.Receipt != string(types.ReceiptTypeReadSelf) {
+		t.Fatalf("receipt = %q, want the effective receipt type passed through", resp.Receipt)
+	}
+}
+
 type delegatedMarkReadCall struct {
 	chat types.JID
 	read bool

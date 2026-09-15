@@ -19,6 +19,7 @@ wacli messages delete --chat JID --id MSG_ID [--for-me] [--delete-media] [--post
 wacli messages purge --chat JID --id MSG_ID [--dry-run] [--confirm]
 wacli messages revoke --chat JID --id MSG_ID [--post-send-wait 2s]
 wacli messages forward --chat JID --id MSG_ID --to RECIPIENT [--pick N] [--post-send-wait 2s]
+wacli messages mark-read --chat CHAT --id MSG_ID [--id MSG_ID...] [--sender JID] [--pick N]
 ```
 
 ## Search
@@ -60,6 +61,15 @@ Plain audio messages have an empty `MediaCaption`. Their `Text` keeps the `[Audi
 - Sync, history, and backfill ingestion merge messages by chat JID and message ID. A message missing from any partial import is left unchanged, and a later live copy does not resurrect an existing tombstone.
 - `messages purge` is the deliberate payload-erasure path. It only accepts an already tombstoned row, removes downloaded local media, clears its retained `wacli.db` payload, and requires confirmation unless `--confirm` is passed. A minimal tombstone with `payload_purged_at` and a non-cascading purge-ledger key remain so later sync or history imports cannot restore the payload after chat cleanup.
 
+## Read receipts
+
+- `messages mark-read` sends WhatsApp **read receipts** for received messages, so their sender sees them as read (blue ticks) when read receipts are on for your account. It is the per-message counterpart of `chats mark-read`, which only syncs a chat's read flag to your own linked devices through app state and never notifies the sender.
+- `--chat` accepts a JID, phone number, or a synced contact/group/chat name (`--pick N` disambiguates). `--id` is repeatable.
+- In a group chat the receipt is addressed to the participant who sent the messages. Pass `--sender JID`, or omit it to look the sender up in the local store; without `--sender`, every `--id` must come from the same participant and must already be synced.
+- Receipts follow your account's **read-receipts privacy setting** (WhatsApp → Settings → Privacy → Read receipts). When it is off, a `read-self` receipt is sent instead of `read`, in direct and group chats alike: it only syncs the read state to your own devices, and the sender does not see blue ticks. The result reports which one was sent (`receipt`: `read` or `read-self`; `sender_notified` is `true` only for `read`); for `read-self` the human output prints a note on stderr, or a `warning` event (`code: read_self_receipt`) with `--events`. The setting itself is never changed, and the command fails if it cannot be fetched.
+- Receipts apply to messages you received: any `--id` the local store knows as one of your own sent messages is rejected, whether the row is stored under the chat's phone-number or LID form. IDs that are not in the store are accepted in direct chats and, with `--sender`, in groups, so an unsynced received message can still be marked read; a store read failure is an error.
+- Requires an authenticated, writable store and honors `--read-only`/`WACLI_READONLY`. While a same-store `sync --follow` process owns the store, the command is delegated to it, like sends and reactions.
+
 ## LID mapping
 
 When a phone-number chat JID maps to a stored `@lid` row, list/search/show/context include the mapped rows so historical LID splits do not hide messages.
@@ -68,6 +78,7 @@ When a phone-number chat JID maps to a stored `@lid` row, list/search/show/conte
 
 ```bash
 wacli messages list --chat 1234567890@s.whatsapp.net --asc
+wacli messages mark-read --chat 120363000000000000@g.us --id 3EB0ABCDEF --sender 1234567890@s.whatsapp.net
 wacli messages list --from-me --limit 20
 wacli messages starred --limit 20
 wacli messages search "invoice" --has-media --type document

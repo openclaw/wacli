@@ -66,6 +66,7 @@ type WAClient interface {
 	SendProtoMessage(ctx context.Context, to types.JID, msg *waProto.Message) (types.MessageID, error)
 	SendProtoMessageWithExtra(ctx context.Context, to types.JID, msg *waProto.Message, mediaHandle string) (types.MessageID, error)
 	SendReaction(ctx context.Context, chat, sender types.JID, targetID types.MessageID, reaction string) (types.MessageID, error)
+	MarkRead(ctx context.Context, chat, sender types.JID, ids []types.MessageID) (types.ReceiptType, error)
 	SendPoll(ctx context.Context, to types.JID, name string, options []string, selectable int, ephemeral bool) (types.MessageID, error)
 	SendPollVote(ctx context.Context, pollInfo *types.MessageInfo, options []string) (types.MessageID, error)
 	DecryptPollVote(ctx context.Context, evt *events.Message) (*waE2E.PollVoteMessage, error)

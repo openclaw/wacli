@@ -76,6 +76,8 @@ type fakeWA struct {
 	pinCalls                    []fakePinCall
 	muteCalls                   []fakeMuteCall
 	markReadCalls               []fakeMarkReadCall
+	markReadReceiptCalls        []fakeMarkReadReceiptCall
+	markReadReceiptType         types.ReceiptType
 	markReadBeforeApply         func()
 	manualHistorySyncCalls      []bool
 	appStateRecoveries          []string
@@ -518,6 +520,26 @@ func (f *fakeWA) SendProtoMessageWithExtra(ctx context.Context, to types.JID, ms
 
 func (f *fakeWA) SendReaction(ctx context.Context, chat, sender types.JID, targetID types.MessageID, reaction string) (types.MessageID, error) {
 	return types.MessageID("reactionid"), nil
+}
+
+type fakeMarkReadReceiptCall struct {
+	chat   types.JID
+	sender types.JID
+	ids    []types.MessageID
+}
+
+func (f *fakeWA) MarkRead(ctx context.Context, chat, sender types.JID, ids []types.MessageID) (types.ReceiptType, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.markReadReceiptCalls = append(f.markReadReceiptCalls, fakeMarkReadReceiptCall{
+		chat:   chat,
+		sender: sender,
+		ids:    append([]types.MessageID(nil), ids...),
+	})
+	if f.markReadReceiptType != "" {
+		return f.markReadReceiptType, nil
+	}
+	return types.ReceiptTypeRead, nil
 }
 
 func (f *fakeWA) SendPoll(ctx context.Context, to types.JID, name string, options []string, selectable int, ephemeral bool) (types.MessageID, error) {

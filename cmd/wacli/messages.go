@@ -18,5 +18,6 @@ func newMessagesCmd(flags *rootFlags) *cobra.Command {
 	cmd.AddCommand(newMessagesRevokeCmd(flags))
 	cmd.AddCommand(newMessagesEditCmd(flags))
 	cmd.AddCommand(newMessagesForwardCmd(flags))
+	cmd.AddCommand(newMessagesMarkReadCmd(flags))
 	return cmd
 }

@@ -47,6 +47,7 @@ type sendDelegateRequest struct {
 	As                   string   `json:"as,omitempty"`
 	PTT                  bool     `json:"ptt,omitempty"`
 	ID                   string   `json:"id,omitempty"`
+	IDs                  []string `json:"ids,omitempty"`
 	Reaction             string   `json:"reaction,omitempty"`
 	Sender               string   `json:"sender,omitempty"`
 	Label                string   `json:"label,omitempty"`
@@ -83,6 +84,8 @@ type sendDelegateResponse struct {
 	StoreWarning   string            `json:"store_warning,omitempty"`
 	Chat           string            `json:"chat,omitempty"`
 	Action         string            `json:"action,omitempty"`
+	IDs            []string          `json:"ids,omitempty"`
+	Receipt        string            `json:"receipt,omitempty"`
 }
 
 type sendDelegateExecutor func(context.Context, sendDelegateRequest) (sendDelegateResponse, error)
@@ -306,6 +309,8 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 		return executeDelegatedEdit(ctx, a, req)
 	case "mark_read":
 		return executeDelegatedMarkRead(ctx, a, req)
+	case "read_receipt":
+		return executeDelegatedReadReceipt(ctx, a, req)
 	default:
 		return sendDelegateResponse{}, fmt.Errorf("unsupported send kind %q", req.Kind)
 	}
@@ -333,6 +338,31 @@ func executeDelegatedMarkRead(ctx context.Context, a delegatedMarkReadApp, req s
 		action = "mark-unread"
 	}
 	return sendDelegateResponse{OK: true, Chat: toJID.String(), Action: action}, nil
+}
+
+type delegatedReadReceiptApp interface {
+	recipientResolverApp
+	MarkMessagesRead(context.Context, types.JID, []string, types.JID) (types.ReceiptType, error)
+}
+
+func executeDelegatedReadReceipt(ctx context.Context, a delegatedReadReceiptApp, req sendDelegateRequest) (sendDelegateResponse, error) {
+	ids := cleanMessageIDs(req.IDs)
+	if len(ids) == 0 {
+		return sendDelegateResponse{}, fmt.Errorf("--id is required")
+	}
+	chat, err := resolveRecipient(a, req.To, recipientOptions{pick: req.Pick, asJSON: true})
+	if err != nil {
+		return sendDelegateResponse{}, err
+	}
+	sender, err := parseOptionalSender(req.Sender)
+	if err != nil {
+		return sendDelegateResponse{}, err
+	}
+	receipt, err := a.MarkMessagesRead(ctx, chat, ids, sender)
+	if err != nil {
+		return sendDelegateResponse{}, err
+	}
+	return sendDelegateResponse{OK: true, Sent: true, Chat: chat.String(), IDs: ids, Action: "mark-read", Receipt: string(receipt)}, nil
 }
 
 func executeDelegatedPresence(ctx context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {
