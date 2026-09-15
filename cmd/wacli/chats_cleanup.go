@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -87,10 +88,11 @@ Use --days to adjust the threshold. Use --dry-run to preview what would be delet
 			}
 
 			var deleted int
+			var failures []error
 			for _, c := range chats {
 				msgCount, _ := a.DB().CountChatMessages(c.JID)
 				if err := a.DB().DeleteChat(c.JID); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: failed to delete chat %s: %v\n", c.JID, err)
+					failures = append(failures, fmt.Errorf("delete chat %s: %w", c.JID, err))
 					continue
 				}
 				deleted++
@@ -101,6 +103,10 @@ Use --days to adjust the threshold. Use --dry-run to preview what would be delet
 					}
 					fmt.Fprintf(os.Stderr, "Deleted %s (%d messages)\n", name, msgCount)
 				}
+			}
+
+			if err := errors.Join(failures...); err != nil {
+				return fmt.Errorf("cleanup incomplete: deleted %d chat(s): %w", deleted, err)
 			}
 
 			if flags.asJSON {

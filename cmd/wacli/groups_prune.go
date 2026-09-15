@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -97,9 +98,10 @@ func pruneGroups(a *app.App, days int, includeActive, dryRun, confirm, asJSON bo
 	}
 
 	var deleted int
+	var failures []error
 	for _, g := range groups {
 		if err := a.DB().DeleteGroupLocalData(g.JID); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to delete group %s: %v\n", g.JID, err)
+			failures = append(failures, fmt.Errorf("delete group %s: %w", g.JID, err))
 			continue
 		}
 		deleted++
@@ -110,6 +112,10 @@ func pruneGroups(a *app.App, days int, includeActive, dryRun, confirm, asJSON bo
 			}
 			fmt.Fprintf(os.Stderr, "Deleted %s\n", sanitize(name))
 		}
+	}
+
+	if err := errors.Join(failures...); err != nil {
+		return fmt.Errorf("prune incomplete: deleted %d group(s): %w", deleted, err)
 	}
 
 	if asJSON {
