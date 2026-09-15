@@ -203,9 +203,8 @@ func TestRunSyncFollowLoggedOutWinsOverPendingReconnect(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			for i := range 50 {
-				a := newTestApp(t)
 				f := newFakeWA()
-				a.wa = f
+				a := &App{wa: f}
 
 				var messagesStored, connectionEpoch atomic.Int64
 				disconnected := make(chan struct{}, 1)
@@ -321,9 +320,8 @@ func TestRunSyncUntilIdleStopsOnLoggedOut(t *testing.T) {
 // queued, the loop must stop without reconnecting.
 func TestRunSyncUntilIdleLoggedOutWinsOverDisconnected(t *testing.T) {
 	for i := range 50 {
-		a := newTestApp(t)
 		f := newFakeWA()
-		a.wa = f
+		a := &App{wa: f}
 
 		var messagesStored, lastEvent atomic.Int64
 		lastEvent.Store(nowUTC().UnixNano())
