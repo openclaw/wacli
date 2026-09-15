@@ -15,6 +15,7 @@ import (
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/proto/waWeb"
+	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 )
@@ -26,8 +27,9 @@ type Options struct {
 type Client struct {
 	opts Options
 
-	mu     sync.Mutex
-	client *whatsmeow.Client
+	mu        sync.Mutex
+	client    *whatsmeow.Client
+	container *sqlstore.Container
 }
 
 func New(opts Options) (*Client, error) {
@@ -46,6 +48,20 @@ func New(opts Options) (*Client, error) {
 }
 
 func (c *Client) Close() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.client != nil {
+		c.client.Disconnect()
+		c.client = nil
+	}
+	if c.container != nil {
+		_ = c.container.Close()
+		c.container = nil
+	}
+}
+
+// Disconnect stops the socket while retaining the session store for reconnects.
+func (c *Client) Disconnect() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.client != nil {

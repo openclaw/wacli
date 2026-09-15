@@ -12,7 +12,7 @@ import (
 	"go.mau.fi/whatsmeow/store/sqlstore"
 )
 
-func (c *Client) init() error {
+func (c *Client) init() (err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -25,6 +25,11 @@ func (c *Client) init() error {
 	if err != nil {
 		return fmt.Errorf("open whatsmeow store: %w", err)
 	}
+	defer func() {
+		if err != nil {
+			_ = container.Close()
+		}
+	}()
 	if err := sqliteutil.ChmodFiles(c.opts.StorePath, 0o600); err != nil {
 		return err
 	}
@@ -49,5 +54,6 @@ func (c *Client) init() error {
 	// "Waiting for this message" indefinitely because whatsmeow can't find the
 	// original plaintext to re-encrypt when the retry arrives.
 	c.client.UseRetryMessageStore = true
+	c.container = container
 	return nil
 }

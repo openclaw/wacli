@@ -168,7 +168,7 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 			a.emitOrPrint("stream_replaced", nil, "\nStream replaced.\n")
 			// whatsmeow emits StreamReplaced before onDisconnect necessarily
 			// clears the socket, so force-close before reconnecting.
-			a.wa.Close()
+			a.wa.Disconnect()
 			select {
 			case disconnected <- struct{}{}:
 			default:

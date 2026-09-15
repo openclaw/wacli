@@ -24,6 +24,7 @@ import (
 
 type WAClient interface {
 	Close()
+	Disconnect()
 	IsAuthed() bool
 	IsConnected() bool
 	SetAutoReconnect(enabled bool) (previous bool, ok bool)
@@ -198,7 +199,7 @@ func (a *App) Close() {
 	sessionState, sessionHandler := a.sessionState, a.sessionHandler
 	a.waMu.Unlock()
 	if waClient != nil {
-		waClient.Close()
+		waClient.Disconnect()
 		if sessionState != nil {
 			waClient.RemoveEventHandler(sessionHandler)
 		}
@@ -209,6 +210,9 @@ func (a *App) Close() {
 	_ = a.appStatePersist.waitIdle(context.Background())
 	if sessionResolver != nil {
 		_ = sessionResolver.Close()
+	}
+	if waClient != nil {
+		waClient.Close()
 	}
 	if a.db != nil {
 		_ = a.db.Close()

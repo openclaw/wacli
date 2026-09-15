@@ -412,12 +412,18 @@ func TestFailedAppStateReplayPersistsIntentAndRecoversAtStartup(t *testing.T) {
 
 type recoveryCloseWA struct {
 	*appStateContextWA
-	closed chan struct{}
-	once   sync.Once
+	disconnected chan struct{}
+	closed       atomic.Bool
+	once         sync.Once
+}
+
+func (f *recoveryCloseWA) Disconnect() {
+	f.once.Do(func() { close(f.disconnected) })
+	f.fakeWA.Disconnect()
 }
 
 func (f *recoveryCloseWA) Close() {
-	f.once.Do(func() { close(f.closed) })
+	f.closed.Store(true)
 	f.fakeWA.Close()
 }
 
@@ -433,7 +439,7 @@ func TestCloseWaitsForAppStateRecoveryPersistence(t *testing.T) {
 		var releaseOnce sync.Once
 		defer a.Close()
 		defer releaseOnce.Do(func() { close(release) })
-		f := &recoveryCloseWA{appStateContextWA: &appStateContextWA{fakeWA: newFakeWA()}, closed: make(chan struct{})}
+		f := &recoveryCloseWA{appStateContextWA: &appStateContextWA{fakeWA: newFakeWA()}, disconnected: make(chan struct{})}
 		f.fetchEvents = func(context.Context, string, bool, bool) ([]any, error) {
 			close(started)
 			<-release
@@ -445,8 +451,11 @@ func TestCloseWaitsForAppStateRecoveryPersistence(t *testing.T) {
 		<-started
 		closed := make(chan struct{})
 		go func() { a.Close(); close(closed) }()
-		<-f.closed
+		<-f.disconnected
 		synctest.Wait()
+		if f.closed.Load() {
+			t.Fatal("App.Close closed the session store before recovery finished")
+		}
 		select {
 		case <-closed:
 			t.Fatal("App.Close closed the database before recovery finished")
@@ -455,6 +464,9 @@ func TestCloseWaitsForAppStateRecoveryPersistence(t *testing.T) {
 		releaseOnce.Do(func() { close(release) })
 		synctest.Wait()
 		<-closed
+		if !f.closed.Load() {
+			t.Fatal("App.Close did not close the session store after recovery finished")
+		}
 	})
 	db, err := store.OpenReadOnly(filepath.Join(a.StoreDir(), "wacli.db"))
 	if err != nil {

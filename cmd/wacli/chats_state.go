@@ -163,7 +163,7 @@ func runChatState(flags *rootFlags, opts chatStateOptions, action string, delega
 	defer func() {
 		// Keep the handler active until the socket is closed, then let App.Close
 		// drain every persistence task before it closes the local database.
-		a.WA().Close()
+		a.WA().Disconnect()
 		removePersistenceHandler()
 	}()
 	if err := a.Connect(ctx, false, nil); err != nil {

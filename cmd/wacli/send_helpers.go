@@ -92,7 +92,7 @@ func reconnectForSend(a interface {
 	Connect(context.Context, bool, func(string)) error
 }) func(context.Context) error {
 	return func(ctx context.Context) error {
-		a.WA().Close()
+		a.WA().Disconnect()
 		return a.Connect(ctx, false, nil)
 	}
 }

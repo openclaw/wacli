@@ -54,7 +54,7 @@ func (a *App) runSyncFollow(ctx context.Context, maxReconnect time.Duration, pre
 			}, "\nKeepalive has been failing for %s (threshold %s), reconnecting...\n", req.idle, req.threshold)
 			// Force-close before reconnecting, matching StreamReplaced. Without this,
 			// Client.Connect can see the existing socket as still live and return nil.
-			a.wa.Close()
+			a.wa.Disconnect()
 			connectionEpoch.Store(nowUTC().UnixNano())
 			loggedOutDuringReconnect, err := a.reconnectWhileWatchingLogout(ctx, maxReconnect, presenceMode, loggedOut)
 			if loggedOutDuringReconnect {

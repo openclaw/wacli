@@ -19,6 +19,8 @@ Read when: changing command boundaries, storage, synchronization, or protocol ha
 
 Each store owns two databases: `session.db` contains whatsmeow-managed identities, keys, and protocol state; `wacli.db` contains wacli's searchable mirror. Keep their schemas and lifecycle separate. Named accounts select isolated stores rather than combining account data in one database.
 
+The WhatsApp wrapper owns its session database container. Temporary `Disconnect` calls stop the socket while retaining the container for reconnects; permanent `Close` releases it. Application shutdown disconnects first, drains app-state persistence, and then closes both databases. Failed client initialization also releases any container it opened.
+
 The other store files include downloaded `media/`, an exclusive-writer `LOCK`, and the follow process's `HEARTBEAT`. The heartbeat records observed activity at most once per minute; it is not a process-liveness or keepalive-health signal. Files containing account state use owner-only permissions.
 
 Store selection and the supported legacy Linux directory fallback are documented in [accounts](accounts.md). Local row removal, retention, and statistics are documented in [store](store.md).

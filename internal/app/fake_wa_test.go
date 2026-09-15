@@ -159,7 +159,8 @@ func (f *fakeWA) emit(evt any) {
 	}
 }
 
-func (f *fakeWA) Close() { f.mu.Lock(); f.connected = false; f.mu.Unlock() }
+func (f *fakeWA) Close()      { f.Disconnect() }
+func (f *fakeWA) Disconnect() { f.mu.Lock(); f.connected = false; f.mu.Unlock() }
 
 func (f *fakeWA) IsAuthed() bool { f.mu.Lock(); defer f.mu.Unlock(); return f.authed }
 func (f *fakeWA) IsConnected() bool {
