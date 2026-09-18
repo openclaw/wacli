@@ -41,7 +41,7 @@ func newContactsSearchCmd(flags *rootFlags) *cobra.Command {
 			}
 			defer closeApp(a, lk)
 
-			cs, err := a.DB().SearchContacts(args[0], limit)
+			cs, err := searchContactsForDisplay(ctx, a, args[0], limit)
 			if err != nil {
 				return err
 			}
@@ -87,7 +87,7 @@ func newContactsShowCmd(flags *rootFlags) *cobra.Command {
 			}
 			defer closeApp(a, lk)
 
-			c, err := a.DB().GetContact(jid)
+			c, err := getContactForDisplay(ctx, a, jid)
 			if err != nil {
 				return err
 			}
