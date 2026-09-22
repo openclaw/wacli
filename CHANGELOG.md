@@ -2,18 +2,22 @@
 
 ## Unreleased
 
-- Dependencies: refresh WhatsApp protocol handling, Go modules, pnpm, GoReleaser, and Docker images; keep the Go and Node source requirements unchanged.
+## 0.18.3 - 2026-09-21
+
+**Highlights:** webhooks omit media keys, backfill follows verified phone/LID identities, and sync recovery survives interruptions.
+
+- Security: omit attachment decryption keys and retrieval fields from media webhooks while preserving descriptive metadata and local downloads. (#417 - thanks @hchittanuru3)
 - History and contacts: resolve verified phone/LID pairs for backfill requests and contact lookup, preserve alias/tag edits through either identity, and keep opaque LIDs out of phone fields. (#427 - thanks @ugoi)
 - History: wait for response persistence before checking backfill progress, preventing an asynchronous reply from stopping a multi-batch backfill early.
-- Security: omit attachment decryption keys and retrieval fields from media webhooks while preserving descriptive metadata and local downloads. (#417 - thanks @hchittanuru3)
-- Session: close the WhatsApp SQLite container on permanent shutdown and initialization failure, while keeping temporary reconnects usable and draining pending app-state persistence before closing either database.
-- Store: return failure when bulk chat/group cleanup cannot delete selected rows, preserving successful deletions and reporting the underlying errors instead of emitting a successful JSON result.
-- CLI: keep libsignal diagnostics off stdout, preserve warnings and errors safely on stderr, and emit them as NDJSON warnings with `--events` without exposing raw cryptographic payloads. (#418, #419 - thanks @shishiv)
 - Sync: decrypt encrypted message edits in live/history sync and bind updates to the authenticated sender, chat, and target. (#362, #363 - thanks @goutamadwant)
-- Messages: index associated-child and group-status-mention content and group-invite captions during live/history sync. (#365)
 - Sync: repair LTHash mismatches with a durable full refresh before bounded phone recovery, and replay interrupted recovery at startup. (#367, #382 - thanks @shishiv)
+- Messages: index associated-child and group-status-mention content and group-invite captions during live/history sync. (#365 - thanks @natea)
 - Auth: retain observed session revocation in auth/doctor diagnostics until confirmed login, and wait for login confirmation before reporting a successful diagnostic connection. (#389 - thanks @0xble)
-- Builds: update pnpm to 12.4.1, share production/test dead-code checks between local and CI gates, validate documentation links in CI, and isolate concurrent Windows lock cross-builds.
+- CLI: keep libsignal diagnostics off stdout, preserve warnings and errors safely on stderr, and emit them as NDJSON warnings with `--events` without exposing raw cryptographic payloads. (#418, #419 - thanks @shishiv)
+- Store: return failure when bulk chat/group cleanup cannot delete selected rows, preserving successful deletions and reporting the underlying errors instead of emitting a successful JSON result.
+- Session: close the WhatsApp SQLite container on permanent shutdown and initialization failure, while keeping temporary reconnects usable and draining pending app-state persistence before closing either database.
+- Dependencies: refresh WhatsApp protocol handling, Go modules, pnpm, GoReleaser, and Docker images; keep the Go and Node source requirements unchanged.
+- Builds: share production/test dead-code checks between local and CI gates, validate documentation links in CI, isolate concurrent Windows lock cross-builds, and allow Go module maintenance while keeping CGO-disabled builds rejected.
 
 ## 0.18.2 - 2026-09-11
 
