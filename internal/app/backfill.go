@@ -106,8 +106,6 @@ func (a *App) BackfillHistory(ctx context.Context, opts BackfillOptions) (Backfi
 	}
 	handlerID := a.wa.AddEventHandler(func(evt any) {
 		switch v := evt.(type) {
-		case *events.HistorySync:
-			handleOnDemand(v)
 		case *events.Message:
 			notif := historySyncNotificationFromMessage(v)
 			if notif == nil || notif.GetSyncType() != waE2E.HistorySyncType_ON_DEMAND {
@@ -183,9 +181,10 @@ func (a *App) BackfillHistory(ctx context.Context, opts BackfillOptions) (Backfi
 	}
 
 	syncRes, err := a.Sync(ctx, SyncOptions{
-		Mode:     SyncModeOnce,
-		AllowQR:  false,
-		IdleExit: opts.IdleExit,
+		Mode:             SyncModeOnce,
+		AllowQR:          false,
+		IdleExit:         opts.IdleExit,
+		afterHistorySync: handleOnDemand,
 		AfterConnect: func(ctx context.Context) error {
 			// Sync can learn mappings and migrate old LID rows while connecting.
 			// Resolve the local identity only after that migration has completed.

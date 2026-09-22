@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- History and contacts: resolve verified phone/LID pairs for backfill requests and contact lookup, preserve alias/tag edits through either identity, and keep opaque LIDs out of phone fields. (#427 - thanks @ugoi)
+- History: wait for response persistence before checking backfill progress, preventing an asynchronous reply from stopping a multi-batch backfill early.
 - Security: omit attachment decryption keys and retrieval fields from media webhooks while preserving descriptive metadata and local downloads. (#417 - thanks @hchittanuru3)
 - Session: close the WhatsApp SQLite container on permanent shutdown and initialization failure, while keeping temporary reconnects usable and draining pending app-state persistence before closing either database.
 - Store: return failure when bulk chat/group cleanup cannot delete selected rows, preserving successful deletions and reporting the underlying errors instead of emitting a successful JSON result.

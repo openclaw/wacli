@@ -14,6 +14,7 @@ import (
 	"github.com/openclaw/wacli/internal/wa"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/types"
+	"go.mau.fi/whatsmeow/types/events"
 )
 
 const maxAuthConnectAttempts = 3
@@ -77,7 +78,7 @@ type SyncOptions struct {
 	WebhookSecret       string
 	WebhookAllowPrivate bool
 	WebhookEvents       SyncWebhookEventSet // nil = messages only
-	Verbosity           int                 // future
+	afterHistorySync    func(*events.HistorySync)
 }
 
 type SyncResult struct {

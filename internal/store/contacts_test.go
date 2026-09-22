@@ -4,6 +4,32 @@ import (
 	"testing"
 )
 
+func TestContactMetadataUpdateRollsBackAllIdentities(t *testing.T) {
+	db := openTestDB(t)
+	jids := []string{"111@s.whatsapp.net", "222@lid"}
+	for _, jid := range jids {
+		if err := db.UpsertContact(jid, "", "", "Contact", "", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.SetAlias(jids, "original"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.sql.Exec(`CREATE TRIGGER reject_alias BEFORE INSERT ON contact_aliases
+		WHEN NEW.jid = '222@lid' BEGIN SELECT RAISE(ABORT, 'synthetic write failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetAlias(jids, "replacement"); err == nil {
+		t.Fatal("expected alias update to fail")
+	}
+	for _, jid := range jids {
+		got, err := db.GetContact(jid)
+		if err != nil || got.Alias != "original" {
+			t.Fatalf("partial alias update for %s: %+v, %v", jid, got, err)
+		}
+	}
+}
+
 func TestContactsAliasTagsAndSearch(t *testing.T) {
 	db := openTestDB(t)
 
@@ -11,13 +37,13 @@ func TestContactsAliasTagsAndSearch(t *testing.T) {
 	if err := db.UpsertContact(jid, "111", "Push", "Full Name", "First", "Biz"); err != nil {
 		t.Fatalf("UpsertContact: %v", err)
 	}
-	if err := db.SetAlias(jid, "Ali"); err != nil {
+	if err := db.SetAlias([]string{jid}, "Ali"); err != nil {
 		t.Fatalf("SetAlias: %v", err)
 	}
-	if err := db.AddTag(jid, "friends"); err != nil {
+	if err := db.AddTag([]string{jid}, "friends"); err != nil {
 		t.Fatalf("AddTag: %v", err)
 	}
-	if err := db.AddTag(jid, "work"); err != nil {
+	if err := db.AddTag([]string{jid}, "work"); err != nil {
 		t.Fatalf("AddTag: %v", err)
 	}
 
@@ -50,10 +76,10 @@ func TestContactsAliasTagsAndSearch(t *testing.T) {
 		}
 	}
 
-	if err := db.RemoveTag(jid, "work"); err != nil {
+	if err := db.RemoveTag([]string{jid}, "work"); err != nil {
 		t.Fatalf("RemoveTag: %v", err)
 	}
-	if err := db.RemoveAlias(jid); err != nil {
+	if err := db.RemoveAlias([]string{jid}); err != nil {
 		t.Fatalf("RemoveAlias: %v", err)
 	}
 	c, err = db.GetContact(jid)
@@ -95,7 +121,7 @@ func TestContactSystemNamePrecedenceAndSearch(t *testing.T) {
 		t.Fatalf("expected system-name match, got %#v", found)
 	}
 
-	if err := db.SetAlias(jid, "Alias Alice"); err != nil {
+	if err := db.SetAlias([]string{jid}, "Alias Alice"); err != nil {
 		t.Fatalf("SetAlias: %v", err)
 	}
 	c, err = db.GetContact(jid)

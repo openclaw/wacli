@@ -16,6 +16,58 @@ const (
 	contactLID = "900000001@lid"
 )
 
+func TestContactsReadMetadataWithoutCounterpartContactRow(t *testing.T) {
+	for _, tc := range []struct{ name, pn, lid, metadataJID string }{
+		{"LID only", "15550001003@s.whatsapp.net", "900000003@lid", "15550001003@s.whatsapp.net"},
+		{"PN only", "15550001004@s.whatsapp.net", "900000004@lid", "900000004@lid"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := seedContactReadStore(t, true)
+			db := openSystemImportStore(t, dir)
+			if tc.name == "PN only" {
+				if err := db.UpsertContact(tc.pn, "15550001004", "", "Phone only", "", ""); err != nil {
+					t.Fatal(err)
+				}
+				session, err := sql.Open("sqlite3", filepath.Join(dir, "session.db"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, err = session.Exec(`INSERT INTO whatsmeow_lid_map VALUES ('900000004', '15550001004')`)
+				session.Close()
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := db.SetAlias([]string{tc.metadataJID}, "Counterpart alias"); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.AddTag([]string{tc.metadataJID}, "counterpart tag"); err != nil {
+				t.Fatal(err)
+			}
+			db.Close()
+			for _, jid := range []string{tc.pn, tc.lid} {
+				got := runContactsShow(t, dir, jid)
+				if got.Alias != "Counterpart alias" || got.Name != got.Alias || !reflect.DeepEqual(got.Tags, []string{"counterpart tag"}) {
+					t.Errorf("metadata missing through %s: %+v", jid, got)
+				}
+			}
+			if got := runContactsSearch(t, dir, "Counterpart alias"); len(got) != 1 || got[0].JID != tc.pn {
+				t.Errorf("counterpart alias search = %+v", got)
+			}
+			if tc.name == "PN only" {
+				db = openSystemImportStore(t, dir)
+				if err := db.SetAlias([]string{tc.pn}, "Primary alias"); err != nil {
+					t.Fatal(err)
+				}
+				db.Close()
+				if got := runContactsSearch(t, dir, "Counterpart alias"); len(got) != 1 || got[0].Alias != "Primary alias" {
+					t.Errorf("hidden counterpart alias search = %+v", got)
+				}
+			}
+		})
+	}
+}
+
 func TestContactsSearchFoldsOnlyMappedIdentitiesBeforeLimit(t *testing.T) {
 	storeDir := seedContactReadStore(t, true)
 	contacts := runContactsSearch(t, storeDir, "Alex", "--limit", "2")
@@ -30,7 +82,7 @@ func TestContactsSearchFoldsOnlyMappedIdentitiesBeforeLimit(t *testing.T) {
 func TestContactsSearchFindsEitherIdentityAndMetadata(t *testing.T) {
 	storeDir := seedContactReadStore(t, true)
 	db := openSystemImportStore(t, storeDir)
-	if err := db.SetAlias(contactLID, "Device nickname"); err != nil {
+	if err := db.SetAlias([]string{contactLID}, "Device nickname"); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.SetSystemName(contactLID, "Imported name"); err != nil {
@@ -123,20 +175,20 @@ func TestContactsShowMergesMetadataWithoutChangingStoredRows(t *testing.T) {
 	storeDir := seedContactReadStore(t, true)
 	db := openSystemImportStore(t, storeDir)
 	for jid, alias := range map[string]string{contactPN: "Primary alias", contactLID: "Device alias"} {
-		if err := db.SetAlias(jid, alias); err != nil {
+		if err := db.SetAlias([]string{jid}, alias); err != nil {
 			t.Fatal(err)
 		}
-		if err := db.AddTag(jid, "shared"); err != nil {
+		if err := db.AddTag([]string{jid}, "shared"); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if err := db.SetSystemName(contactLID, "System name"); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AddTag(contactPN, "work"); err != nil {
+	if err := db.AddTag([]string{contactPN}, "work"); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AddTag(contactLID, "family"); err != nil {
+	if err := db.AddTag([]string{contactLID}, "family"); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {

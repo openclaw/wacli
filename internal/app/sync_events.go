@@ -113,6 +113,10 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 		case *events.HistorySync:
 			lastEvent.Store(nowUTC().UnixNano())
 			a.handleHistorySync(ctx, opts, v, messagesStored, lastEvent, enqueueMedia, limits)
+			// Backfill checks local anchors as soon as it receives this response.
+			if opts.afterHistorySync != nil {
+				opts.afterHistorySync(v)
+			}
 		case *events.Receipt:
 			lastEvent.Store(nowUTC().UnixNano())
 			a.handleReceiptPersistenceEvent(ctx, v)

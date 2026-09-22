@@ -233,7 +233,7 @@ func TestResolveRecipientUsesContactAlias(t *testing.T) {
 	if err := db.UpsertContact("15551234567@s.whatsapp.net", "15551234567", "Alice", "", "", ""); err != nil {
 		t.Fatalf("UpsertContact: %v", err)
 	}
-	if err := db.SetAlias("15551234567@s.whatsapp.net", "mom"); err != nil {
+	if err := db.SetAlias([]string{"15551234567@s.whatsapp.net"}, "mom"); err != nil {
 		t.Fatalf("SetAlias: %v", err)
 	}
 
