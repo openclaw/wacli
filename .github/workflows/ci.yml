@@ -78,19 +78,19 @@ jobs:
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           distribution: goreleaser
-          version: v2.18.1
+          version: v2.18.2
           args: check --config .goreleaser.yaml
 
       - name: GoReleaser check (linux/windows)
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           distribution: goreleaser
-          version: v2.18.1
+          version: v2.18.2
           args: check --config .goreleaser-linux-windows.yaml
 
       - name: GoReleaser build (linux amd64/arm64)
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           distribution: goreleaser
-          version: v2.18.1
+          version: v2.18.2
           args: build --snapshot --clean --config .goreleaser-linux-windows.yaml --id wacli_linux_amd64 --id wacli_linux_arm64

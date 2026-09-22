@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Dependencies: refresh WhatsApp protocol handling, Go modules, pnpm, GoReleaser, and Docker images; keep the Go and Node source requirements unchanged.
 - History and contacts: resolve verified phone/LID pairs for backfill requests and contact lookup, preserve alias/tag edits through either identity, and keep opaque LIDs out of phone fields. (#427 - thanks @ugoi)
 - History: wait for response persistence before checking backfill progress, preventing an asynchronous reply from stopping a multi-batch backfill early.
 - Security: omit attachment decryption keys and retrieval fields from media webhooks while preserving descriptive metadata and local downloads. (#417 - thanks @hchittanuru3)
