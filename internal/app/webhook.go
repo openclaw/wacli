@@ -36,7 +36,17 @@ var syncWebhookRequestTimeout = 5 * time.Second
 
 type syncWebhookPayload struct {
 	wa.ParsedMessage
+	Media    *syncWebhookMedia
 	ChatName string `json:"ChatName,omitempty"`
+}
+
+// Keep retrieval credentials in the local store, outside the webhook contract.
+type syncWebhookMedia struct {
+	Type       string
+	Caption    string
+	Filename   string
+	MimeType   string
+	FileLength uint64
 }
 
 type syncWebhookReceiptPayload struct {
@@ -198,6 +208,13 @@ func (a *App) newSyncWebhookEventPayload(ctx context.Context, evt syncWebhookEve
 func (a *App) newSyncWebhookPayload(ctx context.Context, pm wa.ParsedMessage) syncWebhookPayload {
 	pm = a.canonicalWebhookMessage(ctx, pm)
 	payload := syncWebhookPayload{ParsedMessage: pm}
+	if pm.Media != nil {
+		payload.Media = &syncWebhookMedia{
+			Type: pm.Media.Type, Caption: pm.Media.Caption, Filename: pm.Media.Filename,
+			MimeType: pm.Media.MimeType, FileLength: pm.Media.FileLength,
+		}
+		payload.ParsedMessage.Media = nil
+	}
 	chatJID := canonicalJIDString(pm.Chat)
 	if chatJID != "" && a.db != nil {
 		chat, err := a.db.GetChat(chatJID)

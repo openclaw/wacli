@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -227,7 +228,14 @@ func TestMessageWebhookPayloadMatchesLegacyBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal legacy message: %v", err)
 	}
-	if !bytes.Equal(got, legacy) {
+	var gotFields, legacyFields map[string]any
+	if err := json.Unmarshal(got, &gotFields); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(legacy, &legacyFields); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(gotFields, legacyFields) {
 		t.Fatalf("message payload changed\ngot:  %s\nwant: %s", got, legacy)
 	}
 }

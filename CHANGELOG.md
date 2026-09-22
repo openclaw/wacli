@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Security: omit attachment decryption keys and retrieval fields from media webhooks while preserving descriptive metadata and local downloads. (#417 - thanks @hchittanuru3)
 - Session: close the WhatsApp SQLite container on permanent shutdown and initialization failure, while keeping temporary reconnects usable and draining pending app-state persistence before closing either database.
 - Store: return failure when bulk chat/group cleanup cannot delete selected rows, preserving successful deletions and reporting the underlying errors instead of emitting a successful JSON result.
 - CLI: keep libsignal diagnostics off stdout, preserve warnings and errors safely on stderr, and emit them as NDJSON warnings with `--events` without exposing raw cryptographic payloads. (#418, #419 - thanks @shishiv)
