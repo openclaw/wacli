@@ -114,6 +114,16 @@ type chatStateApp interface {
 	MarkChatRead(context.Context, types.JID, bool) error
 }
 
+// runChatState runs a chat-state mutation, using the local store-lock path via
+// run when no daemon holds the lock. delegateRead is non-nil only for the
+// mark-read/mark-unread pair, and delegation to the daemon's send IPC is allowed
+// only for mark-read (read=true), which uses the network receipt path.
+//
+// mark-unread is a regular_low app-state write and MUST NOT be delegated:
+// executing it inside the daemon can re-enter app-state recovery while holding
+// chatStateSync and wedge the send IPC. It therefore falls through to the local
+// store-lock path, failing fast when a daemon holds the lock — the same behavior
+// as archive/pin/mute.
 func runChatState(flags *rootFlags, opts chatStateOptions, action string, delegateRead *bool, run func(context.Context, chatStateApp, types.JID) error) error {
 	if strings.TrimSpace(opts.chat) == "" {
 		return fmt.Errorf("--chat is required")
@@ -127,7 +137,7 @@ func runChatState(flags *rootFlags, opts chatStateOptions, action string, delega
 
 	a, lk, err := newApp(ctx, flags, true, false)
 	if err != nil {
-		if delegateRead != nil {
+		if delegateRead != nil && *delegateRead {
 			resp, delegated, delegateErr := tryDelegateSend(ctx, flags, err, sendDelegateRequest{
 				Kind: "mark_read",
 				To:   opts.chat,

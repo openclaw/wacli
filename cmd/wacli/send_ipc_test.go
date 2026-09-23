@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openclaw/wacli/internal/app"
 	"github.com/openclaw/wacli/internal/fsutil"
@@ -426,16 +427,15 @@ type fakeDelegatedMarkReadApp struct {
 
 func (f *fakeDelegatedMarkReadApp) DB() *store.DB { return nil }
 
-func (f *fakeDelegatedMarkReadApp) MarkChatRead(_ context.Context, chat types.JID, read bool) error {
-	f.calls <- delegatedMarkReadCall{chat: chat, read: read}
-	return nil
-}
-
 func (f *fakeDelegatedMarkReadApp) MarkChatReadReceipt(_ context.Context, chat types.JID) error {
 	f.calls <- delegatedMarkReadCall{chat: chat, read: true, receipt: true}
 	return nil
 }
 
+// TestChatsMarkReadDelegatesThroughProductionServerWhenStoreLocked proves the
+// delegated mark-read path uses the network receipt (never app-state), and that
+// mark-unread is never executed as an in-daemon app-state write: it falls through
+// to the local store-lock path and fails fast, like archive/pin/mute.
 func TestChatsMarkReadDelegatesThroughProductionServerWhenStoreLocked(t *testing.T) {
 	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
 	storeDir := shortPresenceDelegateStoreDir(t)
@@ -474,48 +474,76 @@ func TestChatsMarkReadDelegatesThroughProductionServerWhenStoreLocked(t *testing
 		t.Fatalf("delegate socket mode = %v, want socket 0600", info.Mode())
 	}
 
-	tests := []struct {
-		command string
-		read    bool
-		receipt bool
-	}{
-		// mark-read must use the network receipt path (no regular_low app-state),
-		// so it cannot wedge on an LTHash-mismatched app-state recovery.
-		{command: "mark-read", read: true, receipt: true},
-		{command: "mark-unread", read: false, receipt: false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.command, func(t *testing.T) {
-			stdout, stderr, err := runPresenceDelegateHelper(t, []string{
-				"--store", storeDir, "--json", "--timeout", "750ms",
-				"chats", tt.command, "--chat", "123@s.whatsapp.net",
-			})
-			if err != nil {
-				t.Fatalf("chats %s failed: %v stdout=%q stderr=%q", tt.command, err, stdout, stderr)
-			}
-
-			select {
-			case call := <-fake.calls:
-				if call.chat.String() != "123@s.whatsapp.net" || call.read != tt.read || call.receipt != tt.receipt {
-					t.Fatalf("fake mark-read call = %+v, want chat 123@s.whatsapp.net read %t receipt %t", call, tt.read, tt.receipt)
-				}
-			case <-contextWithTestTimeout(t).Done():
-				t.Fatal("timed out waiting for delegated mark-read call")
-			}
-			if strings.Contains(stderr, "store is locked") {
-				t.Fatalf("delegated command returned lock error: stderr=%q", stderr)
-			}
-			for _, want := range []string{`"ok":true`, `"action":"` + tt.command + `"`, `"chat":"123@s.whatsapp.net"`} {
-				if !strings.Contains(stdout, want) {
-					t.Fatalf("stdout %q missing %s", stdout, want)
-				}
-			}
+	t.Run("mark-read uses the receipt path", func(t *testing.T) {
+		stdout, stderr, err := runPresenceDelegateHelper(t, []string{
+			"--store", storeDir, "--json", "--timeout", "750ms",
+			"chats", "mark-read", "--chat", "123@s.whatsapp.net",
 		})
-	}
+		if err != nil {
+			t.Fatalf("chats mark-read failed: %v stdout=%q stderr=%q", err, stdout, stderr)
+		}
+
+		select {
+		case call := <-fake.calls:
+			if call.chat.String() != "123@s.whatsapp.net" || !call.read || !call.receipt {
+				t.Fatalf("fake mark-read call = %+v, want chat 123@s.whatsapp.net read true receipt true", call)
+			}
+		case <-contextWithTestTimeout(t).Done():
+			t.Fatal("timed out waiting for delegated mark-read call")
+		}
+		if strings.Contains(stderr, "store is locked") {
+			t.Fatalf("delegated command returned lock error: stderr=%q", stderr)
+		}
+		for _, want := range []string{`"ok":true`, `"action":"mark-read"`, `"chat":"123@s.whatsapp.net"`} {
+			if !strings.Contains(stdout, want) {
+				t.Fatalf("stdout %q missing %s", stdout, want)
+			}
+		}
+	})
+
+	t.Run("mark-unread stays off the daemon", func(t *testing.T) {
+		stdout, stderr, err := runPresenceDelegateHelper(t, []string{
+			"--store", storeDir, "--json", "--timeout", "750ms",
+			"chats", "mark-unread", "--chat", "123@s.whatsapp.net",
+		})
+		if err == nil {
+			t.Fatalf("chats mark-unread succeeded under a running daemon; want fail-fast: stdout=%q stderr=%q", stdout, stderr)
+		}
+		if !strings.Contains(stderr, "store is locked") {
+			t.Fatalf("stderr = %q, want store-lock fail-fast", stderr)
+		}
+		select {
+		case call := <-fake.calls:
+			t.Fatalf("mark-unread was executed inside the daemon as an app-state write: %+v", call)
+		case <-time.After(300 * time.Millisecond):
+		}
+	})
 
 	stop()
 	stopped = true
 	if _, err := os.Lstat(socketPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("delegate socket remains after stop: %v", err)
+	}
+}
+
+// TestExecuteDelegatedMarkReadRefusesUnreadAppStateWrite is the compile-time and
+// runtime invariant behind F4: the delegated executor has no app-state method,
+// and a mark-unread request is refused before it can touch any store.
+func TestExecuteDelegatedMarkReadRefusesUnreadAppStateWrite(t *testing.T) {
+	fake := &fakeDelegatedMarkReadApp{calls: make(chan delegatedMarkReadCall, 1)}
+	unread := false
+	_, err := executeDelegatedMarkRead(context.Background(), fake, sendDelegateRequest{
+		Version: sendDelegateVersion,
+		Kind:    "mark_read",
+		To:      "123@s.whatsapp.net",
+		Read:    &unread,
+	})
+	if err == nil || !strings.Contains(err.Error(), "app-state write") {
+		t.Fatalf("error = %v, want app-state refusal", err)
+	}
+	select {
+	case call := <-fake.calls:
+		t.Fatalf("mark-unread reached the app-state write: %+v", call)
+	default:
 	}
 }

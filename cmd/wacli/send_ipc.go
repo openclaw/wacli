@@ -313,33 +313,32 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 
 type delegatedMarkReadApp interface {
 	recipientResolverApp
-	MarkChatRead(context.Context, types.JID, bool) error
 	MarkChatReadReceipt(context.Context, types.JID) error
 }
 
 func executeDelegatedMarkRead(ctx context.Context, a delegatedMarkReadApp, req sendDelegateRequest) (sendDelegateResponse, error) {
-	toJID, err := resolveRecipient(a, req.To, recipientOptions{pick: req.Pick, asJSON: true})
-	if err != nil {
-		return sendDelegateResponse{}, err
-	}
 	read := true
 	if req.Read != nil {
 		read = *req.Read
 	}
-	if read {
-		// Receipt path (network, no app-state) so mark-read works even when the
-		// regular_low app-state is stuck (LTHash) — which otherwise hangs MarkChatRead
-		// and wedges the daemon's send IPC. There is no receipt-based "unread", so
-		// mark-unread keeps the app-state path.
-		if err := a.MarkChatReadReceipt(ctx, toJID); err != nil {
-			return sendDelegateResponse{}, err
-		}
-		return sendDelegateResponse{OK: true, Chat: toJID.String(), Action: "mark-read"}, nil
+	if !read {
+		// There is no receipt-based "unread": mark-unread is a regular_low
+		// app-state write. Refuse it here so a delegated request can never run an
+		// app-state mutation inside the daemon, where it can re-enter
+		// RequestAppStateRecovery while holding chatStateSync and wedge the send IPC.
+		return sendDelegateResponse{}, errors.New("mark-unread is an app-state write; stop the daemon / use the store-lock path")
 	}
-	if err := a.MarkChatRead(ctx, toJID, false); err != nil {
+	toJID, err := resolveRecipient(a, req.To, recipientOptions{pick: req.Pick, asJSON: true})
+	if err != nil {
 		return sendDelegateResponse{}, err
 	}
-	return sendDelegateResponse{OK: true, Chat: toJID.String(), Action: "mark-unread"}, nil
+	// Receipt path (network, no app-state) so mark-read works even when the
+	// regular_low app-state is stuck (LTHash) — which otherwise hangs MarkChatRead
+	// and wedges the daemon's send IPC.
+	if err := a.MarkChatReadReceipt(ctx, toJID); err != nil {
+		return sendDelegateResponse{}, err
+	}
+	return sendDelegateResponse{OK: true, Chat: toJID.String(), Action: "mark-read"}, nil
 }
 
 func executeDelegatedPresence(ctx context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {
