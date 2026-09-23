@@ -1060,6 +1060,61 @@ func TestMarkChatReadUsesLatestMessageRange(t *testing.T) {
 	}
 }
 
+func TestMarkChatReadReceiptSendsNetworkReceiptWithoutAppState(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	group := types.NewJID("120363405095564557", types.GroupServer)
+	sender := types.NewJID("919686577080", types.DefaultUserServer)
+	when := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+	if err := a.db.UpsertChat(group.String(), "group", "Test Group", when); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	if err := a.db.UpsertMessage(store.UpsertMessageParams{
+		ChatJID:   group.String(),
+		MsgID:     "latest",
+		SenderJID: sender.String(),
+		Timestamp: when,
+		Text:      "hi",
+	}); err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+	if err := a.db.SetChatUnread(group.String(), true); err != nil {
+		t.Fatalf("SetChatUnread: %v", err)
+	}
+
+	if err := a.MarkChatReadReceipt(context.Background(), group); err != nil {
+		t.Fatalf("MarkChatReadReceipt: %v", err)
+	}
+
+	// The read-receipt path must never touch app-state (the regular_low patch is
+	// what wedges on LTHash mismatch and blocks the daemon's send IPC).
+	f.mu.Lock()
+	markReadCalls := append([]fakeMarkReadCall(nil), f.markReadCalls...)
+	receiptCalls := append([]fakeReadReceiptCall(nil), f.readReceiptCalls...)
+	f.mu.Unlock()
+	if len(markReadCalls) != 0 {
+		t.Fatalf("app-state mark-read calls = %d, want 0", len(markReadCalls))
+	}
+	if len(receiptCalls) != 1 {
+		t.Fatalf("read receipt calls = %d, want 1", len(receiptCalls))
+	}
+	if len(receiptCalls[0].ids) != 1 || receiptCalls[0].ids[0] != "latest" {
+		t.Fatalf("receipt ids = %v, want [latest]", receiptCalls[0].ids)
+	}
+	if receiptCalls[0].chat != group || receiptCalls[0].sender != sender {
+		t.Fatalf("receipt chat/sender = %s/%s, want %s/%s", receiptCalls[0].chat, receiptCalls[0].sender, group, sender)
+	}
+	stored, err := a.db.GetChat(group.String())
+	if err != nil {
+		t.Fatalf("GetChat: %v", err)
+	}
+	if stored.Unread {
+		t.Fatalf("expected chat to be marked read, got %+v", stored)
+	}
+}
+
 func TestMuteChatRecoversRegularHighBeforeWrite(t *testing.T) {
 	for _, tc := range []struct {
 		name string

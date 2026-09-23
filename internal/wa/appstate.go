@@ -43,3 +43,17 @@ func (c *Client) MuteChat(ctx context.Context, target types.JID, mute bool, dura
 func (c *Client) MarkChatAsRead(ctx context.Context, target types.JID, read bool, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey, beforeApply func()) ([]any, error) {
 	return c.sendAppStateWithBoundary(ctx, appstate.BuildMarkChatAsRead(target, read, lastMsgTS, lastMsgKey), beforeApply)
 }
+
+// SendReadReceipt sends a plain read receipt (network) for the given message IDs —
+// no app-state mutation. This is the lightweight "mark read" that propagates read
+// state to the user's own devices (read-self) without the regular_low app-state
+// patch, so it works even when app-state sync is stuck (LTHash mismatch).
+func (c *Client) SendReadReceipt(ctx context.Context, ids []types.MessageID, ts time.Time, chat, sender types.JID) error {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || !cli.IsConnected() {
+		return fmt.Errorf("not connected")
+	}
+	return cli.MarkRead(ctx, ids, ts, chat, sender)
+}

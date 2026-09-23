@@ -21,7 +21,11 @@ func (c *Client) init() (err error) {
 	if err := sqliteutil.ChmodFiles(c.opts.StorePath, 0o600); err != nil {
 		return err
 	}
-	container, err := sqlstore.New(ctx, "sqlite3", sqliteutil.FileURI(c.opts.StorePath, "_foreign_keys=on"), dbLog)
+	// _busy_timeout matches the message-store and read-only paths (internal/store/db.go,
+	// auth_status_readonly.go): without it the sync-write vs the decryption retry-receipt's
+	// prekey-read collide and fail INSTANTLY ("database is locked"), which kills whatsmeow's
+	// retry path and leaves messages stored as "(message)". Making the read wait fixes that.
+	container, err := sqlstore.New(ctx, "sqlite3", sqliteutil.FileURI(c.opts.StorePath, "_foreign_keys=on&_busy_timeout=5000"), dbLog)
 	if err != nil {
 		return fmt.Errorf("open whatsmeow store: %w", err)
 	}

@@ -415,8 +415,9 @@ func TestExecuteDelegatedSendRoutesMarkRead(t *testing.T) {
 }
 
 type delegatedMarkReadCall struct {
-	chat types.JID
-	read bool
+	chat    types.JID
+	read    bool
+	receipt bool
 }
 
 type fakeDelegatedMarkReadApp struct {
@@ -427,6 +428,11 @@ func (f *fakeDelegatedMarkReadApp) DB() *store.DB { return nil }
 
 func (f *fakeDelegatedMarkReadApp) MarkChatRead(_ context.Context, chat types.JID, read bool) error {
 	f.calls <- delegatedMarkReadCall{chat: chat, read: read}
+	return nil
+}
+
+func (f *fakeDelegatedMarkReadApp) MarkChatReadReceipt(_ context.Context, chat types.JID) error {
+	f.calls <- delegatedMarkReadCall{chat: chat, read: true, receipt: true}
 	return nil
 }
 
@@ -471,9 +477,12 @@ func TestChatsMarkReadDelegatesThroughProductionServerWhenStoreLocked(t *testing
 	tests := []struct {
 		command string
 		read    bool
+		receipt bool
 	}{
-		{command: "mark-read", read: true},
-		{command: "mark-unread", read: false},
+		// mark-read must use the network receipt path (no regular_low app-state),
+		// so it cannot wedge on an LTHash-mismatched app-state recovery.
+		{command: "mark-read", read: true, receipt: true},
+		{command: "mark-unread", read: false, receipt: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.command, func(t *testing.T) {
@@ -487,8 +496,8 @@ func TestChatsMarkReadDelegatesThroughProductionServerWhenStoreLocked(t *testing
 
 			select {
 			case call := <-fake.calls:
-				if call.chat.String() != "123@s.whatsapp.net" || call.read != tt.read {
-					t.Fatalf("fake mark-read call = %+v, want chat 123@s.whatsapp.net read %t", call, tt.read)
+				if call.chat.String() != "123@s.whatsapp.net" || call.read != tt.read || call.receipt != tt.receipt {
+					t.Fatalf("fake mark-read call = %+v, want chat 123@s.whatsapp.net read %t receipt %t", call, tt.read, tt.receipt)
 				}
 			case <-contextWithTestTimeout(t).Done():
 				t.Fatal("timed out waiting for delegated mark-read call")

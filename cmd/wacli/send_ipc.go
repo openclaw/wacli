@@ -314,6 +314,7 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 type delegatedMarkReadApp interface {
 	recipientResolverApp
 	MarkChatRead(context.Context, types.JID, bool) error
+	MarkChatReadReceipt(context.Context, types.JID) error
 }
 
 func executeDelegatedMarkRead(ctx context.Context, a delegatedMarkReadApp, req sendDelegateRequest) (sendDelegateResponse, error) {
@@ -325,14 +326,20 @@ func executeDelegatedMarkRead(ctx context.Context, a delegatedMarkReadApp, req s
 	if req.Read != nil {
 		read = *req.Read
 	}
-	if err := a.MarkChatRead(ctx, toJID, read); err != nil {
+	if read {
+		// Receipt path (network, no app-state) so mark-read works even when the
+		// regular_low app-state is stuck (LTHash) — which otherwise hangs MarkChatRead
+		// and wedges the daemon's send IPC. There is no receipt-based "unread", so
+		// mark-unread keeps the app-state path.
+		if err := a.MarkChatReadReceipt(ctx, toJID); err != nil {
+			return sendDelegateResponse{}, err
+		}
+		return sendDelegateResponse{OK: true, Chat: toJID.String(), Action: "mark-read"}, nil
+	}
+	if err := a.MarkChatRead(ctx, toJID, false); err != nil {
 		return sendDelegateResponse{}, err
 	}
-	action := "mark-read"
-	if !read {
-		action = "mark-unread"
-	}
-	return sendDelegateResponse{OK: true, Chat: toJID.String(), Action: action}, nil
+	return sendDelegateResponse{OK: true, Chat: toJID.String(), Action: "mark-unread"}, nil
 }
 
 func executeDelegatedPresence(ctx context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {

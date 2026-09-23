@@ -142,6 +142,29 @@ func (a *App) MarkChatRead(ctx context.Context, jid types.JID, read bool) error 
 	})
 }
 
+// MarkChatReadReceipt marks a chat read WITHOUT the regular_low app-state patch: it
+// sends a plain read receipt (network) for the chat's latest message and flips the
+// local unread flag. Use when the app-state is stuck (LTHash mismatch) and the normal
+// MarkChatRead would hang on the apply boundary. Read-only (there is no receipt-based
+// "unread").
+func (a *App) MarkChatReadReceipt(ctx context.Context, jid types.JID) error {
+	chatJID := canonicalJIDString(a.canonicalStoreJID(ctx, jid))
+	_, lastKey := a.latestMessageRange(chatJID)
+	if lastKey == nil || lastKey.GetID() == "" {
+		return nil // nothing to mark read
+	}
+	var sender types.JID
+	if p := lastKey.GetParticipant(); p != "" {
+		if pj, err := types.ParseJID(p); err == nil {
+			sender = pj
+		}
+	}
+	if err := a.wa.SendReadReceipt(ctx, []types.MessageID{types.MessageID(lastKey.GetID())}, time.Now(), jid, sender); err != nil {
+		return err
+	}
+	return a.db.SetChatUnread(chatJID, false)
+}
+
 func (a *App) acquireChatStateSync(ctx context.Context) (func(), error) {
 	select {
 	case <-ctx.Done():
