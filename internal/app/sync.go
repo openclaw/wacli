@@ -389,7 +389,17 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 	chatJID := canonicalJIDString(pm.Chat)
 	chatName := a.wa.ResolveChatName(ctx, pm.Chat, pm.PushName)
 	if pm.Chat != types.StatusBroadcastJID {
-		if err := a.db.UpsertChat(chatJID, chatKind(pm.Chat), chatName, pm.Timestamp); err != nil {
+		// A payload that carried no content is a WhatsApp system event, such as a
+		// changed security code or a group notice, stored as a "(message)" row.
+		// It is not something to read, so it must not become the chat's newest
+		// message and reorder a list sorted by activity.
+		var err error
+		if pm.HasContent() {
+			err = a.db.UpsertChat(chatJID, chatKind(pm.Chat), chatName, pm.Timestamp)
+		} else {
+			err = a.db.UpsertChatMetadata(chatJID, chatKind(pm.Chat), chatName)
+		}
+		if err != nil {
 			return err
 		}
 	}
