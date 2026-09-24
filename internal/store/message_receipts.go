@@ -10,13 +10,6 @@ import (
 // so a later receipt for the same recipient only counts when it reaches further.
 var receiptRank = map[string]int{"delivered": 1, "read": 2, "played": 3}
 
-// ReceiptStatusRank reports how far a receipt status is from being sent, and
-// whether the status is one this store keeps at all.
-func ReceiptStatusRank(status string) (int, bool) {
-	rank, ok := receiptRank[strings.ToLower(strings.TrimSpace(status))]
-	return rank, ok
-}
-
 // UpsertMessageReceipt records what one recipient reported about one message.
 func (d *DB) UpsertMessageReceipt(chatJID, msgID, recipientJID, status string, ts time.Time) error {
 	chatJID = strings.TrimSpace(chatJID)

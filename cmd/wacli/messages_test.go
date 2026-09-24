@@ -578,6 +578,38 @@ func TestDeleteLocalMediaPathsIfRequestedReportsActualRemoval(t *testing.T) {
 	}
 }
 
+func TestGetMessageByChatFilterCarriesDeliveryState(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "wacli.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	chat := "15551234567@s.whatsapp.net"
+	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	if err := db.UpsertChat(chat, "dm", "Alice", now); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	if err := db.UpsertMessage(store.UpsertMessageParams{
+		ChatJID: chat, MsgID: "mid", Timestamp: now, FromMe: true, Text: "hello",
+	}); err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+	if err := db.UpsertMessageReceipt(chat, "mid", chat, "read", now.Add(time.Minute)); err != nil {
+		t.Fatalf("UpsertMessageReceipt: %v", err)
+	}
+
+	// `show` reads its own columns, so it has to ask for the counts separately
+	// or it would disagree with `list` about the same message.
+	msg, err := getMessageByChatFilter(db, []string{chat}, "mid")
+	if err != nil {
+		t.Fatalf("getMessageByChatFilter: %v", err)
+	}
+	if msg.DeliveredTo != 1 || msg.ReadBy != 1 {
+		t.Fatalf("delivery state = %d delivered, %d read; want 1 and 1", msg.DeliveredTo, msg.ReadBy)
+	}
+}
+
 func TestGetMessageByChatFilterTriesMappedChatJIDs(t *testing.T) {
 	db, err := store.Open(filepath.Join(t.TempDir(), "wacli.db"))
 	if err != nil {

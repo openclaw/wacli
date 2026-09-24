@@ -108,6 +108,9 @@ func (d *DB) MigrateLIDToPN(lidJID, pnJID string) error {
 	if err := migrateLIDMessageLocationsToPN(tx, lidJID, pnJID); err != nil {
 		return err
 	}
+	if err := migrateLIDMessageReceiptsToPN(tx, lidJID, pnJID); err != nil {
+		return err
+	}
 	if err := migrateLIDPollsToPN(tx, lidJID, pnJID); err != nil {
 		return err
 	}
@@ -462,6 +465,39 @@ func migrateLIDGroupIdentitiesToPN(tx *sql.Tx, lidJID, pnJID string) error {
 	}
 	if _, err := tx.Exec(`DELETE FROM group_participants WHERE user_jid = ?`, lidJID); err != nil {
 		return fmt.Errorf("delete lid group participants: %w", err)
+	}
+	return nil
+}
+
+// migrateLIDMessageReceiptsToPN carries what recipients reported across with
+// the messages they reported on. Without this the rows would go down with the
+// LID chat row and a delivered or read message would fall back to sent.
+func migrateLIDMessageReceiptsToPN(tx *sql.Tx, lidJID, pnJID string) error {
+	const rank = `CASE %s.status WHEN 'delivered' THEN 1 WHEN 'read' THEN 2 WHEN 'played' THEN 3 ELSE 0 END`
+	// The recipient is the same person under both identities, in this chat and
+	// in every group they report in, so it is rewritten too: leaving it would
+	// count one recipient twice.
+	if _, err := tx.Exec(fmt.Sprintf(`
+		INSERT INTO message_receipts(chat_jid, msg_id, recipient_jid, status, ts)
+		SELECT CASE WHEN chat_jid = ?1 THEN ?2 ELSE chat_jid END,
+			msg_id,
+			CASE WHEN recipient_jid = ?1 THEN ?2 ELSE recipient_jid END,
+			status, ts
+		FROM message_receipts
+		WHERE chat_jid = ?1 OR recipient_jid = ?1
+		ON CONFLICT(chat_jid, msg_id, recipient_jid) DO UPDATE SET
+			status = CASE WHEN %s > %s THEN excluded.status ELSE message_receipts.status END,
+			ts = CASE WHEN %s > %s THEN excluded.ts ELSE message_receipts.ts END
+	`,
+		fmt.Sprintf(rank, "excluded"), fmt.Sprintf(rank, "message_receipts"),
+		fmt.Sprintf(rank, "excluded"), fmt.Sprintf(rank, "message_receipts"),
+	), lidJID, pnJID); err != nil {
+		return fmt.Errorf("migrate lid message receipts: %w", err)
+	}
+	if _, err := tx.Exec(
+		`DELETE FROM message_receipts WHERE chat_jid = ? OR recipient_jid = ?`, lidJID, lidJID,
+	); err != nil {
+		return fmt.Errorf("delete migrated lid message receipts: %w", err)
 	}
 	return nil
 }

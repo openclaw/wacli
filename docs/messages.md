@@ -36,6 +36,8 @@ wacli messages forward --chat JID --id MSG_ID --to RECIPIENT [--pick N] [--post-
 
 Messages you sent carry `DeliveredTo` and `ReadBy`: how many recipients reported the message delivered, and how many of those went on to read it. A direct chat counts one recipient; a group counts one per participant who reported, so a chat where everybody has read is distinguishable from one where a single member has. Playing a voice note counts as reading it, and a state never moves backwards.
 
+`messages show` reports the same two counts, and an identity migration from a `@lid` chat to its phone number carries the reports with their messages, counting a recipient that reported under both identities once.
+
 Only reports that arrive while `sync` is connected are kept: WhatsApp announces each one once and does not repeat it. Messages sent before a store started keeping them, or while nothing was connected, stay at zero on both counts, which means "sent, nothing reported" rather than "not delivered". Your own notes chat receives no report at all, since the only recipient is the account itself. Reports about incoming messages are not kept: they say nothing about your own.
 
 ## Media captions
