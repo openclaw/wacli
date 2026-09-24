@@ -28,6 +28,7 @@ wacli chats cleanup [--days N] [--jid JID] [--dry-run] [--confirm]
 - `--query` filters by chat name or JID.
 - `list --json` and `show --json` include `archived`, `pinned`, `muted_until`, `unread`, and `unread_count`; `unread` is true for counted unread messages and marker-only unread chats, while `unread_count` only counts unread messages.
 - `list --unread` matches counted and marker-only unread chats; `list --no-unread` excludes both.
+- Replayed read signals reduce the unread count only through the messages they cover; older reads cannot restore already-read messages. Known message IDs distinguish arrivals in the same second, using their local insertion order. Without a known ID boundary, messages at the cutoff second remain unread. Content-free system events, reactions, and revocations do not add to live unread counts.
 - `mark-unread` sets the unread marker without inventing an unread count; `mark-read` clears both the marker and count.
 - `show` accepts the stored JID. If a phone JID maps to a historical `@lid` row, it can show that row too.
 - State commands use `--chat` and resolve names, phone numbers, groups, and JIDs like send commands. Use `--pick N` for ambiguous matches.

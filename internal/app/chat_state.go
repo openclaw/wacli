@@ -138,7 +138,14 @@ func (a *App) MarkChatRead(ctx context.Context, jid types.JID, read bool) error 
 		return fmt.Errorf("WhatsApp app state send completed without an apply boundary")
 	}
 	return a.completeLocalAppStateWrite(ctx, &pending, postSendEvents, func() error {
-		return a.db.SetChatUnread(chatJID, !read)
+		if !read {
+			return a.db.SetChatUnread(chatJID, true)
+		}
+		var ids []string
+		if lastKey != nil {
+			ids = []string{lastKey.GetID()}
+		}
+		return a.db.ClearChatUnreadThrough(chatJID, lastTS, ids)
 	})
 }
 
@@ -499,7 +506,14 @@ func (a *App) handleChatStateEvent(ctx context.Context, evt any) error {
 			return nil
 		}
 		chat := a.canonicalStoreJID(ctx, v.JID)
-		if err := a.db.SetChatUnread(canonicalJIDString(chat), !v.Action.GetRead()); err != nil {
+		var err error
+		if v.Action.GetRead() {
+			through, ids := markChatAsReadPosition(v)
+			err = a.db.ClearChatUnreadThrough(canonicalJIDString(chat), through, ids)
+		} else {
+			err = a.db.SetChatUnread(canonicalJIDString(chat), true)
+		}
+		if err != nil {
 			a.emitChatStateWarning("mark_read", v.JID, err)
 			return err
 		}

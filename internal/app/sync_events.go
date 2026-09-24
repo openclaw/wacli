@@ -367,7 +367,12 @@ func (a *App) handleReceiptPersistenceEvent(ctx context.Context, evt *events.Rec
 
 func (a *App) handleReceiptEvent(ctx context.Context, evt *events.Receipt) {
 	chat := a.canonicalStoreJID(ctx, evt.Chat)
-	if err := a.db.SetChatUnreadCount(canonicalJIDString(chat), 0); err != nil {
+	chatJID := canonicalJIDString(chat)
+	through, ids, err := a.receiptReadPosition(chatJID, evt)
+	if err == nil {
+		err = a.db.ClearChatUnreadThrough(chatJID, through, ids)
+	}
+	if err != nil {
 		a.emitWarning(
 			"receipt_read_self_store_failed",
 			fmt.Sprintf("warning: failed to clear unread count from read-self receipt for chat %s: %v", chat, err),
@@ -729,7 +734,8 @@ func (a *App) incrementLiveUnread(ctx context.Context, pm wa.ParsedMessage) {
 }
 
 func (a *App) shouldIncrementLiveUnread(ctx context.Context, pm wa.ParsedMessage) bool {
-	if pm.FromMe || pm.ID == "" || pm.Chat.IsEmpty() || pm.Chat == types.StatusBroadcastJID {
+	if pm.FromMe || pm.ID == "" || pm.Chat.IsEmpty() || pm.Chat == types.StatusBroadcastJID ||
+		!pm.HasContent() || pm.Revoked || pm.ReactionToID != "" || pm.ReactionEmoji != "" {
 		return false
 	}
 	chat := canonicalJIDString(a.canonicalStoreJID(ctx, pm.Chat))

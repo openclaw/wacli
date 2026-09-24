@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Sync: preserve messages beyond replayed read boundaries, keep read counts monotonic, resolve same-second boundaries by message ID, and exclude system events, reactions, and revocations from new unread counts. Thanks @zarmat99 (#435).
 - Sync: keep content-free system events out of chat activity order and rebuild matching existing activity timestamps from stored content. Thanks @zarmat99 (#436).
 
 ## 0.18.3 - 2026-09-21
