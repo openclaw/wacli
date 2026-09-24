@@ -40,6 +40,37 @@ var schemaMigrations = []migration{
 	{version: 24, name: "app state recovery intents", up: migrateAppStateRecoveryIntents},
 	{version: 25, name: "message locations", up: migrateMessageLocations},
 	{version: 26, name: "message identity indexes and selective fts updates", up: migrateMessageIdentityIndexes},
+	{version: 27, name: "repair placeholder chat activity", up: migratePlaceholderChatActivity},
+}
+
+func migratePlaceholderChatActivity(d *DB) error {
+	for _, table := range []string{"chats", "messages"} {
+		exists, err := d.tableExists(table)
+		if err != nil || !exists {
+			return err
+		}
+	}
+	// Rebuild the derived activity index from local content when its newest row
+	// matches. Preserve snapshot activity strictly newer than local history.
+	_, err := d.sql.Exec(`
+		WITH activity AS (
+			SELECT chat_jid, MAX(ts) AS latest,
+				MAX(CASE WHEN COALESCE(display_text, '') != '(message)'
+					OR TRIM(COALESCE(text, '')) != ''
+					OR COALESCE(media_type, '') != ''
+					OR revoked != 0 OR deleted_for_me != 0
+					THEN ts END) AS content_ts
+			FROM messages GROUP BY chat_jid
+		)
+		UPDATE chats SET last_message_ts = activity.content_ts
+		FROM activity WHERE chats.jid = activity.chat_jid
+			AND chats.last_message_ts = activity.latest
+			AND chats.last_message_ts > COALESCE(activity.content_ts, 0)
+	`)
+	if err != nil {
+		return fmt.Errorf("repair placeholder chat activity: %w", err)
+	}
+	return nil
 }
 
 func migrateMessageIdentityIndexes(d *DB) error {

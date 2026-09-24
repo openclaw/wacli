@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Sync: stop WhatsApp system events, such as a changed security code or a group notice, from becoming a chat's newest message. They reach sync as payloads with no content, are still stored as `(message)` rows, and no longer move the chat in a list sorted by activity.
+- Sync: keep content-free system events out of chat activity order and rebuild matching existing activity timestamps from stored content. Thanks @zarmat99 (#436).
 
 ## 0.18.3 - 2026-09-21
 

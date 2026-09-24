@@ -24,6 +24,7 @@ wacli chats cleanup [--days N] [--jid JID] [--dry-run] [--confirm]
 
 - `list` is local and sorted by pinned chats first, then newest known message timestamp.
 - WhatsApp system events, such as a changed security code or a group notice, arrive as payloads with no content and are stored as `(message)` rows. They do not set that timestamp, so they cannot move a chat up the list; a chat that holds nothing else has no timestamp and sorts last.
+- On the next writable open, activity matching the newest locally stored message is recomputed from stored content. Activity newer than every local message is preserved. If an unstored message advertised by history has the exact same second as a local placeholder, the repair uses local content; syncing that message restores its activity.
 - `--query` filters by chat name or JID.
 - `list --json` and `show --json` include `archived`, `pinned`, `muted_until`, `unread`, and `unread_count`; `unread` is true for counted unread messages and marker-only unread chats, while `unread_count` only counts unread messages.
 - `list --unread` matches counted and marker-only unread chats; `list --no-unread` excludes both.

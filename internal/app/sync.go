@@ -389,10 +389,7 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 	chatJID := canonicalJIDString(pm.Chat)
 	chatName := a.wa.ResolveChatName(ctx, pm.Chat, pm.PushName)
 	if pm.Chat != types.StatusBroadcastJID {
-		// A payload that carried no content is a WhatsApp system event, such as a
-		// changed security code or a group notice, stored as a "(message)" row.
-		// It is not something to read, so it must not become the chat's newest
-		// message and reorder a list sorted by activity.
+		// Keep diagnostic placeholders without treating them as chat activity.
 		var err error
 		if pm.HasContent() {
 			err = a.db.UpsertChat(chatJID, chatKind(pm.Chat), chatName, pm.Timestamp)
