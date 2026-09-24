@@ -20,6 +20,8 @@
 
 - Sync: enforce caller deadlines for queued delegated operations even without send spacing, and warn against retrying ambiguous timeouts. Thanks @tsavo-at-pieces (#456, #446).
 
+- Sync: keep what recipients report about your own messages, one row per recipient, and expose it on listed messages as `DeliveredTo` and `ReadBy`, so a client can show a message as sent, delivered or read. Reports arriving while nothing is connected are still lost, since WhatsApp announces each one once.
+
 ## 0.19.0 - 2026-09-24
 
 **Highlights:** opt-in read receipts without app-state recovery, accurate unread counts, and stable chat activity order.
