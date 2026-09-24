@@ -359,10 +359,31 @@ func appStateCollectionsForEvent(evt any) []appstate.WAPatchName {
 }
 
 func (a *App) handleReceiptPersistenceEvent(ctx context.Context, evt *events.Receipt) {
-	if evt == nil || evt.Type != types.ReceiptTypeReadSelf || evt.Chat.IsEmpty() {
+	if evt == nil || evt.Chat.IsEmpty() || !readByThisAccountElsewhere(evt) {
 		return
 	}
 	a.handleReceiptEvent(ctx, evt)
+}
+
+// readByThisAccountElsewhere reports whether a receipt says this account read
+// the chat on another of its devices.
+//
+// WhatsApp only marks such a read "read-self" when read receipts are turned off
+// in the privacy settings. With them on, the phone broadcasts an ordinary
+// "read" receipt and this device receives that same one, sent by this account:
+// matching on the type alone therefore misses every account whose senders can
+// see blue ticks, and their unread counts never clear. A "read" receipt from
+// anyone else acknowledges an outgoing message and says nothing about what has
+// been read here.
+func readByThisAccountElsewhere(evt *events.Receipt) bool {
+	switch evt.Type {
+	case types.ReceiptTypeReadSelf:
+		return true
+	case types.ReceiptTypeRead:
+		return evt.IsFromMe
+	default:
+		return false
+	}
 }
 
 func (a *App) handleReceiptEvent(ctx context.Context, evt *events.Receipt) {

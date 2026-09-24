@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Sync: clear a chat's unread state from this account's own read receipts, not only from `read-self` ones. WhatsApp marks a read `read-self` only while read receipts are turned off, so with them on a chat read on the phone stayed unread here forever.
+
 ## 0.19.0 - 2026-09-24
 
 **Highlights:** opt-in read receipts without app-state recovery, accurate unread counts, and stable chat activity order.
