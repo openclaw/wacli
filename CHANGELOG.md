@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.19.0 - 2026-09-24
+
+**Highlights:** opt-in read receipts without app-state recovery, accurate unread counts, and stable chat activity order.
+
 - Chats: add opt-in `mark-read --receipts` through an independent network path, with bounded batches, safe unread boundaries, sync delegation, and privacy-aware outcome reporting. Thanks @zarmat99 and @Adi-A (#432, #433).
 - Sync: preserve messages beyond replayed read boundaries, keep read counts monotonic, resolve same-second boundaries by message ID, and exclude system events, reactions, and revocations from new unread counts. Thanks @zarmat99 (#435).
 - Sync: keep content-free system events out of chat activity order and rebuild matching existing activity timestamps from stored content. Thanks @zarmat99 (#436).
