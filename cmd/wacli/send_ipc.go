@@ -62,6 +62,7 @@ type sendDelegateRequest struct {
 	PresenceState        string   `json:"presence_state,omitempty"`
 	PresenceMedia        string   `json:"presence_media,omitempty"`
 	Read                 *bool    `json:"read,omitempty"`
+	Receipts             bool     `json:"receipts,omitempty"`
 	PostSendWaitMS       int64    `json:"post_send_wait_ms,omitempty"`
 	TimeoutMS            int64    `json:"timeout_ms,omitempty"`
 	DeadlineUnixMS       int64    `json:"deadline_unix_ms,omitempty"`
@@ -83,6 +84,8 @@ type sendDelegateResponse struct {
 	StoreWarning   string            `json:"store_warning,omitempty"`
 	Chat           string            `json:"chat,omitempty"`
 	Action         string            `json:"action,omitempty"`
+	Receipts       *int              `json:"receipts,omitempty"`
+	ReceiptType    string            `json:"receipt_type,omitempty"`
 }
 
 type sendDelegateExecutor func(context.Context, sendDelegateRequest) (sendDelegateResponse, error)
@@ -304,7 +307,12 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 		return executeDelegatedPresence(ctx, a, req)
 	case "edit":
 		return executeDelegatedEdit(ctx, a, req)
-	case "mark_read":
+	case markReadKind:
+		return executeDelegatedMarkRead(ctx, a, req)
+	case markReadReceiptsKind:
+		// Its own kind, so daemons without receipt support reject it here
+		// instead of marking the chat read and dropping the unread count.
+		req.Receipts = true
 		return executeDelegatedMarkRead(ctx, a, req)
 	default:
 		return sendDelegateResponse{}, fmt.Errorf("unsupported send kind %q", req.Kind)
@@ -314,25 +322,39 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 type delegatedMarkReadApp interface {
 	recipientResolverApp
 	MarkChatRead(context.Context, types.JID, bool) error
+	MarkChatReadWithReceipts(context.Context, types.JID) (int, types.ReceiptType, error)
 }
 
 func executeDelegatedMarkRead(ctx context.Context, a delegatedMarkReadApp, req sendDelegateRequest) (sendDelegateResponse, error) {
-	toJID, err := resolveRecipient(a, req.To, recipientOptions{pick: req.Pick, asJSON: true})
-	if err != nil {
-		return sendDelegateResponse{}, err
-	}
 	read := true
 	if req.Read != nil {
 		read = *req.Read
 	}
-	if err := a.MarkChatRead(ctx, toJID, read); err != nil {
+	if req.Receipts && !read {
+		return sendDelegateResponse{}, fmt.Errorf("--receipts only applies to mark-read")
+	}
+	toJID, err := resolveRecipient(a, req.To, recipientOptions{pick: req.Pick, asJSON: true})
+	if err != nil {
+		return sendDelegateResponse{}, err
+	}
+	// Receipt mode never enters app-state recovery.
+	var receipts *int
+	var receiptType string
+	if req.Receipts {
+		n, kind, err := a.MarkChatReadWithReceipts(ctx, toJID)
+		if err != nil {
+			return sendDelegateResponse{}, err
+		}
+		receipts = &n
+		receiptType = string(kind)
+	} else if err := a.MarkChatRead(ctx, toJID, read); err != nil {
 		return sendDelegateResponse{}, err
 	}
 	action := "mark-read"
 	if !read {
 		action = "mark-unread"
 	}
-	return sendDelegateResponse{OK: true, Chat: toJID.String(), Action: action}, nil
+	return sendDelegateResponse{OK: true, Chat: toJID.String(), Action: action, Receipts: receipts, ReceiptType: receiptType}, nil
 }
 
 func executeDelegatedPresence(ctx context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {

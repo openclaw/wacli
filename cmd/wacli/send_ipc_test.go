@@ -420,10 +420,19 @@ type delegatedMarkReadCall struct {
 }
 
 type fakeDelegatedMarkReadApp struct {
-	calls chan delegatedMarkReadCall
+	calls        chan delegatedMarkReadCall
+	receipts     int
+	receiptCalls chan types.JID
 }
 
 func (f *fakeDelegatedMarkReadApp) DB() *store.DB { return nil }
+
+func (f *fakeDelegatedMarkReadApp) MarkChatReadWithReceipts(_ context.Context, chat types.JID) (int, types.ReceiptType, error) {
+	if f.receiptCalls != nil {
+		f.receiptCalls <- chat
+	}
+	return f.receipts, types.ReceiptType("unknown"), nil
+}
 
 func (f *fakeDelegatedMarkReadApp) MarkChatRead(_ context.Context, chat types.JID, read bool) error {
 	f.calls <- delegatedMarkReadCall{chat: chat, read: read}
@@ -439,12 +448,20 @@ func TestChatsMarkReadDelegatesThroughProductionServerWhenStoreLocked(t *testing
 	}
 	defer lk.Release()
 
-	fake := &fakeDelegatedMarkReadApp{calls: make(chan delegatedMarkReadCall, 2)}
+	fake := &fakeDelegatedMarkReadApp{
+		calls:        make(chan delegatedMarkReadCall, 3),
+		receipts:     2,
+		receiptCalls: make(chan types.JID, 3),
+	}
 	stop, err := startSendDelegateServerForStore(context.Background(), storeDir, sendSpacing{}, func(ctx context.Context, req sendDelegateRequest) (sendDelegateResponse, error) {
 		if req.Version != sendDelegateVersion {
 			return sendDelegateResponse{}, fmt.Errorf("unexpected delegated version %d", req.Version)
 		}
-		if req.Kind != "mark_read" {
+		switch req.Kind {
+		case markReadKind:
+		case markReadReceiptsKind:
+			req.Receipts = true // as executeDelegatedSend does for this kind
+		default:
 			return sendDelegateResponse{}, fmt.Errorf("unexpected delegated kind %q", req.Kind)
 		}
 		return executeDelegatedMarkRead(ctx, fake, req)
@@ -469,34 +486,65 @@ func TestChatsMarkReadDelegatesThroughProductionServerWhenStoreLocked(t *testing
 	}
 
 	tests := []struct {
-		command string
-		read    bool
+		name     string
+		command  string
+		read     bool
+		receipts bool
 	}{
-		{command: "mark-read", read: true},
-		{command: "mark-unread", read: false},
+		{name: "mark-read", command: "mark-read", read: true},
+		{name: "mark-unread", command: "mark-unread", read: false},
+		{name: "mark-read receipts", command: "mark-read", read: true, receipts: true},
 	}
 	for _, tt := range tests {
-		t.Run(tt.command, func(t *testing.T) {
-			stdout, stderr, err := runPresenceDelegateHelper(t, []string{
+		t.Run(tt.name, func(t *testing.T) {
+			args := []string{
 				"--store", storeDir, "--json", "--timeout", "750ms",
 				"chats", tt.command, "--chat", "123@s.whatsapp.net",
-			})
+			}
+			if tt.receipts {
+				args = append(args, "--receipts")
+			}
+			stdout, stderr, err := runPresenceDelegateHelper(t, args)
 			if err != nil {
 				t.Fatalf("chats %s failed: %v stdout=%q stderr=%q", tt.command, err, stdout, stderr)
 			}
 
-			select {
-			case call := <-fake.calls:
-				if call.chat.String() != "123@s.whatsapp.net" || call.read != tt.read {
-					t.Fatalf("fake mark-read call = %+v, want chat 123@s.whatsapp.net read %t", call, tt.read)
+			if tt.receipts {
+				select {
+				case call := <-fake.calls:
+					t.Fatalf("receipt mode entered app state: %+v", call)
+				default:
 				}
-			case <-contextWithTestTimeout(t).Done():
-				t.Fatal("timed out waiting for delegated mark-read call")
+			} else {
+				select {
+				case call := <-fake.calls:
+					if call.chat.String() != "123@s.whatsapp.net" || call.read != tt.read {
+						t.Fatalf("fake mark-read call = %+v, want chat 123@s.whatsapp.net read %t", call, tt.read)
+					}
+				case <-contextWithTestTimeout(t).Done():
+					t.Fatal("timed out waiting for delegated mark-read call")
+				}
+			}
+			select {
+			case chat := <-fake.receiptCalls:
+				if !tt.receipts || chat.String() != "123@s.whatsapp.net" {
+					t.Fatalf("unexpected delegated receipts for %s", chat)
+				}
+			default:
+				if tt.receipts {
+					t.Fatal("delegated mark-read --receipts sent no receipts")
+				}
 			}
 			if strings.Contains(stderr, "store is locked") {
 				t.Fatalf("delegated command returned lock error: stderr=%q", stderr)
 			}
-			for _, want := range []string{`"ok":true`, `"action":"` + tt.command + `"`, `"chat":"123@s.whatsapp.net"`} {
+			wants := []string{`"ok":true`, `"action":"` + tt.command + `"`, `"chat":"123@s.whatsapp.net"`}
+			if tt.receipts {
+				wants = append(wants, `"receipts":2`, `"receipt":"unknown"`, `"sender_notified":null`)
+			} else if strings.Contains(stdout, `"receipts"`) {
+				t.Fatalf("stdout %q reports receipts that were not requested", stdout)
+			}
+			for _, want := range wants {
 				if !strings.Contains(stdout, want) {
 					t.Fatalf("stdout %q missing %s", stdout, want)
 				}

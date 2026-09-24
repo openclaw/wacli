@@ -77,6 +77,10 @@ type fakeWA struct {
 	muteCalls                   []fakeMuteCall
 	markReadCalls               []fakeMarkReadCall
 	markReadBeforeApply         func()
+	readReceiptCalls            []fakeReadReceiptCall
+	onReadReceipt               func(int) (types.ReceiptType, error)
+	readReceiptErr              error
+	readReceiptType             types.ReceiptType
 	manualHistorySyncCalls      []bool
 	appStateRecoveries          []string
 	appStateFetches             []fakeAppStateFetch
@@ -108,6 +112,14 @@ type fakeMarkReadCall struct {
 	read       bool
 	lastMsgTS  time.Time
 	lastMsgKey *waCommon.MessageKey
+}
+
+type fakeReadReceiptCall struct {
+	ids        []types.MessageID
+	timestamp  time.Time
+	chat       types.JID
+	sender     types.JID
+	addressing types.AddressingMode
 }
 
 type fakeSendPollCall struct {
@@ -701,6 +713,26 @@ func (f *fakeWA) SendMediaRetryReceipt(ctx context.Context, info *types.MessageI
 		}
 	}
 	return nil
+}
+
+func (f *fakeWA) MarkRead(ctx context.Context, ids []types.MessageID, timestamp time.Time, chat, sender types.JID, addressing types.AddressingMode) (types.ReceiptType, error) {
+	f.mu.Lock()
+	if f.readReceiptErr != nil {
+		err := f.readReceiptErr
+		f.mu.Unlock()
+		return "", err
+	}
+	f.readReceiptCalls = append(f.readReceiptCalls, fakeReadReceiptCall{ids: append([]types.MessageID(nil), ids...), timestamp: timestamp, chat: chat, sender: sender, addressing: addressing})
+	index := len(f.readReceiptCalls) - 1
+	hook, kind := f.onReadReceipt, f.readReceiptType
+	f.mu.Unlock()
+	if hook != nil {
+		return hook(index)
+	}
+	if kind != "" {
+		return kind, nil
+	}
+	return wa.ReadReceiptUnknown, nil
 }
 
 func (f *fakeWA) RequestHistorySyncOnDemand(ctx context.Context, lastKnown types.MessageInfo, count int) (types.MessageID, error) {

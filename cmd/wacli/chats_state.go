@@ -14,8 +14,9 @@ import (
 )
 
 type chatStateOptions struct {
-	chat string
-	pick int
+	chat     string
+	pick     int
+	receipts bool
 }
 
 func newChatsArchiveCmd(flags *rootFlags, archive bool) *cobra.Command {
@@ -104,6 +105,9 @@ func newChatsMarkReadCmd(flags *rootFlags, read bool) *cobra.Command {
 		},
 	}
 	addChatStateFlags(cmd, &opts)
+	if read {
+		cmd.Flags().BoolVar(&opts.receipts, "receipts", false, "send read receipts for up to 100 unread messages without waiting for app-state recovery; follows your read-receipt privacy setting")
+	}
 	return cmd
 }
 
@@ -112,6 +116,42 @@ type chatStateApp interface {
 	PinChat(context.Context, types.JID, bool) error
 	MuteChat(context.Context, types.JID, bool, time.Duration) error
 	MarkChatRead(context.Context, types.JID, bool) error
+	MarkChatReadWithReceipts(context.Context, types.JID) (int, types.ReceiptType, error)
+}
+
+// Receipt dispatch does not prove that a sender received a notification.
+type chatStateReceipts struct {
+	count int
+	kind  string
+}
+
+func (r chatStateReceipts) senderNotified() *bool {
+	if r.kind != string(types.ReceiptTypeReadSelf) {
+		return nil
+	}
+	notified := false
+	return &notified
+}
+
+const (
+	markReadKind         = "mark_read"
+	markReadReceiptsKind = "mark_read_receipts"
+)
+
+// A separate kind makes old daemons reject receipts instead of ignoring a flag.
+func markReadDelegateKind(receipts bool) string {
+	if receipts {
+		return markReadReceiptsKind
+	}
+	return markReadKind
+}
+
+// explainReceiptsDelegateError turns that rejection into the action to take.
+func explainReceiptsDelegateError(err error, requested bool) error {
+	if err == nil || !requested || !strings.Contains(err.Error(), "unsupported send kind") || !strings.Contains(err.Error(), markReadReceiptsKind) {
+		return err
+	}
+	return fmt.Errorf("the running sync process does not support --receipts and left the chat unread; restart `wacli sync` after upgrading, then run this again: %w", err)
 }
 
 func runChatState(flags *rootFlags, opts chatStateOptions, action string, delegateRead *bool, run func(context.Context, chatStateApp, types.JID) error) error {
@@ -129,24 +169,21 @@ func runChatState(flags *rootFlags, opts chatStateOptions, action string, delega
 	if err != nil {
 		if delegateRead != nil {
 			resp, delegated, delegateErr := tryDelegateSend(ctx, flags, err, sendDelegateRequest{
-				Kind: "mark_read",
-				To:   opts.chat,
-				Pick: opts.pick,
-				Read: delegateRead,
+				Kind:     markReadDelegateKind(opts.receipts),
+				To:       opts.chat,
+				Pick:     opts.pick,
+				Read:     delegateRead,
+				Receipts: opts.receipts,
 			})
 			if delegated {
 				if delegateErr != nil {
-					return delegateErr
+					return explainReceiptsDelegateError(delegateErr, opts.receipts)
 				}
-				if flags.asJSON {
-					return out.WriteJSON(os.Stdout, map[string]any{
-						"ok":     true,
-						"action": action,
-						"chat":   resp.Chat,
-					})
+				receipts, err := delegatedReceipts(resp, opts.receipts)
+				if err != nil {
+					return err
 				}
-				fmt.Fprintf(os.Stdout, "%s: %s\n", action, resp.Chat)
-				return nil
+				return writeChatStateResult(flags, action, resp.Chat, receipts)
 			}
 		}
 		return err
@@ -174,19 +211,60 @@ func runChatState(flags *rootFlags, opts chatStateOptions, action string, delega
 	if err != nil {
 		return err
 	}
-	if err := run(ctx, a, jid); err != nil {
+	// Receipt mode owns its local read boundary and bypasses app-state recovery.
+	var receipts *chatStateReceipts
+	if opts.receipts {
+		n, kind, err := a.MarkChatReadWithReceipts(ctx, jid)
+		if err != nil {
+			return err
+		}
+		receipts = &chatStateReceipts{count: n, kind: string(kind)}
+	} else if err := run(ctx, a, jid); err != nil {
 		return err
 	}
+	return writeChatStateResult(flags, action, jid.String(), receipts)
+}
 
+// writeChatStateResult prints a state command's result. receipts is set only
+// when --receipts was requested.
+func writeChatStateResult(flags *rootFlags, action, chat string, receipts *chatStateReceipts) error {
 	if flags.asJSON {
-		return out.WriteJSON(os.Stdout, map[string]any{
+		result := map[string]any{
 			"ok":     true,
 			"action": action,
-			"chat":   jid.String(),
-		})
+			"chat":   chat,
+		}
+		if receipts != nil {
+			result["receipts"] = receipts.count
+			if receipts.kind != "" {
+				result["receipt"] = receipts.kind
+				result["sender_notified"] = receipts.senderNotified()
+			}
+		}
+		return out.WriteJSON(os.Stdout, result)
 	}
-	fmt.Fprintf(os.Stdout, "%s: %s\n", action, jid.String())
+	if receipts == nil {
+		fmt.Fprintf(os.Stdout, "%s: %s\n", action, chat)
+		return nil
+	}
+	note := ""
+	if receipts.kind == string(types.ReceiptTypeReadSelf) {
+		note = fmt.Sprintf(", sent as %s: your read-receipt privacy setting keeps them from the sender", receipts.kind)
+	} else if receipts.count > 0 {
+		note = ", sender notification unknown; WhatsApp applies your privacy setting"
+	}
+	fmt.Fprintf(os.Stdout, "%s: %s (read receipts: %d%s)\n", action, chat, receipts.count, note)
 	return nil
+}
+
+func delegatedReceipts(resp sendDelegateResponse, requested bool) (*chatStateReceipts, error) {
+	if !requested {
+		return nil, nil
+	}
+	if resp.Receipts == nil {
+		return nil, fmt.Errorf("the running sync process did not report receipt results for %s; restart `wacli sync` after upgrading", resp.Chat)
+	}
+	return &chatStateReceipts{count: *resp.Receipts, kind: resp.ReceiptType}, nil
 }
 
 func addChatStateFlags(cmd *cobra.Command, opts *chatStateOptions) {
