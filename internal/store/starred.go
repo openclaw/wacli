@@ -56,7 +56,7 @@ func (d *DB) ListStarredMessages(p ListStarredMessagesParams) ([]Message, error)
 		p.Limit = 50
 	}
 	query := `
-		SELECT ` + messageSelectColumns("") + `
+		SELECT ` + d.messageSelectColumns("") + `
 		FROM messages m
 		LEFT JOIN chats c ON c.jid = m.chat_jid
 		JOIN starred s ON s.chat_jid = m.chat_jid AND s.msg_id = m.msg_id

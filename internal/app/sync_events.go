@@ -120,6 +120,7 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 		case *events.Receipt:
 			lastEvent.Store(nowUTC().UnixNano())
 			a.handleReceiptPersistenceEvent(ctx, v)
+			a.handleOutgoingReceiptEvent(ctx, v)
 			if opts.WebhookEvents.Enabled(SyncWebhookEventReceipt) {
 				if job, ok := newSyncWebhookReceiptEvent(v); ok {
 					enqueueWebhook(job)

@@ -56,7 +56,7 @@ func likeContains(s string) string {
 
 func (d *DB) searchLIKE(p SearchMessagesParams) ([]Message, error) {
 	query := `
-		SELECT ` + messageSelectColumns("") + `
+		SELECT ` + d.messageSelectColumns("") + `
 		FROM messages m
 		LEFT JOIN chats c ON c.jid = m.chat_jid
 		LEFT JOIN starred s ON s.chat_jid = m.chat_jid AND s.msg_id = m.msg_id
@@ -90,7 +90,7 @@ func sanitizeFTSQuery(q string) string {
 
 func (d *DB) searchFTS(p SearchMessagesParams) ([]Message, error) {
 	query := `
-		SELECT ` + messageSelectColumns("snippet(messages_fts, 0, '[', ']', '…', 12)") + `
+		SELECT ` + d.messageSelectColumns("snippet(messages_fts, 0, '[', ']', '…', 12)") + `
 		FROM messages_fts
 		JOIN messages m ON messages_fts.rowid = m.rowid
 		LEFT JOIN chats c ON c.jid = m.chat_jid

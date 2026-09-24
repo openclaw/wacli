@@ -18,6 +18,10 @@ type DB struct {
 	sql        *sql.DB
 	q          *storedb.Queries
 	ftsEnabled bool
+	// A store written by an older build has no receipt table, and a read-only
+	// open cannot create one, so message queries ask for the counts only when
+	// the table is there.
+	receiptsEnabled bool
 }
 
 func Open(path string) (*DB, error) {
@@ -56,12 +60,14 @@ func open(path string, readOnly bool) (*DB, error) {
 			return nil, fmt.Errorf("open read-only sqlite: %w", err)
 		}
 		s.ftsEnabled = s.detectMessagesFTS()
+		s.receiptsEnabled = s.hasTable("message_receipts")
 		return s, nil
 	}
 	if err := s.init(); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
+	s.receiptsEnabled = s.hasTable("message_receipts")
 	if err := sqliteutil.ChmodFiles(path, 0o600); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -72,6 +78,11 @@ func open(path string, readOnly bool) (*DB, error) {
 func (d *DB) validateReadable() error {
 	var n int
 	return d.sql.QueryRow("SELECT count(*) FROM sqlite_master").Scan(&n)
+}
+
+func (d *DB) hasTable(name string) bool {
+	ok, err := d.tableExists(name)
+	return err == nil && ok
 }
 
 func sqliteURI(path string, readOnly bool) string {

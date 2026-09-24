@@ -41,6 +41,7 @@ var schemaMigrations = []migration{
 	{version: 25, name: "message locations", up: migrateMessageLocations},
 	{version: 26, name: "message identity indexes and selective fts updates", up: migrateMessageIdentityIndexes},
 	{version: 27, name: "repair placeholder chat activity", up: migratePlaceholderChatActivity},
+	{version: 28, name: "message receipts", up: ensureMessageReceiptsTable},
 }
 
 func migratePlaceholderChatActivity(d *DB) error {
@@ -117,6 +118,28 @@ func ensureMessageLocalMediaAliasesTable(d *DB) error {
 		)
 	`); err != nil {
 		return fmt.Errorf("ensure message local media aliases: %w", err)
+	}
+	return nil
+}
+
+// ensureMessageReceiptsTable adds the receipt table to stores created before it
+// existed. The core schema only runs once, so a new table needs its own step.
+func ensureMessageReceiptsTable(d *DB) error {
+	if _, err := d.sql.Exec(`
+		CREATE TABLE IF NOT EXISTS message_receipts (
+			chat_jid TEXT NOT NULL,
+			msg_id TEXT NOT NULL,
+			recipient_jid TEXT NOT NULL,
+			status TEXT NOT NULL,
+			ts INTEGER NOT NULL,
+			PRIMARY KEY (chat_jid, msg_id, recipient_jid),
+			FOREIGN KEY (chat_jid) REFERENCES chats(jid) ON DELETE CASCADE
+		)
+	`); err != nil {
+		return fmt.Errorf("ensure message receipts: %w", err)
+	}
+	if _, err := d.sql.Exec(`CREATE INDEX IF NOT EXISTS idx_message_receipts_msg ON message_receipts(chat_jid, msg_id)`); err != nil {
+		return fmt.Errorf("ensure message receipts index: %w", err)
 	}
 	return nil
 }
