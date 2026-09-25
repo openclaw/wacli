@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Sync: request undecryptable messages from the primary device when the sender does not resend them, and report each one instead of dropping it silently. Thanks @zarmat99 (#441).
+
 ## 0.19.0 - 2026-09-24
 
 **Highlights:** opt-in read receipts without app-state recovery, accurate unread counts, and stable chat activity order.

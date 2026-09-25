@@ -54,6 +54,13 @@ func (c *Client) init() (err error) {
 	// "Waiting for this message" indefinitely because whatsmeow can't find the
 	// original plaintext to re-encrypt when the retry arrives.
 	c.client.UseRetryMessageStore = true
+	// Ask the primary device for any message this client cannot decrypt, which
+	// is what WhatsApp Web does and why reopening it after a long pause does not
+	// lose messages. Without this, whatsmeow only asks the sender to resend, and
+	// a message the sender does not resend - because it is offline, or because
+	// the session broke while this device was down - is dropped for good, with
+	// no row and no warning.
+	c.client.AutomaticMessageRerequestFromPhone = true
 	c.container = container
 	return nil
 }

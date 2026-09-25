@@ -133,6 +133,21 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 					enqueueWebhook(job)
 				}
 			}
+		case *events.UndecryptableMessage:
+			// A message that arrived but could not be read. whatsmeow asks the
+			// sender, and then the primary device, for another copy; say so, so
+			// that a hole in a chat is never silent.
+			lastEvent.Store(nowUTC().UnixNano())
+			a.emitWarning("undecryptable_message",
+				fmt.Sprintf("warning: could not decrypt message %s in %s from %s (%s); asking for another copy",
+					v.Info.ID, v.Info.Chat, v.Info.Sender, v.DecryptFailMode),
+				map[string]any{
+					"chat_jid":       v.Info.Chat.String(),
+					"sender_jid":     v.Info.Sender.String(),
+					"msg_id":         string(v.Info.ID),
+					"is_unavailable": v.IsUnavailable,
+					"fail_mode":      string(v.DecryptFailMode),
+				})
 		case *events.OfflineSyncPreview:
 			// Emitted right after connecting when the server is about to send
 			// what this device missed while it was down.
