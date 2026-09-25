@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"strings"
 	"time"
@@ -27,8 +28,9 @@ type authOptions struct {
 }
 
 type validatedAuthOptions struct {
-	qrFormat  string
-	pairPhone string
+	qrFormat      string
+	pairPhone     string
+	historyLimits wa.HistorySyncLimits
 }
 
 func newAuthCmd(flags *rootFlags) *cobra.Command {
@@ -85,11 +87,8 @@ func runAuth(flags *rootFlags, opts authOptions) (appPkg.SyncResult, error) {
 	if err != nil {
 		return appPkg.SyncResult{}, err
 	}
-	if opts.historyDays < 0 || opts.historyPerChat < 0 {
-		return appPkg.SyncResult{}, fmt.Errorf("--history-days and --history-max-per-chat cannot be negative")
-	}
 	// Pairing carries these limits, so they must be set before the handshake.
-	wa.SetHistorySyncLimits(wa.HistorySyncLimits{Days: opts.historyDays, MaxPerChat: opts.historyPerChat})
+	wa.SetHistorySyncLimits(validated.historyLimits)
 	ctx, stop := signalContextWithEvents(out.NewEventWriter(os.Stderr, flags.events))
 	defer stop()
 
@@ -138,7 +137,37 @@ func validateAuthOptions(flags *rootFlags, opts authOptions) (validatedAuthOptio
 	if err != nil {
 		return validatedAuthOptions{}, err
 	}
-	return validatedAuthOptions{qrFormat: qrFormat, pairPhone: pairPhone}, nil
+	historyLimits, err := normalizeHistoryLimits(opts)
+	if err != nil {
+		return validatedAuthOptions{}, err
+	}
+	return validatedAuthOptions{qrFormat: qrFormat, pairPhone: pairPhone, historyLimits: historyLimits}, nil
+}
+
+// normalizeHistoryLimits checks both limits fit the pairing field before they
+// are converted to it. Without the upper bound a value above the uint32 range
+// would wrap - 4294967296 becomes 0 - and a request for a bounded history
+// would silently turn into a request for all of it.
+func normalizeHistoryLimits(opts authOptions) (wa.HistorySyncLimits, error) {
+	days, err := historyLimitValue("--history-days", opts.historyDays)
+	if err != nil {
+		return wa.HistorySyncLimits{}, err
+	}
+	perChat, err := historyLimitValue("--history-max-per-chat", opts.historyPerChat)
+	if err != nil {
+		return wa.HistorySyncLimits{}, err
+	}
+	return wa.HistorySyncLimits{Days: days, MaxPerChat: perChat}, nil
+}
+
+func historyLimitValue(flag string, value int) (uint32, error) {
+	if value < 0 {
+		return 0, fmt.Errorf("%s cannot be negative", flag)
+	}
+	if int64(value) > math.MaxUint32 {
+		return 0, fmt.Errorf("%s cannot be above %d", flag, uint32(math.MaxUint32))
+	}
+	return uint32(value), nil
 }
 
 func normalizePairPhone(phone string) (string, error) {
