@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 )
@@ -103,6 +104,34 @@ func TestHistoricalLIDJIDsFindsPurgeLedgerOnlyIdentity(t *testing.T) {
 	`, lid); err != nil {
 		t.Fatal(err)
 	}
+	got, err := db.HistoricalLIDJIDs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{lid}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("HistoricalLIDJIDs = %#v, want %#v", got, want)
+	}
+}
+
+// A group member who only ever reported on our messages, never sending one,
+// leaves an identity that no other table holds.
+func TestHistoricalLIDJIDsFindsReceiptOnlyIdentity(t *testing.T) {
+	db := openTestDB(t)
+	group := "123456789@g.us"
+	lid := "777123456789@lid"
+	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := db.UpsertChat(group, "group", "Friends", base); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID: group, MsgID: "g1", Timestamp: base, FromMe: true, Text: "hello",
+	}); err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+	if err := db.UpsertMessageReceipt(group, "g1", lid, "read", base); err != nil {
+		t.Fatalf("UpsertMessageReceipt: %v", err)
+	}
+
 	got, err := db.HistoricalLIDJIDs()
 	if err != nil {
 		t.Fatal(err)
@@ -488,6 +517,52 @@ func TestMigrateLIDToPNPreservesMessageReceipts(t *testing.T) {
 	}
 	if left := countRows(t, db.sql, `SELECT COUNT(*) FROM message_receipts WHERE chat_jid = ? OR recipient_jid = ?`, lid, lid); left != 0 {
 		t.Fatalf("%d receipts left behind under the lid identity", left)
+	}
+}
+
+// The upgrade path end to end: a store that already holds a receipt whose
+// recipient is only known by LID must surface that identity, reconcile it, and
+// then count the same member once when they report again under their number.
+func TestExistingStoreReconcilesAReceiptOnlyGroupRecipient(t *testing.T) {
+	db := openTestDB(t)
+	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	group := "123456789@g.us"
+	pn := "15551234567@s.whatsapp.net"
+	lid := "777123456789@lid"
+
+	if err := db.UpsertChat(group, "group", "Friends", base); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID: group, MsgID: "g1", Timestamp: base, FromMe: true, Text: "hello",
+	}); err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+	if err := db.UpsertMessageReceipt(group, "g1", lid, "delivered", base); err != nil {
+		t.Fatalf("UpsertMessageReceipt lid: %v", err)
+	}
+
+	found, err := db.HistoricalLIDJIDs()
+	if err != nil {
+		t.Fatalf("HistoricalLIDJIDs: %v", err)
+	}
+	if !slices.Contains(found, lid) {
+		t.Fatalf("HistoricalLIDJIDs = %#v, want it to surface the receipt-only identity", found)
+	}
+	if err := db.MigrateLIDToPN(lid, pn); err != nil {
+		t.Fatalf("MigrateLIDToPN: %v", err)
+	}
+
+	// The same member reads it later, now reporting under their phone number.
+	if err := db.UpsertMessageReceipt(group, "g1", pn, "read", base.Add(time.Hour)); err != nil {
+		t.Fatalf("UpsertMessageReceipt pn: %v", err)
+	}
+	counts, err := db.MessageReceipts(group, "g1")
+	if err != nil {
+		t.Fatalf("MessageReceipts: %v", err)
+	}
+	if counts.Delivered != 1 || counts.Read != 1 {
+		t.Fatalf("counts = %+v, want one member counted once, as having read it", counts)
 	}
 }
 
