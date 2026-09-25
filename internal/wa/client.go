@@ -124,11 +124,15 @@ func (c *Client) SetAutoReconnect(enabled bool) (bool, bool) {
 // a companion links. WhatsApp Web asks for a short window and stays fast; the
 // whatsmeow default asks for no limit and lets the primary send everything it
 // is willing to.
+//
+// The fields are uint32 because that is what the pairing protobuf carries:
+// callers convert once, after checking the value fits, so a request too large
+// for the wire cannot quietly wrap into a different one here.
 type HistorySyncLimits struct {
 	// Days of history to ask for, 0 for whatsmeow's unlimited default.
-	Days int
+	Days uint32
 	// MaxPerChat caps how many messages each chat brings, 0 for no cap.
-	MaxPerChat int
+	MaxPerChat uint32
 }
 
 // SetHistorySyncLimits applies the limits to the device properties whatsmeow
@@ -142,11 +146,11 @@ func SetHistorySyncLimits(limits HistorySyncLimits) {
 		wastore.DeviceProps.HistorySyncConfig = cfg
 	}
 	if limits.Days > 0 {
-		cfg.FullSyncDaysLimit = proto.Uint32(uint32(limits.Days))
-		cfg.RecentSyncDaysLimit = proto.Uint32(uint32(limits.Days))
+		cfg.FullSyncDaysLimit = proto.Uint32(limits.Days)
+		cfg.RecentSyncDaysLimit = proto.Uint32(limits.Days)
 	}
 	if limits.MaxPerChat > 0 {
-		cfg.InitialSyncMaxMessagesPerChat = proto.Uint32(uint32(limits.MaxPerChat))
+		cfg.InitialSyncMaxMessagesPerChat = proto.Uint32(limits.MaxPerChat)
 	}
 }
 
