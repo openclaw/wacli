@@ -18,6 +18,7 @@ wacli --account work auth status
 - Default pairing prints a terminal QR code.
 - `--qr-format text` prints the raw QR payload for external renderers.
 - `--phone PHONE` uses WhatsApp phone-number pairing instead of QR pairing.
+- `--history-days N` asks the primary device for the last N days of history instead of everything it is willing to send, and `--history-max-per-chat M` caps how many messages each chat brings. Both are sent in the pairing handshake, so they apply to this pairing only: they do nothing on a device that is already linked, and the primary decides whether to honour them. Use them when linking again to repair a gap, where a full bundle would re-import an archive you already hold.
 - Transient websocket drops before pairing completes are retried with a fresh QR/code.
 - Passkey-gated pairing is not yet supported. If WhatsApp requests passkey verification or confirmation, auth stops with an actionable error instead of continuing to rotate unusable QR codes.
 - After pairing, auth runs bootstrap sync until idle unless `--follow` is set.
@@ -34,6 +35,7 @@ wacli auth
 wacli auth --qr-format text
 wacli auth --phone "+1 (234) 567-8900"
 wacli auth --download-media
+wacli auth --history-days 1
 wacli auth status --json
 wacli auth logout
 ```

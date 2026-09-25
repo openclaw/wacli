@@ -322,3 +322,27 @@ func TestBestContactName(t *testing.T) {
 		t.Fatalf("expected push name")
 	}
 }
+
+func TestSetHistorySyncLimits(t *testing.T) {
+	previous := waStore.DeviceProps.HistorySyncConfig
+	t.Cleanup(func() { waStore.DeviceProps.HistorySyncConfig = previous })
+
+	waStore.DeviceProps.HistorySyncConfig = nil
+	SetHistorySyncLimits(HistorySyncLimits{})
+	cfg := waStore.DeviceProps.GetHistorySyncConfig()
+	if cfg == nil {
+		t.Fatal("expected a history sync config")
+	}
+	if cfg.FullSyncDaysLimit != nil || cfg.RecentSyncDaysLimit != nil || cfg.InitialSyncMaxMessagesPerChat != nil {
+		t.Fatalf("zero limits set fields: %v", cfg)
+	}
+
+	SetHistorySyncLimits(HistorySyncLimits{Days: 3, MaxPerChat: 50})
+	cfg = waStore.DeviceProps.GetHistorySyncConfig()
+	if cfg.GetFullSyncDaysLimit() != 3 || cfg.GetRecentSyncDaysLimit() != 3 {
+		t.Fatalf("days = %d/%d, want 3/3", cfg.GetFullSyncDaysLimit(), cfg.GetRecentSyncDaysLimit())
+	}
+	if cfg.GetInitialSyncMaxMessagesPerChat() != 50 {
+		t.Fatalf("per chat = %d, want 50", cfg.GetInitialSyncMaxMessagesPerChat())
+	}
+}
