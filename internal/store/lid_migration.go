@@ -17,7 +17,10 @@ type MessageLocalMedia struct {
 }
 
 // HistoricalLIDJIDs returns distinct hidden-user JIDs stored in chat, group,
-// message, and poll identity columns. The app layer resolves these through whatsmeow.
+// message, poll, and receipt identity columns. A recipient that only ever
+// reported on a message, never sending one, appears nowhere else, and an
+// identity nobody discovers is never migrated. The app layer resolves these
+// through whatsmeow.
 func (d *DB) HistoricalLIDJIDs() ([]string, error) {
 	rows, err := d.sql.Query(`
 		SELECT jid FROM chats WHERE jid GLOB '*@lid'
@@ -41,6 +44,10 @@ func (d *DB) HistoricalLIDJIDs() ([]string, error) {
 		SELECT voter_jid FROM poll_votes WHERE voter_jid GLOB '*@lid'
 		UNION
 		SELECT chat_jid FROM message_payload_purges WHERE chat_jid GLOB '*@lid'
+		UNION
+		SELECT chat_jid FROM message_receipts WHERE chat_jid GLOB '*@lid'
+		UNION
+		SELECT recipient_jid FROM message_receipts WHERE recipient_jid GLOB '*@lid'
 		ORDER BY 1
 	`)
 	if err != nil {
