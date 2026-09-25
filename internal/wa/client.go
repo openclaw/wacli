@@ -12,12 +12,15 @@ import (
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/appstate"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
+	"go.mau.fi/whatsmeow/proto/waCompanionReg"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/proto/waWeb"
+	wastore "go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
+	"google.golang.org/protobuf/proto"
 )
 
 type Options struct {
@@ -115,6 +118,36 @@ func (c *Client) SetAutoReconnect(enabled bool) (bool, bool) {
 	}
 	c.client.EnableAutoReconnect = enabled
 	return previous, true
+}
+
+// HistorySyncLimits narrows the history bundle the primary device pushes when
+// a companion links. WhatsApp Web asks for a short window and stays fast; the
+// whatsmeow default asks for no limit and lets the primary send everything it
+// is willing to.
+type HistorySyncLimits struct {
+	// Days of history to ask for, 0 for whatsmeow's unlimited default.
+	Days int
+	// MaxPerChat caps how many messages each chat brings, 0 for no cap.
+	MaxPerChat int
+}
+
+// SetHistorySyncLimits applies the limits to the device properties whatsmeow
+// sends while pairing. They travel in the pairing handshake, so they only
+// affect a device that links after this call: changing them for an already
+// linked device does nothing.
+func SetHistorySyncLimits(limits HistorySyncLimits) {
+	cfg := wastore.DeviceProps.GetHistorySyncConfig()
+	if cfg == nil {
+		cfg = &waCompanionReg.DeviceProps_HistorySyncConfig{}
+		wastore.DeviceProps.HistorySyncConfig = cfg
+	}
+	if limits.Days > 0 {
+		cfg.FullSyncDaysLimit = proto.Uint32(uint32(limits.Days))
+		cfg.RecentSyncDaysLimit = proto.Uint32(uint32(limits.Days))
+	}
+	if limits.MaxPerChat > 0 {
+		cfg.InitialSyncMaxMessagesPerChat = proto.Uint32(uint32(limits.MaxPerChat))
+	}
 }
 
 type ConnectOptions struct {
