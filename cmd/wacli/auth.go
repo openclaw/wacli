@@ -17,11 +17,13 @@ import (
 )
 
 type authOptions struct {
-	follow        bool
-	idleExit      time.Duration
-	downloadMedia bool
-	qrFormat      string
-	phone         string
+	follow         bool
+	idleExit       time.Duration
+	downloadMedia  bool
+	qrFormat       string
+	phone          string
+	historyDays    int
+	historyPerChat int
 }
 
 type validatedAuthOptions struct {
@@ -67,6 +69,8 @@ func addAuthFlags(cmd *cobra.Command, opts *authOptions) {
 	cmd.Flags().BoolVar(&opts.downloadMedia, "download-media", false, "download media in the background during sync")
 	cmd.Flags().StringVar(&opts.qrFormat, "qr-format", "terminal", "QR output format: terminal or text")
 	cmd.Flags().StringVar(&opts.phone, "phone", "", "pair by phone number instead of QR code")
+	cmd.Flags().IntVar(&opts.historyDays, "history-days", 0, "days of history to ask the phone for while pairing (0 = no limit, what the phone decides)")
+	cmd.Flags().IntVar(&opts.historyPerChat, "history-max-per-chat", 0, "cap the messages each chat brings while pairing (0 = no cap)")
 }
 
 func runAuth(flags *rootFlags, opts authOptions) (appPkg.SyncResult, error) {
@@ -81,6 +85,11 @@ func runAuth(flags *rootFlags, opts authOptions) (appPkg.SyncResult, error) {
 	if err != nil {
 		return appPkg.SyncResult{}, err
 	}
+	if opts.historyDays < 0 || opts.historyPerChat < 0 {
+		return appPkg.SyncResult{}, fmt.Errorf("--history-days and --history-max-per-chat cannot be negative")
+	}
+	// Pairing carries these limits, so they must be set before the handshake.
+	wa.SetHistorySyncLimits(wa.HistorySyncLimits{Days: opts.historyDays, MaxPerChat: opts.historyPerChat})
 	ctx, stop := signalContextWithEvents(out.NewEventWriter(os.Stderr, flags.events))
 	defer stop()
 
