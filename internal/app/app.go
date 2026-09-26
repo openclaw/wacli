@@ -132,6 +132,9 @@ type App struct {
 	appStateRecoveryClosing bool
 	manualFetchMu           sync.Mutex
 	manualFetches           map[string]int
+	appStateKeyMu           sync.Mutex
+	appStateKeyUnavailable  bool
+	appStateKeyMissing      map[string]struct{}
 	heartbeatLast           atomic.Int64
 }
 
