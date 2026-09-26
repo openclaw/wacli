@@ -122,19 +122,23 @@ func (c *Client) SetAutoReconnect(enabled bool) (bool, bool) {
 	return previous, true
 }
 
-// HistorySyncLimits narrows the history bundle the primary device pushes when
-// a companion links. WhatsApp Web asks for a short window and stays fast; the
-// whatsmeow default asks for no limit and lets the primary send everything it
-// is willing to.
+// HistorySyncLimits shapes the history bundle the primary device pushes when
+// a companion links. By default whatsmeow does not ask for a full sync, so the
+// primary sends only its recent window (about three months); Days narrows that
+// window and Full asks for the full archive instead.
 //
 // The fields are uint32 because that is what the pairing protobuf carries:
 // callers convert once, after checking the value fits, so a request too large
 // for the wire cannot quietly wrap into a different one here.
 type HistorySyncLimits struct {
-	// Days of history to ask for, 0 for whatsmeow's unlimited default.
+	// Days of history to ask for, 0 to leave it to the primary.
 	Days uint32
 	// MaxPerChat caps how many messages each chat brings, 0 for no cap.
 	MaxPerChat uint32
+	// Full asks for a full history sync instead of the recent window. With
+	// Days set it bounds only the full sync: the recent window the primary
+	// sends first keeps its default.
+	Full bool
 }
 
 // SetHistorySyncLimits applies the limits to the device properties whatsmeow
@@ -147,9 +151,12 @@ func SetHistorySyncLimits(limits HistorySyncLimits) {
 		cfg = &waCompanionReg.DeviceProps_HistorySyncConfig{}
 		wastore.DeviceProps.HistorySyncConfig = cfg
 	}
+	wastore.DeviceProps.RequireFullSync = proto.Bool(limits.Full)
 	if limits.Days > 0 {
 		cfg.FullSyncDaysLimit = proto.Uint32(limits.Days)
-		cfg.RecentSyncDaysLimit = proto.Uint32(limits.Days)
+		if !limits.Full {
+			cfg.RecentSyncDaysLimit = proto.Uint32(limits.Days)
+		}
 	}
 	if limits.MaxPerChat > 0 {
 		cfg.InitialSyncMaxMessagesPerChat = proto.Uint32(limits.MaxPerChat)

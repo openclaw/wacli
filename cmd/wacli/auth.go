@@ -25,6 +25,7 @@ type authOptions struct {
 	phone          string
 	historyDays    int
 	historyPerChat int
+	fullHistory    bool
 }
 
 type validatedAuthOptions struct {
@@ -73,6 +74,7 @@ func addAuthFlags(cmd *cobra.Command, opts *authOptions) {
 	cmd.Flags().StringVar(&opts.phone, "phone", "", "pair by phone number instead of QR code")
 	cmd.Flags().IntVar(&opts.historyDays, "history-days", 0, "days of history to ask the phone for while pairing (0 = no limit, what the phone decides)")
 	cmd.Flags().IntVar(&opts.historyPerChat, "history-max-per-chat", 0, "cap the messages each chat brings while pairing (0 = no cap)")
+	cmd.Flags().BoolVar(&opts.fullHistory, "full-history", false, "ask the phone for a full history sync instead of its recent window (--history-days then sets how far back)")
 }
 
 func runAuth(flags *rootFlags, opts authOptions) (appPkg.SyncResult, error) {
@@ -157,7 +159,7 @@ func normalizeHistoryLimits(opts authOptions) (wa.HistorySyncLimits, error) {
 	if err != nil {
 		return wa.HistorySyncLimits{}, err
 	}
-	return wa.HistorySyncLimits{Days: days, MaxPerChat: perChat}, nil
+	return wa.HistorySyncLimits{Days: days, MaxPerChat: perChat, Full: opts.fullHistory}, nil
 }
 
 func historyLimitValue(flag string, value int) (uint32, error) {

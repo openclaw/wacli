@@ -318,12 +318,14 @@ func TestValidateAuthOptionsHistoryLimits(t *testing.T) {
 		name        string
 		days        int
 		perChat     int
+		full        bool
 		wantErr     string
 		wantDays    uint32
 		wantPerChat uint32
 	}{
 		{name: "unset stays unlimited"},
 		{name: "kept as asked", days: 3, perChat: 50, wantDays: 3, wantPerChat: 50},
+		{name: "full history", full: true, days: 3650, wantDays: 3650},
 		{name: "uint32 maximum", days: math.MaxUint32, wantDays: math.MaxUint32},
 		{name: "negative days", days: -1, wantErr: "--history-days cannot be negative"},
 		{name: "negative per chat", perChat: -1, wantErr: "--history-max-per-chat cannot be negative"},
@@ -332,7 +334,7 @@ func TestValidateAuthOptionsHistoryLimits(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			opts := authOptions{qrFormat: "terminal", historyDays: tc.days, historyPerChat: tc.perChat}
+			opts := authOptions{qrFormat: "terminal", historyDays: tc.days, historyPerChat: tc.perChat, fullHistory: tc.full}
 			validated, err := validateAuthOptions(&rootFlags{}, opts)
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
@@ -348,6 +350,9 @@ func TestValidateAuthOptionsHistoryLimits(t *testing.T) {
 			}
 			if validated.historyLimits.MaxPerChat != tc.wantPerChat {
 				t.Fatalf("MaxPerChat = %d, want %d", validated.historyLimits.MaxPerChat, tc.wantPerChat)
+			}
+			if validated.historyLimits.Full != tc.full {
+				t.Fatalf("Full = %v, want %v", validated.historyLimits.Full, tc.full)
 			}
 		})
 	}

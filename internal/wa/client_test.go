@@ -325,7 +325,11 @@ func TestBestContactName(t *testing.T) {
 
 func TestSetHistorySyncLimits(t *testing.T) {
 	previous := waStore.DeviceProps.HistorySyncConfig
-	t.Cleanup(func() { waStore.DeviceProps.HistorySyncConfig = previous })
+	previousFull := waStore.DeviceProps.RequireFullSync
+	t.Cleanup(func() {
+		waStore.DeviceProps.HistorySyncConfig = previous
+		waStore.DeviceProps.RequireFullSync = previousFull
+	})
 
 	waStore.DeviceProps.HistorySyncConfig = nil
 	SetHistorySyncLimits(HistorySyncLimits{})
@@ -336,6 +340,9 @@ func TestSetHistorySyncLimits(t *testing.T) {
 	if cfg.FullSyncDaysLimit != nil || cfg.RecentSyncDaysLimit != nil || cfg.InitialSyncMaxMessagesPerChat != nil {
 		t.Fatalf("zero limits set fields: %v", cfg)
 	}
+	if waStore.DeviceProps.GetRequireFullSync() {
+		t.Fatal("zero limits asked for a full sync")
+	}
 
 	SetHistorySyncLimits(HistorySyncLimits{Days: 3, MaxPerChat: 50})
 	cfg = waStore.DeviceProps.GetHistorySyncConfig()
@@ -344,5 +351,28 @@ func TestSetHistorySyncLimits(t *testing.T) {
 	}
 	if cfg.GetInitialSyncMaxMessagesPerChat() != 50 {
 		t.Fatalf("per chat = %d, want 50", cfg.GetInitialSyncMaxMessagesPerChat())
+	}
+	if waStore.DeviceProps.GetRequireFullSync() {
+		t.Fatal("a bounded window asked for a full sync")
+	}
+
+	waStore.DeviceProps.HistorySyncConfig = nil
+	SetHistorySyncLimits(HistorySyncLimits{Full: true})
+	cfg = waStore.DeviceProps.GetHistorySyncConfig()
+	if !waStore.DeviceProps.GetRequireFullSync() {
+		t.Fatal("full history did not ask for a full sync")
+	}
+	if cfg.FullSyncDaysLimit != nil || cfg.RecentSyncDaysLimit != nil {
+		t.Fatalf("full history without days set a bound: %v", cfg)
+	}
+
+	waStore.DeviceProps.HistorySyncConfig = nil
+	SetHistorySyncLimits(HistorySyncLimits{Full: true, Days: 3650})
+	cfg = waStore.DeviceProps.GetHistorySyncConfig()
+	if !waStore.DeviceProps.GetRequireFullSync() || cfg.GetFullSyncDaysLimit() != 3650 {
+		t.Fatalf("full = %v, days = %d, want true, 3650", waStore.DeviceProps.GetRequireFullSync(), cfg.GetFullSyncDaysLimit())
+	}
+	if cfg.RecentSyncDaysLimit != nil {
+		t.Fatalf("full history bounded the recent window: %d", cfg.GetRecentSyncDaysLimit())
 	}
 }
