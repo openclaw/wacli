@@ -133,6 +133,22 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 					enqueueWebhook(job)
 				}
 			}
+		case *events.UndecryptableMessage:
+			// A message that arrived but could not be read. Report it, so that a
+			// hole in a chat is never silent, and say which recovery this event
+			// actually gets: they are not the same.
+			lastEvent.Store(nowUTC().UnixNano())
+			recovery, warning := undecryptableWarning(v)
+			a.emitWarning("undecryptable_message", warning,
+				map[string]any{
+					"chat_jid":         v.Info.Chat.String(),
+					"sender_jid":       v.Info.Sender.String(),
+					"msg_id":           string(v.Info.ID),
+					"is_unavailable":   v.IsUnavailable,
+					"unavailable_type": string(v.UnavailableType),
+					"fail_mode":        string(v.DecryptFailMode),
+					"recovery":         recovery,
+				})
 		case *events.OfflineSyncPreview:
 			// Emitted right after connecting when the server is about to send
 			// what this device missed while it was down.
@@ -806,6 +822,43 @@ func (a *App) decryptEncryptedReaction(ctx context.Context, pm *wa.ParsedMessage
 			pm.ReactionToID = key.GetID()
 		}
 	}
+}
+
+// undecryptableWarning returns the recovery this event gets and the line that
+// reports it.
+//
+// Only one case is certain: content WhatsApp keeps from linked devices on
+// purpose, which carries an unavailable type and is never coming. Everything
+// else is asked back, but not always and not the same way. A message with no
+// ciphertext for this device is requested from the primary at once; a message
+// that failed to decrypt gets a retry receipt to the sender plus, on the first
+// failure for that ID only, a delayed request to the primary; a bot message
+// with no message secret is merely NACKed and gets neither. IsUnavailable does
+// not separate them either, because whatsmeow also sets it for an encrypted
+// group message whose sender key is missing, where ciphertext did arrive and
+// the conditional retry path is the one taken. So that line names what is
+// known and promises neither a request nor a recovered copy.
+func undecryptableWarning(v *events.UndecryptableMessage) (recovery, warning string) {
+	what := fmt.Sprintf("message %s in %s from %s", v.Info.ID, v.Info.Chat, v.Info.Sender)
+	if v.UnavailableType != events.UnavailableTypeUnknown {
+		return "none", fmt.Sprintf(
+			"warning: %s is kept from linked devices on purpose (%s); it cannot be read here",
+			what, v.UnavailableType)
+	}
+	arrival := "decryption failed"
+	if v.IsUnavailable {
+		arrival = "nothing readable arrived"
+	}
+	return "requested_if_possible", fmt.Sprintf(
+		"warning: could not read %s (%s, fail mode %s); a copy is asked back where the failure allows it, so the message can stay missing here",
+		what, arrival, undecryptableFailMode(v.DecryptFailMode))
+}
+
+func undecryptableFailMode(mode events.DecryptFailMode) string {
+	if mode == events.DecryptFailShow {
+		return "show"
+	}
+	return string(mode)
 }
 
 // sendPresence sends a global presence update if the WhatsApp client is ready.
