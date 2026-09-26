@@ -41,6 +41,7 @@ var schemaMigrations = []migration{
 	{version: 25, name: "message locations", up: migrateMessageLocations},
 	{version: 26, name: "message identity indexes and selective fts updates", up: migrateMessageIdentityIndexes},
 	{version: 27, name: "repair placeholder chat activity", up: migratePlaceholderChatActivity},
+	{version: 28, name: "history sync queue", up: migrateHistorySyncQueue},
 }
 
 func migratePlaceholderChatActivity(d *DB) error {
@@ -117,6 +118,22 @@ func ensureMessageLocalMediaAliasesTable(d *DB) error {
 		)
 	`); err != nil {
 		return fmt.Errorf("ensure message local media aliases: %w", err)
+	}
+	return nil
+}
+
+func migrateHistorySyncQueue(d *DB) error {
+	if _, err := d.sql.Exec(`
+		CREATE TABLE IF NOT EXISTS history_sync_queue (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			msg_id TEXT UNIQUE,
+			sync_type INTEGER NOT NULL,
+			notification BLOB NOT NULL,
+			queued_at INTEGER NOT NULL,
+			attempts INTEGER NOT NULL DEFAULT 0
+		)
+	`); err != nil {
+		return fmt.Errorf("create history sync queue table: %w", err)
 	}
 	return nil
 }
