@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/openclaw/wacli/internal/wa"
 	"go.mau.fi/whatsmeow/appstate"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -20,10 +22,58 @@ func (a *App) handleAppStateSyncError(ctx context.Context, evt *events.AppStateS
 	if evt == nil || !errors.Is(evt.Error, appstate.ErrMismatchingLTHash) {
 		return
 	}
-	if a.ownsManualAppStateFetch(evt.Name) {
+	a.startAppStateRecovery(ctx, evt.Name, recoveries, "app_state_lthash_mismatch", "hit an LTHash mismatch")
+}
+
+// handleAppStateKeyUnavailable reacts to the primary answering a key request
+// without key data. whatsmeow only knows how to ask for the key again, which
+// returns the same empty share, so every collection already failing on a
+// missing key goes to the full sync -> recovery snapshot path instead.
+func (a *App) handleAppStateKeyUnavailable(ctx context.Context, evt *wa.AppStateKeyUnavailable, recoveries *sync.Map) {
+	if evt == nil {
 		return
 	}
-	name := strings.TrimSpace(string(evt.Name))
+	a.appStateKeyMu.Lock()
+	a.appStateKeyUnavailable = true
+	names := make([]string, 0, len(a.appStateKeyMissing))
+	for name := range a.appStateKeyMissing {
+		names = append(names, name)
+	}
+	a.appStateKeyMu.Unlock()
+	slices.Sort(names)
+
+	keyID := fmt.Sprintf("%X", evt.KeyID)
+	a.emitWarning("app_state_key_unavailable",
+		fmt.Sprintf("warning: primary device has no data for app state key %s; collections that need it will be recovered from a snapshot", keyID),
+		map[string]any{"key_id": keyID})
+	for _, name := range names {
+		a.startAppStateRecovery(ctx, appstate.WAPatchName(name), recoveries, "app_state_key_missing", "needs a key the primary device no longer has")
+	}
+}
+
+// noteAppStateKeyMissing records a collection that failed on ErrKeyNotFound and
+// reports whether the primary already said it cannot supply a missing key.
+func (a *App) noteAppStateKeyMissing(name appstate.WAPatchName) (primaryLacksKey bool) {
+	a.appStateKeyMu.Lock()
+	defer a.appStateKeyMu.Unlock()
+	if a.appStateKeyMissing == nil {
+		a.appStateKeyMissing = make(map[string]struct{})
+	}
+	a.appStateKeyMissing[string(name)] = struct{}{}
+	return a.appStateKeyUnavailable
+}
+
+func (a *App) primaryLacksAppStateKey() bool {
+	a.appStateKeyMu.Lock()
+	defer a.appStateKeyMu.Unlock()
+	return a.appStateKeyUnavailable
+}
+
+func (a *App) startAppStateRecovery(ctx context.Context, collection appstate.WAPatchName, recoveries *sync.Map, warningCode, reason string) {
+	if a.ownsManualAppStateFetch(collection) {
+		return
+	}
+	name := strings.TrimSpace(string(collection))
 	if name == "" {
 		return
 	}
@@ -40,8 +90,8 @@ func (a *App) handleAppStateSyncError(ctx context.Context, evt *events.AppStateS
 	}
 
 	a.appStateRecoveryWorkers.Go(func() {
-		a.emitWarning("app_state_lthash_mismatch",
-			fmt.Sprintf("warning: app state %s hit an LTHash mismatch; attempting full sync", name),
+		a.emitWarning(warningCode,
+			fmt.Sprintf("warning: app state %s %s; attempting full sync", name, reason),
 			map[string]any{"name": name})
 		a.recoverAppStateCollection(ctx, name, recoveries, appStateRecoveryStepTimeout)
 	})
@@ -131,6 +181,10 @@ func (a *App) syncAppStateDeltas(ctx context.Context, recoveries *sync.Map) {
 		}
 		fullSync := name == appstate.WAPatchRegular
 		if err := a.wa.FetchAppState(ctx, string(name), fullSync, false); err != nil {
+			if errors.Is(err, appstate.ErrKeyNotFound) && a.noteAppStateKeyMissing(name) {
+				a.startAppStateRecovery(ctx, name, recoveries, "app_state_key_missing", "needs a key the primary device no longer has")
+				continue
+			}
 			a.emitWarning("app_state_sync_failed",
 				fmt.Sprintf("warning: failed to sync WhatsApp app state %s: %v", name, err),
 				map[string]any{"name": string(name), "error": err.Error()})

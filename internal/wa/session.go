@@ -10,6 +10,7 @@ import (
 	"github.com/openclaw/wacli/internal/sqliteutil"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store/sqlstore"
+	"go.mau.fi/whatsmeow/types/events"
 )
 
 func (c *Client) init() (err error) {
@@ -54,6 +55,16 @@ func (c *Client) init() (err error) {
 	// "Waiting for this message" indefinitely because whatsmeow can't find the
 	// original plaintext to re-encrypt when the retry arrives.
 	c.client.UseRetryMessageStore = true
+	cli := c.client
+	onEmptyKey := func(keyID []byte) {
+		cli.DangerousInternals().DispatchEvent(&AppStateKeyUnavailable{KeyID: keyID})
+	}
+	guardAppStateKeys(deviceStore, onEmptyKey)
+	cli.AddEventHandler(func(evt any) {
+		if _, ok := evt.(*events.PairSuccess); ok {
+			guardAppStateKeys(cli.Store, onEmptyKey)
+		}
+	})
 	c.container = container
 	return nil
 }

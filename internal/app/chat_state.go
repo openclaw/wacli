@@ -224,7 +224,12 @@ func (a *App) replayRequiredAppState(ctx context.Context, collection appstate.WA
 		}
 		// whatsmeow requests the missing keys when patch decoding returns
 		// ErrKeyNotFound. Keep the connection alive for that delivery, bounded
-		// so one absent key cannot hold all chat-state writes forever.
+		// so one absent key cannot hold all chat-state writes forever. Once the
+		// primary has answered with an empty share, no delivery is coming.
+		a.noteAppStateKeyMissing(collection)
+		if a.primaryLacksAppStateKey() {
+			return a.recoverMismatchingAppState(ctx, collection, markerGeneration, tracker, nil)
+		}
 
 		timer := time.NewTimer(retryDelay)
 		select {

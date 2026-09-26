@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Sync: stop storing app state keys the phone shares without key data, which failed on `NOT NULL constraint failed: whatsmeow_app_state_sync_keys.key_data` on every sync, and recover collections that need such a key through full sync and a phone recovery snapshot instead of waiting for a key that never arrives.
+
 ## 0.19.0 - 2026-09-24
 
 **Highlights:** opt-in read receipts without app-state recovery, accurate unread counts, and stable chat activity order.
