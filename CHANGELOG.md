@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Sync: store RECENT and FULL history chunks from a queue in the store, on a worker of their own, so live messages, receipts, and the offline backlog are no longer held up behind a chunk that takes minutes to store; a chunk interrupted by the sync stopping is stored by the next one. Thanks @zarmat99.
+
 ## 0.19.0 - 2026-09-24
 
 **Highlights:** opt-in read receipts without app-state recovery, accurate unread counts, and stable chat activity order.

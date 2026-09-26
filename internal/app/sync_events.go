@@ -98,6 +98,17 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 				if notif.GetSyncType() == waE2E.HistorySyncType_ON_DEMAND {
 					return
 				}
+				if q := opts.historyQueue; q != nil && queuesHistorySync(notif.GetSyncType()) {
+					err := q.enqueue(v.Info.ID, notif)
+					if err == nil {
+						return
+					}
+					a.emitWarning(
+						"history_queue_failed",
+						fmt.Sprintf("warning: failed to queue history sync, storing it now: %v", err),
+						map[string]any{"error": err.Error()},
+					)
+				}
 				a.downloadAndHandleHistorySync(ctx, opts, notif, messagesStored, lastEvent, enqueueMedia, limits)
 				return
 			}
@@ -618,14 +629,26 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 	a.emitOrPrint("history_sync", map[string]any{"conversations": len(v.Data.Conversations)}, "\nProcessing history sync (%d conversations)...\n", len(v.Data.Conversations))
 	a.storeHistoryCallLogRecords(ctx, v, lastEvent)
 	for _, conv := range v.Data.Conversations {
+		// A queued chunk stays queued until it is stored in full, so it can
+		// stop as soon as the sync does; one stored in line has no second
+		// chance and keeps going.
+		if opts.deferredHistory && ctx.Err() != nil {
+			return
+		}
 		lastEvent.Store(nowUTC().UnixNano())
 		chatID := strings.TrimSpace(conv.GetID())
 		if chatID == "" {
 			continue
 		}
-		a.storeHistoryUnreadCount(ctx, chatID, conv)
+		if !opts.deferredHistory {
+			a.storeHistoryUnreadCount(ctx, chatID, conv)
+		}
 		var pendingPolls []historyPollSideEffect
 		for _, m := range conv.Messages {
+			if opts.deferredHistory && ctx.Err() != nil {
+				a.handleHistoryPollSideEffectsBatch(context.WithoutCancel(ctx), pendingPolls)
+				return
+			}
 			lastEvent.Store(nowUTC().UnixNano())
 			if m.Message == nil {
 				continue

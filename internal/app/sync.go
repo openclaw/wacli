@@ -79,6 +79,12 @@ type SyncOptions struct {
 	WebhookAllowPrivate bool
 	WebhookEvents       SyncWebhookEventSet // nil = messages only
 	afterHistorySync    func(*events.HistorySync)
+	// historyQueue takes RECENT and FULL history chunks off the event
+	// handler; nil stores every chunk in line, as before.
+	historyQueue *historyQueue
+	// deferredHistory marks a chunk stored by the queue's worker: it can stop
+	// part way, since the chunk stays queued, and it leaves unread state alone.
+	deferredHistory bool
 }
 
 type SyncResult struct {
@@ -173,6 +179,11 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 		defer stopWebhook()
 	}
 
+	// RECENT and FULL history chunks go to a queue kept in the store and are
+	// stored by a worker, so the event handler is never held up behind one.
+	historyQ := newHistoryQueue(a)
+	opts.historyQueue = historyQ
+
 	ps := &syncPresence{}
 	handlerID, appStateRecoveries := a.addSyncEventHandler(syncCtx, opts, &messagesStored, &lastEvent, disconnected, loggedOut, staleReconnect, enqueueMedia, enqueueWebhook, limits, ps, mediaQ)
 	defer a.wa.RemoveEventHandler(handlerID)
@@ -198,6 +209,10 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 		return SyncResult{MessagesStored: messagesStored.Load()}, err
 	}
 	a.syncAppStateDeltas(syncCtx, appStateRecoveries)
+	// Started once identities are migrated, so chunks left queued by an
+	// earlier run are stored under the same identities as new ones.
+	stopHistory := historyQ.start(syncCtx, opts, &messagesStored, &lastEvent, enqueueMedia, limits)
+	defer stopHistory()
 
 	// Optional: bootstrap imports (helps contacts/groups management without waiting for events).
 	if opts.RefreshContacts {
@@ -240,9 +255,14 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 		_, err = a.runSyncUntilIdle(syncCtx, opts.IdleExit, opts.MaxReconnect, opts.PresenceMode, &messagesStored, &lastEvent, disconnected, loggedOut)
 	}
 	limitErr := limits.Err()
-	// Successful one-shot modes must finish queued downloads before cleanup
-	// cancels the worker context. Follow mode keeps the queue open; error,
-	// cancellation, and storage-limit exits retain immediate cancellation.
+	// Successful one-shot modes must store queued history chunks and finish
+	// queued downloads before cleanup cancels the worker context. Follow mode
+	// keeps the queues open; error, cancellation, and storage-limit exits
+	// retain immediate cancellation, and what history is left stays queued.
+	if opts.Mode != SyncModeFollow && err == nil && limitErr == nil && syncCtx.Err() == nil {
+		historyQ.waitIdle(syncCtx)
+		limitErr = limits.Err()
+	}
 	if waitMedia != nil && opts.Mode != SyncModeFollow && err == nil && limitErr == nil && syncCtx.Err() == nil {
 		waitMedia(syncCtx)
 		limitErr = limits.Err()

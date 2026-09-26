@@ -210,3 +210,12 @@ CREATE TABLE IF NOT EXISTS poll_votes (
 );
 
 CREATE INDEX IF NOT EXISTS idx_poll_votes_poll ON poll_votes(chat_jid, poll_msg_id);
+
+CREATE TABLE IF NOT EXISTS history_sync_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    msg_id TEXT UNIQUE,
+    sync_type INTEGER NOT NULL,
+    notification BLOB NOT NULL, -- marshaled HistorySyncNotification
+    queued_at INTEGER NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0
+);
