@@ -20,8 +20,11 @@ func TestSyncEventHandlerWarnsOnUndecryptableMessage(t *testing.T) {
 	chat := types.JID{User: "123", Server: types.DefaultUserServer}
 	sender := types.JID{User: "456", Server: types.DefaultUserServer}
 
+	group := types.JID{User: "123-456", Server: types.GroupServer}
+
 	tests := []struct {
 		name            string
+		chat            types.JID
 		event           *events.UndecryptableMessage
 		wantRecovery    string
 		wantUnavailable bool
@@ -33,18 +36,33 @@ func TestSyncEventHandlerWarnsOnUndecryptableMessage(t *testing.T) {
 			event: &events.UndecryptableMessage{
 				DecryptFailMode: events.DecryptFailHide,
 			},
-			wantRecovery:  "resend_requested",
-			wantInMessage: "could not decrypt",
-			notInMessage:  "primary device has been asked",
+			wantRecovery:  "requested_if_possible",
+			wantInMessage: "decryption failed, fail mode hide",
+			notInMessage:  "primary device",
 		},
 		{
 			name: "no ciphertext for this device",
 			event: &events.UndecryptableMessage{
 				IsUnavailable: true,
 			},
-			wantRecovery:    "requested_from_primary",
+			wantRecovery:    "requested_if_possible",
 			wantUnavailable: true,
-			wantInMessage:   "the primary device has been asked for one",
+			wantInMessage:   "nothing readable arrived",
+			notInMessage:    "primary device",
+		},
+		{
+			// whatsmeow sets IsUnavailable here too, although ciphertext did
+			// arrive and the request to the primary is only the conditional one.
+			name: "group message with no sender key",
+			chat: group,
+			event: &events.UndecryptableMessage{
+				IsUnavailable:   true,
+				DecryptFailMode: events.DecryptFailShow,
+			},
+			wantRecovery:    "requested_if_possible",
+			wantUnavailable: true,
+			wantInMessage:   "a copy is asked back where the failure allows it",
+			notInMessage:    "primary device",
 		},
 		{
 			name: "unavailable on purpose",
@@ -84,10 +102,14 @@ func TestSyncEventHandlerWarnsOnUndecryptableMessage(t *testing.T) {
 			)
 			defer f.RemoveEventHandler(handlerID)
 
+			wantChat := chat
+			if !tc.chat.IsEmpty() {
+				wantChat = tc.chat
+			}
 			evtIn := *tc.event
 			evtIn.Info = types.MessageInfo{
 				ID:            "lost-1",
-				MessageSource: types.MessageSource{Chat: chat, Sender: sender},
+				MessageSource: types.MessageSource{Chat: wantChat, Sender: sender},
 			}
 			f.emit(&evtIn)
 
@@ -102,8 +124,8 @@ func TestSyncEventHandlerWarnsOnUndecryptableMessage(t *testing.T) {
 			if data["msg_id"] != "lost-1" {
 				t.Fatalf("msg_id = %v, want lost-1", data["msg_id"])
 			}
-			if data["chat_jid"] != chat.String() || data["sender_jid"] != sender.String() {
-				t.Fatalf("event names chat %v and sender %v, want %s and %s", data["chat_jid"], data["sender_jid"], chat, sender)
+			if data["chat_jid"] != wantChat.String() || data["sender_jid"] != sender.String() {
+				t.Fatalf("event names chat %v and sender %v, want %s and %s", data["chat_jid"], data["sender_jid"], wantChat, sender)
 			}
 			if data["is_unavailable"] != tc.wantUnavailable {
 				t.Fatalf("is_unavailable = %v, want %v", data["is_unavailable"], tc.wantUnavailable)

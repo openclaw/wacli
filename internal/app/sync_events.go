@@ -825,30 +825,33 @@ func (a *App) decryptEncryptedReaction(ctx context.Context, pm *wa.ParsedMessage
 }
 
 // undecryptableWarning returns the recovery this event gets and the line that
-// reports it. whatsmeow does not treat them alike: content the sender marked
-// unavailable to linked devices is never coming, a message whose ciphertext
-// never reached this device is requested from the primary at once, and a
-// message that failed to decrypt gets a retry receipt to the sender plus, on
-// the first failure for that ID only, a delayed request to the primary. A few
-// failures - a bot message with no message secret - are only NACKed and get
-// neither, and the event carries nothing that tells them apart, so that last
-// line promises no request and no recovered copy.
+// reports it.
+//
+// Only one case is certain: content WhatsApp keeps from linked devices on
+// purpose, which carries an unavailable type and is never coming. Everything
+// else is asked back, but not always and not the same way. A message with no
+// ciphertext for this device is requested from the primary at once; a message
+// that failed to decrypt gets a retry receipt to the sender plus, on the first
+// failure for that ID only, a delayed request to the primary; a bot message
+// with no message secret is merely NACKed and gets neither. IsUnavailable does
+// not separate them either, because whatsmeow also sets it for an encrypted
+// group message whose sender key is missing, where ciphertext did arrive and
+// the conditional retry path is the one taken. So that line names what is
+// known and promises neither a request nor a recovered copy.
 func undecryptableWarning(v *events.UndecryptableMessage) (recovery, warning string) {
 	what := fmt.Sprintf("message %s in %s from %s", v.Info.ID, v.Info.Chat, v.Info.Sender)
-	switch {
-	case v.UnavailableType != events.UnavailableTypeUnknown:
+	if v.UnavailableType != events.UnavailableTypeUnknown {
 		return "none", fmt.Sprintf(
 			"warning: %s is kept from linked devices on purpose (%s); it cannot be read here",
 			what, v.UnavailableType)
-	case v.IsUnavailable:
-		return "requested_from_primary", fmt.Sprintf(
-			"warning: no copy of %s reached this device; the primary device has been asked for one",
-			what)
-	default:
-		return "resend_requested", fmt.Sprintf(
-			"warning: could not decrypt %s (fail mode %s); a copy is asked back where the failure allows it, so the message can stay missing here",
-			what, undecryptableFailMode(v.DecryptFailMode))
 	}
+	arrival := "decryption failed"
+	if v.IsUnavailable {
+		arrival = "nothing readable arrived"
+	}
+	return "requested_if_possible", fmt.Sprintf(
+		"warning: could not read %s (%s, fail mode %s); a copy is asked back where the failure allows it, so the message can stay missing here",
+		what, arrival, undecryptableFailMode(v.DecryptFailMode))
 }
 
 func undecryptableFailMode(mode events.DecryptFailMode) string {
