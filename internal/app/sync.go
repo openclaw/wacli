@@ -390,10 +390,10 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 	// A group's name and stored snapshot come from one kept answer, not from
 	// two lookups per message.
 	var group *types.GroupInfo
-	var groupAsked bool
+	var groupUnstored bool
 	var chatName string
 	if pm.Chat.Server == types.GroupServer {
-		group, groupAsked, _ = a.cachedGroupInfo(ctx, pm.Chat)
+		group, groupUnstored, _ = a.cachedGroupInfo(ctx, pm.Chat)
 		chatName = groupChatName(pm.Chat, group, pm.PushName)
 	} else {
 		chatName = a.wa.ResolveChatName(ctx, pm.Chat, pm.PushName)
@@ -454,9 +454,12 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 	}
 
 	// Best-effort: store group metadata (and participants) when available,
-	// once for each answer from the servers.
-	if group != nil && groupAsked {
-		_ = a.storeGroupInfo(ctx, group)
+	// once for each answer from the servers. An answer whose write failed, or
+	// was never reached, is offered again with the group's next message.
+	if group != nil && groupUnstored {
+		if err := a.storeGroupInfo(ctx, group); err == nil {
+			a.groupInfoStored(pm.Chat, group)
+		}
 	}
 
 	var mediaType, caption, filename, mimeType, directPath string

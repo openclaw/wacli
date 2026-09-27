@@ -2,8 +2,10 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -250,6 +252,72 @@ func TestGroupInfoAskedAcrossAChangeIsNotKept(t *testing.T) {
 	assertGroupInfoCalls(t, f, 2)
 	storeGroupText(t, ctx, a, "m3")
 	assertGroupInfoCalls(t, f, 2)
+}
+
+// renameTable moves a table of the app's store out of the way, or back.
+func renameTable(t *testing.T, a *App, from, to string) {
+	t.Helper()
+	raw, err := sql.Open("sqlite3", filepath.Join(a.opts.StoreDir, "wacli.db"))
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer raw.Close()
+	if _, err := raw.Exec(fmt.Sprintf(`ALTER TABLE %q RENAME TO %q`, from, to)); err != nil {
+		t.Fatalf("rename %s to %s: %v", from, to, err)
+	}
+}
+
+func TestGroupSnapshotIsRetriedAfterAFailedWrite(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		table   string // made to fail while the first message is stored
+		wantErr bool
+	}{
+		{name: "snapshot write fails", table: "groups"},
+		{name: "chat write fails before the snapshot", table: "chats", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := newTestApp(t)
+			f := newFakeWA()
+			a.wa = f
+			ctx := context.Background()
+			f.groups[testGroupJID] = testGroup("Project")
+
+			renameTable(t, a, tc.table, tc.table+"_away")
+			err := a.storeParsedMessage(ctx, wa.ParsedMessage{
+				Chat:      testGroupJID,
+				ID:        "m1",
+				SenderJID: testMemberJID.String(),
+				PushName:  "Anna",
+				Timestamp: time.Date(2025, 3, 1, 12, 0, 0, 0, time.UTC),
+				Text:      "hello",
+			})
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("storeParsedMessage error = %v, want error %v", err, tc.wantErr)
+			}
+			renameTable(t, a, tc.table+"_away", tc.table)
+			if n := storedParticipants(t, a); n != 0 {
+				t.Fatalf("participants stored while the write failed: %d", n)
+			}
+
+			// The next message stores the snapshot from the kept answer.
+			storeGroupText(t, ctx, a, "m2")
+			assertGroupInfoCalls(t, f, 1)
+			if n := storedParticipants(t, a); n != 1 {
+				t.Fatalf("snapshot not retried after the failed write: %d participants", n)
+			}
+
+			// Once stored, it is not written again for that answer.
+			if err := a.db.ReplaceGroupParticipants(testGroupJID.String(), nil); err != nil {
+				t.Fatalf("ReplaceGroupParticipants: %v", err)
+			}
+			storeGroupText(t, ctx, a, "m3")
+			assertGroupInfoCalls(t, f, 1)
+			if n := storedParticipants(t, a); n != 0 {
+				t.Fatalf("snapshot written again after it was stored: %d participants", n)
+			}
+		})
+	}
 }
 
 func TestGroupInfoAskedWhileStoppingIsNotKept(t *testing.T) {

@@ -28,6 +28,10 @@ type groupInfoAnswer struct {
 	info    *types.GroupInfo
 	err     error
 	expires time.Time
+	// stored is set once the answer's snapshot is in the store. Until then
+	// each message that reuses the answer offers it for storing again, so a
+	// failed write is retried without asking the servers again.
+	stored bool
 }
 
 type groupInfoCache struct {
@@ -39,15 +43,17 @@ type groupInfoCache struct {
 }
 
 // cachedGroupInfo returns the group's info, asking the servers only when no
-// recent answer is kept. asked reports whether this call asked, so the caller
-// stores each answer once instead of with every message. info is nil whenever
+// recent answer is kept. unstored reports that the answer's snapshot is not in
+// the store yet: the caller stores it and then calls groupInfoStored, so each
+// answer is written once rather than with every message, and a write that
+// failed is tried again with the group's next message. info is nil whenever
 // err is set.
-func (a *App) cachedGroupInfo(ctx context.Context, jid types.JID) (info *types.GroupInfo, asked bool, err error) {
+func (a *App) cachedGroupInfo(ctx context.Context, jid types.JID) (info *types.GroupInfo, unstored bool, err error) {
 	c := &a.groupInfo
 	c.mu.Lock()
 	if ans, ok := c.answers[jid]; ok && nowUTC().Before(ans.expires) {
 		c.mu.Unlock()
-		return ans.info, false, ans.err
+		return ans.info, ans.info != nil && !ans.stored, ans.err
 	}
 	changes := c.changes
 	c.mu.Unlock()
@@ -58,7 +64,7 @@ func (a *App) cachedGroupInfo(ctx context.Context, jid types.JID) (info *types.G
 	}
 	if ctx.Err() != nil {
 		// The sync is stopping: keep nothing, the next run asks again.
-		return info, true, err
+		return info, info != nil, err
 	}
 	reuse := groupInfoReuse
 	if info == nil {
@@ -72,7 +78,19 @@ func (a *App) cachedGroupInfo(ctx context.Context, jid types.JID) (info *types.G
 		c.answers[jid] = groupInfoAnswer{info: info, err: err, expires: nowUTC().Add(reuse)}
 	}
 	c.mu.Unlock()
-	return info, true, err
+	return info, info != nil, err
+}
+
+// groupInfoStored records that the snapshot of info is in the store, if info
+// is still the answer kept for the group.
+func (a *App) groupInfoStored(jid types.JID, info *types.GroupInfo) {
+	c := &a.groupInfo
+	c.mu.Lock()
+	if ans, ok := c.answers[jid]; ok && ans.info == info {
+		ans.stored = true
+		c.answers[jid] = ans
+	}
+	c.mu.Unlock()
 }
 
 // forgetGroupInfo drops the answer kept for a group that changed, so its next
