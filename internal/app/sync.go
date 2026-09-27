@@ -387,7 +387,17 @@ func chatKind(chat types.JID) string {
 func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error {
 	pm.Chat = a.canonicalStoreJID(ctx, pm.Chat)
 	chatJID := canonicalJIDString(pm.Chat)
-	chatName := a.wa.ResolveChatName(ctx, pm.Chat, pm.PushName)
+	// A group's name and stored snapshot come from one kept answer, not from
+	// two lookups per message.
+	var group *types.GroupInfo
+	var groupAsked bool
+	var chatName string
+	if pm.Chat.Server == types.GroupServer {
+		group, groupAsked, _ = a.cachedGroupInfo(ctx, pm.Chat)
+		chatName = groupChatName(pm.Chat, group, pm.PushName)
+	} else {
+		chatName = a.wa.ResolveChatName(ctx, pm.Chat, pm.PushName)
+	}
 	if pm.Chat != types.StatusBroadcastJID {
 		// Keep diagnostic placeholders without treating them as chat activity.
 		var err error
@@ -443,11 +453,10 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 		}
 	}
 
-	// Best-effort: store group metadata (and participants) when available.
-	if pm.Chat.Server == types.GroupServer {
-		if gi, err := a.wa.GetGroupInfo(ctx, pm.Chat); err == nil && gi != nil {
-			_ = a.storeGroupInfo(ctx, gi)
-		}
+	// Best-effort: store group metadata (and participants) when available,
+	// once for each answer from the servers.
+	if group != nil && groupAsked {
+		_ = a.storeGroupInfo(ctx, group)
 	}
 
 	var mediaType, caption, filename, mimeType, directPath string

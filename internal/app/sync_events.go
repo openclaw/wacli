@@ -133,6 +133,11 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 					enqueueWebhook(job)
 				}
 			}
+		case *events.GroupInfo:
+			// The group changed: its next message asks for its info again.
+			a.forgetGroupInfo(v.JID)
+		case *events.JoinedGroup:
+			a.forgetGroupInfo(v.JID)
 		case *events.OfflineSyncPreview:
 			// Emitted right after connecting when the server is about to send
 			// what this device missed while it was down.
