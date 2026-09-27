@@ -31,6 +31,7 @@ type fakeWA struct {
 	connected     bool
 	autoReconnect bool
 	linkedLID     string
+	linkedJID     string // overrides the default linked account when set
 
 	nextHandlerID uint32
 	handlers      map[uint32]func(any)
@@ -904,6 +905,12 @@ func (f *fakeWA) GetBusinessProfile(ctx context.Context, jid types.JID) (*types.
 func (f *fakeWA) LinkedJID() string {
 	if !f.IsAuthed() {
 		return ""
+	}
+	f.mu.Lock()
+	override := f.linkedJID
+	f.mu.Unlock()
+	if override != "" {
+		return override
 	}
 	return "1234567890@s.whatsapp.net"
 }

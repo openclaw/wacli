@@ -127,6 +127,7 @@ func migrateHistorySyncQueue(d *DB) error {
 		CREATE TABLE IF NOT EXISTS history_sync_queue (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			msg_id TEXT UNIQUE,
+			account_jid TEXT NOT NULL DEFAULT '',
 			sync_type INTEGER NOT NULL,
 			notification BLOB NOT NULL,
 			queued_at INTEGER NOT NULL,
@@ -134,6 +135,17 @@ func migrateHistorySyncQueue(d *DB) error {
 		)
 	`); err != nil {
 		return fmt.Errorf("create history sync queue table: %w", err)
+	}
+	// Tables made before rows carried their account: those rows are left
+	// with no account, which the worker treats as another account's.
+	hasAccount, err := d.tableHasColumn("history_sync_queue", "account_jid")
+	if err != nil {
+		return err
+	}
+	if !hasAccount {
+		if _, err := d.sql.Exec(`ALTER TABLE history_sync_queue ADD COLUMN account_jid TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add history_sync_queue.account_jid column: %w", err)
+		}
 	}
 	return nil
 }
@@ -967,6 +979,8 @@ func tableInfoPragma(table string) (string, error) {
 		return `PRAGMA table_info("messages_fts")`, nil
 	case "status_messages":
 		return `PRAGMA table_info("status_messages")`, nil
+	case "history_sync_queue":
+		return `PRAGMA table_info("history_sync_queue")`, nil
 	default:
 		return "", fmt.Errorf("unsupported table %q", table)
 	}

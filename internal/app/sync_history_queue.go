@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -29,12 +30,21 @@ import (
 // bootstrap carries the phone's unread state, which has to land before the
 // live events that follow it; a queued chunk is stored later, when that state
 // may have moved on, so its unread counts are not applied.
+//
+// Because a row outlives the session that queued it, each one records the
+// linked account it was received for. A row for any other account, as after
+// the store is logged out and paired with a different one, is dropped before
+// anything is downloaded or written.
 
 const historyQueueMaxAttempts = 3
 
 // historyQueueRetryDelay is how long the worker waits before trying again a
 // chunk whose download failed. Tests shorten it.
 var historyQueueRetryDelay = 30 * time.Second
+
+// historyQueueReadRetryDelay is how long the worker waits before reading the
+// queue again after a failed read. Tests shorten it.
+var historyQueueReadRetryDelay = time.Second
 
 // historyQueuePoll is how often waitIdle looks at the queue.
 var historyQueuePoll = 50 * time.Millisecond
@@ -47,7 +57,7 @@ func queuesHistorySync(syncType waE2E.HistorySyncType) bool {
 
 // historyQueueStore is the part of the store the queue uses.
 type historyQueueStore interface {
-	EnqueueHistorySync(msgID string, syncType int32, notification []byte, queuedAt time.Time) error
+	EnqueueHistorySync(msgID, accountJID string, syncType int32, notification []byte, queuedAt time.Time) error
 	NextHistorySync(skip []int64) (store.HistorySyncQueueItem, bool, error)
 	MarkHistorySyncAttempt(id int64) (int, error)
 	DeleteHistorySync(id int64) error
@@ -65,6 +75,9 @@ type historyQueue struct {
 	// Until then the worker passes over them, so one bad chunk does not hold
 	// up the healthy ones queued behind it.
 	retryAt map[int64]time.Time
+	// unreadable is set once the queue could not be read historyQueueMaxAttempts
+	// times in a row; a one-shot sync then stops waiting for it.
+	unreadable bool
 }
 
 func newHistoryQueue(a *App) *historyQueue {
@@ -74,11 +87,15 @@ func newHistoryQueue(a *App) *historyQueue {
 // enqueue stores the notification in the queue and wakes the worker. It does
 // no network work and no parsing, so it is cheap enough for the handler.
 func (q *historyQueue) enqueue(msgID string, notif *waE2E.HistorySyncNotification) error {
+	account := strings.TrimSpace(q.a.wa.LinkedJID())
+	if account == "" {
+		return fmt.Errorf("no linked account to queue history sync for")
+	}
 	raw, err := proto.Marshal(notif)
 	if err != nil {
 		return fmt.Errorf("encode history sync notification: %w", err)
 	}
-	if err := q.db.EnqueueHistorySync(msgID, int32(notif.GetSyncType()), raw, nowUTC()); err != nil {
+	if err := q.db.EnqueueHistorySync(msgID, account, int32(notif.GetSyncType()), raw, nowUTC()); err != nil {
 		return err
 	}
 	queued, _ := q.db.CountHistorySyncQueue()
@@ -134,16 +151,23 @@ func (q *historyQueue) backedOff() (ids []int64, nextDue time.Duration) {
 // settled reports whether the worker has nothing it could store now: it is
 // not storing a chunk and every chunk still queued waits for a retry, which a
 // one-shot sync does not stay for (those chunks stay queued).
+//
+// A failed read counts as unsettled, since chunks may still be waiting: the
+// worker retries the read a bounded number of times, and only once it has
+// given up does a one-shot sync stop waiting (the chunks stay queued).
 func (q *historyQueue) settled() bool {
 	q.mu.Lock()
-	working := q.working
+	working, unreadable := q.working, q.unreadable
 	q.mu.Unlock()
 	if working {
 		return false
 	}
+	if unreadable {
+		return true
+	}
 	skip, _ := q.backedOff()
 	_, ok, err := q.db.NextHistorySync(skip)
-	return err != nil || !ok
+	return err == nil && !ok
 }
 
 // waitIdle blocks until the worker has settled or ctx ends.
@@ -177,13 +201,37 @@ func (q *historyQueue) start(ctx context.Context, opts SyncOptions, messagesStor
 
 func (q *historyQueue) run(ctx context.Context, storeItem func(context.Context, store.HistorySyncQueueItem) error) {
 	defer q.setWorking(false)
+	readFailures := 0
 	for ctx.Err() == nil {
 		skip, nextDue := q.backedOff()
 		item, ok, err := q.db.NextHistorySync(skip)
 		if err != nil {
-			q.a.emitWarning("history_queue_read_failed",
-				fmt.Sprintf("warning: failed to read the history sync queue: %v", err),
-				map[string]any{"error": err.Error()})
+			readFailures++
+			if readFailures < historyQueueMaxAttempts {
+				q.a.emitWarning("history_queue_read_failed",
+					fmt.Sprintf("warning: failed to read the history sync queue (attempt %d of %d), trying again in %s: %v",
+						readFailures, historyQueueMaxAttempts, historyQueueReadRetryDelay, err),
+					map[string]any{"attempts": readFailures, "error": err.Error()})
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(historyQueueReadRetryDelay):
+				}
+				continue
+			}
+			// Given up for now: queued chunks stay for a later read, which the
+			// next queued chunk or the next sync brings.
+			q.a.emitWarning("history_queue_unreadable",
+				fmt.Sprintf("warning: cannot read the history sync queue after %d attempts; what is queued stays for the next sync: %v", readFailures, err),
+				map[string]any{"attempts": readFailures, "error": err.Error()})
+			q.mu.Lock()
+			q.unreadable = true
+			q.mu.Unlock()
+		} else {
+			readFailures = 0
+			q.mu.Lock()
+			q.unreadable = false
+			q.mu.Unlock()
 		}
 		if err != nil || !ok {
 			// Nothing ready: wait for a new chunk, or for a failed one's retry.
@@ -198,10 +246,27 @@ func (q *historyQueue) run(ctx context.Context, storeItem func(context.Context, 
 			case <-q.wake:
 			case <-due:
 			}
+			readFailures = 0
 			continue
 		}
 
 		q.setWorking(true)
+		current := strings.TrimSpace(q.a.wa.LinkedJID())
+		if current == "" {
+			// Not linked right now: nothing to check the row against, so it
+			// waits rather than being stored or dropped.
+			q.backOff(item.ID)
+			continue
+		}
+		if item.AccountJID != current {
+			// Received for a different linked account, or for none this store
+			// can vouch for: drop it before any download or write.
+			q.a.emitWarning("history_queue_foreign_account",
+				fmt.Sprintf("warning: dropped queued history sync %d: it was received for another linked account", item.ID),
+				map[string]any{"queue_id": item.ID})
+			q.remove(item.ID)
+			continue
+		}
 		err = storeItem(ctx, item)
 		if ctx.Err() != nil {
 			// Stopped part way: the chunk stays queued and the next sync stores

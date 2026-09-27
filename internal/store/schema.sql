@@ -214,6 +214,7 @@ CREATE INDEX IF NOT EXISTS idx_poll_votes_poll ON poll_votes(chat_jid, poll_msg_
 CREATE TABLE IF NOT EXISTS history_sync_queue (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     msg_id TEXT UNIQUE,
+    account_jid TEXT NOT NULL DEFAULT '', -- linked account the notification was received for
     sync_type INTEGER NOT NULL,
     notification BLOB NOT NULL, -- marshaled HistorySyncNotification
     queued_at INTEGER NOT NULL,

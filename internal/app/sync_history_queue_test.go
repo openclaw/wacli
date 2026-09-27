@@ -106,7 +106,7 @@ func TestSyncStoresHistoryLeftQueuedByAnEarlierRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
-	if err := a.db.EnqueueHistorySync("hist-left", int32(notif.GetSyncType()), raw, base); err != nil {
+	if err := a.db.EnqueueHistorySync("hist-left", f.LinkedJID(), int32(notif.GetSyncType()), raw, base); err != nil {
 		t.Fatalf("EnqueueHistorySync: %v", err)
 	}
 	f.downloadHistory = func(got *waE2E.HistorySyncNotification) (*waHistorySync.HistorySync, error) {
@@ -257,6 +257,155 @@ func TestHistoryQueueKeepsAChunkInterruptedByStop(t *testing.T) {
 	}
 	if item.MsgID != "hist-slow" || item.Attempts != 0 {
 		t.Fatalf("queued item = %+v, want hist-slow with no failed attempt", item)
+	}
+}
+
+func TestHistoryQueueRecordsTheLinkedAccount(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	q := newHistoryQueue(a)
+	_, notif := historyNotificationEvent("hist-mine", waE2E.HistorySyncType_FULL)
+	if err := q.enqueue("hist-mine", notif); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	item, ok, err := a.db.NextHistorySync(nil)
+	if err != nil || !ok || item.AccountJID != f.LinkedJID() {
+		t.Fatalf("queued item = %+v, %v, %v: want it tied to %s", item, ok, err, f.LinkedJID())
+	}
+
+	f.mu.Lock()
+	f.authed = false
+	f.mu.Unlock()
+	if err := q.enqueue("hist-nobody", notif); err == nil {
+		t.Fatalf("enqueue without a linked account succeeded: the handler must store such a chunk in line instead")
+	}
+}
+
+func TestHistoryQueueDropsAChunkOfAnotherAccountBeforeDownloading(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	chat := types.JID{User: "555", Server: types.DefaultUserServer}
+	base := time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
+	_, notif := historyNotificationEvent("hist-old-account", waE2E.HistorySyncType_FULL)
+	raw, err := proto.Marshal(notif)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	// Queued while the store was linked to another account, which was then
+	// logged out; the store has since been paired with f.LinkedJID().
+	if err := a.db.EnqueueHistorySync("hist-old-account", "15550000000@s.whatsapp.net", int32(notif.GetSyncType()), raw, base); err != nil {
+		t.Fatalf("EnqueueHistorySync: %v", err)
+	}
+	var downloads atomic.Int32
+	f.downloadHistory = func(*waE2E.HistorySyncNotification) (*waHistorySync.HistorySync, error) {
+		downloads.Add(1)
+		return historySyncWithTextMessages(chat, base, "m-old-account").Data, nil
+	}
+
+	if _, err := a.Sync(context.Background(), SyncOptions{Mode: SyncModeOnce, IdleExit: 10 * time.Millisecond}); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if got := downloads.Load(); got != 0 {
+		t.Fatalf("downloads = %d, want 0: another account's chunk must be dropped before any network I/O", got)
+	}
+	if _, err := a.db.GetMessage(chat.String(), "m-old-account"); err == nil {
+		t.Fatalf("another account's history reached the archive")
+	}
+	if n, err := a.db.CountHistorySyncQueue(); err != nil || n != 0 {
+		t.Fatalf("queue = %d (err %v), want the foreign row dropped", n, err)
+	}
+	if len(f.deleteHistoryCalls) != 0 {
+		t.Fatalf("delete history calls = %d, want 0", len(f.deleteHistoryCalls))
+	}
+}
+
+// flakyReads is the store with NextHistorySync failing its first calls.
+type flakyReads struct {
+	*store.DB
+	fail atomic.Int32
+}
+
+func (f *flakyReads) NextHistorySync(skip []int64) (store.HistorySyncQueueItem, bool, error) {
+	if f.fail.Add(-1) >= 0 {
+		return store.HistorySyncQueueItem{}, false, errors.New("database is locked")
+	}
+	return f.DB.NextHistorySync(skip)
+}
+
+func TestHistoryQueueRetriesAFailedReadBeforeSettling(t *testing.T) {
+	a := newTestApp(t)
+	a.wa = newFakeWA()
+	previous := historyQueueReadRetryDelay
+	historyQueueReadRetryDelay = time.Millisecond
+	t.Cleanup(func() { historyQueueReadRetryDelay = previous })
+
+	q := newHistoryQueue(a)
+	flaky := &flakyReads{DB: a.db}
+	flaky.fail.Store(2)
+	q.db = flaky
+	_, notif := historyNotificationEvent("hist-ready", waE2E.HistorySyncType_FULL)
+	if err := q.enqueue("hist-ready", notif); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var stored atomic.Int32
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		q.run(ctx, func(context.Context, store.HistorySyncQueueItem) error {
+			stored.Add(1)
+			return nil
+		})
+	}()
+	waitCtx, waitCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer waitCancel()
+	q.waitIdle(waitCtx)
+	if got := stored.Load(); got != 1 {
+		t.Fatalf("stored = %d when waitIdle returned, want 1: a failed read must not count as settled", got)
+	}
+	cancel()
+	<-done
+}
+
+func TestHistoryQueueStopsWaitingOnAQueueThatStaysUnreadable(t *testing.T) {
+	a := newTestApp(t)
+	a.wa = newFakeWA()
+	previous := historyQueueReadRetryDelay
+	historyQueueReadRetryDelay = time.Millisecond
+	t.Cleanup(func() { historyQueueReadRetryDelay = previous })
+
+	q := newHistoryQueue(a)
+	flaky := &flakyReads{DB: a.db}
+	flaky.fail.Store(1 << 20)
+	q.db = flaky
+	_, notif := historyNotificationEvent("hist-stuck", waE2E.HistorySyncType_FULL)
+	if err := q.enqueue("hist-stuck", notif); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		q.run(ctx, func(context.Context, store.HistorySyncQueueItem) error { return nil })
+	}()
+	waitCtx, waitCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer waitCancel()
+	q.waitIdle(waitCtx)
+	if waitCtx.Err() != nil {
+		t.Fatalf("waitIdle kept waiting on a queue that cannot be read")
+	}
+	cancel()
+	<-done
+	if n, err := a.db.CountHistorySyncQueue(); err != nil || n != 1 {
+		t.Fatalf("queue = %d (err %v), want the chunk left for the next sync", n, err)
 	}
 }
 
