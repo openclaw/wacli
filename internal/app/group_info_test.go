@@ -230,6 +230,14 @@ func TestGroupChangeEventsAskForGroupInfoAgain(t *testing.T) {
 	f.emit(&events.JoinedGroup{GroupInfo: types.GroupInfo{JID: testGroupJID}})
 	storeGroupText(t, ctx, a, "m3")
 	assertGroupInfoCalls(t, f, 3)
+
+	// A reconnect drops every kept answer, so nothing asked before a
+	// disconnect is reused after it.
+	storeGroupText(t, ctx, a, "m4")
+	assertGroupInfoCalls(t, f, 3)
+	f.emit(&events.Connected{})
+	storeGroupText(t, ctx, a, "m5")
+	assertGroupInfoCalls(t, f, 4)
 }
 
 func TestGroupInfoAskedAcrossAChangeIsNotKept(t *testing.T) {

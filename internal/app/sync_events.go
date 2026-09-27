@@ -153,6 +153,9 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 				"count": v.Count,
 			}, "\nOffline backlog replayed (%d event(s)).\n", v.Count)
 		case *events.Connected:
+			// Group changes made while disconnected may not all come back as
+			// events: ask for every group's info afresh.
+			a.forgetAllGroupInfo()
 			a.emitOrPrint("connected", nil, "\nConnected.\n")
 			ps.mu.Lock()
 			if !ps.cleanupStarted && opts.PresenceMode.SendsAvailablePresence() {

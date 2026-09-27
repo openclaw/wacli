@@ -103,6 +103,16 @@ func (a *App) forgetGroupInfo(jid types.JID) {
 	c.mu.Unlock()
 }
 
+// forgetAllGroupInfo drops every kept answer. It runs on each connection, so
+// nothing asked before a disconnect is reused after it.
+func (a *App) forgetAllGroupInfo() {
+	c := &a.groupInfo
+	c.mu.Lock()
+	clear(c.answers)
+	c.changes++
+	c.mu.Unlock()
+}
+
 // groupChatName names a group chat from its info the way ResolveChatName
 // does, without asking the servers again.
 func groupChatName(chat types.JID, info *types.GroupInfo, pushName string) string {

@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Sync: ask WhatsApp for a group's info once per group instead of twice for every stored group message, reuse the answer for 10 minutes (a failed lookup for one, a reported group change ends it early), and store the group snapshot once per answer; history sync of busy groups spent most of its time on these round trips. Thanks @zarmat99.
+- Sync: ask WhatsApp for a group's info once per group instead of twice for every stored group message, reuse the answer for 10 minutes (a failed lookup for one; a reported group change or a reconnect ends it early), and store the group snapshot once per answer; history sync of busy groups spent most of its time on these round trips. Thanks @zarmat99.
 
 ## 0.19.0 - 2026-09-24
 
