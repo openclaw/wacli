@@ -139,6 +139,9 @@ type HistorySyncLimits struct {
 	// Days set it bounds only the full sync: the recent window the primary
 	// sends first keeps its default.
 	Full bool
+	// SizeMB is how many megabytes the primary may put into the full sync,
+	// 0 to leave it to the primary.
+	SizeMB uint32
 }
 
 // SetHistorySyncLimits applies the limits to the device properties whatsmeow
@@ -160,6 +163,9 @@ func SetHistorySyncLimits(limits HistorySyncLimits) {
 	}
 	if limits.MaxPerChat > 0 {
 		cfg.InitialSyncMaxMessagesPerChat = proto.Uint32(limits.MaxPerChat)
+	}
+	if limits.SizeMB > 0 {
+		cfg.FullSyncSizeMbLimit = proto.Uint32(limits.SizeMB)
 	}
 }
 

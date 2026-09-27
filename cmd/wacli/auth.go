@@ -26,6 +26,7 @@ type authOptions struct {
 	historyDays    int
 	historyPerChat int
 	fullHistory    bool
+	historySizeMB  int
 }
 
 type validatedAuthOptions struct {
@@ -75,6 +76,7 @@ func addAuthFlags(cmd *cobra.Command, opts *authOptions) {
 	cmd.Flags().IntVar(&opts.historyDays, "history-days", 0, "days of history to ask the phone for while pairing (0 = no limit, what the phone decides)")
 	cmd.Flags().IntVar(&opts.historyPerChat, "history-max-per-chat", 0, "cap the messages each chat brings while pairing (0 = no cap)")
 	cmd.Flags().BoolVar(&opts.fullHistory, "full-history", false, "ask the phone for a full history sync instead of its recent window (--history-days then sets how far back)")
+	cmd.Flags().IntVar(&opts.historySizeMB, "history-size-mb", 0, "megabytes the phone may put into the full history sync (0 = what the phone decides; needs --full-history)")
 }
 
 func runAuth(flags *rootFlags, opts authOptions) (appPkg.SyncResult, error) {
@@ -159,7 +161,15 @@ func normalizeHistoryLimits(opts authOptions) (wa.HistorySyncLimits, error) {
 	if err != nil {
 		return wa.HistorySyncLimits{}, err
 	}
-	return wa.HistorySyncLimits{Days: days, MaxPerChat: perChat, Full: opts.fullHistory}, nil
+	sizeMB, err := historyLimitValue("--history-size-mb", opts.historySizeMB)
+	if err != nil {
+		return wa.HistorySyncLimits{}, err
+	}
+	// The size only bounds a full sync; without one it would be ignored.
+	if sizeMB > 0 && !opts.fullHistory {
+		return wa.HistorySyncLimits{}, fmt.Errorf("--history-size-mb needs --full-history")
+	}
+	return wa.HistorySyncLimits{Days: days, MaxPerChat: perChat, Full: opts.fullHistory, SizeMB: sizeMB}, nil
 }
 
 func historyLimitValue(flag string, value int) (uint32, error) {

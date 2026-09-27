@@ -337,7 +337,7 @@ func TestSetHistorySyncLimits(t *testing.T) {
 	if cfg == nil {
 		t.Fatal("expected a history sync config")
 	}
-	if cfg.FullSyncDaysLimit != nil || cfg.RecentSyncDaysLimit != nil || cfg.InitialSyncMaxMessagesPerChat != nil {
+	if cfg.FullSyncDaysLimit != nil || cfg.RecentSyncDaysLimit != nil || cfg.InitialSyncMaxMessagesPerChat != nil || cfg.FullSyncSizeMbLimit != nil {
 		t.Fatalf("zero limits set fields: %v", cfg)
 	}
 	if waStore.DeviceProps.GetRequireFullSync() {
@@ -374,5 +374,15 @@ func TestSetHistorySyncLimits(t *testing.T) {
 	}
 	if cfg.RecentSyncDaysLimit != nil {
 		t.Fatalf("full history bounded the recent window: %d", cfg.GetRecentSyncDaysLimit())
+	}
+	if cfg.FullSyncSizeMbLimit != nil {
+		t.Fatalf("full history without a size set one: %d", cfg.GetFullSyncSizeMbLimit())
+	}
+
+	waStore.DeviceProps.HistorySyncConfig = nil
+	SetHistorySyncLimits(HistorySyncLimits{Full: true, Days: 7300, SizeMB: 2048})
+	cfg = waStore.DeviceProps.GetHistorySyncConfig()
+	if cfg.GetFullSyncSizeMbLimit() != 2048 || cfg.GetFullSyncDaysLimit() != 7300 {
+		t.Fatalf("size = %d MB, days = %d, want 2048, 7300", cfg.GetFullSyncSizeMbLimit(), cfg.GetFullSyncDaysLimit())
 	}
 }

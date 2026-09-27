@@ -21,6 +21,7 @@
 - Sync: enforce caller deadlines for queued delegated operations even without send spacing, and warn against retrying ambiguous timeouts. Thanks @tsavo-at-pieces (#456, #446).
 
 - Auth: add `--history-days` and `--history-max-per-chat` to bound the history bundle the primary device pushes while pairing. Thanks @zarmat99 (#442).
+- Auth: add `--full-history` to ask the primary device for a full history sync instead of its recent window, and `--history-size-mb` to set how many megabytes it may put into it. Thanks @zarmat99.
 
 ## 0.19.0 - 2026-09-24
 
