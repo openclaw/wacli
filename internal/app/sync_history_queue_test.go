@@ -251,12 +251,91 @@ func TestHistoryQueueKeepsAChunkInterruptedByStop(t *testing.T) {
 	cancel()
 	<-done
 
-	item, ok, err := a.db.NextHistorySync()
+	item, ok, err := a.db.NextHistorySync(nil)
 	if err != nil || !ok {
 		t.Fatalf("NextHistorySync = %v, %v: the interrupted chunk must stay queued", ok, err)
 	}
 	if item.MsgID != "hist-slow" || item.Attempts != 0 {
 		t.Fatalf("queued item = %+v, want hist-slow with no failed attempt", item)
+	}
+}
+
+// failingAttempts is the store with MarkHistorySyncAttempt broken.
+type failingAttempts struct{ *store.DB }
+
+func (failingAttempts) MarkHistorySyncAttempt(int64) (int, error) {
+	return 0, errors.New("database is locked")
+}
+
+func TestHistoryQueueKeepsAChunkWhenItsAttemptCannotBeCounted(t *testing.T) {
+	a := newTestApp(t)
+	a.wa = newFakeWA()
+	previous := historyQueueRetryDelay
+	historyQueueRetryDelay = time.Hour
+	t.Cleanup(func() { historyQueueRetryDelay = previous })
+
+	q := newHistoryQueue(a)
+	q.db = failingAttempts{a.db}
+	_, notif := historyNotificationEvent("hist-kept", waE2E.HistorySyncType_FULL)
+	if err := q.enqueue("hist-kept", notif); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var calls atomic.Int32
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		q.run(ctx, func(context.Context, store.HistorySyncQueueItem) error {
+			calls.Add(1)
+			return errors.New("download failed")
+		})
+	}()
+	waitUntil(t, "the failed attempt", func() bool { return calls.Load() == 1 && q.settled() })
+	cancel()
+	<-done
+
+	item, ok, err := a.db.NextHistorySync(nil)
+	if err != nil || !ok || item.MsgID != "hist-kept" {
+		t.Fatalf("NextHistorySync = %+v, %v, %v: a chunk that was never stored must stay queued", item, ok, err)
+	}
+}
+
+func TestSyncOnceStoresHealthyChunksQueuedBehindAFailingOne(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+	previous := historyQueueRetryDelay
+	historyQueueRetryDelay = time.Hour
+	t.Cleanup(func() { historyQueueRetryDelay = previous })
+
+	chat := types.JID{User: "555", Server: types.DefaultUserServer}
+	base := time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
+	badEvt, bad := historyNotificationEvent("hist-bad", waE2E.HistorySyncType_FULL)
+	bad.DirectPath = proto.String("/bad")
+	goodEvt, good := historyNotificationEvent("hist-good", waE2E.HistorySyncType_FULL)
+	good.DirectPath = proto.String("/good")
+	f.connectEvents = []any{badEvt, goodEvt}
+	f.downloadHistory = func(got *waE2E.HistorySyncNotification) (*waHistorySync.HistorySync, error) {
+		if got.GetDirectPath() == "/bad" {
+			return nil, errors.New("media expired")
+		}
+		return historySyncWithTextMessages(chat, base, "m-good").Data, nil
+	}
+
+	if _, err := a.Sync(context.Background(), SyncOptions{Mode: SyncModeOnce, IdleExit: 10 * time.Millisecond}); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if _, err := a.db.GetMessage(chat.String(), "m-good"); err != nil {
+		t.Fatalf("the healthy chunk behind the failing one was not stored: %v", err)
+	}
+	item, ok, err := a.db.NextHistorySync(nil)
+	if err != nil || !ok || item.MsgID != "hist-bad" || item.Attempts != 1 {
+		t.Fatalf("queue head = %+v, %v, %v: want only hist-bad left, after one attempt", item, ok, err)
+	}
+	if n, err := a.db.CountHistorySyncQueue(); err != nil || n != 1 {
+		t.Fatalf("queue = %d (err %v), want 1", n, err)
 	}
 }
 

@@ -45,24 +45,30 @@ func queuesHistorySync(syncType waE2E.HistorySyncType) bool {
 	return syncType == waE2E.HistorySyncType_RECENT || syncType == waE2E.HistorySyncType_FULL
 }
 
-type historyQueueState int
-
-const (
-	historyQueueIdle historyQueueState = iota
-	historyQueueWorking
-	historyQueueRetrying
-)
+// historyQueueStore is the part of the store the queue uses.
+type historyQueueStore interface {
+	EnqueueHistorySync(msgID string, syncType int32, notification []byte, queuedAt time.Time) error
+	NextHistorySync(skip []int64) (store.HistorySyncQueueItem, bool, error)
+	MarkHistorySyncAttempt(id int64) (int, error)
+	DeleteHistorySync(id int64) error
+	CountHistorySyncQueue() (int, error)
+}
 
 type historyQueue struct {
 	a    *App
+	db   historyQueueStore
 	wake chan struct{}
 
-	mu    sync.Mutex
-	state historyQueueState
+	mu      sync.Mutex
+	working bool
+	// retryAt holds the chunks that failed and when they may be tried again.
+	// Until then the worker passes over them, so one bad chunk does not hold
+	// up the healthy ones queued behind it.
+	retryAt map[int64]time.Time
 }
 
 func newHistoryQueue(a *App) *historyQueue {
-	return &historyQueue{a: a, wake: make(chan struct{}, 1)}
+	return &historyQueue{a: a, db: a.db, wake: make(chan struct{}, 1), retryAt: map[int64]time.Time{}}
 }
 
 // enqueue stores the notification in the queue and wakes the worker. It does
@@ -72,10 +78,10 @@ func (q *historyQueue) enqueue(msgID string, notif *waE2E.HistorySyncNotificatio
 	if err != nil {
 		return fmt.Errorf("encode history sync notification: %w", err)
 	}
-	if err := q.a.db.EnqueueHistorySync(msgID, int32(notif.GetSyncType()), raw, nowUTC()); err != nil {
+	if err := q.db.EnqueueHistorySync(msgID, int32(notif.GetSyncType()), raw, nowUTC()); err != nil {
 		return err
 	}
-	queued, _ := q.a.db.CountHistorySyncQueue()
+	queued, _ := q.db.CountHistorySyncQueue()
 	q.a.emitOrPrint("history_sync_queued", map[string]any{
 		"sync_type": notif.GetSyncType().String(),
 		"queued":    queued,
@@ -87,27 +93,57 @@ func (q *historyQueue) enqueue(msgID string, notif *waE2E.HistorySyncNotificatio
 	return nil
 }
 
-func (q *historyQueue) setState(s historyQueueState) {
+func (q *historyQueue) setWorking(working bool) {
 	q.mu.Lock()
-	q.state = s
+	q.working = working
 	q.mu.Unlock()
 }
 
-// settled reports whether the worker has nothing left to do for now: the
-// queue is empty and nothing is being stored, or what is left waits for a
-// retry, which a one-shot sync does not stay for (it stays queued).
+// backOff keeps a failed chunk queued but out of the way until its retry.
+func (q *historyQueue) backOff(id int64) {
+	q.mu.Lock()
+	q.retryAt[id] = nowUTC().Add(historyQueueRetryDelay)
+	q.mu.Unlock()
+}
+
+func (q *historyQueue) forget(id int64) {
+	q.mu.Lock()
+	delete(q.retryAt, id)
+	q.mu.Unlock()
+}
+
+// backedOff returns the chunks still waiting for their retry, and how long
+// until the first of them is due (0 when there are none).
+func (q *historyQueue) backedOff() (ids []int64, nextDue time.Duration) {
+	now := nowUTC()
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for id, at := range q.retryAt {
+		wait := at.Sub(now)
+		if wait <= 0 {
+			continue
+		}
+		ids = append(ids, id)
+		if nextDue == 0 || wait < nextDue {
+			nextDue = wait
+		}
+	}
+	return ids, nextDue
+}
+
+// settled reports whether the worker has nothing it could store now: it is
+// not storing a chunk and every chunk still queued waits for a retry, which a
+// one-shot sync does not stay for (those chunks stay queued).
 func (q *historyQueue) settled() bool {
 	q.mu.Lock()
-	state := q.state
+	working := q.working
 	q.mu.Unlock()
-	switch state {
-	case historyQueueRetrying:
-		return true
-	case historyQueueWorking:
+	if working {
 		return false
 	}
-	n, err := q.a.db.CountHistorySyncQueue()
-	return err != nil || n == 0
+	skip, _ := q.backedOff()
+	_, ok, err := q.db.NextHistorySync(skip)
+	return err != nil || !ok
 }
 
 // waitIdle blocks until the worker has settled or ctx ends.
@@ -140,28 +176,32 @@ func (q *historyQueue) start(ctx context.Context, opts SyncOptions, messagesStor
 }
 
 func (q *historyQueue) run(ctx context.Context, storeItem func(context.Context, store.HistorySyncQueueItem) error) {
-	defer q.setState(historyQueueIdle)
-	for {
-		if ctx.Err() != nil {
-			return
-		}
-		q.setState(historyQueueWorking)
-		item, ok, err := q.a.db.NextHistorySync()
+	defer q.setWorking(false)
+	for ctx.Err() == nil {
+		skip, nextDue := q.backedOff()
+		item, ok, err := q.db.NextHistorySync(skip)
 		if err != nil {
 			q.a.emitWarning("history_queue_read_failed",
 				fmt.Sprintf("warning: failed to read the history sync queue: %v", err),
 				map[string]any{"error": err.Error()})
 		}
 		if err != nil || !ok {
-			q.setState(historyQueueIdle)
+			// Nothing ready: wait for a new chunk, or for a failed one's retry.
+			q.setWorking(false)
+			var due <-chan time.Time
+			if nextDue > 0 {
+				due = time.After(nextDue)
+			}
 			select {
 			case <-ctx.Done():
 				return
 			case <-q.wake:
+			case <-due:
 			}
 			continue
 		}
 
+		q.setWorking(true)
 		err = storeItem(ctx, item)
 		if ctx.Err() != nil {
 			// Stopped part way: the chunk stays queued and the next sync stores
@@ -174,40 +214,48 @@ func (q *historyQueue) run(ctx context.Context, storeItem func(context.Context, 
 					fmt.Sprintf("warning: dropped queued history sync %d: %v", item.ID, err),
 					map[string]any{"queue_id": item.ID, "error": err.Error()})
 			}
-			if delErr := q.a.db.DeleteHistorySync(item.ID); delErr != nil {
-				// Without the delete the same chunk would come back forever.
-				q.a.emitWarning("history_queue_delete_failed",
-					fmt.Sprintf("warning: failed to remove stored history sync %d from the queue: %v", item.ID, delErr),
-					map[string]any{"queue_id": item.ID, "error": delErr.Error()})
-				return
-			}
+			q.remove(item.ID)
 			continue
 		}
 
-		attempts, markErr := q.a.db.MarkHistorySyncAttempt(item.ID)
-		if markErr != nil || attempts >= historyQueueMaxAttempts {
+		attempts, markErr := q.db.MarkHistorySyncAttempt(item.ID)
+		if markErr != nil {
+			// The chunk was not stored, so it must not be lost over bookkeeping:
+			// keep it queued and try it again later.
+			q.a.emitWarning("history_queue_retry",
+				fmt.Sprintf("warning: failed to store queued history sync %d and to count the attempt, trying again in %s: %v (%v)",
+					item.ID, historyQueueRetryDelay, err, markErr),
+				map[string]any{"queue_id": item.ID, "error": err.Error(), "attempt_error": markErr.Error()})
+			q.backOff(item.ID)
+			continue
+		}
+		if attempts >= historyQueueMaxAttempts {
 			q.a.emitWarning("history_queue_dropped",
 				fmt.Sprintf("warning: gave up on queued history sync %d after %d attempt(s): %v", item.ID, attempts, err),
 				map[string]any{"queue_id": item.ID, "attempts": attempts, "error": err.Error()})
-			if delErr := q.a.db.DeleteHistorySync(item.ID); delErr != nil {
-				q.a.emitWarning("history_queue_delete_failed",
-					fmt.Sprintf("warning: failed to remove queued history sync %d: %v", item.ID, delErr),
-					map[string]any{"queue_id": item.ID, "error": delErr.Error()})
-				return
-			}
+			q.remove(item.ID)
 			continue
 		}
 		q.a.emitWarning("history_queue_retry",
 			fmt.Sprintf("warning: failed to store queued history sync %d (attempt %d of %d), trying again in %s: %v",
 				item.ID, attempts, historyQueueMaxAttempts, historyQueueRetryDelay, err),
 			map[string]any{"queue_id": item.ID, "attempts": attempts, "error": err.Error()})
-		q.setState(historyQueueRetrying)
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(historyQueueRetryDelay):
-		}
+		q.backOff(item.ID)
 	}
+}
+
+// remove takes a stored or abandoned chunk off the queue. If the delete fails
+// the chunk is set aside like a failed one, so the worker does not loop on it;
+// storing it again later only rewrites the same rows.
+func (q *historyQueue) remove(id int64) {
+	if err := q.db.DeleteHistorySync(id); err != nil {
+		q.a.emitWarning("history_queue_delete_failed",
+			fmt.Sprintf("warning: failed to remove history sync %d from the queue: %v", id, err),
+			map[string]any{"queue_id": id, "error": err.Error()})
+		q.backOff(id)
+		return
+	}
+	q.forget(id)
 }
 
 // storeQueuedHistorySync downloads and stores one queued chunk. It returns an

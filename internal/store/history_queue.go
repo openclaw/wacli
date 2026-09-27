@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -39,17 +40,23 @@ func (d *DB) EnqueueHistorySync(msgID string, syncType int32, notification []byt
 	return nil
 }
 
-// NextHistorySync returns the oldest queued notification; ok is false when the
-// queue is empty.
-func (d *DB) NextHistorySync() (item HistorySyncQueueItem, ok bool, err error) {
+// NextHistorySync returns the oldest queued notification whose ID is not in
+// skip; ok is false when there is none.
+func (d *DB) NextHistorySync(skip []int64) (item HistorySyncQueueItem, ok bool, err error) {
+	query := `
+		SELECT id, msg_id, sync_type, notification, queued_at, attempts
+		FROM history_sync_queue`
+	args := make([]any, 0, len(skip))
+	if len(skip) > 0 {
+		query += ` WHERE id NOT IN (?` + strings.Repeat(`, ?`, len(skip)-1) + `)`
+		for _, id := range skip {
+			args = append(args, id)
+		}
+	}
+	query += ` ORDER BY id LIMIT 1`
 	var msgID sql.NullString
 	var queuedAt int64
-	err = d.sql.QueryRow(`
-		SELECT id, msg_id, sync_type, notification, queued_at, attempts
-		FROM history_sync_queue
-		ORDER BY id
-		LIMIT 1
-	`).Scan(&item.ID, &msgID, &item.SyncType, &item.Notification, &queuedAt, &item.Attempts)
+	err = d.sql.QueryRow(query, args...).Scan(&item.ID, &msgID, &item.SyncType, &item.Notification, &queuedAt, &item.Attempts)
 	if errors.Is(err, sql.ErrNoRows) {
 		return HistorySyncQueueItem{}, false, nil
 	}

@@ -419,6 +419,9 @@ func (d *DB) ensureCurrentSchema() error {
 	if err := migrateMessageLocations(d); err != nil {
 		return fmt.Errorf("ensure current message locations schema: %w", err)
 	}
+	if err := migrateHistorySyncQueue(d); err != nil {
+		return fmt.Errorf("ensure current history sync queue: %w", err)
+	}
 	return nil
 }
 
