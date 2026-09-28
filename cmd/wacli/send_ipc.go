@@ -63,29 +63,31 @@ type sendDelegateRequest struct {
 	PresenceMedia        string   `json:"presence_media,omitempty"`
 	Read                 *bool    `json:"read,omitempty"`
 	Receipts             bool     `json:"receipts,omitempty"`
+	Phones               []string `json:"phones,omitempty"`
 	PostSendWaitMS       int64    `json:"post_send_wait_ms,omitempty"`
 	TimeoutMS            int64    `json:"timeout_ms,omitempty"`
 	DeadlineUnixMS       int64    `json:"deadline_unix_ms,omitempty"`
 }
 
 type sendDelegateResponse struct {
-	OK             bool              `json:"ok"`
-	Error          string            `json:"error,omitempty"`
-	Sent           bool              `json:"sent,omitempty"`
-	To             string            `json:"to,omitempty"`
-	ID             string            `json:"id,omitempty"`
-	Target         string            `json:"target,omitempty"`
-	Reaction       string            `json:"reaction,omitempty"`
-	Question       string            `json:"question,omitempty"`
-	Options        []string          `json:"options,omitempty"`
-	Selected       []string          `json:"selected,omitempty"`
-	SelectedOption *selectOption     `json:"selected_option,omitempty"`
-	File           map[string]string `json:"file,omitempty"`
-	StoreWarning   string            `json:"store_warning,omitempty"`
-	Chat           string            `json:"chat,omitempty"`
-	Action         string            `json:"action,omitempty"`
-	Receipts       *int              `json:"receipts,omitempty"`
-	ReceiptType    string            `json:"receipt_type,omitempty"`
+	OK             bool                 `json:"ok"`
+	Error          string               `json:"error,omitempty"`
+	Sent           bool                 `json:"sent,omitempty"`
+	To             string               `json:"to,omitempty"`
+	ID             string               `json:"id,omitempty"`
+	Target         string               `json:"target,omitempty"`
+	Reaction       string               `json:"reaction,omitempty"`
+	Question       string               `json:"question,omitempty"`
+	Options        []string             `json:"options,omitempty"`
+	Selected       []string             `json:"selected,omitempty"`
+	SelectedOption *selectOption        `json:"selected_option,omitempty"`
+	File           map[string]string    `json:"file,omitempty"`
+	StoreWarning   string               `json:"store_warning,omitempty"`
+	Chat           string               `json:"chat,omitempty"`
+	Action         string               `json:"action,omitempty"`
+	Receipts       *int                 `json:"receipts,omitempty"`
+	ReceiptType    string               `json:"receipt_type,omitempty"`
+	Contacts       []contactCheckResult `json:"contacts,omitempty"`
 }
 
 type sendDelegateExecutor func(context.Context, sendDelegateRequest) (sendDelegateResponse, error)
@@ -314,6 +316,8 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 		// instead of marking the chat read and dropping the unread count.
 		req.Receipts = true
 		return executeDelegatedMarkRead(ctx, a, req)
+	case contactsCheckKind:
+		return executeDelegatedContactsCheck(ctx, a.WA(), req)
 	default:
 		return sendDelegateResponse{}, fmt.Errorf("unsupported send kind %q", req.Kind)
 	}

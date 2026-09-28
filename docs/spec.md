@@ -29,7 +29,7 @@ Store selection and the supported legacy Linux directory fallback are documented
 
 Commands that write local state or access the live WhatsApp session acquire the per-store lock. `--lock-wait` controls bounded waiting. `--read-only` and `WACLI_READONLY=1` reject intentional writes; local readers can inspect the mirror while sync owns the lock.
 
-After `sync --follow` completes startup, its local delegate socket accepts supported send and read-state operations. The follow process retains ownership of the session and store lock. The invoking command still validates writable mode and preserves its normal result format. See [send](send.md) and [chats](chats.md) for supported operations and upgrade constraints.
+After `sync --follow` completes startup, its local delegate socket accepts supported send, read-state, and contact registration check operations. The follow process retains ownership of the session and store lock. The invoking command still validates writable mode and preserves its normal result format. See [send](send.md), [chats](chats.md), and [contacts](contacts.md) for supported operations and upgrade constraints.
 
 ## Authentication and synchronization
 

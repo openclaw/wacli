@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/openclaw/wacli/internal/out"
 	"github.com/openclaw/wacli/internal/wa"
@@ -80,6 +81,8 @@ func checkRegistrations(ctx context.Context, checker registrationChecker, inputs
 	return results, nil
 }
 
+const contactsCheckKind = "contacts_check"
+
 func runContactsCheck(flags *rootFlags, args []string) error {
 	if err := flags.requireWritable(); err != nil {
 		return err
@@ -90,6 +93,16 @@ func runContactsCheck(flags *rootFlags, args []string) error {
 
 	a, lk, err := newApp(ctx, flags, true, false)
 	if err != nil {
+		resp, delegated, delegateErr := tryDelegateSend(ctx, flags, err, sendDelegateRequest{
+			Kind:   contactsCheckKind,
+			Phones: args,
+		})
+		if delegated {
+			if delegateErr != nil {
+				return explainContactsCheckDelegateError(delegateErr)
+			}
+			return writeContactCheckResults(flags, resp.Contacts)
+		}
 		return err
 	}
 	defer closeApp(a, lk)
@@ -105,7 +118,34 @@ func runContactsCheck(flags *rootFlags, args []string) error {
 	if err != nil {
 		return err
 	}
+	return writeContactCheckResults(flags, results)
+}
 
+// executeDelegatedContactsCheck runs the lookup on the follow process's
+// connected session, so the caller never needs the store lock.
+func executeDelegatedContactsCheck(ctx context.Context, checker registrationChecker, req sendDelegateRequest) (sendDelegateResponse, error) {
+	if len(req.Phones) == 0 {
+		return sendDelegateResponse{}, fmt.Errorf("at least one phone is required")
+	}
+	results, err := checkRegistrations(ctx, checker, req.Phones)
+	if err != nil {
+		return sendDelegateResponse{}, err
+	}
+	return sendDelegateResponse{OK: true, Contacts: results}, nil
+}
+
+// explainContactsCheckDelegateError turns an older daemon's rejection into the action to take.
+func explainContactsCheckDelegateError(err error) error {
+	if err == nil || !strings.Contains(err.Error(), "unsupported send kind") || !strings.Contains(err.Error(), contactsCheckKind) {
+		return err
+	}
+	return fmt.Errorf("the running sync process does not support contacts check; restart `wacli sync` after upgrading, then run this again: %w", err)
+}
+
+func writeContactCheckResults(flags *rootFlags, results []contactCheckResult) error {
+	if results == nil {
+		results = []contactCheckResult{}
+	}
 	if flags.asJSON {
 		return out.WriteJSON(os.Stdout, results)
 	}

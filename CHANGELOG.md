@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Contacts: delegate `contacts check` to a running `sync --follow` process so registration lookups no longer fail on the store lock. (#425)
+
 ## 0.19.0 - 2026-09-24
 
 **Highlights:** opt-in read receipts without app-state recovery, accurate unread counts, and stable chat activity order.

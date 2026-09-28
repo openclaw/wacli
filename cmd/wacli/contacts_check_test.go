@@ -3,8 +3,11 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
+	"github.com/openclaw/wacli/internal/lock"
 	"go.mau.fi/whatsmeow/types"
 )
 
@@ -115,5 +118,94 @@ func TestCheckRegistrationsPropagatesError(t *testing.T) {
 	_, err := checkRegistrations(context.Background(), checker, []string{"+4366412345678"})
 	if err == nil || err.Error() != "boom" {
 		t.Fatalf("expected boom, got %v", err)
+	}
+}
+
+func TestExecuteDelegatedContactsCheckReturnsPerQueryResults(t *testing.T) {
+	jid := types.NewJID("4366412345678", types.DefaultUserServer)
+	checker := &fakeRegistrationChecker{
+		resp: []types.IsOnWhatsAppResponse{{Query: "+4366412345678", JID: jid, IsIn: true}},
+	}
+	resp, err := executeDelegatedContactsCheck(context.Background(), checker, sendDelegateRequest{
+		Kind:   contactsCheckKind,
+		Phones: []string{"+43 664 12345678", "+15550000001"},
+	})
+	if err != nil {
+		t.Fatalf("executeDelegatedContactsCheck: %v", err)
+	}
+	if !resp.OK || len(resp.Contacts) != 2 {
+		t.Fatalf("response = %+v, want ok with two results", resp)
+	}
+	if !resp.Contacts[0].Registered || resp.Contacts[0].JID != jid.String() {
+		t.Fatalf("first result = %+v, want registered %s", resp.Contacts[0], jid)
+	}
+	if resp.Contacts[1].Responded {
+		t.Fatalf("second result = %+v, want no response", resp.Contacts[1])
+	}
+}
+
+func TestExecuteDelegatedContactsCheckRequiresPhones(t *testing.T) {
+	checker := &fakeRegistrationChecker{}
+	_, err := executeDelegatedContactsCheck(context.Background(), checker, sendDelegateRequest{Kind: contactsCheckKind})
+	if err == nil || !strings.Contains(err.Error(), "at least one phone") {
+		t.Fatalf("error = %v, want phone validation", err)
+	}
+	if checker.gotPhones != nil {
+		t.Fatalf("checker called with %#v, want no lookup", checker.gotPhones)
+	}
+}
+
+func TestExplainContactsCheckDelegateErrorNamesRestartForOlderDaemons(t *testing.T) {
+	old := errors.New(`unsupported send kind "contacts_check"`)
+	if err := explainContactsCheckDelegateError(old); err == nil || !strings.Contains(err.Error(), "restart `wacli sync`") || !errors.Is(err, old) {
+		t.Fatalf("error = %v, want restart hint wrapping the original", err)
+	}
+	other := errors.New("usync timeout")
+	if err := explainContactsCheckDelegateError(other); err != other {
+		t.Fatalf("error = %v, want unrelated error unchanged", err)
+	}
+}
+
+func TestContactsCheckDelegatesThroughProductionServerWhenStoreLocked(t *testing.T) {
+	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
+	storeDir := shortPresenceDelegateStoreDir(t)
+	lk, err := lock.Acquire(storeDir)
+	if err != nil {
+		t.Fatalf("lock store: %v", err)
+	}
+	defer lk.Release()
+
+	jid := types.NewJID("4366412345678", types.DefaultUserServer)
+	checker := &fakeRegistrationChecker{
+		resp: []types.IsOnWhatsAppResponse{{Query: "+4366412345678", JID: jid, IsIn: true}},
+	}
+	stop, err := startSendDelegateServerForStore(context.Background(), storeDir, sendSpacing{}, func(ctx context.Context, req sendDelegateRequest) (sendDelegateResponse, error) {
+		if req.Version != sendDelegateVersion || req.Kind != contactsCheckKind {
+			return sendDelegateResponse{}, fmt.Errorf("unexpected delegated request %d/%q", req.Version, req.Kind)
+		}
+		return executeDelegatedContactsCheck(ctx, checker, req)
+	})
+	if err != nil {
+		t.Fatalf("start production delegate server: %v", err)
+	}
+	defer stop()
+
+	stdout, stderr, err := runPresenceDelegateHelper(t, []string{
+		"--store", storeDir, "--json", "--timeout", "750ms",
+		"contacts", "check", "+43 664 12345678",
+	})
+	if err != nil {
+		t.Fatalf("contacts check failed: %v stdout=%q stderr=%q", err, stdout, stderr)
+	}
+	if strings.Contains(stderr, "store is locked") {
+		t.Fatalf("delegated command returned lock error: stderr=%q", stderr)
+	}
+	if len(checker.gotPhones) != 1 || checker.gotPhones[0] != "+4366412345678" {
+		t.Fatalf("delegated lookup phones = %#v, want +4366412345678", checker.gotPhones)
+	}
+	for _, want := range []string{`"query":"+43 664 12345678"`, `"registered":true`, `"responded":true`, `"jid":"` + jid.String() + `"`} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("stdout %q missing %s", stdout, want)
+		}
 	}
 }
