@@ -915,13 +915,15 @@ WHERE COALESCE(m.media_type,'') != ''
   AND m.media_unavailable_at IS NULL
   AND m.ts < ?1
   AND (?2 = '' OR m.chat_jid = ?2)
+  AND (?3 = '' OR m.media_type = ?3)
 ORDER BY m.ts DESC, m.rowid DESC
-LIMIT CASE WHEN ?3 <= 0 THEN -1 ELSE ?3 END
+LIMIT CASE WHEN ?4 <= 0 THEN -1 ELSE ?4 END
 `
 
 type ListPendingMediaBeforeParams struct {
 	BeforeTs   int64
 	ChatJid    interface{}
+	MediaType  interface{}
 	LimitCount interface{}
 }
 
@@ -931,7 +933,12 @@ type ListPendingMediaBeforeRow struct {
 }
 
 func (q *Queries) ListPendingMediaBefore(ctx context.Context, arg ListPendingMediaBeforeParams) ([]ListPendingMediaBeforeRow, error) {
-	rows, err := q.db.QueryContext(ctx, listPendingMediaBefore, arg.BeforeTs, arg.ChatJid, arg.LimitCount)
+	rows, err := q.db.QueryContext(ctx, listPendingMediaBefore,
+		arg.BeforeTs,
+		arg.ChatJid,
+		arg.MediaType,
+		arg.LimitCount,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -963,12 +970,14 @@ WHERE COALESCE(m.media_type,'') != ''
   AND m.deleted_at IS NULL
   AND m.media_unavailable_at IS NULL
   AND (?1 = '' OR m.chat_jid = ?1)
+  AND (?2 = '' OR m.media_type = ?2)
 ORDER BY m.ts DESC, m.rowid DESC
-LIMIT CASE WHEN ?2 <= 0 THEN -1 ELSE ?2 END
+LIMIT CASE WHEN ?3 <= 0 THEN -1 ELSE ?3 END
 `
 
 type ListPendingMediaDownloadsParams struct {
 	ChatJid    interface{}
+	MediaType  interface{}
 	LimitCount interface{}
 }
 
@@ -978,7 +987,7 @@ type ListPendingMediaDownloadsRow struct {
 }
 
 func (q *Queries) ListPendingMediaDownloads(ctx context.Context, arg ListPendingMediaDownloadsParams) ([]ListPendingMediaDownloadsRow, error) {
-	rows, err := q.db.QueryContext(ctx, listPendingMediaDownloads, arg.ChatJid, arg.LimitCount)
+	rows, err := q.db.QueryContext(ctx, listPendingMediaDownloads, arg.ChatJid, arg.MediaType, arg.LimitCount)
 	if err != nil {
 		return nil, err
 	}

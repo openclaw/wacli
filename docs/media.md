@@ -9,7 +9,7 @@ Read when: downloading media from a synced message.
 ```bash
 wacli media download --chat JID --id MSG_ID [--output PATH]
 wacli media backfill [--chat JID] [--limit N] [--workers N]
-wacli media retry [--chat JID] [--before YYYY-MM-DD] [--limit N] [--batch N] [--wait DUR]
+wacli media retry [--chat JID] [--type TYPE] [--before YYYY-MM-DD] [--limit N] [--batch N] [--wait DUR]
 ```
 
 ## download
@@ -81,7 +81,13 @@ also confirmed expired, so later runs can skip genuinely unavailable rows.
 - Retry receipts are sent in batches (`--batch`, default 32) with a second
   attempt for non-responders; `--wait` (default 30s) bounds each attempt.
 - `--chat` scopes to one chat; `--before YYYY-MM-DD` scopes to media older than a date.
+- `--type` scopes to one kind of media: `image`, `video`, `gif`, `audio`,
+  `document` or `sticker`. Voice notes are stored as `audio`, so
+  `--type audio` recovers them without also re-uploading every expired photo
+  and video, which usually make up most of the bytes. Any other value is
+  rejected.
 - `--limit` caps how many messages to retry (0 = all pending); newest first.
+  It counts only the messages that match the other filters.
 - Runs until completion or interruption by default; explicitly set global `--timeout` to cap a run.
 - Reports counts: requested, recovered, not_on_phone (gone), no_response, failed.
 - `no_response` means the phone did not answer in time (often transient) — those
@@ -93,5 +99,6 @@ also confirmed expired, so later runs can skip genuinely unavailable rows.
 wacli media retry                                    # try to recover all pending media
 wacli media retry --chat 1234567890@s.whatsapp.net   # one chat only
 wacli media retry --before 2026-01-01                # only media older than a date
+wacli media retry --type audio                       # only audio, voice notes included
 wacli media retry --limit 50 --wait 45s --json       # bounded run, machine-readable
 ```

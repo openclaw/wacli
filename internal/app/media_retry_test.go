@@ -215,6 +215,47 @@ func TestRetryMediaBeforeFilter(t *testing.T) {
 	}
 }
 
+func TestRetryMediaTypeFilter(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+	f.onMediaRetry = notOnPhoneHook
+	f.downloadErr = whatsmeow.ErrMediaDownloadFailedWith403
+
+	chat := "123@s.whatsapp.net"
+	if err := a.db.UpsertChat(chat, "dm", "Alice", time.Now()); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	base := time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC)
+	insertMediaMessage(t, a, chat, "photo", base.Add(time.Hour))
+	for _, id := range []string{"voice1", "voice2"} {
+		if err := a.db.UpsertMessage(store.UpsertMessageParams{
+			ChatJID: chat, MsgID: id, SenderJID: chat, Timestamp: base,
+			MediaType: "audio", MimeType: "audio/ogg; codecs=opus",
+			DirectPath: "/direct/" + id, MediaKey: []byte{1},
+		}); err != nil {
+			t.Fatalf("UpsertMessage %s: %v", id, err)
+		}
+	}
+
+	res, err := a.RetryMedia(context.Background(), RetryMediaOptions{MediaType: " audio ", Wait: time.Second})
+	if err != nil {
+		t.Fatalf("RetryMedia: %v", err)
+	}
+	if res.Requested != 2 || res.NotOnPhone != 2 || res.Failed != 0 {
+		t.Fatalf("unexpected type-filter result: %+v", res)
+	}
+	for _, id := range f.mediaRetryReceipts {
+		if id == "photo" {
+			t.Fatalf("receipt sent for filtered-out image: %v", f.mediaRetryReceipts)
+		}
+	}
+	// The image was never asked for, so it stays pending for a later run.
+	if n, err := a.db.CountPendingMediaDownloads(context.Background(), ""); err != nil || n != 1 {
+		t.Fatalf("expected the image to remain pending, got %d (err %v)", n, err)
+	}
+}
+
 func TestRetryMediaExplicitEpochBeforeFilterDoesNotRetryEverything(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()

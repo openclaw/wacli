@@ -399,6 +399,7 @@ WHERE COALESCE(m.media_type,'') != ''
   AND m.deleted_at IS NULL
   AND m.media_unavailable_at IS NULL
   AND (sqlc.arg(chat_jid) = '' OR m.chat_jid = sqlc.arg(chat_jid))
+  AND (sqlc.arg(media_type) = '' OR m.media_type = sqlc.arg(media_type))
 ORDER BY m.ts DESC, m.rowid DESC
 LIMIT CASE WHEN sqlc.arg(limit_count) <= 0 THEN -1 ELSE sqlc.arg(limit_count) END;
 
@@ -413,6 +414,7 @@ WHERE COALESCE(m.media_type,'') != ''
   AND m.media_unavailable_at IS NULL
   AND m.ts < sqlc.arg(before_ts)
   AND (sqlc.arg(chat_jid) = '' OR m.chat_jid = sqlc.arg(chat_jid))
+  AND (sqlc.arg(media_type) = '' OR m.media_type = sqlc.arg(media_type))
 ORDER BY m.ts DESC, m.rowid DESC
 LIMIT CASE WHEN sqlc.arg(limit_count) <= 0 THEN -1 ELSE sqlc.arg(limit_count) END;
 

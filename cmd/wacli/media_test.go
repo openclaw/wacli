@@ -41,6 +41,21 @@ func TestParseMediaRetryBefore(t *testing.T) {
 	}
 }
 
+func TestParseMediaRetryType(t *testing.T) {
+	for in, want := range map[string]string{"": "", " Audio ": "audio", "sticker": "sticker", "gif": "gif"} {
+		got, err := parseMediaRetryType(in)
+		if err != nil || got != want {
+			t.Fatalf("parseMediaRetryType(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	// Types the store never records for downloadable media are typos here.
+	for _, in := range []string{"voice", "ptt", "location", "images"} {
+		if _, err := parseMediaRetryType(in); err == nil {
+			t.Fatalf("parseMediaRetryType(%q) accepted an unknown type", in)
+		}
+	}
+}
+
 func TestMediaRetryRejectsInvalidOptionsBeforeStoreAccess(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -51,6 +66,7 @@ func TestMediaRetryRejectsInvalidOptionsBeforeStoreAccess(t *testing.T) {
 		{name: "batch", args: []string{"--batch", "0"}, want: "--batch must be > 0"},
 		{name: "wait", args: []string{"--wait", "0"}, want: "--wait must be > 0"},
 		{name: "before", args: []string{"--before", "01-02-2026"}, want: "--before must be YYYY-MM-DD"},
+		{name: "type", args: []string{"--type", "voice"}, want: `invalid --type "voice"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			args := append([]string{"--account", "does-not-exist", "media", "retry"}, tc.args...)

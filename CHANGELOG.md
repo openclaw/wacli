@@ -20,6 +20,8 @@
 
 - Sync: enforce caller deadlines for queued delegated operations even without send spacing, and warn against retrying ambiguous timeouts. Thanks @tsavo-at-pieces (#456, #446).
 
+- Media: add `media retry --type` to recover one kind of media (for example `audio`, which includes voice notes) without asking the phone to re-upload every other expired photo, video and sticker as well. Thanks @zarmat99.
+
 ## 0.19.0 - 2026-09-24
 
 **Highlights:** opt-in read receipts without app-state recovery, accurate unread counts, and stable chat activity order.
