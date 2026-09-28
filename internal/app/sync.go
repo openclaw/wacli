@@ -95,6 +95,9 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	if opts.PresenceMode == "" {
 		opts.PresenceMode = SyncPresenceModeNormal
 	}
+	// A quiet sync never shows as available, so WhatsApp would send nothing
+	// to a presence subscription delegated to it.
+	a.presenceWatch.setQuiet(!opts.PresenceMode.SendsAvailablePresence())
 	if (opts.Mode == SyncModeBootstrap || opts.Mode == SyncModeOnce) && opts.IdleExit <= 0 {
 		opts.IdleExit = 30 * time.Second
 	}

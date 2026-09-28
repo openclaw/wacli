@@ -91,6 +91,12 @@ type fakeWA struct {
 
 	presenceCalls   []types.Presence
 	sendPresenceErr error
+
+	presenceSubscriptions []types.JID
+	subscribePresenceErr  error
+	// onSubscribePresence, when set, returns an event emitted as WhatsApp's
+	// answer before SubscribePresence returns (nil emits nothing).
+	onSubscribePresence func(types.JID) any
 }
 
 type fakeArchiveCall struct {
@@ -620,6 +626,24 @@ func (f *fakeWA) SendPresence(ctx context.Context, presence types.Presence) erro
 	defer f.mu.Unlock()
 	f.presenceCalls = append(f.presenceCalls, presence)
 	return f.sendPresenceErr
+}
+
+func (f *fakeWA) SubscribePresence(ctx context.Context, jid types.JID) error {
+	f.mu.Lock()
+	if f.subscribePresenceErr != nil {
+		err := f.subscribePresenceErr
+		f.mu.Unlock()
+		return err
+	}
+	f.presenceSubscriptions = append(f.presenceSubscriptions, jid)
+	hook := f.onSubscribePresence
+	f.mu.Unlock()
+	if hook != nil {
+		if evt := hook(jid); evt != nil {
+			f.emit(evt)
+		}
+	}
+	return nil
 }
 
 func (f *fakeWA) DecryptReaction(ctx context.Context, reaction *events.Message) (*waProto.ReactionMessage, error) {
