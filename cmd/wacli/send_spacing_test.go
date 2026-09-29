@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 )
@@ -265,13 +264,12 @@ func TestSendPacingTimeoutCancelsQueueWait(t *testing.T) {
 		t.Fatalf("set client deadline: %v", err)
 	}
 
-	var sendMu sync.Mutex
 	pacedSendSlot := make(chan struct{}, 1) // empty means an earlier send owns it
 	pacer := newSendPacer(sendSpacing{min: time.Second, max: time.Second})
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		handleSendDelegateConn(context.Background(), serverConn, executeDelegatedSendWithoutApp, &sendMu, pacedSendSlot, pacer)
+		handleSendDelegateConn(context.Background(), serverConn, executeDelegatedSendWithoutApp, pacedSendSlot, pacer)
 	}()
 
 	req := sendDelegateRequest{
@@ -297,14 +295,13 @@ func TestSendPacingExtendsIPCDeadlineThroughResponse(t *testing.T) {
 	trackedServerConn := &deadlineRecordingConn{Conn: serverConn}
 	defer clientConn.Close()
 
-	var sendMu sync.Mutex
 	pacedSendSlot := make(chan struct{}, 1)
 	pacedSendSlot <- struct{}{}
 	pacer := newSendPacer(sendSpacing{min: time.Second, max: time.Second})
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		handleSendDelegateConn(context.Background(), trackedServerConn, executeDelegatedSendWithoutApp, &sendMu, pacedSendSlot, pacer)
+		handleSendDelegateConn(context.Background(), trackedServerConn, executeDelegatedSendWithoutApp, pacedSendSlot, pacer)
 	}()
 
 	const requestTimeout = 10 * time.Minute
@@ -339,14 +336,13 @@ func TestSendPacingHonorsAbsoluteCallerDeadline(t *testing.T) {
 		t.Fatalf("set client deadline: %v", err)
 	}
 
-	var sendMu sync.Mutex
 	pacedSendSlot := make(chan struct{}, 1)
 	pacedSendSlot <- struct{}{}
 	pacer := newSendPacer(sendSpacing{min: time.Second, max: time.Second})
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		handleSendDelegateConn(context.Background(), serverConn, executeDelegatedSendWithoutApp, &sendMu, pacedSendSlot, pacer)
+		handleSendDelegateConn(context.Background(), serverConn, executeDelegatedSendWithoutApp, pacedSendSlot, pacer)
 	}()
 
 	req := sendDelegateRequest{
