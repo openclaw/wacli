@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -130,6 +131,10 @@ func (d *DB) detectMessagesFTS() bool {
 	if err != nil || !hasDisplayText {
 		return false
 	}
-	var n int
-	return d.sql.QueryRow("SELECT count(*) FROM messages_fts").Scan(&n) == nil
+	// One row is enough: a build without FTS5 fails as soon as the table is
+	// read. count(*) would walk the whole index on every open, a cost that
+	// grows with the archive and that every command pays.
+	var rowid int64
+	err = d.sql.QueryRow("SELECT rowid FROM messages_fts LIMIT 1").Scan(&rowid)
+	return err == nil || errors.Is(err, sql.ErrNoRows)
 }

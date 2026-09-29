@@ -369,43 +369,69 @@ func (d *DB) ListMessages(p ListMessagesParams) ([]Message, error) {
 	if p.Limit <= 0 {
 		p.Limit = 50
 	}
-	query := `
-		SELECT ` + messageSelectColumns("") + `
+	const from = `
 		FROM messages m
 		LEFT JOIN chats c ON c.jid = m.chat_jid
 		LEFT JOIN starred s ON s.chat_jid = m.chat_jid AND s.msg_id = m.msg_id
 		WHERE m.deleted_at IS NULL`
+	filter, filterArgs := p.messageFilter()
+	order := " ORDER BY m.ts DESC, m.rowid DESC"
+	if p.Asc {
+		order = " ORDER BY m.ts ASC, m.rowid ASC"
+	}
+	query := `SELECT ` + messageSelectColumns("") + from
 	var args []any
-	query, args = appendStringFilter(query, args, "m.chat_jid", p.ChatJID, p.ChatJIDs)
+	if chats := uniqueNonEmptyStrings(append([]string{p.ChatJID}, p.ChatJIDs...)); len(chats) > 1 {
+		// One chat under several JIDs (a phone number and its LID): take each
+		// JID's first rows through idx_messages_chat_ts and order only those.
+		// With "chat_jid IN (...)" SQLite reads and sorts every message of the
+		// chat, and computes each one's columns, to return the first few.
+		parts := make([]string, 0, len(chats))
+		for _, chat := range chats {
+			parts = append(parts, `SELECT rid FROM (SELECT m.rowid AS rid`+from+` AND m.chat_jid = ?`+filter+order+` LIMIT ?)`)
+			args = append(args, chat)
+			args = append(args, filterArgs...)
+			args = append(args, p.Limit)
+		}
+		query += ` AND m.rowid IN (` + strings.Join(parts, ` UNION ALL `) + `)`
+	} else {
+		query, args = appendStringFilter(query, args, "m.chat_jid", p.ChatJID, p.ChatJIDs)
+		query += filter
+		args = append(args, filterArgs...)
+	}
+	query += order + " LIMIT ?"
+	args = append(args, p.Limit)
+	return d.scanMessages(query, args...)
+}
+
+// messageFilter is the part of ListMessages' WHERE clause that does not name
+// a chat.
+func (p ListMessagesParams) messageFilter() (string, []any) {
+	var filter string
+	var args []any
 	if p.After != nil {
-		query += " AND m.ts > ?"
+		filter += " AND m.ts > ?"
 		args = append(args, unix(*p.After))
 	}
 	if p.Before != nil {
-		query += " AND m.ts < ?"
+		filter += " AND m.ts < ?"
 		args = append(args, unix(*p.Before))
 	}
 	if strings.TrimSpace(p.SenderJID) != "" {
-		query += " AND m.sender_jid = ?"
+		filter += " AND m.sender_jid = ?"
 		args = append(args, strings.TrimSpace(p.SenderJID))
 	}
 	if p.FromMe != nil {
-		query += " AND m.from_me = ?"
+		filter += " AND m.from_me = ?"
 		args = append(args, boolToInt(*p.FromMe))
 	}
 	if p.Forwarded {
-		query += " AND m.is_forwarded = 1"
+		filter += " AND m.is_forwarded = 1"
 	}
 	if p.Starred {
-		query += " AND s.msg_id IS NOT NULL"
+		filter += " AND s.msg_id IS NOT NULL"
 	}
-	if p.Asc {
-		query += " ORDER BY m.ts ASC, m.rowid ASC LIMIT ?"
-	} else {
-		query += " ORDER BY m.ts DESC, m.rowid DESC LIMIT ?"
-	}
-	args = append(args, p.Limit)
-	return d.scanMessages(query, args...)
+	return filter, args
 }
 
 func appendStringFilter(query string, args []any, column, value string, values []string) (string, []any) {
