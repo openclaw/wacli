@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Store: stop counting every search-index row each time the store is opened, which cost every command about a second on a store of 1.77M messages, and list a direct chat stored under both its phone number and its LID without reading and sorting all of its messages. Thanks @zarmat99.
+
 ## 0.19.0 - 2026-09-24
 
 **Highlights:** opt-in read receipts without app-state recovery, accurate unread counts, and stable chat activity order.
