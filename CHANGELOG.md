@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Sync: apply this account’s ordinary read receipts to local unread state so chats read on the phone are reflected locally with read receipts enabled. Thanks @zarmat99 (#439).
+
 - Sync: reuse group information and participant snapshots instead of requesting them twice per message; invalidate on group changes and reconnects, and retry failed snapshot writes. Thanks @zarmat99 (#447).
 
 - Store: avoid scanning the full search index on open and sorting entire phone/LID histories for limited message reads. Thanks @zarmat99 (#455).
