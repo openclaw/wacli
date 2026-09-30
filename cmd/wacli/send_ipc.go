@@ -228,13 +228,19 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDele
 	// operation itself all share it.
 	deadline := time.Now().Add(millisDuration(req.TimeoutMS, 5*time.Minute))
 	if req.DeadlineUnixMS > 0 {
-		callerDeadline := time.UnixMilli(req.DeadlineUnixMS).Add(-sendDelegateReplyMargin)
+		callerDeadline := time.UnixMilli(req.DeadlineUnixMS)
 		if callerDeadline.Before(deadline) {
 			deadline = callerDeadline
 		}
 	}
+	// Reserve at most a tenth of the remaining budget for the reply, so
+	// sub-second requests still have time to execute.
+	if remaining := time.Until(deadline); remaining > 0 {
+		deadline = deadline.Add(-min(sendDelegateReplyMargin, remaining/10))
+	}
 	requestCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
+	deadline, _ = requestCtx.Deadline()
 	// The fixed initial deadline only protects request decoding. A queued or
 	// paced request may intentionally run longer than five minutes, so keep the
 	// transport alive through its budget and the final response write.
@@ -257,7 +263,7 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDele
 	}
 	// select picks at random when the slot frees up at the same moment the
 	// deadline passes. Never start an operation after its caller gave up.
-	if requestCtx.Err() != nil {
+	if requestCtx.Err() != nil || !time.Now().Before(deadline) {
 		refuse()
 		return
 	}
@@ -271,6 +277,12 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDele
 		}
 	}
 
+	// Timer delivery can lag wall-clock expiry, including while pacing.
+	if requestCtx.Err() != nil || !time.Now().Before(deadline) {
+		refuse()
+		return
+	}
+
 	resp, err := execute(requestCtx, req)
 	if pacer.enabled() {
 		// Record completion, not handler entry: recipient resolution, media
@@ -279,6 +291,9 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDele
 		pacer.record()
 	}
 	if err != nil {
+		if requestCtx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			err = fmt.Errorf("delegated %s failed after dispatch and may still have gone through; check before retrying: %w", req.Kind, err)
+		}
 		resp = sendDelegateResponse{OK: false, Error: err.Error()}
 	}
 	_ = json.NewEncoder(conn).Encode(resp)

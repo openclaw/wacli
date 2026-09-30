@@ -141,6 +141,13 @@ func TestProductionServerDropsQueuedSendAfterCallerTimeout(t *testing.T) {
 		t.Fatalf("start delegate server: %v", err)
 	}
 	defer stop()
+	t.Cleanup(func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	})
 
 	slowFlags := &rootFlags{storeDir: storeDir, timeout: 10 * time.Second}
 	slowDone := make(chan error, 1)
@@ -189,5 +196,82 @@ func TestDelegateSendTimeoutWarnsAgainstBlindRetry(t *testing.T) {
 	_, err = delegateSend(context.Background(), flags, sendDelegateRequest{Kind: "text", Message: "hi"})
 	if err == nil || !strings.Contains(err.Error(), "may still have gone through") {
 		t.Fatalf("error = %v, want a warning that the send may have gone through", err)
+	}
+}
+
+func TestUnpacedShortTimeoutCanDispatch(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer clientConn.Close()
+	sendSlot := make(chan struct{}, 1)
+	sendSlot <- struct{}{}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		handleSendDelegateConn(context.Background(), serverConn, func(ctx context.Context, _ sendDelegateRequest) (sendDelegateResponse, error) {
+			return sendDelegateResponse{OK: true, Sent: true}, ctx.Err()
+		}, sendSlot, newSendPacer(sendSpacing{}))
+	}()
+	resp := roundTripDelegate(t, clientConn, sendDelegateRequest{
+		Version: sendDelegateVersion, Kind: "text", TimeoutMS: 200,
+		DeadlineUnixMS: time.Now().Add(200 * time.Millisecond).UnixMilli(),
+	})
+	<-done
+	if !resp.OK || !resp.Sent {
+		t.Fatalf("short request refused: %+v", resp)
+	}
+}
+
+// Models a deadline whose cancellation callback has not run yet.
+type delayedDeadlineContext struct {
+	context.Context
+	deadline time.Time
+}
+
+func (c delayedDeadlineContext) Deadline() (time.Time, bool) { return c.deadline, true }
+
+func TestDelegateRefusesElapsedDeadlineBeforeDispatch(t *testing.T) {
+	for _, paced := range []bool{false, true} {
+		t.Run(map[bool]string{false: "unpaced", true: "paced"}[paced], func(t *testing.T) {
+			serverConn, clientConn := net.Pipe()
+			defer clientConn.Close()
+			sendSlot := make(chan struct{}, 1)
+			sendSlot <- struct{}{}
+			deadline := time.Now().Add(-time.Second)
+			pacer := newSendPacer(sendSpacing{})
+			if paced {
+				deadline = time.Now().Add(20 * time.Millisecond)
+				pacer = newSendPacer(sendSpacing{min: time.Second, max: time.Second})
+				pacer.record()
+				pacer.sleep = func(context.Context, time.Duration) { time.Sleep(50 * time.Millisecond) }
+			}
+			parent := delayedDeadlineContext{Context: context.Background(), deadline: deadline}
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				handleSendDelegateConn(parent, serverConn, unexpectedExecute(t), sendSlot, pacer)
+			}()
+			resp := roundTripDelegate(t, clientConn, sendDelegateRequest{Version: sendDelegateVersion, Kind: "text", TimeoutMS: 10000})
+			<-done
+			if resp.OK || !strings.Contains(resp.Error, "it was not sent") {
+				t.Fatalf("expired request response: %+v", resp)
+			}
+		})
+	}
+}
+
+func TestDelegateDispatchedDeadlineWarnsAgainstBlindRetry(t *testing.T) {
+	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
+	storeDir := shortPresenceDelegateStoreDir(t)
+	stop, err := startSendDelegateServerForStore(context.Background(), storeDir, sendSpacing{}, func(ctx context.Context, _ sendDelegateRequest) (sendDelegateResponse, error) {
+		<-ctx.Done()
+		return sendDelegateResponse{}, ctx.Err()
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	_, err = delegateSend(context.Background(), &rootFlags{storeDir: storeDir, timeout: time.Second}, sendDelegateRequest{Kind: "text"})
+	if err == nil || !strings.Contains(err.Error(), "may still have gone through") {
+		t.Fatalf("error = %v, want retry warning after dispatch", err)
 	}
 }
