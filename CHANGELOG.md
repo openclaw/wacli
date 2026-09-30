@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Store: avoid scanning the full search index on open and sorting entire phone/LID histories for limited message reads. Thanks @zarmat99 (#455).
+
 - Tests: compile store tests on Windows and isolate account tests from the real Windows home directory; keep both regressions in the normal gate. Thanks @parth-garg01 (#452, #448, #449).
 
 - History: retry unanswered one-to-one backfill with the chat’s verified alternate phone/LID identity and reuse the identity that responds. Thanks @tsavo-at-pieces (#457, #444).

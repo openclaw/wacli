@@ -67,6 +67,33 @@ func TestExistingEmptyFTSTableDetectedOnReopen(t *testing.T) {
 	}
 }
 
+func TestExistingFTSTableWithRowsDetectedReadOnly(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "store.db")
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	chat := "123@s.whatsapp.net"
+	if err := db.UpsertChat(chat, "dm", "Alice", time.Now()); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{ChatJID: chat, MsgID: "m1", SenderJID: chat, Timestamp: time.Now(), Text: "hello"}); err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	ro, err := OpenReadOnly(path)
+	if err != nil {
+		t.Fatalf("OpenReadOnly: %v", err)
+	}
+	defer ro.Close()
+	if !ro.HasFTS() {
+		t.Fatalf("expected an FTS table with rows to enable FTS on a read-only open")
+	}
+}
+
 func TestMigrateLIDToPNMaintainsFTSRows(t *testing.T) {
 	db := openTestDB(t)
 	if !db.HasFTS() {
