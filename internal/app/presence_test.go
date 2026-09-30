@@ -191,7 +191,8 @@ func TestSyncRenewsWatchedPresenceOnConnect(t *testing.T) {
 	captureStderr(t, func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		if _, err := a.Sync(ctx, SyncOptions{Mode: SyncModeOnce, IdleExit: time.Millisecond}); err != nil {
+		// The renewal runs beside the sync: leave it a moment before idling out.
+		if _, err := a.Sync(ctx, SyncOptions{Mode: SyncModeOnce, IdleExit: 300 * time.Millisecond}); err != nil {
 			t.Fatalf("Sync: %v", err)
 		}
 	})
@@ -200,6 +201,94 @@ func TestSyncRenewsWatchedPresenceOnConnect(t *testing.T) {
 	defer f.mu.Unlock()
 	if len(f.presenceSubscriptions) != 1 || f.presenceSubscriptions[0] != user {
 		t.Fatalf("subscriptions after connect = %v, want [%s]", f.presenceSubscriptions, user)
+	}
+}
+
+// Renewing up to 256 subscriptions can take a while: it must not hold up the
+// connection's event handling, and the sync's cleanup must still stop it.
+func TestPresenceRenewalRunsOffTheEventPath(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+	a.presenceWatch.add(types.NewJID("15551234567", types.DefaultUserServer))
+	stalled := make(chan struct{})
+	f.slowSubscribePresence = func(ctx context.Context, _ types.JID) error {
+		close(stalled)
+		<-ctx.Done() // WhatsApp never answers
+		return ctx.Err()
+	}
+
+	returned := make(chan struct{})
+	go func() {
+		a.renewPresenceWatches(context.Background())
+		close(returned)
+	}()
+	select {
+	case <-returned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("renewal held up its caller while a subscription stalled")
+	}
+	<-stalled
+
+	stopped := make(chan struct{})
+	go func() {
+		a.presenceWatch.stopRenewal()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("stopping the renewal waited for the stalled subscription")
+	}
+}
+
+// One contact that never answers costs the others nothing: each renewal has
+// its own bound, and every contact of a full list is asked again.
+func TestPresenceRenewalReachesEveryContactPastASlowOne(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+	defer func(old time.Duration) { presenceRenewTimeout = old }(presenceRenewTimeout)
+	presenceRenewTimeout = 20 * time.Millisecond
+	slow := types.NewJID("1000", types.DefaultUserServer)
+	a.presenceWatch.add(slow)
+	for i := 1; i < maxWatchedPresences; i++ {
+		a.presenceWatch.add(types.NewJID(fmt.Sprintf("2%06d", i), types.DefaultUserServer))
+	}
+	f.slowSubscribePresence = func(ctx context.Context, jid types.JID) error {
+		if jid != slow {
+			return nil
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	}
+
+	stderr := captureStderr(t, func() {
+		a.renewPresenceWatches(context.Background())
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			f.mu.Lock()
+			done := len(f.presenceSubscribeAttempts) == maxWatchedPresences
+			f.mu.Unlock()
+			if done || time.Now().After(deadline) {
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		a.presenceWatch.stopRenewal()
+	})
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.presenceSubscribeAttempts) != maxWatchedPresences || f.presenceSubscribeAttempts[0] != slow {
+		t.Fatalf("renewal asked %d contacts (first %v), want all %d starting with the slow one",
+			len(f.presenceSubscribeAttempts), f.presenceSubscribeAttempts[:min(1, len(f.presenceSubscribeAttempts))], maxWatchedPresences)
+	}
+	if len(f.presenceSubscriptions) != maxWatchedPresences-1 {
+		t.Fatalf("renewed %d subscriptions, want %d", len(f.presenceSubscriptions), maxWatchedPresences-1)
+	}
+	if !strings.Contains(stderr, "could not watch the presence of "+slow.String()+" again") {
+		t.Fatalf("no warning for the contact that timed out; stderr = %q", stderr)
 	}
 }
 

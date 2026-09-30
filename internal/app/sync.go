@@ -193,6 +193,8 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 		ps.cleanupStarted = true
 		ps.mu.Unlock()
 		a.wa.RemoveEventHandler(handlerID)
+		// No presence subscription goes out after this device leaves.
+		a.presenceWatch.stopRenewal()
 		a.sendPresenceBounded(types.PresenceUnavailable)
 	}()
 	now = nowUTC().UnixNano()

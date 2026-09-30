@@ -19,8 +19,9 @@ wacli presence subscribe --to PHONE_OR_JID [--wait 10s]
 - `paused` clears the composing indicator.
 - `subscribe` asks WhatsApp to send the contact's presence (online, last seen) to this device and prints the first answer: online, last seen at a time, offline with the last seen withheld, or no answer within `--wait`.
 - WhatsApp applies the contact's privacy settings. A contact who hides their online status or last seen from you sends no answer or no time, and an account that hides its own last seen does not see anyone else's.
-- WhatsApp sends presence only to devices that show as available. Without a running sync, `subscribe` connects, shows as online while it waits, then sends unavailable and disconnects; the subscription ends with that connection.
+- WhatsApp sends presence only to devices that show as available. Without a running sync, `subscribe` connects, shows as online while it waits, then sends unavailable and disconnects; the subscription ends with that connection, so `--wait 0` is refused there.
 - While `sync --follow` runs, `subscribe` is delegated to it, like sends: the subscription is made on the sync's connection, renewed after every reconnect, and with `sync --events` each change arrives as a `presence` event, and the contact's typing as a `chat_presence` event (see [sync](sync.md)). `--wait 0` returns as soon as the subscription is made. A sync started with `--presence-mode quiet` refuses it, since WhatsApp would send it nothing.
+- The sync renews the newest 256 subscriptions after a reconnect in the background, one at a time, each bounded on its own, so a contact that does not answer delays neither the others nor the sync.
 - Recipients accept phone numbers with common formatting or JIDs. Only users have a presence: groups are rejected.
 
 ## Examples

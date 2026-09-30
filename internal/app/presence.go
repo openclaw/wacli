@@ -20,6 +20,10 @@ var ErrPresenceQuiet = errors.New("this sync runs with --presence-mode quiet, an
 // after each reconnect. The oldest one is dropped first.
 const maxWatchedPresences = 256
 
+// presenceRenewTimeout bounds each subscription renewed after a reconnect, so
+// a slow one cannot use up the time of the ones after it.
+var presenceRenewTimeout = 5 * time.Second
+
 // PresenceState is what WhatsApp said about a user's presence.
 type PresenceState struct {
 	JID    string `json:"jid"`
@@ -36,6 +40,9 @@ type presenceWatch struct {
 	mu    sync.Mutex
 	jids  []types.JID // oldest first
 	quiet bool
+	// The renewal still running for the current connection, if any.
+	renewCancel context.CancelFunc
+	renewDone   chan struct{}
 }
 
 func (w *presenceWatch) setQuiet(quiet bool) {
@@ -120,22 +127,52 @@ func (a *App) WatchPresence(ctx context.Context, jid types.JID, wait time.Durati
 	}
 }
 
-// rewatchPresence renews every remembered subscription on a new connection,
-// once it has marked this device available.
-func (a *App) rewatchPresence(ctx context.Context) {
-	for _, jid := range a.presenceWatch.list() {
-		if err := a.wa.SubscribePresence(ctx, jid); err != nil {
-			a.emitWarning("presence_subscribe_failed",
-				fmt.Sprintf("warning: could not watch the presence of %s again after reconnecting: %v", jid, err),
-				map[string]any{"jid": jid.String(), "error": err.Error()})
-		}
+// renewPresenceWatches renews every remembered subscription on a new
+// connection, once it has marked this device available. Up to
+// maxWatchedPresences of them can take a while, so they are renewed off the
+// connection's event handling, one after the other, each with its own bound:
+// a slow or failing one never costs the others their turn. A renewal still
+// running for an earlier connection is stopped first.
+func (a *App) renewPresenceWatches(ctx context.Context) {
+	a.presenceWatch.stopRenewal()
+	jids := a.presenceWatch.list()
+	if len(jids) == 0 {
+		return
 	}
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	a.presenceWatch.mu.Lock()
+	a.presenceWatch.renewCancel, a.presenceWatch.renewDone = cancel, done
+	a.presenceWatch.mu.Unlock()
+	go func() {
+		defer close(done)
+		defer cancel()
+		for _, jid := range jids {
+			if ctx.Err() != nil {
+				return
+			}
+			subscribeCtx, subscribeCancel := context.WithTimeout(ctx, presenceRenewTimeout)
+			err := a.wa.SubscribePresence(subscribeCtx, jid)
+			subscribeCancel()
+			if err != nil && ctx.Err() == nil {
+				a.emitWarning("presence_subscribe_failed",
+					fmt.Sprintf("warning: could not watch the presence of %s again after reconnecting: %v", jid, err),
+					map[string]any{"jid": jid.String(), "error": err.Error()})
+			}
+		}
+	}()
 }
 
-func (a *App) rewatchPresenceBounded() {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	a.rewatchPresence(ctx)
+// stopRenewal stops a renewal still running and waits for it to return.
+func (w *presenceWatch) stopRenewal() {
+	w.mu.Lock()
+	cancel, done := w.renewCancel, w.renewDone
+	w.renewCancel, w.renewDone = nil, nil
+	w.mu.Unlock()
+	if cancel != nil {
+		cancel()
+		<-done
+	}
 }
 
 func presenceStateFromEvent(jid types.JID, evt *events.Presence) PresenceState {

@@ -188,15 +188,13 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 			a.forgetAllGroupInfo()
 			a.emitOrPrint("connected", nil, "\nConnected.\n")
 			ps.mu.Lock()
-			available := !ps.cleanupStarted && opts.PresenceMode.SendsAvailablePresence()
-			if available {
+			if !ps.cleanupStarted && opts.PresenceMode.SendsAvailablePresence() {
 				a.sendPresenceBounded(types.PresenceAvailable)
+				// Presence subscriptions end with the connection that made
+				// them. Started under ps.mu, so the cleanup stops every one.
+				a.renewPresenceWatches(ctx)
 			}
 			ps.mu.Unlock()
-			// Presence subscriptions end with the connection that made them.
-			if available {
-				a.rewatchPresenceBounded()
-			}
 		case *events.KeepAliveTimeout:
 			a.handleKeepAliveTimeout(opts, v, staleReconnect)
 		case *events.PushNameSetting:

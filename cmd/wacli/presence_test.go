@@ -291,6 +291,17 @@ func TestPresenceSubscribeRejectsInvalidFlagsBeforeStoreAccess(t *testing.T) {
 	}
 }
 
+// With no sync running, the command's own connection would close as it
+// returns, ending the subscription: --wait 0 is refused rather than reported
+// as a watch, before anything connects.
+func TestPresenceSubscribeWithoutWaitNeedsARunningSync(t *testing.T) {
+	storeDir := t.TempDir()
+	err := execute([]string{"--store", storeDir, "presence", "subscribe", "--to", "+15551234567", "--wait", "0"})
+	if err == nil || !strings.Contains(err.Error(), "running `wacli sync --follow`") {
+		t.Fatalf("execute error = %v, want the running-sync requirement", err)
+	}
+}
+
 func TestPresenceSubscribeDelegatesThroughSendSocketWhenStoreLocked(t *testing.T) {
 	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
 

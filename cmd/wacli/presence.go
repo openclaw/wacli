@@ -41,7 +41,8 @@ func newPresenceSubscribeCmd(flags *rootFlags) *cobra.Command {
 			"sync renews it after every reconnect and, with --events, reports each change\n" +
 			"as a `presence` event, and the contact's typing as `chat_presence`. Otherwise\n" +
 			"wacli connects, shows as online while it waits (WhatsApp sends presence only\n" +
-			"to devices that are online), prints the answer and disconnects.",
+			"to devices that are online), prints the answer and disconnects. The\n" +
+			"subscription ends with that connection, so --wait 0 needs the running sync.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(to) == "" {
 				return fmt.Errorf("--to is required")
@@ -83,6 +84,12 @@ func runPresenceSubscribe(flags *rootFlags, to string, wait time.Duration) error
 	}
 	defer closeApp(a, lk)
 
+	if wait == 0 {
+		// No sync holds the store, so this command's own connection would be
+		// the only one, and it closes as the command returns: the
+		// subscription would end with it and nothing would be watched.
+		return fmt.Errorf("--wait 0 keeps watching only through a running `wacli sync --follow`, and none is running; start one, or give --wait a duration to get the contact's first answer")
+	}
 	if err := a.EnsureAuthed(ctx); err != nil {
 		return err
 	}
@@ -127,7 +134,8 @@ func writePresenceSubscribeOutput(flags *rootFlags, to string, wait time.Duratio
 	case wait > 0:
 		fmt.Fprintf(os.Stdout, "No presence from %s within %s (hidden from this account, or not sent)\n", to, wait)
 	default:
-		fmt.Fprintf(os.Stdout, "Watching the presence of %s\n", to)
+		// Only a subscription delegated to a running sync gets here.
+		fmt.Fprintf(os.Stdout, "The running sync now watches the presence of %s\n", to)
 	}
 	return nil
 }

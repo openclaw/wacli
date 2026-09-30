@@ -94,6 +94,10 @@ type fakeWA struct {
 
 	presenceSubscriptions []types.JID
 	subscribePresenceErr  error
+	// presenceSubscribeAttempts records every call, failed ones included;
+	// slowSubscribePresence, when set, runs first and can stall or fail one.
+	presenceSubscribeAttempts []types.JID
+	slowSubscribePresence     func(context.Context, types.JID) error
 	// onSubscribePresence, when set, returns an event emitted as WhatsApp's
 	// answer before SubscribePresence returns (nil emits nothing).
 	onSubscribePresence func(types.JID) any
@@ -629,6 +633,15 @@ func (f *fakeWA) SendPresence(ctx context.Context, presence types.Presence) erro
 }
 
 func (f *fakeWA) SubscribePresence(ctx context.Context, jid types.JID) error {
+	f.mu.Lock()
+	f.presenceSubscribeAttempts = append(f.presenceSubscribeAttempts, jid)
+	slow := f.slowSubscribePresence
+	f.mu.Unlock()
+	if slow != nil {
+		if err := slow(ctx, jid); err != nil {
+			return err
+		}
+	}
 	f.mu.Lock()
 	if f.subscribePresenceErr != nil {
 		err := f.subscribePresenceErr
