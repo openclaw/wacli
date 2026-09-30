@@ -22,11 +22,11 @@ wacli history backfill --chat JID [--count 50] [--requests N] [--wait 1m] [--idl
 ## Limits
 
 - `--count` defaults to 50 and must be at most 500.
-- `--requests` defaults to 1 and must be at most 100. Each requested batch may make one extra attempt after a timeout.
+- `--requests` defaults to 1 and must be at most 100. Each requested batch may retry the other verified identity and one later anchor after timeouts.
 - Requests are per chat.
 - The anchor starts at the oldest locally stored message in that chat. If the phone does not answer within `--wait`, backfill retries once using the next chronological local message (timestamp, then row ID). No message IDs or content types are filtered out, and no local rows are deleted.
-- A phone-number JID and its verified mapped LID refer to the same local chat. Backfill uses the phone JID for local anchors and results, requests history with the corresponding LID when available, and accepts responses under either identity. Unmapped JIDs and groups retain their original identity.
-- Each attempt gets its own `--wait`; a batch can therefore wait up to twice that duration for responses. If there is no next anchor, or the retry also times out, backfill stops with an error naming the unanswered anchor. Transport errors and cancellation are not retried.
+- A phone-number JID and its verified mapped LID refer to the same local chat. Backfill uses the phone JID for local anchors and results, requests history with the corresponding LID when available, and accepts responses under either identity. The primary device answers some 1:1 chats only by LID and others only by phone number (#444), so an unanswered request is retried for the same anchor with the other identity, and the identity of a successful attempt is preferred for later batches. Responses do not identify the triggering request, so a late reply may temporarily favor the other identity; the bounded fallback remains available on every batch. A `backfill_identity_retry` warning reports the switch. Unmapped JIDs and groups retain their original identity.
+- Each attempt gets its own `--wait`; a batch can therefore wait up to twice that duration for responses, or four times for a mapped 1:1 chat whose identities are both silent (two identities for each of two anchors). If there is no next anchor, or the retry also times out, backfill stops with an error naming the unanswered anchor. Transport errors and cancellation are not retried.
 - A successful retry must add history older than the original local anchor to continue to another batch. Returning only already-stored messages stops backfill normally.
 - Backfill evaluates progress after the history response has been processed into the local store, including asynchronously delivered responses.
 - Automatic initial history-sync blob downloads are disabled during backfill; only on-demand responses are processed.

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- History: retry unanswered one-to-one backfill with the chat’s verified alternate phone/LID identity and reuse the identity that responds. Thanks @tsavo-at-pieces (#457, #444).
+
 - Sync: enforce caller deadlines for queued delegated operations even without send spacing, and warn against retrying ambiguous timeouts. Thanks @tsavo-at-pieces (#456, #446).
 
 ## 0.19.0 - 2026-09-24
