@@ -65,6 +65,9 @@ func (c *Client) init() (err error) {
 			guardAppStateKeys(cli.Store, c.opts.KeyStateStore, onEmptyKey)
 		}
 	})
+	// Let whatsmeow own bounded primary-device retries and cancellation for
+	// eligible decryption failures.
+	c.client.AutomaticMessageRerequestFromPhone = true
 	c.container = container
 	return nil
 }

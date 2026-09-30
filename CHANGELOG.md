@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Sync: enable bounded primary-device rerequests for eligible decryption failures and report unreadable messages with accurate recovery caveats. Thanks @zarmat99 (#441).
+
 - Sync: recover collections that require explicitly empty app-state keys while preserving ordinary key delivery and one-shot chat-state writes. Thanks @jzmudzinski (#443).
 
 - Sync: apply this account’s ordinary read receipts to local unread state so chats read on the phone are reflected locally with read receipts enabled. Thanks @zarmat99 (#439).

@@ -138,6 +138,25 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 			a.forgetGroupInfo(v.JID)
 		case *events.JoinedGroup:
 			a.forgetGroupInfo(v.JID)
+		case *events.UndecryptableMessage:
+			if v == nil {
+				return
+			}
+			// A message that arrived but could not be read. Report it, so that a
+			// hole in a chat is never silent, and say which recovery this event
+			// actually gets: they are not the same.
+			lastEvent.Store(nowUTC().UnixNano())
+			recovery, warning := undecryptableWarning(v)
+			a.emitWarning("undecryptable_message", warning,
+				map[string]any{
+					"chat_jid":         v.Info.Chat.String(),
+					"sender_jid":       v.Info.Sender.String(),
+					"msg_id":           string(v.Info.ID),
+					"is_unavailable":   v.IsUnavailable,
+					"unavailable_type": string(v.UnavailableType),
+					"fail_mode":        string(v.DecryptFailMode),
+					"recovery":         recovery,
+				})
 		case *events.OfflineSyncPreview:
 			// Emitted right after connecting when the server is about to send
 			// what this device missed while it was down.
@@ -837,6 +856,31 @@ func (a *App) decryptEncryptedReaction(ctx context.Context, pm *wa.ParsedMessage
 			pm.ReactionToID = key.GetID()
 		}
 	}
+}
+
+// Failure events do not identify the exact retry path. Even typed unavailable
+// messages can prompt a primary-device request, without guaranteeing recovery.
+func undecryptableWarning(v *events.UndecryptableMessage) (recovery, warning string) {
+	what := fmt.Sprintf("message %s in %s from %s", v.Info.ID, v.Info.Chat, v.Info.Sender)
+	if v.UnavailableType != events.UnavailableTypeUnknown {
+		return "requested_if_possible", fmt.Sprintf(
+			"warning: %s was reported unavailable (%s); recovery depends on WhatsApp and a readable copy may not arrive",
+			what, v.UnavailableType)
+	}
+	arrival := "decryption failed"
+	if v.IsUnavailable {
+		arrival = "nothing readable arrived"
+	}
+	return "requested_if_possible", fmt.Sprintf(
+		"warning: could not read %s (%s, fail mode %s); a copy is asked back where the failure allows it, so the message can stay missing here",
+		what, arrival, undecryptableFailMode(v.DecryptFailMode))
+}
+
+func undecryptableFailMode(mode events.DecryptFailMode) string {
+	if mode == events.DecryptFailShow {
+		return "show"
+	}
+	return string(mode)
 }
 
 // sendPresence sends a global presence update if the WhatsApp client is ready.
