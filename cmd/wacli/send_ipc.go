@@ -64,6 +64,7 @@ type sendDelegateRequest struct {
 	Selectable           int      `json:"selectable,omitempty"`
 	PresenceState        string   `json:"presence_state,omitempty"`
 	PresenceMedia        string   `json:"presence_media,omitempty"`
+	PresenceWaitMS       int64    `json:"presence_wait_ms,omitempty"`
 	Read                 *bool    `json:"read,omitempty"`
 	Receipts             bool     `json:"receipts,omitempty"`
 	PostSendWaitMS       int64    `json:"post_send_wait_ms,omitempty"`
@@ -72,23 +73,24 @@ type sendDelegateRequest struct {
 }
 
 type sendDelegateResponse struct {
-	OK             bool              `json:"ok"`
-	Error          string            `json:"error,omitempty"`
-	Sent           bool              `json:"sent,omitempty"`
-	To             string            `json:"to,omitempty"`
-	ID             string            `json:"id,omitempty"`
-	Target         string            `json:"target,omitempty"`
-	Reaction       string            `json:"reaction,omitempty"`
-	Question       string            `json:"question,omitempty"`
-	Options        []string          `json:"options,omitempty"`
-	Selected       []string          `json:"selected,omitempty"`
-	SelectedOption *selectOption     `json:"selected_option,omitempty"`
-	File           map[string]string `json:"file,omitempty"`
-	StoreWarning   string            `json:"store_warning,omitempty"`
-	Chat           string            `json:"chat,omitempty"`
-	Action         string            `json:"action,omitempty"`
-	Receipts       *int              `json:"receipts,omitempty"`
-	ReceiptType    string            `json:"receipt_type,omitempty"`
+	OK             bool               `json:"ok"`
+	Error          string             `json:"error,omitempty"`
+	Sent           bool               `json:"sent,omitempty"`
+	To             string             `json:"to,omitempty"`
+	ID             string             `json:"id,omitempty"`
+	Target         string             `json:"target,omitempty"`
+	Reaction       string             `json:"reaction,omitempty"`
+	Question       string             `json:"question,omitempty"`
+	Options        []string           `json:"options,omitempty"`
+	Selected       []string           `json:"selected,omitempty"`
+	SelectedOption *selectOption      `json:"selected_option,omitempty"`
+	File           map[string]string  `json:"file,omitempty"`
+	StoreWarning   string             `json:"store_warning,omitempty"`
+	Chat           string             `json:"chat,omitempty"`
+	Action         string             `json:"action,omitempty"`
+	Receipts       *int               `json:"receipts,omitempty"`
+	ReceiptType    string             `json:"receipt_type,omitempty"`
+	Presence       *app.PresenceState `json:"presence,omitempty"`
 }
 
 type sendDelegateExecutor func(context.Context, sendDelegateRequest) (sendDelegateResponse, error)
@@ -246,6 +248,18 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDele
 	// transport alive through its budget and the final response write.
 	_ = conn.SetDeadline(deadline.Add(sendDelegateResponseGrace))
 
+	if req.Kind == presenceSubscribeKind {
+		// Watching presence puts nothing in a chat, and it may wait for an
+		// answer: it neither queues behind sends nor takes a paced send slot,
+		// but it keeps the same budget.
+		resp, err := execute(requestCtx, req)
+		if err != nil {
+			resp = sendDelegateResponse{OK: false, Error: err.Error()}
+		}
+		_ = json.NewEncoder(conn).Encode(resp)
+		return
+	}
+
 	refuse := func() {
 		msg := "request timed out in the send queue before dispatch; it was not sent"
 		if pacer.enabled() {
@@ -325,6 +339,8 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 		return executeDelegatedButtonListSelect(ctx, a, req)
 	case "presence":
 		return executeDelegatedPresence(ctx, a, req)
+	case presenceSubscribeKind:
+		return executeDelegatedPresenceSubscribe(ctx, a, req)
 	case "edit":
 		return executeDelegatedEdit(ctx, a, req)
 	case markReadKind:
@@ -397,6 +413,25 @@ func executeDelegatedPresence(ctx context.Context, a *app.App, req sendDelegateR
 		return sendDelegateResponse{}, err
 	}
 	return sendDelegateResponse{OK: true, Sent: true, To: toJID.String()}, nil
+}
+
+type delegatedPresenceWatchApp interface {
+	WatchPresence(context.Context, types.JID, time.Duration) (*app.PresenceState, error)
+}
+
+func executeDelegatedPresenceSubscribe(ctx context.Context, a delegatedPresenceWatchApp, req sendDelegateRequest) (sendDelegateResponse, error) {
+	if req.PresenceWaitMS < 0 {
+		return sendDelegateResponse{}, fmt.Errorf("presence wait must be >= 0")
+	}
+	toJID, err := wa.ParseUserOrJID(req.To)
+	if err != nil {
+		return sendDelegateResponse{}, err
+	}
+	state, err := a.WatchPresence(ctx, toJID, time.Duration(req.PresenceWaitMS)*time.Millisecond)
+	if err != nil {
+		return sendDelegateResponse{}, err
+	}
+	return sendDelegateResponse{OK: true, To: toJID.String(), Presence: state}, nil
 }
 
 func executeDelegatedEdit(ctx context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {
