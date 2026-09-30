@@ -133,6 +133,7 @@ type App struct {
 	manualFetchMu           sync.Mutex
 	manualFetches           map[string]int
 	heartbeatLast           atomic.Int64
+	groupInfo               groupInfoCache
 }
 
 func New(opts Options) (*App, error) {

@@ -133,6 +133,11 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 					enqueueWebhook(job)
 				}
 			}
+		case *events.GroupInfo:
+			// The group changed: its next message asks for its info again.
+			a.forgetGroupInfo(v.JID)
+		case *events.JoinedGroup:
+			a.forgetGroupInfo(v.JID)
 		case *events.OfflineSyncPreview:
 			// Emitted right after connecting when the server is about to send
 			// what this device missed while it was down.
@@ -148,6 +153,9 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 				"count": v.Count,
 			}, "\nOffline backlog replayed (%d event(s)).\n", v.Count)
 		case *events.Connected:
+			// Group changes made while disconnected may not all come back as
+			// events: ask for every group's info afresh.
+			a.forgetAllGroupInfo()
 			a.emitOrPrint("connected", nil, "\nConnected.\n")
 			ps.mu.Lock()
 			if !ps.cleanupStarted && opts.PresenceMode.SendsAvailablePresence() {

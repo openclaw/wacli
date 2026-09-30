@@ -51,6 +51,10 @@ type fakeWA struct {
 	news     map[types.JID]*types.NewsletterMetadata
 	lids     map[types.JID]types.JID
 
+	groupInfoCalls int
+	groupInfoErr   error
+	onGroupInfo    func() // runs while a group info lookup is in flight
+
 	getAllContactsErr           error
 	getJoinedGroupsErr          error
 	getSubscribedNewslettersErr error
@@ -355,7 +359,17 @@ func (f *fakeWA) GetJoinedGroups(ctx context.Context) ([]*types.GroupInfo, error
 
 func (f *fakeWA) GetGroupInfo(ctx context.Context, jid types.JID) (*types.GroupInfo, error) {
 	f.mu.Lock()
+	f.groupInfoCalls++
+	hook := f.onGroupInfo
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.groupInfoErr != nil {
+		return nil, f.groupInfoErr
+	}
 	return f.groups[jid], nil
 }
 

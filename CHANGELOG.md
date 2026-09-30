@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Sync: reuse group information and participant snapshots instead of requesting them twice per message; invalidate on group changes and reconnects, and retry failed snapshot writes. Thanks @zarmat99 (#447).
+
 - Store: avoid scanning the full search index on open and sorting entire phone/LID histories for limited message reads. Thanks @zarmat99 (#455).
 
 - Tests: compile store tests on Windows and isolate account tests from the real Windows home directory; keep both regressions in the normal gate. Thanks @parth-garg01 (#452, #448, #449).
