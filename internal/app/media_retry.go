@@ -319,7 +319,7 @@ func (a *App) classifyRetry(ctx context.Context, info store.MediaDownloadInfo, i
 	case n.code == wa.MediaRetryNotFound:
 		// A phone may no longer hold media that is still available from the CDN.
 		// Try the stored path before permanently excluding this row from backfill.
-		path, bytes, directErr := a.downloadMediaWithDirectPath(ctx, info, info.DirectPath)
+		path, bytes, directErr := a.downloadMediaWithDirectPath(ctx, info, info.DirectPath, false)
 		switch {
 		case directErr == nil:
 			out.Status = "recovered"
@@ -345,7 +345,7 @@ func (a *App) classifyRetry(ctx context.Context, info store.MediaDownloadInfo, i
 		out.Detail = fmt.Sprintf("retry result code %d", n.code)
 		result.Failed++
 	default:
-		path, bytes, derr := a.downloadMediaWithDirectPath(ctx, info, n.directPath)
+		path, bytes, derr := a.downloadMediaWithDirectPath(ctx, info, n.directPath, true)
 		if derr != nil {
 			out.Status = "error"
 			out.Detail = fmt.Sprintf("download: %v", derr)
@@ -369,7 +369,7 @@ func isExpiredMediaDownload(err error) bool {
 // downloadMediaWithDirectPath downloads media using a caller-supplied direct
 // path (e.g. a fresh one from a media-retry notification) rather than the one
 // stored in the DB, then records the local path.
-func (a *App) downloadMediaWithDirectPath(ctx context.Context, info store.MediaDownloadInfo, directPath string) (string, int64, error) {
+func (a *App) downloadMediaWithDirectPath(ctx context.Context, info store.MediaDownloadInfo, directPath string, reuploaded bool) (string, int64, error) {
 	targetPath, err := a.ResolveMediaOutputPath(info, "")
 	if err != nil {
 		return "", 0, err
@@ -377,7 +377,12 @@ func (a *App) downloadMediaWithDirectPath(ctx context.Context, info store.MediaD
 	if err := fsutil.EnsurePrivateDir(filepath.Dir(targetPath)); err != nil {
 		return "", 0, err
 	}
-	n, err := a.wa.DownloadMediaToFile(ctx, directPath, info.FileEncSHA256, info.FileSHA256, info.MediaKey, info.FileLength, info.MediaType, "", targetPath)
+	var n int64
+	if reuploaded {
+		n, err = a.wa.DownloadRetriedMediaToFile(ctx, directPath, info.FileSHA256, info.MediaKey, info.FileLength, info.MediaType, targetPath)
+	} else {
+		n, err = a.wa.DownloadMediaToFile(ctx, directPath, info.FileEncSHA256, info.FileSHA256, info.MediaKey, info.FileLength, info.MediaType, "", targetPath)
+	}
 	if err != nil {
 		return "", 0, err
 	}

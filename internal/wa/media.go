@@ -125,6 +125,18 @@ func (c *Client) DownloadMediaToFile(ctx context.Context, directPath string, enc
 	return info.Size(), nil
 }
 
+// DownloadRetriedMediaToFile accepts a path from a successfully decrypted retry
+// notification. Re-uploaded ciphertext can differ, but the original plaintext
+// digest and media-key HMAC must still authenticate the downloaded bytes.
+func (c *Client) DownloadRetriedMediaToFile(ctx context.Context, directPath string, fileHash, mediaKey []byte, fileLength uint64, mediaType, targetPath string) (int64, error) {
+	if len(fileHash) != sha256.Size || len(mediaKey) != 32 {
+		return 0, fmt.Errorf("media retry requires the original SHA-256 digest and 32-byte media key")
+	}
+	// The streaming downloader treats a nil ciphertext hash as unencrypted media
+	// and skips MAC extraction. The direct downloader preserves that validation.
+	return DownloadMediaDirectToFile(ctx, directPath, nil, fileHash, mediaKey, fileLength, mediaType, targetPath)
+}
+
 func DownloadMediaDirectToFile(ctx context.Context, directPath string, encFileHash, fileHash, mediaKey []byte, fileLength uint64, mediaType string, targetPath string) (int64, error) {
 	if strings.TrimSpace(directPath) == "" {
 		return 0, fmt.Errorf("direct path is required")

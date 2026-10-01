@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Media: recover authenticated retry uploads without reusing stale ciphertext hashes, while retaining HMAC, plaintext digest, and size verification. Thanks @danielfadul1-pixel (#462).
+
 - Send: add opt-in `WACLI_MEDIA_ROOTS` upload confinement, including symlink-aware CLI validation and confined file reads in sync daemons. Thanks @tsavo-at-pieces (#459).
 
 - Contacts: add offline `contacts resolve` for verified phone/LID pairs, with explicit unresolved results and read-only access alongside sync. Thanks @tsavo-at-pieces (#458).

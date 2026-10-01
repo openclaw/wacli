@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/openclaw/wacli/internal/store"
+	"github.com/openclaw/wacli/internal/wa"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -348,5 +350,71 @@ func TestIsExpiredMediaDownload(t *testing.T) {
 	}
 	if isExpiredMediaDownload(errors.New("timeout")) {
 		t.Fatalf("unexpected transient error classified as expired")
+	}
+}
+
+type reuploadedMediaWA struct {
+	*fakeWA
+	normalCalls int
+	encHash     []byte
+	retryCalls  int
+	fileHash    []byte
+	mediaKey    []byte
+}
+
+func (f *reuploadedMediaWA) DownloadMediaToFile(ctx context.Context, path string, encHash, fileHash, key []byte, length uint64, mediaType, mmsType, target string) (int64, error) {
+	f.normalCalls++
+	f.encHash = bytes.Clone(encHash)
+	return 0, whatsmeow.ErrInvalidMediaEncSHA256
+}
+
+func (f *reuploadedMediaWA) DownloadRetriedMediaToFile(ctx context.Context, path string, fileHash, key []byte, length uint64, mediaType, target string) (int64, error) {
+	f.retryCalls++
+	if !bytes.Equal(fileHash, f.fileHash) || !bytes.Equal(key, f.mediaKey) {
+		return 0, fmt.Errorf("lost authenticated media identity")
+	}
+	return f.fakeWA.DownloadMediaToFile(ctx, path, nil, fileHash, key, length, mediaType, "", target)
+}
+
+func TestRetryMediaDoesNotReuseOriginalCiphertextHash(t *testing.T) {
+	for _, samePath := range []bool{false, true} {
+		t.Run(fmt.Sprintf("same-path-%t", samePath), func(t *testing.T) {
+			a := newTestApp(t)
+			chat := "15550000001@s.whatsapp.net"
+			if err := a.db.UpsertChat(chat, "dm", "Synthetic", time.Now()); err != nil {
+				t.Fatal(err)
+			}
+			insertMediaMessage(t, a, chat, "retry", time.Now())
+			info, err := a.db.GetMediaDownloadInfo(chat, "retry")
+			if err != nil {
+				t.Fatal(err)
+			}
+			info.FileEncSHA256 = bytes.Repeat([]byte{1}, 32)
+			info.FileSHA256 = bytes.Repeat([]byte{2}, 32)
+			info.MediaKey = bytes.Repeat([]byte{3}, 32)
+			f := &reuploadedMediaWA{fakeWA: newFakeWA(), fileHash: info.FileSHA256, mediaKey: info.MediaKey}
+			a.wa = f
+			path := "/reuploaded"
+			if samePath {
+				path = info.DirectPath
+			}
+			var result MediaRetryResult
+			got := a.classifyRetry(context.Background(), info, "retry", retryNotif{directPath: path, code: wa.MediaRetrySuccess}, true, &result)
+			if got.Status != "recovered" || result.Recovered != 1 || f.retryCalls != 1 || f.normalCalls != 0 {
+				t.Fatalf("retry outcome=%+v counts=%+v downloads=%d/%d", got, result, f.normalCalls, f.retryCalls)
+			}
+		})
+	}
+}
+
+func TestRetryMediaStoredPathFallbackRetainsCiphertextHash(t *testing.T) {
+	a := newTestApp(t)
+	f := &reuploadedMediaWA{fakeWA: newFakeWA()}
+	a.wa = f
+	info := store.MediaDownloadInfo{ChatJID: "15550000001@s.whatsapp.net", MsgID: "missing", DirectPath: "/original", MediaType: "image", FileEncSHA256: bytes.Repeat([]byte{9}, 32)}
+	var result MediaRetryResult
+	got := a.classifyRetry(context.Background(), info, info.MsgID, retryNotif{code: wa.MediaRetryNotFound}, true, &result)
+	if got.Status != "error" || f.normalCalls != 1 || f.retryCalls != 0 || !bytes.Equal(f.encHash, info.FileEncSHA256) {
+		t.Fatalf("fallback=%+v downloads=%d/%d", got, f.normalCalls, f.retryCalls)
 	}
 }
