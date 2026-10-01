@@ -12,12 +12,15 @@ import (
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/appstate"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
+	"go.mau.fi/whatsmeow/proto/waCompanionReg"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/proto/waWeb"
+	wastore "go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
+	"google.golang.org/protobuf/proto"
 )
 
 type Options struct {
@@ -117,6 +120,53 @@ func (c *Client) SetAutoReconnect(enabled bool) (bool, bool) {
 	}
 	c.client.EnableAutoReconnect = enabled
 	return previous, true
+}
+
+// HistorySyncLimits shapes the history bundle the primary device pushes when
+// a companion links. By default whatsmeow does not ask for a full sync, so the
+// primary sends only its recent window (about three months); Days narrows that
+// window and Full asks for the full archive instead.
+//
+// The fields are uint32 because that is what the pairing protobuf carries:
+// callers convert once, after checking the value fits, so a request too large
+// for the wire cannot quietly wrap into a different one here.
+type HistorySyncLimits struct {
+	// Days of history to ask for, 0 to leave it to the primary.
+	Days uint32
+	// MaxPerChat caps how many messages each chat brings, 0 for no cap.
+	MaxPerChat uint32
+	// Full asks for a full history sync instead of the recent window. With
+	// Days set it bounds only the full sync: the recent window the primary
+	// sends first keeps its default.
+	Full bool
+	// SizeMB is how many megabytes the primary may put into the full sync,
+	// 0 to leave it to the primary.
+	SizeMB uint32
+}
+
+// SetHistorySyncLimits applies the limits to the device properties whatsmeow
+// sends while pairing. They travel in the pairing handshake, so they only
+// affect a device that links after this call: changing them for an already
+// linked device does nothing.
+func SetHistorySyncLimits(limits HistorySyncLimits) {
+	cfg := wastore.DeviceProps.GetHistorySyncConfig()
+	if cfg == nil {
+		cfg = &waCompanionReg.DeviceProps_HistorySyncConfig{}
+		wastore.DeviceProps.HistorySyncConfig = cfg
+	}
+	wastore.DeviceProps.RequireFullSync = proto.Bool(limits.Full)
+	if limits.Days > 0 {
+		cfg.FullSyncDaysLimit = proto.Uint32(limits.Days)
+		if !limits.Full {
+			cfg.RecentSyncDaysLimit = proto.Uint32(limits.Days)
+		}
+	}
+	if limits.MaxPerChat > 0 {
+		cfg.InitialSyncMaxMessagesPerChat = proto.Uint32(limits.MaxPerChat)
+	}
+	if limits.SizeMB > 0 {
+		cfg.FullSyncSizeMbLimit = proto.Uint32(limits.SizeMB)
+	}
 }
 
 type ConnectOptions struct {
