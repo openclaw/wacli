@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Dependencies: update pnpm to 12.8.1 and refresh Google API/RPC protocol modules after the 48-hour cooldown, preserving runtime minimums.
+
 - Chats: delegate archive, pin, mute, and their inverses to a running sync without blocking the send queue, while preserving caller deadlines. Thanks @nicolasbiondic (#454).
 
 - Media: recover authenticated retry uploads without reusing stale ciphertext hashes, while retaining HMAC, plaintext digest, and size verification. Thanks @danielfadul1-pixel (#462).
