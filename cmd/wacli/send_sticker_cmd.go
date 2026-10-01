@@ -29,6 +29,9 @@ func newSendStickerCmd(flags *rootFlags) *cobra.Command {
 			if err := flags.requireWritable(); err != nil {
 				return err
 			}
+			if err := checkOutboundMediaPath(filePath); err != nil {
+				return err
+			}
 
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()

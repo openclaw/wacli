@@ -418,7 +418,7 @@ func newAudioMessage(up whatsmeow.UploadResponse, mimeType string, ptt bool, met
 }
 
 func readSendFileData(filePath string) ([]byte, error) {
-	return readRegularFileLimited(filePath, maxSendFileSize)
+	return readRegularFileLimitedWithOpener(filePath, maxSendFileSize, openOutboundMedia)
 }
 
 func attachSendFileReplyContext(msg *waProto.Message, info *waProto.ContextInfo) {

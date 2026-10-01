@@ -45,6 +45,11 @@ func newSendStatusCmd(flags *rootFlags) *cobra.Command {
 			if err := flags.requireWritable(); err != nil {
 				return err
 			}
+			if filePath != "" {
+				if err := checkOutboundMediaPath(filePath); err != nil {
+					return err
+				}
+			}
 			if cmd.Flags().Changed("font") {
 				fontSet = true
 			}

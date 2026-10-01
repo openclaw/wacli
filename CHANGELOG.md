@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Send: add opt-in `WACLI_MEDIA_ROOTS` upload confinement, including symlink-aware CLI validation and confined file reads in sync daemons. Thanks @tsavo-at-pieces (#459).
+
 - Contacts: add offline `contacts resolve` for verified phone/LID pairs, with explicit unresolved results and read-only access alongside sync. Thanks @tsavo-at-pieces (#458).
 
 - Dependencies: update gRPC tooling dependencies and pnpm to eligible minor releases while retaining the Go/Node minimums and 48-hour package cooldown.
