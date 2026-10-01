@@ -2,33 +2,24 @@
 
 ## Unreleased
 
-- Dependencies: update pnpm to 12.8.1 and refresh Google API/RPC protocol modules after the 48-hour cooldown, preserving runtime minimums.
+## 0.20.0 - 2026-09-30
 
-- Chats: delegate archive, pin, mute, and their inverses to a running sync without blocking the send queue, while preserving caller deadlines. Thanks @nicolasbiondic (#454).
-
-- Media: recover authenticated retry uploads without reusing stale ciphertext hashes, while retaining HMAC, plaintext digest, and size verification. Thanks @danielfadul1-pixel (#462).
-
-- Send: add opt-in `WACLI_MEDIA_ROOTS` upload confinement, including symlink-aware CLI validation and confined file reads in sync daemons. Thanks @tsavo-at-pieces (#459).
+**Highlights:** offline phone/LID resolution, confined uploads, authenticated media retries, and chat-state commands alongside sync.
 
 - Contacts: add offline `contacts resolve` for verified phone/LID pairs, with explicit unresolved results and read-only access alongside sync. Thanks @tsavo-at-pieces (#458).
-
-- Dependencies: update gRPC tooling dependencies and pnpm to eligible minor releases while retaining the Go/Node minimums and 48-hour package cooldown.
-
-- Sync: enable bounded primary-device rerequests for eligible decryption failures and report unreadable messages with accurate recovery caveats. Thanks @zarmat99 (#441).
-
-- Sync: recover collections that require explicitly empty app-state keys while preserving ordinary key delivery and one-shot chat-state writes. Thanks @jzmudzinski (#443).
-
-- Sync: apply this account’s ordinary read receipts to local unread state so chats read on the phone are reflected locally with read receipts enabled. Thanks @zarmat99 (#439).
-
-- Sync: reuse group information and participant snapshots instead of requesting them twice per message; invalidate on group changes and reconnects, and retry failed snapshot writes. Thanks @zarmat99 (#447).
-
-- Store: avoid scanning the full search index on open and sorting entire phone/LID histories for limited message reads. Thanks @zarmat99 (#455).
-
-- Tests: compile store tests on Windows and isolate account tests from the real Windows home directory; keep both regressions in the normal gate. Thanks @parth-garg01 (#452, #448, #449).
-
+- Send: add opt-in `WACLI_MEDIA_ROOTS` upload confinement, including symlink-aware CLI validation and confined file reads in sync daemons. Thanks @tsavo-at-pieces (#459).
+- Media: recover authenticated retry uploads without reusing stale ciphertext hashes, while retaining HMAC, plaintext digest, and size verification. Thanks @danielfadul1-pixel (#462).
+- Chats: delegate archive, pin, mute, and their inverses to a running sync without blocking the send queue, while preserving caller deadlines. Thanks @nicolasbiondic (#454).
 - History: retry unanswered one-to-one backfill with the chat’s verified alternate phone/LID identity and reuse the identity that responds. Thanks @tsavo-at-pieces (#457, #444).
-
+- Sync: enable bounded primary-device rerequests for eligible decryption failures and report unreadable messages with accurate recovery caveats. Thanks @zarmat99 (#441).
+- Sync: recover collections that require explicitly empty app-state keys while preserving ordinary key delivery and one-shot chat-state writes. Thanks @jzmudzinski (#443).
+- Sync: apply this account’s ordinary read receipts to local unread state so chats read on the phone are reflected locally with read receipts enabled. Thanks @zarmat99 (#439).
+- Sync: reuse group information and participant snapshots instead of requesting them twice per message; invalidate on group changes and reconnects, and retry failed snapshot writes. Thanks @zarmat99 (#447).
 - Sync: enforce caller deadlines for queued delegated operations even without send spacing, and warn against retrying ambiguous timeouts. Thanks @tsavo-at-pieces (#456, #446).
+- Store: avoid scanning the full search index on open and sorting entire phone/LID histories for limited message reads. Thanks @zarmat99 (#455).
+- Tests: compile store tests on Windows and isolate account tests from the real Windows home directory; keep both regressions in the normal gate. Thanks @parth-garg01 (#452, #448, #449).
+- Dependencies: update pnpm to 12.8.1 and refresh Google API/RPC protocol modules after the 48-hour cooldown, preserving runtime minimums.
+- Dependencies: update gRPC tooling dependencies and pnpm to eligible minor releases while retaining the Go/Node minimums and 48-hour package cooldown.
 
 ## 0.19.0 - 2026-09-24
 

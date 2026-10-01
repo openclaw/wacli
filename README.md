@@ -21,7 +21,7 @@ Homebrew on macOS or Linux:
 brew install openclaw/tap/wacli
 ```
 
-Prebuilt archives for macOS, Linux, and Windows are available from [GitHub Releases](https://github.com/openclaw/wacli/releases/latest).
+Prebuilt archives for macOS, Linux, and Windows are available from [GitHub Releases](https://github.com/openclaw/wacli/releases/latest). Official macOS binaries require macOS 15 (Sequoia) or newer.
 
 To build from source, install Go 1.27.0 or newer and a C compiler, then run:
 
