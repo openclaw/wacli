@@ -101,8 +101,13 @@ type Message struct {
 	DeletedAt       *time.Time `json:"deleted_at,omitempty"`
 	DeletionReason  string     `json:"deletion_reason,omitempty"`
 	PayloadPurgedAt *time.Time `json:"payload_purged_at,omitempty"`
-	Snippet         string
-	rowID           int64
+	// How many recipients reported the message delivered, and how many of those
+	// went on to read it. Both stay 0 for a message nobody reported on, which
+	// includes every message stored before receipts were kept.
+	DeliveredTo int
+	ReadBy      int
+	Snippet     string
+	rowID       int64
 }
 
 type MessageInfo struct {

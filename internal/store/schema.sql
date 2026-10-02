@@ -99,6 +99,21 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE INDEX IF NOT EXISTS idx_messages_chat_ts ON messages(chat_jid, ts);
 CREATE INDEX IF NOT EXISTS idx_messages_ts ON messages(ts);
 
+-- What other devices reported about a message of ours: one row per recipient,
+-- keeping the furthest state reached, so a group can be told apart from a chat
+-- where a single recipient has read.
+CREATE TABLE IF NOT EXISTS message_receipts (
+    chat_jid TEXT NOT NULL,
+    msg_id TEXT NOT NULL,
+    recipient_jid TEXT NOT NULL,
+    status TEXT NOT NULL, -- delivered|read|played
+    ts INTEGER NOT NULL,
+    PRIMARY KEY (chat_jid, msg_id, recipient_jid),
+    FOREIGN KEY (chat_jid) REFERENCES chats(jid) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_message_receipts_msg ON message_receipts(chat_jid, msg_id);
+
 CREATE TABLE IF NOT EXISTS message_payload_purges (
     chat_jid TEXT NOT NULL,
     msg_id TEXT NOT NULL,

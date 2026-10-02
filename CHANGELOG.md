@@ -21,6 +21,8 @@
 - Dependencies: update pnpm to 12.8.1 and refresh Google API/RPC protocol modules after the 48-hour cooldown, preserving runtime minimums.
 - Dependencies: update gRPC tooling dependencies and pnpm to eligible minor releases while retaining the Go/Node minimums and 48-hour package cooldown.
 
+- Sync: keep what recipients report about your own messages, one row per recipient, and expose it on listed messages as `DeliveredTo` and `ReadBy`, so a client can show a message as sent, delivered or read. Reports arriving while nothing is connected are still lost, since WhatsApp announces each one once.
+
 ## 0.19.0 - 2026-09-24
 
 **Highlights:** opt-in read receipts without app-state recovery, accurate unread counts, and stable chat activity order.
