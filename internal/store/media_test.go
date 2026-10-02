@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -16,14 +17,76 @@ func TestPendingMediaQueriesHonorCanceledContext(t *testing.T) {
 	if _, err := db.CountPendingMediaDownloads(ctx, ""); !errors.Is(err, context.Canceled) {
 		t.Fatalf("CountPendingMediaDownloads error = %v, want context.Canceled", err)
 	}
-	if _, err := db.ListPendingMediaDownloads(ctx, "", 0); !errors.Is(err, context.Canceled) {
+	if _, err := db.ListPendingMediaDownloads(ctx, "", "", 0); !errors.Is(err, context.Canceled) {
 		t.Fatalf("ListPendingMediaDownloads error = %v, want context.Canceled", err)
 	}
-	if _, err := db.ListPendingMediaBefore(ctx, "", 1, 0); !errors.Is(err, context.Canceled) {
+	if _, err := db.ListPendingMediaBefore(ctx, "", "", 1, 0); !errors.Is(err, context.Canceled) {
 		t.Fatalf("ListPendingMediaBefore error = %v, want context.Canceled", err)
 	}
 	if err := db.MarkMediaUnavailable(ctx, "chat", "msg", nowUTC()); !errors.Is(err, context.Canceled) {
 		t.Fatalf("MarkMediaUnavailable error = %v, want context.Canceled", err)
+	}
+}
+
+func TestPendingMediaQueriesFilterByMediaType(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	chat := "123@s.whatsapp.net"
+	if err := db.UpsertChat(chat, "dm", "Chat", time.Now()); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	base := time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC)
+	// The image is the newest row, so a limit applied before the type filter
+	// would return it instead of the newest voice note.
+	for i, m := range []struct{ id, mediaType string }{
+		{"voice-old", "audio"},
+		{"voice-new", "audio"},
+		{"photo", "image"},
+	} {
+		if err := db.UpsertMessage(UpsertMessageParams{
+			ChatJID:    chat,
+			MsgID:      m.id,
+			Timestamp:  base.Add(time.Duration(i) * time.Hour),
+			MediaType:  m.mediaType,
+			DirectPath: "/direct/" + m.id,
+			MediaKey:   []byte{1},
+		}); err != nil {
+			t.Fatalf("UpsertMessage %s: %v", m.id, err)
+		}
+	}
+	ids := func(rows []PendingMediaDownload) []string {
+		out := make([]string, 0, len(rows))
+		for _, row := range rows {
+			out = append(out, row.MsgID)
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		name string
+		list func() ([]PendingMediaDownload, error)
+		want []string
+	}{
+		{"all types", func() ([]PendingMediaDownload, error) { return db.ListPendingMediaDownloads(ctx, "", "", 0) }, []string{"photo", "voice-new", "voice-old"}},
+		{"audio", func() ([]PendingMediaDownload, error) { return db.ListPendingMediaDownloads(ctx, "", "audio", 0) }, []string{"voice-new", "voice-old"}},
+		{"audio limit", func() ([]PendingMediaDownload, error) { return db.ListPendingMediaDownloads(ctx, "", "audio", 1) }, []string{"voice-new"}},
+		{"audio in chat", func() ([]PendingMediaDownload, error) { return db.ListPendingMediaDownloads(ctx, chat, "audio", 0) }, []string{"voice-new", "voice-old"}},
+		{"no match", func() ([]PendingMediaDownload, error) { return db.ListPendingMediaDownloads(ctx, "", "video", 0) }, []string{}},
+		{"audio before", func() ([]PendingMediaDownload, error) {
+			return db.ListPendingMediaBefore(ctx, "", "audio", base.Add(90*time.Minute).Unix(), 0)
+		}, []string{"voice-new", "voice-old"}},
+		{"image before", func() ([]PendingMediaDownload, error) {
+			return db.ListPendingMediaBefore(ctx, "", "image", base.Add(90*time.Minute).Unix(), 0)
+		}, []string{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rows, err := tc.list()
+			if err != nil {
+				t.Fatalf("list: %v", err)
+			}
+			if got := ids(rows); strings.Join(got, ",") != strings.Join(tc.want, ",") {
+				t.Fatalf("pending = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

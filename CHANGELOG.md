@@ -21,6 +21,8 @@
 - Dependencies: update pnpm to 12.8.1 and refresh Google API/RPC protocol modules after the 48-hour cooldown, preserving runtime minimums.
 - Dependencies: update gRPC tooling dependencies and pnpm to eligible minor releases while retaining the Go/Node minimums and 48-hour package cooldown.
 
+- Media: add `media retry --type` to recover one kind of media (for example `audio`, which includes voice notes) without asking the phone to re-upload every other expired photo, video and sticker as well. Thanks @zarmat99.
+
 ## 0.19.0 - 2026-09-24
 
 **Highlights:** opt-in read receipts without app-state recovery, accurate unread counts, and stable chat activity order.

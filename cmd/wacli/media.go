@@ -31,6 +31,7 @@ func newMediaRetryCmd(flags *rootFlags) *cobra.Command {
 	var batch int
 	var wait time.Duration
 	var before string
+	var mediaType string
 
 	cmd := &cobra.Command{
 		Use:   "retry",
@@ -51,6 +52,10 @@ func newMediaRetryCmd(flags *rootFlags) *cobra.Command {
 				return fmt.Errorf("--wait must be > 0")
 			}
 			beforeUnix, err := parseMediaRetryBefore(before)
+			if err != nil {
+				return err
+			}
+			retryType, err := parseMediaRetryType(mediaType)
 			if err != nil {
 				return err
 			}
@@ -75,6 +80,7 @@ func newMediaRetryCmd(flags *rootFlags) *cobra.Command {
 
 			res, err := a.RetryMedia(ctx, app.RetryMediaOptions{
 				ChatJID:    strings.TrimSpace(chat),
+				MediaType:  retryType,
 				BeforeUnix: beforeUnix,
 				BeforeSet:  strings.TrimSpace(before) != "",
 				Limit:      limit,
@@ -108,7 +114,19 @@ func newMediaRetryCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().IntVar(&batch, "batch", 32, "number of retry receipts to send per batch")
 	cmd.Flags().DurationVar(&wait, "wait", 30*time.Second, "how long to wait for the phone per attempt")
 	cmd.Flags().StringVar(&before, "before", "", "only retry media older than this date (YYYY-MM-DD)")
+	cmd.Flags().StringVar(&mediaType, "type", "", "only retry one kind of media (image|video|gif|audio|document|sticker; voice notes are audio)")
 	return cmd
+}
+
+// parseMediaRetryType checks --type against the media types the store records
+// for downloadable media, so a typo fails instead of matching nothing.
+func parseMediaRetryType(value string) (string, error) {
+	switch mediaType := strings.ToLower(strings.TrimSpace(value)); mediaType {
+	case "", "image", "video", "gif", "audio", "document", "sticker":
+		return mediaType, nil
+	default:
+		return "", fmt.Errorf("invalid --type %q (want image|video|gif|audio|document|sticker)", value)
+	}
 }
 
 func parseMediaRetryBefore(value string) (int64, error) {

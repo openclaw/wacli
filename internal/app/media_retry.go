@@ -40,6 +40,7 @@ type MediaRetryResult struct {
 // RetryMediaOptions controls a media-retry run.
 type RetryMediaOptions struct {
 	ChatJID    string        // scope to a single chat (optional)
+	MediaType  string        // scope to one stored media type, e.g. "audio" (optional)
 	BeforeUnix int64         // only retry media older than this unix time (optional)
 	BeforeSet  bool          // distinguish an explicit Unix epoch filter from no filter
 	Limit      int           // cap total messages to retry (0 = all pending)
@@ -78,6 +79,7 @@ func (a *App) RetryMedia(ctx context.Context, opts RetryMediaOptions) (MediaRetr
 		return MediaRetryResult{}, fmt.Errorf("wait must be >= 0")
 	}
 	opts.ChatJID = strings.TrimSpace(opts.ChatJID)
+	opts.MediaType = strings.TrimSpace(opts.MediaType)
 	if opts.BatchSize <= 0 {
 		opts.BatchSize = 32
 	}
@@ -88,9 +90,9 @@ func (a *App) RetryMedia(ctx context.Context, opts RetryMediaOptions) (MediaRetr
 	var pending []store.PendingMediaDownload
 	var err error
 	if opts.BeforeSet || opts.BeforeUnix != 0 {
-		pending, err = a.db.ListPendingMediaBefore(ctx, opts.ChatJID, opts.BeforeUnix, opts.Limit)
+		pending, err = a.db.ListPendingMediaBefore(ctx, opts.ChatJID, opts.MediaType, opts.BeforeUnix, opts.Limit)
 	} else {
-		pending, err = a.db.ListPendingMediaDownloads(ctx, opts.ChatJID, opts.Limit)
+		pending, err = a.db.ListPendingMediaDownloads(ctx, opts.ChatJID, opts.MediaType, opts.Limit)
 	}
 	if err != nil {
 		return MediaRetryResult{}, fmt.Errorf("list pending media: %w", err)
