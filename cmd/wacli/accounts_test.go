@@ -63,6 +63,41 @@ func TestAccountsAddValidatesAuthFlagsBeforeSaving(t *testing.T) {
 	}
 }
 
+func TestAccountsAddValidatesHistoryLimitsBeforeSaving(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "negative",
+			args: []string{"accounts", "add", "personal", "--history-days", "-1"},
+			want: "--history-days cannot be negative",
+		},
+		{
+			name: "above the pairing field",
+			args: []string{"accounts", "add", "personal", "--history-max-per-chat", "4294967296"},
+			want: "--history-max-per-chat cannot be above 4294967295",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateAccountConfigHome(t)
+
+			err := execute(tc.args)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("execute error = %v, want %q", err, tc.want)
+			}
+			if _, statErr := os.Stat(config.DefaultConfigPath()); !os.IsNotExist(statErr) {
+				t.Fatalf("config stat error = %v, want not exist", statErr)
+			}
+			storeDir := filepath.Join(filepath.Dir(config.DefaultConfigPath()), "accounts", "personal")
+			if _, statErr := os.Stat(storeDir); !os.IsNotExist(statErr) {
+				t.Fatalf("store stat error = %v, want not exist", statErr)
+			}
+		})
+	}
+}
+
 func TestAccountsAddRejectsWhitespaceName(t *testing.T) {
 	isolateAccountConfigHome(t)
 

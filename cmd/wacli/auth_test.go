@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"database/sql"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -309,6 +310,46 @@ func TestAuthCommandExposesQRFormat(t *testing.T) {
 	}
 	if cmd.Flags().Lookup("phone") == nil {
 		t.Fatal("expected --phone flag")
+	}
+}
+
+func TestValidateAuthOptionsHistoryLimits(t *testing.T) {
+	tests := []struct {
+		name        string
+		days        int
+		perChat     int
+		wantErr     string
+		wantDays    uint32
+		wantPerChat uint32
+	}{
+		{name: "unset stays unlimited"},
+		{name: "kept as asked", days: 3, perChat: 50, wantDays: 3, wantPerChat: 50},
+		{name: "uint32 maximum", days: math.MaxUint32, wantDays: math.MaxUint32},
+		{name: "negative days", days: -1, wantErr: "--history-days cannot be negative"},
+		{name: "negative per chat", perChat: -1, wantErr: "--history-max-per-chat cannot be negative"},
+		{name: "days above the field", days: math.MaxUint32 + 1, wantErr: "--history-days cannot be above 4294967295"},
+		{name: "per chat above the field", perChat: math.MaxUint32 + 1, wantErr: "--history-max-per-chat cannot be above 4294967295"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := authOptions{qrFormat: "terminal", historyDays: tc.days, historyPerChat: tc.perChat}
+			validated, err := validateAuthOptions(&rootFlags{}, opts)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("validateAuthOptions error = %v, want %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("validateAuthOptions: %v", err)
+			}
+			if validated.historyLimits.Days != tc.wantDays {
+				t.Fatalf("Days = %d, want %d", validated.historyLimits.Days, tc.wantDays)
+			}
+			if validated.historyLimits.MaxPerChat != tc.wantPerChat {
+				t.Fatalf("MaxPerChat = %d, want %d", validated.historyLimits.MaxPerChat, tc.wantPerChat)
+			}
+		})
 	}
 }
 
