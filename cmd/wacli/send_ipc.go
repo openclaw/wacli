@@ -255,8 +255,16 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDele
 			_ = json.NewEncoder(conn).Encode(sendDelegateResponse{OK: false, Error: "request deadline passed before dispatch; it was not sent"})
 			return
 		}
-		resp, err := execute(requestCtx, req)
-		writeDelegateResult(conn, requestCtx, req, resp, err)
+		// Once dispatched, an app-state write runs to completion on the
+		// daemon's own budget: cancelling it partway through the app-state
+		// sync/apply/send can leave the locally stored hash out of step with
+		// the server. A caller that gave up only misses the reply; daemon
+		// shutdown still stops the write.
+		opCtx, cancelOp := context.WithTimeout(ctx, 5*time.Minute)
+		defer cancelOp()
+		req.TimeoutMS = 0 // keep the executor's inner wrapper on the same budget
+		resp, err := execute(opCtx, req)
+		writeDelegateResult(conn, opCtx, req, resp, err)
 		return
 	}
 

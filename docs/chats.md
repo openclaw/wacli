@@ -34,7 +34,7 @@ wacli chats cleanup [--days N] [--jid JID] [--dry-run] [--confirm]
 - `show` accepts the stored JID. If a phone JID maps to a historical `@lid` row, it can show that row too.
 - State commands use `--chat` and resolve names, phone numbers, groups, and JIDs like send commands. Use `--pick N` for ambiguous matches.
 - After a same-store `sync --follow` process finishes startup and opens its local delegate socket, all state commands are delegated to it while it owns the store lock.
-- `mark-read` and `mark-unread` run in the follow process's serialized delegate queue. `archive`, `unarchive`, `pin`, `unpin`, `mute`, and `unmute` run outside it, so an app-state sync or recovery before the change cannot hold queued sends; the caller's `--timeout` still bounds the operation.
+- `mark-read` and `mark-unread` run in the follow process's serialized delegate queue. `archive`, `unarchive`, `pin`, `unpin`, `mute`, and `unmute` run outside it, so an app-state sync or recovery before the change cannot hold queued sends. The caller's `--timeout` bounds waiting for dispatch; a change that has already started finishes under the sync process's own five-minute budget even if the caller times out, so an app-state write is never cancelled partway.
 - Restart an older `sync --follow` process after upgrading before using delegated state commands; older daemons return an unsupported `mark_read` or `chat_state` kind error.
 - State commands print a compact success line by default and a stable JSON object with `--json`.
 - `mute --duration 0` or omitting `--duration` mutes forever. Use `unmute` to clear it.

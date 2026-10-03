@@ -736,6 +736,99 @@ func TestDelegatedChatStateExtendsIPCDeadlineThroughResponse(t *testing.T) {
 	}
 }
 
+// A caller that times out mid-operation must not cancel a dispatched app-state
+// write: aborting it partway can leave the locally stored app-state hash out of
+// step with the server.
+func TestDelegatedChatStateFinishesAfterCallerDeadline(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer clientConn.Close()
+	if err := clientConn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatalf("set client deadline: %v", err)
+	}
+
+	callerDeadline := time.Now().Add(250 * time.Millisecond)
+	ctxErr := make(chan error, 1)
+	go handleSendDelegateConn(context.Background(), serverConn, func(ctx context.Context, req sendDelegateRequest) (sendDelegateResponse, error) {
+		// Outlive the caller's deadline before checking for cancellation.
+		time.Sleep(time.Until(callerDeadline.Add(250 * time.Millisecond)))
+		ctxErr <- ctx.Err()
+		return sendDelegateResponse{OK: true, Chat: req.To, Action: req.ChatStateAction}, nil
+	}, make(chan struct{}, 1), newSendPacer(sendSpacing{}))
+
+	req := chatStateDelegateRequest("archive", 0)
+	req.Version = sendDelegateVersion
+	req.To = "123@s.whatsapp.net"
+	req.TimeoutMS = durationMillis(10 * time.Minute)
+	req.DeadlineUnixMS = callerDeadline.UnixMilli()
+	if err := json.NewEncoder(clientConn).Encode(req); err != nil {
+		t.Fatalf("encode request: %v", err)
+	}
+	var resp sendDelegateResponse
+	if err := json.NewDecoder(clientConn).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !resp.OK || resp.Action != "archive" {
+		t.Fatalf("response = %+v, want the completed archive", resp)
+	}
+	select {
+	case err := <-ctxErr:
+		if err != nil {
+			t.Fatalf("executor context cancelled by the caller's deadline: %v", err)
+		}
+	default:
+		t.Fatal("chat state executor did not run")
+	}
+}
+
+// Send kinds keep the queue semantics: a dispatched send stays bounded by its
+// caller's absolute deadline.
+func TestDelegatedSendStaysBoundedByCallerDeadline(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer clientConn.Close()
+	if err := clientConn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatalf("set client deadline: %v", err)
+	}
+
+	sendSlot := make(chan struct{}, 1)
+	sendSlot <- struct{}{}
+	ctxErr := make(chan error, 1)
+	go handleSendDelegateConn(context.Background(), serverConn, func(ctx context.Context, _ sendDelegateRequest) (sendDelegateResponse, error) {
+		select {
+		case <-ctx.Done():
+		case <-time.After(4 * time.Second):
+		}
+		ctxErr <- ctx.Err()
+		return sendDelegateResponse{}, ctx.Err()
+	}, sendSlot, newSendPacer(sendSpacing{}))
+
+	req := sendDelegateRequest{
+		Version:        sendDelegateVersion,
+		Kind:           "text",
+		To:             "123@s.whatsapp.net",
+		Message:        "hi",
+		TimeoutMS:      durationMillis(10 * time.Minute),
+		DeadlineUnixMS: time.Now().Add(250 * time.Millisecond).UnixMilli(),
+	}
+	if err := json.NewEncoder(clientConn).Encode(req); err != nil {
+		t.Fatalf("encode request: %v", err)
+	}
+	var resp sendDelegateResponse
+	if err := json.NewDecoder(clientConn).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.OK || !strings.Contains(resp.Error, "after dispatch") {
+		t.Fatalf("response = %+v, want an ambiguous after-dispatch failure", resp)
+	}
+	select {
+	case err := <-ctxErr:
+		if err == nil {
+			t.Fatal("send executor was not bounded by the caller's deadline")
+		}
+	default:
+		t.Fatal("send executor did not run")
+	}
+}
+
 func TestDelegatedChatStateHonorsAbsoluteCallerDeadline(t *testing.T) {
 	serverConn, clientConn := net.Pipe()
 	defer clientConn.Close()
