@@ -780,6 +780,63 @@ func TestDelegatedChatStateFinishesAfterCallerDeadline(t *testing.T) {
 	}
 }
 
+// The operation budget is separate from how long the caller waits: a short
+// caller timeout still gets the daemon minimum, and an explicitly longer
+// requested timeout is kept rather than capped.
+func TestDelegatedChatStateOperationBudget(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		timeout   time.Duration
+		minBudget time.Duration
+	}{
+		{name: "short caller timeout gets the daemon minimum", timeout: 2 * time.Second, minBudget: chatStateOperationBudget},
+		{name: "longer requested timeout is kept", timeout: 10 * time.Minute, minBudget: 10 * time.Minute},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			serverConn, clientConn := net.Pipe()
+			defer clientConn.Close()
+			if err := clientConn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+				t.Fatalf("set client deadline: %v", err)
+			}
+
+			type seen struct {
+				remaining time.Duration
+				timeoutMS int64
+			}
+			got := make(chan seen, 1)
+			start := time.Now()
+			go handleSendDelegateConn(context.Background(), serverConn, func(ctx context.Context, req sendDelegateRequest) (sendDelegateResponse, error) {
+				deadline, ok := ctx.Deadline()
+				if !ok {
+					t.Error("executor context has no deadline")
+				}
+				got <- seen{remaining: deadline.Sub(start), timeoutMS: req.TimeoutMS}
+				return sendDelegateResponse{OK: true, Chat: req.To, Action: req.ChatStateAction}, nil
+			}, make(chan struct{}, 1), newSendPacer(sendSpacing{}))
+
+			req := chatStateDelegateRequest("archive", 0)
+			req.Version = sendDelegateVersion
+			req.To = "123@s.whatsapp.net"
+			req.TimeoutMS = durationMillis(tc.timeout)
+			req.DeadlineUnixMS = start.Add(tc.timeout).UnixMilli()
+			if err := json.NewEncoder(clientConn).Encode(req); err != nil {
+				t.Fatalf("encode request: %v", err)
+			}
+			var resp sendDelegateResponse
+			if err := json.NewDecoder(clientConn).Decode(&resp); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			s := <-got
+			if s.remaining < tc.minBudget-time.Second {
+				t.Fatalf("operation budget = %s, want at least %s", s.remaining, tc.minBudget)
+			}
+			if s.timeoutMS < durationMillis(tc.minBudget) {
+				t.Fatalf("executor TimeoutMS = %d, want at least %d", s.timeoutMS, durationMillis(tc.minBudget))
+			}
+		})
+	}
+}
+
 // Send kinds keep the queue semantics: a dispatched send stays bounded by its
 // caller's absolute deadline.
 func TestDelegatedSendStaysBoundedByCallerDeadline(t *testing.T) {

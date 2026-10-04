@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Chats: let a delegated archive, pin, or mute change that already started finish under the sync daemon's five-minute budget when its caller times out, so app-state writes are not cancelled partway. Thanks @nicolasbiondic (#467).
+- Chats: let a delegated archive, pin, or mute change that already started finish when its caller stops waiting, under the requested timeout or five minutes, whichever is longer, so app-state writes are not cancelled partway. Thanks @nicolasbiondic (#467).
 
 ## 0.20.0 - 2026-09-30
 
