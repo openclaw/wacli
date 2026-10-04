@@ -24,7 +24,21 @@ const (
 	appStateRetryInitialDelay = 250 * time.Millisecond
 	appStateRetryMaxDelay     = 5 * time.Second
 	appStateRecoveryMaxWait   = 5 * time.Minute
+	// appStateSendBudget bounds one app-state send once it has started. The
+	// send runs detached from the caller's cancellation (see appStateSendContext).
+	appStateSendBudget = 5 * time.Minute
 )
+
+// appStateSendContext returns the context an app-state send runs under. The
+// pre-write sync stays cancellable by the caller: it is slow and recoverable.
+// The send itself is not: cancelling it between the server accepting the
+// patch and the local hash advancing leaves the stored app state out of step
+// with the server (a later "mismatching LTHash"). A caller that stops waiting
+// therefore no longer cancels a send that already started; the send keeps a
+// bounded budget of its own and still stops with the daemon.
+func appStateSendContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), appStateSendBudget)
+}
 
 // AddChatStatePersistenceHandler captures app-state events that arrive while a
 // one-shot chat-state command is connected. Remove it only after closing the
@@ -62,7 +76,9 @@ func (a *App) ArchiveChat(ctx context.Context, jid types.JID, archive bool) erro
 	if err != nil {
 		return err
 	}
-	postSendEvents, err := a.wa.ArchiveChat(ctx, jid, archive, nowUTC(), nil, func() { pending.reserve(a) })
+	sendCtx, cancelSend := appStateSendContext(ctx)
+	defer cancelSend()
+	postSendEvents, err := a.wa.ArchiveChat(sendCtx, jid, archive, nowUTC(), nil, func() { pending.reserve(a) })
 	if err != nil {
 		return errors.Join(err, a.failLocalAppStateWrite(ctx, &pending, postSendEvents))
 	}
@@ -85,7 +101,9 @@ func (a *App) PinChat(ctx context.Context, jid types.JID, pin bool) error {
 	if err != nil {
 		return err
 	}
-	postSendEvents, err := a.wa.PinChat(ctx, jid, pin, func() { pending.reserve(a) })
+	sendCtx, cancelSend := appStateSendContext(ctx)
+	defer cancelSend()
+	postSendEvents, err := a.wa.PinChat(sendCtx, jid, pin, func() { pending.reserve(a) })
 	if err != nil {
 		return errors.Join(err, a.failLocalAppStateWrite(ctx, &pending, postSendEvents))
 	}
@@ -109,7 +127,9 @@ func (a *App) MuteChat(ctx context.Context, jid types.JID, mute bool, duration t
 	if err != nil {
 		return err
 	}
-	postSendEvents, err := a.wa.MuteChat(ctx, jid, mute, duration, func() { pending.reserve(a) })
+	sendCtx, cancelSend := appStateSendContext(ctx)
+	defer cancelSend()
+	postSendEvents, err := a.wa.MuteChat(sendCtx, jid, mute, duration, func() { pending.reserve(a) })
 	if err != nil {
 		return errors.Join(err, a.failLocalAppStateWrite(ctx, &pending, postSendEvents))
 	}
@@ -133,7 +153,9 @@ func (a *App) MarkChatRead(ctx context.Context, jid types.JID, read bool) error 
 	if err != nil {
 		return err
 	}
-	postSendEvents, err := a.wa.MarkChatAsRead(ctx, jid, read, lastTS, lastKey, func() { pending.reserve(a) })
+	sendCtx, cancelSend := appStateSendContext(ctx)
+	defer cancelSend()
+	postSendEvents, err := a.wa.MarkChatAsRead(sendCtx, jid, read, lastTS, lastKey, func() { pending.reserve(a) })
 	if err != nil {
 		return errors.Join(err, a.failLocalAppStateWrite(ctx, &pending, postSendEvents))
 	}

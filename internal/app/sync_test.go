@@ -3766,3 +3766,46 @@ func TestSyncDoesNotRetryNonTransientAuthConnectFailure(t *testing.T) {
 		t.Fatalf("connect calls = %d, want 1", f.connectCalls)
 	}
 }
+
+// The caller's cancellation must not reach an app-state send that already
+// started: a cancelled send can leave the stored hash out of step with the
+// server. The pre-write sync and persistence stay as they are.
+func TestArchiveChatSendIsNotCancelledByCaller(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	target := types.JID{User: "456", Server: types.DefaultUserServer}
+	if err := a.db.UpsertChat(target.String(), "dm", "Bob", time.Now()); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	if err := a.Connect(context.Background(), false, nil); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	callerCtx, giveUp := context.WithCancel(context.Background())
+	var sendErr error
+	var sendHasDeadline bool
+	f.archiveCtxHook = func(sendCtx context.Context) {
+		giveUp() // the caller stops waiting while the send is in flight
+		sendErr = sendCtx.Err()
+		_, sendHasDeadline = sendCtx.Deadline()
+	}
+
+	if err := a.ArchiveChat(callerCtx, target, true); err != nil {
+		t.Fatalf("ArchiveChat: %v", err)
+	}
+	if sendErr != nil {
+		t.Fatalf("send context cancelled by the caller: %v", sendErr)
+	}
+	if !sendHasDeadline {
+		t.Fatal("send context has no deadline of its own")
+	}
+	stored, err := a.db.GetChat(target.String())
+	if err != nil {
+		t.Fatalf("GetChat: %v", err)
+	}
+	if !stored.Archived {
+		t.Fatal("chat not archived locally after the send completed")
+	}
+}

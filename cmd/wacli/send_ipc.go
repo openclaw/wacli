@@ -25,9 +25,6 @@ const (
 	// refusal can reach the caller before it gives up on the connection. An
 	// explicit "not sent" is only useful if it arrives.
 	sendDelegateReplyMargin = 500 * time.Millisecond
-	// chatStateOperationBudget is the least time a dispatched chat-state
-	// change gets to finish once it has started.
-	chatStateOperationBudget = 5 * time.Minute
 )
 
 var errSendDelegateUnavailable = errors.New("send delegate unavailable")
@@ -258,19 +255,8 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDele
 			_ = json.NewEncoder(conn).Encode(sendDelegateResponse{OK: false, Error: "request deadline passed before dispatch; it was not sent"})
 			return
 		}
-		// Once dispatched, an app-state write runs to completion on its own
-		// budget rather than the caller's waiting deadline: cancelling it
-		// partway through the app-state sync/apply/send can leave the locally
-		// stored hash out of step with the server. The budget is the requested
-		// timeout, never less than the daemon default, so explicitly longer
-		// budgets are kept. A caller that gave up only misses the reply;
-		// daemon shutdown still stops the write.
-		budget := max(millisDuration(req.TimeoutMS, chatStateOperationBudget), chatStateOperationBudget)
-		opCtx, cancelOp := context.WithTimeout(ctx, budget)
-		defer cancelOp()
-		req.TimeoutMS = durationMillis(budget) // the executor's inner wrapper uses the same budget
-		resp, err := execute(opCtx, req)
-		writeDelegateResult(conn, opCtx, req, resp, err)
+		resp, err := execute(requestCtx, req)
+		writeDelegateResult(conn, requestCtx, req, resp, err)
 		return
 	}
 

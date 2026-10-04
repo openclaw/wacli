@@ -75,6 +75,7 @@ type fakeWA struct {
 	appStateFetchErrs           []error
 	appStateFetchEvent          func(name string, fullSync, onlyIfNotSynced bool) any
 	archiveEvent                func() any
+	archiveCtxHook              func(context.Context)
 	archiveErr                  error
 	archiveCalls                []fakeArchiveCall
 	pinCalls                    []fakePinCall
@@ -795,7 +796,11 @@ func (f *fakeWA) ArchiveChat(ctx context.Context, target types.JID, archive bool
 	f.mu.Lock()
 	f.archiveCalls = append(f.archiveCalls, fakeArchiveCall{target: target, archive: archive, lastMsgTS: lastMsgTS, lastMsgKey: lastMsgKey})
 	eventCB := f.archiveEvent
+	ctxHook := f.archiveCtxHook
 	f.mu.Unlock()
+	if ctxHook != nil {
+		ctxHook(ctx)
+	}
 	beforeApply()
 	if eventCB != nil {
 		if evt := eventCB(); evt != nil {

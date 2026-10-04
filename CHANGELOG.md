@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Chats: let a delegated archive, pin, or mute change that already started finish when its caller stops waiting, under the requested timeout or five minutes, whichever is longer, so app-state writes are not cancelled partway. Thanks @nicolasbiondic (#467).
+- Chats: an app-state send for archive, pin, mute, or read state that already started is no longer cancelled when its caller stops waiting; it finishes under a bounded budget of its own so the stored app state cannot drift from the server. The pre-write sync remains bounded by the caller. Thanks @nicolasbiondic (#467).
 
 ## 0.20.0 - 2026-09-30
 
