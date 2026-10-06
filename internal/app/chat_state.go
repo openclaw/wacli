@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/openclaw/wacli/internal/store"
+	"github.com/openclaw/wacli/internal/wa"
 	"go.mau.fi/whatsmeow/appstate"
 	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waSyncAction"
@@ -34,10 +35,12 @@ func (a *App) AddChatStatePersistenceHandler(ctx context.Context) (func(), error
 	}
 	waClient := a.WA()
 	handlerID := waClient.AddEventHandler(func(evt any) {
-		switch evt.(type) {
+		switch v := evt.(type) {
 		case *events.AppState, *events.Star, *events.DeleteForMe,
 			*events.Archive, *events.Pin, *events.Mute, *events.MarkChatAsRead:
 			a.handleAppStatePersistenceEvent(ctx, evt, nil)
+		case *wa.AppStateKeyUnavailable:
+			a.warnEmptyAppStateKey(v)
 		}
 	})
 	var once sync.Once
@@ -194,7 +197,7 @@ func (a *App) syncChatStateBeforeWrite(ctx context.Context, collection appstate.
 			return a.clearCompletedAppStateRecovery(collection, markerGeneration)
 		}
 
-		if errors.Is(err, appstate.ErrMismatchingLTHash) {
+		if errors.Is(err, appstate.ErrMismatchingLTHash) || errors.Is(err, wa.ErrEmptyAppStateKeyShare) {
 			return a.replayRequiredAppState(ctx, collection, markerGeneration, tracker)
 		} else if errors.Is(err, appstate.ErrKeyNotFound) {
 			return a.replayRequiredAppState(ctx, collection, markerGeneration, tracker)
@@ -216,7 +219,7 @@ func (a *App) replayRequiredAppState(ctx context.Context, collection appstate.WA
 		if fetchErr == nil {
 			return a.clearCompletedAppStateRecovery(collection, markerGeneration)
 		}
-		if errors.Is(fetchErr, appstate.ErrMismatchingLTHash) {
+		if errors.Is(fetchErr, appstate.ErrMismatchingLTHash) || errors.Is(fetchErr, wa.ErrEmptyAppStateKeyShare) {
 			return a.recoverMismatchingAppState(ctx, collection, markerGeneration, tracker, nil)
 		}
 		if !errors.Is(fetchErr, appstate.ErrKeyNotFound) {

@@ -384,20 +384,31 @@ func chatKind(chat types.JID) string {
 	return "unknown"
 }
 
+// Content-free messages must not move the chat's activity timestamp.
+func (a *App) upsertMessageChat(pm wa.ParsedMessage, name string) error {
+	jid := canonicalJIDString(pm.Chat)
+	if pm.HasContent() {
+		return a.db.UpsertChat(jid, chatKind(pm.Chat), name, pm.Timestamp)
+	}
+	return a.db.UpsertChatMetadata(jid, chatKind(pm.Chat), name)
+}
+
 func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error {
 	pm.Chat = a.canonicalStoreJID(ctx, pm.Chat)
 	chatJID := canonicalJIDString(pm.Chat)
-	chatName := a.wa.ResolveChatName(ctx, pm.Chat, pm.PushName)
-	if pm.Chat != types.StatusBroadcastJID {
-		// Keep diagnostic placeholders without treating them as chat activity.
+	var chatName string
+	if pm.Chat.Server == types.GroupServer {
 		var err error
-		if pm.HasContent() {
-			err = a.db.UpsertChat(chatJID, chatKind(pm.Chat), chatName, pm.Timestamp)
-		} else {
-			err = a.db.UpsertChatMetadata(chatJID, chatKind(pm.Chat), chatName)
-		}
+		chatName, err = a.storeGroupChat(ctx, pm)
 		if err != nil {
 			return err
+		}
+	} else {
+		chatName = a.wa.ResolveChatName(ctx, pm.Chat, pm.PushName)
+		if pm.Chat != types.StatusBroadcastJID {
+			if err := a.upsertMessageChat(pm, chatName); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -440,13 +451,6 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 					info.BusinessName,
 				)
 			}
-		}
-	}
-
-	// Best-effort: store group metadata (and participants) when available.
-	if pm.Chat.Server == types.GroupServer {
-		if gi, err := a.wa.GetGroupInfo(ctx, pm.Chat); err == nil && gi != nil {
-			_ = a.storeGroupInfo(ctx, gi)
 		}
 	}
 

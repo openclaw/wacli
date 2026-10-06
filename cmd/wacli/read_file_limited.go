@@ -7,6 +7,10 @@ import (
 )
 
 func readRegularFileLimited(path string, maxBytes int64) ([]byte, error) {
+	return readRegularFileLimitedWithOpener(path, maxBytes, os.Open)
+}
+
+func readRegularFileLimitedWithOpener(path string, maxBytes int64, open func(string) (*os.File, error)) ([]byte, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, err
@@ -18,7 +22,7 @@ func readRegularFileLimited(path string, maxBytes int64) ([]byte, error) {
 		return nil, fmt.Errorf("file too large (%d bytes); maximum size is %d bytes", info.Size(), maxBytes)
 	}
 
-	f, err := os.Open(path)
+	f, err := open(path)
 	if err != nil {
 		return nil, err
 	}

@@ -133,6 +133,30 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 					enqueueWebhook(job)
 				}
 			}
+		case *events.GroupInfo:
+			// The group changed: its next message asks for its info again.
+			a.forgetGroupInfo(v.JID)
+		case *events.JoinedGroup:
+			a.forgetGroupInfo(v.JID)
+		case *events.UndecryptableMessage:
+			if v == nil {
+				return
+			}
+			// A message that arrived but could not be read. Report it, so that a
+			// hole in a chat is never silent, and say which recovery this event
+			// actually gets: they are not the same.
+			lastEvent.Store(nowUTC().UnixNano())
+			recovery, warning := undecryptableWarning(v)
+			a.emitWarning("undecryptable_message", warning,
+				map[string]any{
+					"chat_jid":         v.Info.Chat.String(),
+					"sender_jid":       v.Info.Sender.String(),
+					"msg_id":           string(v.Info.ID),
+					"is_unavailable":   v.IsUnavailable,
+					"unavailable_type": string(v.UnavailableType),
+					"fail_mode":        string(v.DecryptFailMode),
+					"recovery":         recovery,
+				})
 		case *events.OfflineSyncPreview:
 			// Emitted right after connecting when the server is about to send
 			// what this device missed while it was down.
@@ -148,6 +172,9 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 				"count": v.Count,
 			}, "\nOffline backlog replayed (%d event(s)).\n", v.Count)
 		case *events.Connected:
+			// Group changes made while disconnected may not all come back as
+			// events: ask for every group's info afresh.
+			a.forgetAllGroupInfo()
 			a.emitOrPrint("connected", nil, "\nConnected.\n")
 			ps.mu.Lock()
 			if !ps.cleanupStarted && opts.PresenceMode.SendsAvailablePresence() {
@@ -179,6 +206,8 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 			}
 		case *events.AppStateSyncError:
 			a.handleAppStateSyncError(ctx, v, &appStateRecoveries)
+		case *wa.AppStateKeyUnavailable:
+			a.warnEmptyAppStateKey(v)
 		case *events.LoggedOut:
 			// WhatsApp revoked this session (linked device removed on the phone,
 			// or a logout/ban). whatsmeow reconnects on Disconnected, so without
@@ -359,10 +388,31 @@ func appStateCollectionsForEvent(evt any) []appstate.WAPatchName {
 }
 
 func (a *App) handleReceiptPersistenceEvent(ctx context.Context, evt *events.Receipt) {
-	if evt == nil || evt.Type != types.ReceiptTypeReadSelf || evt.Chat.IsEmpty() {
+	if evt == nil || evt.Chat.IsEmpty() || !readByThisAccountElsewhere(evt) {
 		return
 	}
 	a.handleReceiptEvent(ctx, evt)
+}
+
+// readByThisAccountElsewhere reports whether a receipt says this account read
+// the chat on another of its devices.
+//
+// WhatsApp only marks such a read "read-self" when read receipts are turned off
+// in the privacy settings. With them on, the phone broadcasts an ordinary
+// "read" receipt and this device receives that same one, sent by this account:
+// matching on the type alone therefore misses every account whose senders can
+// see blue ticks, and their unread counts never clear. A "read" receipt from
+// anyone else acknowledges an outgoing message and says nothing about what has
+// been read here.
+func readByThisAccountElsewhere(evt *events.Receipt) bool {
+	switch evt.Type {
+	case types.ReceiptTypeReadSelf:
+		return true
+	case types.ReceiptTypeRead:
+		return evt.IsFromMe
+	default:
+		return false
+	}
 }
 
 func (a *App) handleReceiptEvent(ctx context.Context, evt *events.Receipt) {
@@ -806,6 +856,31 @@ func (a *App) decryptEncryptedReaction(ctx context.Context, pm *wa.ParsedMessage
 			pm.ReactionToID = key.GetID()
 		}
 	}
+}
+
+// Failure events do not identify the exact retry path. Even typed unavailable
+// messages can prompt a primary-device request, without guaranteeing recovery.
+func undecryptableWarning(v *events.UndecryptableMessage) (recovery, warning string) {
+	what := fmt.Sprintf("message %s in %s from %s", v.Info.ID, v.Info.Chat, v.Info.Sender)
+	if v.UnavailableType != events.UnavailableTypeUnknown {
+		return "requested_if_possible", fmt.Sprintf(
+			"warning: %s was reported unavailable (%s); recovery depends on WhatsApp and a readable copy may not arrive",
+			what, v.UnavailableType)
+	}
+	arrival := "decryption failed"
+	if v.IsUnavailable {
+		arrival = "nothing readable arrived"
+	}
+	return "requested_if_possible", fmt.Sprintf(
+		"warning: could not read %s (%s, fail mode %s); a copy is asked back where the failure allows it, so the message can stay missing here",
+		what, arrival, undecryptableFailMode(v.DecryptFailMode))
+}
+
+func undecryptableFailMode(mode events.DecryptFailMode) string {
+	if mode == events.DecryptFailShow {
+		return "show"
+	}
+	return string(mode)
 }
 
 // sendPresence sends a global presence update if the WhatsApp client is ready.

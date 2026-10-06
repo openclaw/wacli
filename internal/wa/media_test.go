@@ -6,6 +6,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -248,5 +249,65 @@ func TestLimitedDownloadFileAllowsEncryptedOverheadBeforeTruncate(t *testing.T) 
 	}
 	if _, err := limited.Write(bytes.Repeat([]byte("x"), 5+maxEncryptedMediaDownloadOverhead+1)); err == nil || !strings.Contains(err.Error(), "maximum download size is 5 bytes") {
 		t.Fatalf("expected user-facing media limit error, got %v", err)
+	}
+}
+
+func TestDownloadRetriedMediaAuthenticatesReupload(t *testing.T) {
+	plaintext := []byte("synthetic re-uploaded image")
+	key := bytes.Repeat([]byte{7}, 32)
+	encrypted, _, hash := encryptedMediaFixture(t, plaintext, key, whatsmeow.MediaImage)
+	served := encrypted
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(served) }))
+	defer server.Close()
+	oldBase := directMediaBaseURL
+	directMediaBaseURL = server.URL
+	defer func() { directMediaBaseURL = oldBase }()
+	staleHash := bytes.Repeat([]byte{99}, 32)
+	target := filepath.Join(t.TempDir(), "media.jpg")
+	if _, err := DownloadMediaDirectToFile(context.Background(), "/reuploaded", staleHash, hash, key, uint64(len(plaintext)), "image", target); !errors.Is(err, whatsmeow.ErrInvalidMediaEncSHA256) {
+		t.Fatalf("original hash = %v, want ciphertext mismatch", err)
+	}
+	client := &Client{}
+	n, err := client.DownloadRetriedMediaToFile(context.Background(), "/reuploaded", hash, key, uint64(len(plaintext)), "image", target)
+	if err != nil || n != int64(len(plaintext)) {
+		t.Fatalf("retry = %d, %v", n, err)
+	}
+	if got, err := os.ReadFile(target); err != nil || !bytes.Equal(got, plaintext) {
+		t.Fatalf("plaintext = %q, %v", got, err)
+	}
+	for _, tc := range []struct {
+		name               string
+		mutate             func()
+		fileHash, mediaKey []byte
+		length             uint64
+		want               error
+	}{
+		{name: "ciphertext tampered", mutate: func() { served = bytes.Clone(encrypted); served[0] ^= 1 }, fileHash: hash, mediaKey: key, want: whatsmeow.ErrInvalidMediaHMAC},
+		{name: "MAC tampered", mutate: func() { served = bytes.Clone(encrypted); served[len(served)-1] ^= 1 }, fileHash: hash, mediaKey: key, want: whatsmeow.ErrInvalidMediaHMAC},
+		{name: "plaintext changed", fileHash: bytes.Repeat([]byte{1}, 32), mediaKey: key, want: whatsmeow.ErrInvalidMediaSHA256},
+		{name: "length changed", fileHash: hash, mediaKey: key, length: 1, want: whatsmeow.ErrFileLengthMismatch},
+		{name: "missing digest", mediaKey: key},
+		{name: "short digest", fileHash: []byte{1}, mediaKey: key},
+		{name: "missing key", fileHash: hash},
+		{name: "short key", fileHash: hash, mediaKey: []byte{1}},
+		{name: "oversized", fileHash: hash, mediaKey: key, length: MaxMediaDownloadSize + 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			served = encrypted
+			if tc.mutate != nil {
+				tc.mutate()
+			}
+			_, err := client.DownloadRetriedMediaToFile(context.Background(), "/reuploaded", tc.fileHash, tc.mediaKey, tc.length, "image", target)
+			if err == nil || (tc.want != nil && !errors.Is(err, tc.want)) {
+				t.Fatalf("retry = %v, want rejection %v", err, tc.want)
+			}
+			if got, err := os.ReadFile(target); err != nil || !bytes.Equal(got, plaintext) {
+				t.Fatalf("failed retry replaced output: %q, %v", got, err)
+			}
+			partials, err := filepath.Glob(filepath.Join(filepath.Dir(target), ".wacli-download-*"))
+			if err != nil || len(partials) != 0 {
+				t.Fatalf("partial downloads=%v error=%v", partials, err)
+			}
+		})
 	}
 }

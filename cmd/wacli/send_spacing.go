@@ -50,7 +50,7 @@ func parseSendSpacing(raw string) (sendSpacing, error) {
 
 // sendPacer enforces sendSpacing across the daemon's serialized delegated
 // sends. It is NOT safe for concurrent use: callers invoke wait and record while
-// holding the send mutex, so sends are already serialized and the pacer just
+// holding the send slot, so sends are already serialized and the pacer just
 // adds the gap between them. The clock, sleeper, and RNG are injectable for tests.
 type sendPacer struct {
 	spacing sendSpacing

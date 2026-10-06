@@ -22,6 +22,8 @@ import (
 
 type Options struct {
 	StorePath string
+	// The application owns durable, account-scoped key recovery metadata.
+	KeyStateStore AppStateKeyStateStore
 }
 
 type Client struct {

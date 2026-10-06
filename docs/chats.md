@@ -30,10 +30,12 @@ wacli chats cleanup [--days N] [--jid JID] [--dry-run] [--confirm]
 - `list --unread` matches counted and marker-only unread chats; `list --no-unread` excludes both.
 - Replayed read signals reduce the unread count only through the messages they cover; older reads cannot restore already-read messages. Known message IDs distinguish arrivals in the same second, using their local insertion order. Without a known ID boundary, messages at the cutoff second remain unread. Content-free system events, reactions, and revocations do not add to live unread counts.
 - `mark-unread` sets the unread marker without inventing an unread count; `mark-read` clears the marker and count through its captured message boundary; arrivals beyond it remain unread.
+- Reading a chat on the phone clears it here too while `sync` is connected. WhatsApp reports that read as a `read-self` receipt only while read receipts are turned off; with them on it arrives as an ordinary read receipt sent by this account, and both are honoured.
 - `show` accepts the stored JID. If a phone JID maps to a historical `@lid` row, it can show that row too.
 - State commands use `--chat` and resolve names, phone numbers, groups, and JIDs like send commands. Use `--pick N` for ambiguous matches.
-- After a same-store `sync --follow` process finishes startup and opens its local delegate socket, `mark-read` and `mark-unread` are delegated to it while it owns the store lock. Other state commands still require direct access to the lock.
-- Restart an older `sync --follow` process after upgrading before using delegated read-state commands; older daemons return an unsupported `mark_read` kind error.
+- After a same-store `sync --follow` process finishes startup and opens its local delegate socket, all state commands are delegated to it while it owns the store lock.
+- `mark-read` and `mark-unread` run in the follow process's serialized delegate queue. `archive`, `unarchive`, `pin`, `unpin`, `mute`, and `unmute` run outside it, so an app-state sync or recovery before the change cannot hold queued sends; the caller's `--timeout` still bounds the operation.
+- Restart an older `sync --follow` process after upgrading before using delegated state commands; older daemons return an unsupported `mark_read` or `chat_state` kind error.
 - State commands print a compact success line by default and a stable JSON object with `--json`.
 - `mute --duration 0` or omitting `--duration` mutes forever. Use `unmute` to clear it.
 - Run `wacli sync` to catch up chat-state changes made on other devices; run `wacli contacts refresh` to improve chat names.

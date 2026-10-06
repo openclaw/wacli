@@ -8,7 +8,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/openclaw/wacli/internal/app"
@@ -22,6 +21,10 @@ const (
 	sendDelegateVersion       = 1
 	sendDelegateSocketName    = ".send.sock"
 	sendDelegateResponseGrace = 5 * time.Second
+	// sendDelegateReplyMargin is reserved before the caller's deadline so a
+	// refusal can reach the caller before it gives up on the connection. An
+	// explicit "not sent" is only useful if it arrives.
+	sendDelegateReplyMargin = 500 * time.Millisecond
 )
 
 var errSendDelegateUnavailable = errors.New("send delegate unavailable")
@@ -64,6 +67,8 @@ type sendDelegateRequest struct {
 	Read                 *bool    `json:"read,omitempty"`
 	Receipts             bool     `json:"receipts,omitempty"`
 	Phones               []string `json:"phones,omitempty"`
+	ChatStateAction      string   `json:"chat_state_action,omitempty"`
+	MuteDurationMS       int64    `json:"mute_duration_ms,omitempty"`
 	PostSendWaitMS       int64    `json:"post_send_wait_ms,omitempty"`
 	TimeoutMS            int64    `json:"timeout_ms,omitempty"`
 	DeadlineUnixMS       int64    `json:"deadline_unix_ms,omitempty"`
@@ -120,6 +125,12 @@ func delegateSend(ctx context.Context, flags *rootFlags, req sendDelegateRequest
 	}
 	var resp sendDelegateResponse
 	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			// The request reached the daemon, which may have started it just
+			// before the deadline. Say so, because a blind retry can send twice.
+			return sendDelegateResponse{}, fmt.Errorf("no reply from the running sync process before the timeout; the %s may still have gone through, so check before retrying: %w", req.Kind, err)
+		}
 		return sendDelegateResponse{}, err
 	}
 	if !resp.OK {
@@ -164,12 +175,11 @@ func startSendDelegateServerForStore(ctx context.Context, storeDir string, spaci
 	}
 
 	done := make(chan struct{})
-	var sendMu sync.Mutex
-	var pacedSendSlot chan struct{}
-	if spacing.enabled() {
-		pacedSendSlot = make(chan struct{}, 1)
-		pacedSendSlot <- struct{}{}
-	}
+	// One slot serializes delegated operations. Waiting for it is bounded by
+	// each caller's deadline, paced or not, so an operation still queued when
+	// its caller gives up is refused instead of running late (#446).
+	sendSlot := make(chan struct{}, 1)
+	sendSlot <- struct{}{}
 	// One pacer shared across connections: it spaces the serialized delegated
 	// sends so a burst of `wacli send` processes delegating to this daemon
 	// leaves the wire paced instead of back-to-back. Disabled = no-op.
@@ -181,7 +191,7 @@ func startSendDelegateServerForStore(ctx context.Context, storeDir string, spaci
 			if err != nil {
 				return
 			}
-			go handleSendDelegateConn(ctx, conn, execute, &sendMu, pacedSendSlot, pacer)
+			go handleSendDelegateConn(ctx, conn, execute, sendSlot, pacer)
 		}
 	}()
 
@@ -207,7 +217,7 @@ func removeStaleSendDelegateSocket(path string) error {
 	return os.Remove(path)
 }
 
-func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDelegateExecutor, sendMu *sync.Mutex, pacedSendSlot chan struct{}, pacer *sendPacer) {
+func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDelegateExecutor, sendSlot chan struct{}, pacer *sendPacer) {
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(5 * time.Minute))
 
@@ -216,56 +226,77 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDele
 		_ = json.NewEncoder(conn).Encode(sendDelegateResponse{OK: false, Error: err.Error()})
 		return
 	}
-	requestCtx := ctx
-	if pacer.enabled() {
-		deadline := time.Now().Add(millisDuration(req.TimeoutMS, 5*time.Minute))
-		if req.DeadlineUnixMS > 0 {
-			callerDeadline := time.UnixMilli(req.DeadlineUnixMS)
-			if callerDeadline.Before(deadline) {
-				deadline = callerDeadline
-			}
-		}
-		var cancel context.CancelFunc
-		requestCtx, cancel = context.WithDeadline(ctx, deadline)
-		defer cancel()
-		if requestDeadline, ok := requestCtx.Deadline(); ok {
-			// The fixed initial deadline only protects request decoding. A paced
-			// request may intentionally run longer than five minutes, so keep the
-			// transport alive through its budget and the final response write.
-			_ = conn.SetDeadline(requestDeadline.Add(sendDelegateResponseGrace))
+
+	// Every request gets one budget: its own timeout, capped by the caller's
+	// absolute deadline less the reply margin. Queueing, pacing and the
+	// operation itself all share it.
+	deadline := time.Now().Add(millisDuration(req.TimeoutMS, 5*time.Minute))
+	if req.DeadlineUnixMS > 0 {
+		callerDeadline := time.UnixMilli(req.DeadlineUnixMS)
+		if callerDeadline.Before(deadline) {
+			deadline = callerDeadline
 		}
 	}
+	// Reserve at most a tenth of the remaining budget for the reply, so
+	// sub-second requests still have time to execute.
+	if remaining := time.Until(deadline); remaining > 0 {
+		deadline = deadline.Add(-min(sendDelegateReplyMargin, remaining/10))
+	}
+	requestCtx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+	deadline, _ = requestCtx.Deadline()
+	// The fixed initial deadline only protects request decoding. A queued or
+	// paced request may intentionally run longer than five minutes, so keep the
+	// transport alive through its budget and the final response write.
+	_ = conn.SetDeadline(deadline.Add(sendDelegateResponseGrace))
 
-	if pacer.enabled() {
-		select {
-		case <-requestCtx.Done():
-			_ = json.NewEncoder(conn).Encode(sendDelegateResponse{
-				OK:    false,
-				Error: "send spacing exceeded request timeout before dispatch",
-			})
+	if req.Kind == chatStateKind {
+		// App-state writes are serialized by the app and can wait minutes on
+		// recovery, so they must not hold the send queue.
+		if requestCtx.Err() != nil {
+			_ = json.NewEncoder(conn).Encode(sendDelegateResponse{OK: false, Error: "request deadline passed before dispatch; it was not sent"})
 			return
-		case <-pacedSendSlot:
-			defer func() { pacedSendSlot <- struct{}{} }()
 		}
-	} else {
-		// Preserve the original unpaced serialization path exactly when the
-		// opt-in flag is unset.
-		sendMu.Lock()
-		defer sendMu.Unlock()
+		resp, err := execute(requestCtx, req)
+		writeDelegateResult(conn, requestCtx, req, resp, err)
+		return
+	}
+
+	refuse := func() {
+		msg := "request timed out in the send queue before dispatch; it was not sent"
+		if pacer.enabled() {
+			msg = "send spacing exceeded request timeout before dispatch; it was not sent"
+		}
+		_ = json.NewEncoder(conn).Encode(sendDelegateResponse{OK: false, Error: msg})
+	}
+
+	select {
+	case <-requestCtx.Done():
+		refuse()
+		return
+	case <-sendSlot:
+		defer func() { sendSlot <- struct{}{} }()
+	}
+	// select picks at random when the slot frees up at the same moment the
+	// deadline passes. Never start an operation after its caller gave up.
+	if requestCtx.Err() != nil || !time.Now().Before(deadline) {
+		refuse()
+		return
 	}
 
 	// Space this send from the previous one while serialized. Bound the wait by
-	// the caller's request timeout, including time spent waiting for earlier
-	// delegated sends, and have pacing + send share that one deadline. Disabled
-	// spacing leaves the path untouched.
+	// the same deadline. Disabled spacing leaves the path untouched.
 	if pacer.enabled() {
 		if !pacer.wait(requestCtx) {
-			_ = json.NewEncoder(conn).Encode(sendDelegateResponse{
-				OK:    false,
-				Error: "send spacing exceeded request timeout before dispatch",
-			})
+			refuse()
 			return
 		}
+	}
+
+	// Timer delivery can lag wall-clock expiry, including while pacing.
+	if requestCtx.Err() != nil || !time.Now().Before(deadline) {
+		refuse()
+		return
 	}
 
 	resp, err := execute(requestCtx, req)
@@ -275,7 +306,14 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDele
 		// Starting the gap here prevents a slow operation from consuming it.
 		pacer.record()
 	}
+	writeDelegateResult(conn, requestCtx, req, resp, err)
+}
+
+func writeDelegateResult(conn net.Conn, requestCtx context.Context, req sendDelegateRequest, resp sendDelegateResponse, err error) {
 	if err != nil {
+		if requestCtx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			err = fmt.Errorf("delegated %s failed after dispatch and may still have gone through; check before retrying: %w", req.Kind, err)
+		}
 		resp = sendDelegateResponse{OK: false, Error: err.Error()}
 	}
 	_ = json.NewEncoder(conn).Encode(resp)
@@ -318,6 +356,8 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 		return executeDelegatedMarkRead(ctx, a, req)
 	case contactsCheckKind:
 		return executeDelegatedContactsCheck(ctx, a.WA(), req)
+	case chatStateKind:
+		return executeDelegatedChatState(ctx, a, req)
 	default:
 		return sendDelegateResponse{}, fmt.Errorf("unsupported send kind %q", req.Kind)
 	}
@@ -359,6 +399,37 @@ func executeDelegatedMarkRead(ctx context.Context, a delegatedMarkReadApp, req s
 		action = "mark-unread"
 	}
 	return sendDelegateResponse{OK: true, Chat: toJID.String(), Action: action, Receipts: receipts, ReceiptType: receiptType}, nil
+}
+
+type delegatedChatStateApp interface {
+	recipientResolverApp
+	ArchiveChat(context.Context, types.JID, bool) error
+	PinChat(context.Context, types.JID, bool) error
+	MuteChat(context.Context, types.JID, bool, time.Duration) error
+}
+
+func executeDelegatedChatState(ctx context.Context, a delegatedChatStateApp, req sendDelegateRequest) (sendDelegateResponse, error) {
+	var run func(types.JID) error
+	switch req.ChatStateAction {
+	case "archive", "unarchive":
+		run = func(jid types.JID) error { return a.ArchiveChat(ctx, jid, req.ChatStateAction == "archive") }
+	case "pin", "unpin":
+		run = func(jid types.JID) error { return a.PinChat(ctx, jid, req.ChatStateAction == "pin") }
+	case "mute":
+		run = func(jid types.JID) error { return a.MuteChat(ctx, jid, true, millisDuration(req.MuteDurationMS, 0)) }
+	case "unmute":
+		run = func(jid types.JID) error { return a.MuteChat(ctx, jid, false, 0) }
+	default:
+		return sendDelegateResponse{}, fmt.Errorf("unsupported chat state action %q", req.ChatStateAction)
+	}
+	toJID, err := resolveRecipient(a, req.To, recipientOptions{pick: req.Pick, asJSON: true})
+	if err != nil {
+		return sendDelegateResponse{}, err
+	}
+	if err := run(toJID); err != nil {
+		return sendDelegateResponse{}, err
+	}
+	return sendDelegateResponse{OK: true, Chat: toJID.String(), Action: req.ChatStateAction}, nil
 }
 
 func executeDelegatedPresence(ctx context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {

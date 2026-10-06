@@ -9,6 +9,7 @@ Read when: finding synced contacts, importing macOS Contacts names, or managing 
 ```bash
 wacli contacts search <query> [--limit N]
 wacli contacts show --jid JID
+wacli contacts resolve <lid|phone|jid> [...]
 wacli contacts check <phone> [phone...]
 wacli contacts refresh
 wacli contacts import-system [--input FILE] [--dry-run] [--clear]
@@ -25,6 +26,7 @@ wacli contacts tags rm --jid JID --tag TAG
 - Search matches metadata and stored IDs on either row, as well as the resolved phone number. `--limit` applies after combining duplicates. A contact stored only as `@lid` is also searchable by its mapped phone number, including partial numbers.
 - For combined contacts, local aliases and system names retain their display precedence, with the phone-number row winning conflicts within each field. `show` accepts either stored JID or the resolved phone-number JID and combines tags. Reading contacts never rewrites their stored rows or metadata.
 - Alias and tag commands accept either verified identity, including the JID returned by `search` or `show`. Changes apply atomically to both identities so removing metadata cannot reveal an older copy on the other row. These local commands read the session mapping without connecting to WhatsApp or modifying its session database; an unreadable session database fails the command before a metadata write.
+- `resolve` maps each LID to its phone number and each phone number to its LID, using the local session's verified mapping. It reads local state only and takes no store lock, so it works while `sync --follow` is running. Every input gets an entry: an identity without a known pair has `resolved: false` (never dropped), and a group, channel or malformed input carries an `error`. JSON entries have `input`, `jid` (phone JID), `phone`, `lid`, `name`, `resolved` and `error` (#420).
 - `check` connects with the account session and asks WhatsApp's servers whether each number is registered (accepts +E164, common formatting, or user JIDs). Results are reported per query and not stored locally; use `--json` for scripting. A number the server did not answer for is reported as `no response` (JSON `"responded": false`) — treat it as unknown, not as a confirmed negative.
 - While a same-store `sync --follow` process owns the store lock, `check` is delegated to its already-connected session instead of failing on the lock. Restart an older `sync --follow` process after upgrading; older daemons return an unsupported `contacts_check` kind error. Delegated checks run in the follow process's serialized delegate queue, so a large batch can hold a queued send until the send's own `--timeout` expires; split long lists or run them when nothing else is sending.
 - `refresh` imports contacts from the whatsmeow session store into `wacli.db`.
@@ -41,6 +43,7 @@ wacli contacts tags rm --jid JID --tag TAG
 ```bash
 wacli contacts search Alice
 wacli contacts show --jid 1234567890@s.whatsapp.net
+wacli contacts resolve 123456789@lid 987654321@lid --json
 wacli contacts check +43 664 12345678 --json
 wacli contacts refresh
 wacli contacts import-system --dry-run

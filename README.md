@@ -21,7 +21,7 @@ Homebrew on macOS or Linux:
 brew install openclaw/tap/wacli
 ```
 
-Prebuilt archives for macOS, Linux, and Windows are available from [GitHub Releases](https://github.com/openclaw/wacli/releases/latest).
+Prebuilt archives for macOS, Linux, and Windows are available from [GitHub Releases](https://github.com/openclaw/wacli/releases/latest). Official macOS binaries require macOS 15 (Sequoia) or newer.
 
 To build from source, install Go 1.27.0 or newer and a C compiler, then run:
 
@@ -74,7 +74,7 @@ wacli --read-only --json messages search "invoice"
 WACLI_READONLY=1 wacli --json doctor
 ```
 
-Write commands take a per-store lock. After a `sync --follow` process finishes startup, supported send commands plus `chats mark-read`, `chats mark-unread`, and `contacts check` are delegated to it while it owns that lock. See [companion integrations](docs/integrations.md) for webhooks and safe read-only SQLite access.
+Write commands take a per-store lock. After a `sync --follow` process finishes startup, supported send commands, the `chats` state commands (`mark-read`, `archive`, `pin`, `mute`, and their inverses), and `contacts check` are delegated to it while it owns that lock. See [companion integrations](docs/integrations.md) for webhooks and safe read-only SQLite access.
 
 ## Commands
 

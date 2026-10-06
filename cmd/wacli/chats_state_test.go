@@ -211,3 +211,15 @@ func TestReceiptModeHonorsReadOnlyBeforeOpeningStore(t *testing.T) {
 		t.Fatalf("error=%v, want read-only rejection", commandErr)
 	}
 }
+
+func TestExplainChatStateDelegateErrorNamesTheRestart(t *testing.T) {
+	rejected := fmt.Errorf(`unsupported send kind %q`, chatStateKind)
+	err := explainChatStateDelegateError(rejected, "archive")
+	if err == nil || !strings.Contains(err.Error(), "delegated chats archive") || !strings.Contains(err.Error(), "restart `wacli sync`") {
+		t.Fatalf("error = %v, want the restart hint", err)
+	}
+	other := errors.New("connection refused")
+	if got := explainChatStateDelegateError(other, "archive"); got != other {
+		t.Fatalf("unrelated error = %v, want it unchanged", got)
+	}
+}

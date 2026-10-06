@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/openclaw/wacli/internal/wa"
 	"go.mau.fi/whatsmeow/appstate"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -17,7 +18,13 @@ import (
 const appStateRecoveryStepTimeout = 30 * time.Second
 
 func (a *App) handleAppStateSyncError(ctx context.Context, evt *events.AppStateSyncError, recoveries *sync.Map) {
-	if evt == nil || !errors.Is(evt.Error, appstate.ErrMismatchingLTHash) {
+	if evt == nil {
+		return
+	}
+	code, reason := "app_state_lthash_mismatch", "hit an LTHash mismatch"
+	if errors.Is(evt.Error, wa.ErrEmptyAppStateKeyShare) {
+		code, reason = "app_state_key_unavailable", "requires a key shared without data"
+	} else if !errors.Is(evt.Error, appstate.ErrMismatchingLTHash) {
 		return
 	}
 	if a.ownsManualAppStateFetch(evt.Name) {
@@ -40,8 +47,8 @@ func (a *App) handleAppStateSyncError(ctx context.Context, evt *events.AppStateS
 	}
 
 	a.appStateRecoveryWorkers.Go(func() {
-		a.emitWarning("app_state_lthash_mismatch",
-			fmt.Sprintf("warning: app state %s hit an LTHash mismatch; attempting full sync", name),
+		a.emitWarning(code,
+			fmt.Sprintf("warning: app state %s %s; attempting full sync", name, reason),
 			map[string]any{"name": name})
 		a.recoverAppStateCollection(ctx, name, recoveries, appStateRecoveryStepTimeout)
 	})
@@ -131,9 +138,23 @@ func (a *App) syncAppStateDeltas(ctx context.Context, recoveries *sync.Map) {
 		}
 		fullSync := name == appstate.WAPatchRegular
 		if err := a.wa.FetchAppState(ctx, string(name), fullSync, false); err != nil {
+			if errors.Is(err, wa.ErrEmptyAppStateKeyShare) {
+				a.handleAppStateSyncError(ctx, &events.AppStateSyncError{Name: name, FullSync: fullSync, Error: err}, recoveries)
+				continue
+			}
 			a.emitWarning("app_state_sync_failed",
 				fmt.Sprintf("warning: failed to sync WhatsApp app state %s: %v", name, err),
 				map[string]any{"name": string(name), "error": err.Error()})
 		}
 	}
+}
+
+func (a *App) warnEmptyAppStateKey(evt *wa.AppStateKeyUnavailable) {
+	if evt == nil {
+		return
+	}
+	keyID := fmt.Sprintf("%X", evt.KeyID)
+	a.emitWarning("app_state_key_unavailable",
+		fmt.Sprintf("warning: primary device shared app state key %s without data; collections that cannot read it will attempt snapshot recovery", keyID),
+		map[string]any{"key_id": keyID})
 }

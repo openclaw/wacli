@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openclaw/wacli/internal/app"
 	"github.com/openclaw/wacli/internal/fsutil"
@@ -556,5 +558,214 @@ func TestChatsMarkReadDelegatesThroughProductionServerWhenStoreLocked(t *testing
 	stopped = true
 	if _, err := os.Lstat(socketPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("delegate socket remains after stop: %v", err)
+	}
+}
+
+type fakeDelegatedChatStateApp struct {
+	calls chan string
+}
+
+func (f *fakeDelegatedChatStateApp) DB() *store.DB { return nil }
+
+func (f *fakeDelegatedChatStateApp) ArchiveChat(_ context.Context, chat types.JID, archive bool) error {
+	f.calls <- fmt.Sprintf("archive %s %t", chat, archive)
+	return nil
+}
+
+func (f *fakeDelegatedChatStateApp) PinChat(_ context.Context, chat types.JID, pin bool) error {
+	f.calls <- fmt.Sprintf("pin %s %t", chat, pin)
+	return nil
+}
+
+func (f *fakeDelegatedChatStateApp) MuteChat(_ context.Context, chat types.JID, mute bool, duration time.Duration) error {
+	f.calls <- fmt.Sprintf("mute %s %t %s", chat, mute, duration)
+	return nil
+}
+
+func TestExecuteDelegatedChatStateRejectsUnknownActionBeforeAppUse(t *testing.T) {
+	fake := &fakeDelegatedChatStateApp{calls: make(chan string, 1)}
+	_, err := executeDelegatedChatState(context.Background(), fake, sendDelegateRequest{
+		Kind:            chatStateKind,
+		ChatStateAction: "delete",
+		To:              "123@s.whatsapp.net",
+	})
+	if err == nil || !strings.Contains(err.Error(), `unsupported chat state action "delete"`) {
+		t.Fatalf("error = %v, want unsupported action", err)
+	}
+	select {
+	case call := <-fake.calls:
+		t.Fatalf("unknown action reached the app: %s", call)
+	default:
+	}
+}
+
+func TestChatsStateDelegatesThroughProductionServerWhenStoreLocked(t *testing.T) {
+	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
+	storeDir := shortPresenceDelegateStoreDir(t)
+	lk, err := lock.Acquire(storeDir)
+	if err != nil {
+		t.Fatalf("lock store: %v", err)
+	}
+	defer lk.Release()
+
+	fake := &fakeDelegatedChatStateApp{calls: make(chan string, 1)}
+	stop, err := startSendDelegateServerForStore(context.Background(), storeDir, sendSpacing{}, func(ctx context.Context, req sendDelegateRequest) (sendDelegateResponse, error) {
+		if req.Version != sendDelegateVersion || req.Kind != chatStateKind {
+			return sendDelegateResponse{}, fmt.Errorf("unexpected delegated request %d/%q", req.Version, req.Kind)
+		}
+		return executeDelegatedChatState(ctx, fake, req)
+	})
+	if err != nil {
+		t.Fatalf("start production delegate server: %v", err)
+	}
+	defer stop()
+
+	tests := []struct {
+		args []string
+		want string
+	}{
+		{args: []string{"archive"}, want: "archive 123@s.whatsapp.net true"},
+		{args: []string{"unarchive"}, want: "archive 123@s.whatsapp.net false"},
+		{args: []string{"pin"}, want: "pin 123@s.whatsapp.net true"},
+		{args: []string{"unpin"}, want: "pin 123@s.whatsapp.net false"},
+		{args: []string{"mute", "--duration", "8h"}, want: "mute 123@s.whatsapp.net true 8h0m0s"},
+		{args: []string{"unmute"}, want: "mute 123@s.whatsapp.net false 0s"},
+	}
+	for _, tt := range tests {
+		action := tt.args[0]
+		t.Run(action, func(t *testing.T) {
+			args := append([]string{"--store", storeDir, "--json", "--timeout", "750ms", "chats", action, "--chat", "123@s.whatsapp.net"}, tt.args[1:]...)
+			stdout, stderr, err := runPresenceDelegateHelper(t, args)
+			if err != nil {
+				t.Fatalf("chats %s failed: %v stdout=%q stderr=%q", action, err, stdout, stderr)
+			}
+			select {
+			case call := <-fake.calls:
+				if call != tt.want {
+					t.Fatalf("delegated call = %q, want %q", call, tt.want)
+				}
+			case <-contextWithTestTimeout(t).Done():
+				t.Fatalf("timed out waiting for delegated %s", action)
+			}
+			for _, want := range []string{`"ok":true`, `"action":"` + action + `"`, `"chat":"123@s.whatsapp.net"`} {
+				if !strings.Contains(stdout, want) {
+					t.Fatalf("stdout %q missing %s", stdout, want)
+				}
+			}
+		})
+	}
+}
+
+func TestDelegatedChatStateDoesNotWaitForSendQueue(t *testing.T) {
+	tests := []struct {
+		name    string
+		spacing sendSpacing
+	}{
+		{name: "unpaced"},
+		{name: "paced", spacing: sendSpacing{min: time.Second, max: time.Second}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			serverConn, clientConn := net.Pipe()
+			defer clientConn.Close()
+			if err := clientConn.SetDeadline(time.Now().Add(time.Second)); err != nil {
+				t.Fatalf("set client deadline: %v", err)
+			}
+
+			sendSlot := make(chan struct{}, 1) // empty means an earlier send owns it
+			executed := make(chan sendDelegateRequest, 1)
+			go handleSendDelegateConn(context.Background(), serverConn, func(_ context.Context, req sendDelegateRequest) (sendDelegateResponse, error) {
+				executed <- req
+				return sendDelegateResponse{OK: true, Chat: req.To, Action: req.ChatStateAction}, nil
+			}, sendSlot, newSendPacer(tt.spacing))
+
+			req := chatStateDelegateRequest("archive", 0)
+			req.Version = sendDelegateVersion
+			req.To = "123@s.whatsapp.net"
+			if err := json.NewEncoder(clientConn).Encode(req); err != nil {
+				t.Fatalf("encode request: %v", err)
+			}
+			var resp sendDelegateResponse
+			if err := json.NewDecoder(clientConn).Decode(&resp); err != nil {
+				t.Fatalf("chat state waited behind the send queue: %v", err)
+			}
+			if !resp.OK || resp.Action != "archive" {
+				t.Fatalf("response = %+v, want archive ok", resp)
+			}
+			if got := <-executed; got.Kind != chatStateKind {
+				t.Fatalf("executed kind = %q, want %q", got.Kind, chatStateKind)
+			}
+		})
+	}
+}
+
+func TestDelegatedChatStateExtendsIPCDeadlineThroughResponse(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	trackedServerConn := &deadlineRecordingConn{Conn: serverConn}
+	defer clientConn.Close()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		handleSendDelegateConn(context.Background(), trackedServerConn, func(ctx context.Context, req sendDelegateRequest) (sendDelegateResponse, error) {
+			return sendDelegateResponse{OK: true, Chat: req.To, Action: req.ChatStateAction}, nil
+		}, make(chan struct{}, 1), newSendPacer(sendSpacing{}))
+	}()
+
+	const requestTimeout = 10 * time.Minute
+	started := time.Now()
+	req := chatStateDelegateRequest("archive", 0)
+	req.Version = sendDelegateVersion
+	req.To = "123@s.whatsapp.net"
+	req.TimeoutMS = durationMillis(requestTimeout)
+	if err := json.NewEncoder(clientConn).Encode(req); err != nil {
+		t.Fatalf("encode request: %v", err)
+	}
+	var resp sendDelegateResponse
+	if err := json.NewDecoder(clientConn).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	<-done
+
+	if len(trackedServerConn.deadlines) != 2 {
+		t.Fatalf("deadlines = %v, want initial decode and chat-state request deadlines", trackedServerConn.deadlines)
+	}
+	wantAtLeast := started.Add(requestTimeout)
+	if got := trackedServerConn.deadlines[1]; got.Before(wantAtLeast) {
+		t.Fatalf("chat-state connection deadline = %s, want at least %s", got, wantAtLeast)
+	}
+}
+
+func TestDelegatedChatStateHonorsAbsoluteCallerDeadline(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer clientConn.Close()
+	if err := clientConn.SetDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("set client deadline: %v", err)
+	}
+
+	executed := make(chan struct{}, 1)
+	go handleSendDelegateConn(context.Background(), serverConn, func(context.Context, sendDelegateRequest) (sendDelegateResponse, error) {
+		executed <- struct{}{}
+		return sendDelegateResponse{OK: true}, nil
+	}, make(chan struct{}, 1), newSendPacer(sendSpacing{}))
+
+	req := chatStateDelegateRequest("archive", 0)
+	req.Version = sendDelegateVersion
+	req.TimeoutMS = durationMillis(10 * time.Minute)
+	req.DeadlineUnixMS = time.Now().Add(-time.Second).UnixMilli()
+	if err := json.NewEncoder(clientConn).Encode(req); err != nil {
+		t.Fatalf("encode request: %v", err)
+	}
+	var resp sendDelegateResponse
+	if err := json.NewDecoder(clientConn).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.OK || !strings.Contains(resp.Error, "it was not sent") {
+		t.Fatalf("response = %+v, want a refusal before dispatch", resp)
+	}
+	select {
+	case <-executed:
+		t.Fatal("chat state ran after its caller's deadline")
+	default:
 	}
 }

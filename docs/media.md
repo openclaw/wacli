@@ -78,6 +78,7 @@ also confirmed expired, so later runs can skip genuinely unavailable rows.
 
 - Requires a writable store and an online phone; not available in `--read-only` mode.
 - Run `media backfill` first; retry is intended for media whose direct CDN download failed.
+- Successful retry responses download the re-upload without reusing the original ciphertext hash. The original media-key HMAC, plaintext SHA-256, size limit, and declared file length still apply; failed verification leaves the media pending and does not replace a local file.
 - Retry receipts are sent in batches (`--batch`, default 32) with a second
   attempt for non-responders; `--wait` (default 30s) bounds each attempt.
 - `--chat` scopes to one chat; `--before YYYY-MM-DD` scopes to media older than a date.

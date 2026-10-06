@@ -41,6 +41,7 @@ var schemaMigrations = []migration{
 	{version: 25, name: "message locations", up: migrateMessageLocations},
 	{version: 26, name: "message identity indexes and selective fts updates", up: migrateMessageIdentityIndexes},
 	{version: 27, name: "repair placeholder chat activity", up: migratePlaceholderChatActivity},
+	{version: 28, name: "unavailable app state keys", up: migrateUnavailableAppStateKeys},
 }
 
 func migratePlaceholderChatActivity(d *DB) error {
@@ -401,6 +402,9 @@ func (d *DB) ensureCurrentSchema() error {
 	}
 	if err := migrateMessageLocations(d); err != nil {
 		return fmt.Errorf("ensure current message locations schema: %w", err)
+	}
+	if err := migrateUnavailableAppStateKeys(d); err != nil {
+		return fmt.Errorf("ensure unavailable app state keys: %w", err)
 	}
 	return nil
 }
@@ -967,4 +971,13 @@ func isSQLiteIdentifier(name string) bool {
 		return false
 	}
 	return true
+}
+
+func migrateUnavailableAppStateKeys(d *DB) error {
+	_, err := d.sql.Exec(`CREATE TABLE IF NOT EXISTS unavailable_app_state_keys (
+  account_jid TEXT NOT NULL,
+  key_id BLOB NOT NULL,
+  PRIMARY KEY(account_jid,key_id)
+ )`)
+	return err
 }

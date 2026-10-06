@@ -357,6 +357,70 @@ func TestListMessagesFiltersMultipleChatJIDs(t *testing.T) {
 	}
 }
 
+func TestListMessagesMultipleChatJIDsKeepsOrderFiltersAndLimit(t *testing.T) {
+	db := openTestDB(t)
+	pn := "15551234567@s.whatsapp.net"
+	lid := "123456789@lid"
+	base := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+	for _, jid := range []string{pn, lid} {
+		if err := db.UpsertChat(jid, "dm", jid, base); err != nil {
+			t.Fatalf("UpsertChat %s: %v", jid, err)
+		}
+	}
+	// The two JIDs interleave, and p4/l4 share a second, so the order across
+	// them falls back to rowid.
+	rows := []UpsertMessageParams{
+		{ChatJID: pn, MsgID: "p0", SenderJID: pn, Timestamp: base, Text: "p0"},
+		{ChatJID: lid, MsgID: "l1", SenderJID: lid, Timestamp: base.Add(1 * time.Second), FromMe: true, Text: "l1"},
+		{ChatJID: pn, MsgID: "p2", SenderJID: pn, Timestamp: base.Add(2 * time.Second), FromMe: true, Text: "p2"},
+		{ChatJID: lid, MsgID: "l3", SenderJID: lid, Timestamp: base.Add(3 * time.Second), Text: "l3"},
+		{ChatJID: pn, MsgID: "p4", SenderJID: pn, Timestamp: base.Add(4 * time.Second), Text: "p4"},
+		{ChatJID: lid, MsgID: "l4", SenderJID: lid, Timestamp: base.Add(4 * time.Second), Text: "l4"},
+		{ChatJID: lid, MsgID: "l5", SenderJID: lid, Timestamp: base.Add(5 * time.Second), Text: "l5"},
+	}
+	for _, row := range rows {
+		if err := db.UpsertMessage(row); err != nil {
+			t.Fatalf("UpsertMessage %s: %v", row.MsgID, err)
+		}
+	}
+	for _, id := range []string{"p0", "l3"} {
+		chat := pn
+		if id[0] == 'l' {
+			chat = lid
+		}
+		if err := db.SetStarred(SetStarredParams{ChatJID: chat, MsgID: id, Starred: true, StarredAt: base}); err != nil {
+			t.Fatalf("SetStarred %s: %v", id, err)
+		}
+	}
+
+	fromMe := true
+	before := base.Add(4 * time.Second)
+	after := base.Add(1 * time.Second)
+	cases := []struct {
+		name string
+		p    ListMessagesParams
+		want string
+	}{
+		{"newest first", ListMessagesParams{Limit: 4}, "l5,l4,p4,l3"},
+		{"oldest first", ListMessagesParams{Limit: 3, Asc: true}, "p0,l1,p2"},
+		{"everything", ListMessagesParams{Limit: 10}, "l5,l4,p4,l3,p2,l1,p0"},
+		{"from me", ListMessagesParams{Limit: 10, FromMe: &fromMe}, "p2,l1"},
+		{"before", ListMessagesParams{Limit: 2, Before: &before}, "l3,p2"},
+		{"after, oldest first", ListMessagesParams{Limit: 3, After: &after, Asc: true}, "p2,l3,p4"},
+		{"starred", ListMessagesParams{Limit: 1, Starred: true}, "l3"},
+	}
+	for _, tc := range cases {
+		tc.p.ChatJIDs = []string{pn, lid}
+		msgs, err := db.ListMessages(tc.p)
+		if err != nil {
+			t.Fatalf("%s: ListMessages: %v", tc.name, err)
+		}
+		if got := messageIDs(msgs); got != tc.want {
+			t.Fatalf("%s: ids = %s, want %s", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestGetMessageReturnsRichDetails(t *testing.T) {
 	db := openTestDB(t)
 	chat := "123@s.whatsapp.net"

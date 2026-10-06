@@ -29,7 +29,7 @@ func newChatsArchiveCmd(flags *rootFlags, archive bool) *cobra.Command {
 		Use:   use,
 		Short: short,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runChatState(flags, opts, use, nil, func(ctx context.Context, a chatStateApp, jid types.JID) error {
+			return runChatState(flags, opts, use, chatStateDelegateRequest(use, 0), func(ctx context.Context, a chatStateApp, jid types.JID) error {
 				return a.ArchiveChat(ctx, jid, archive)
 			})
 		},
@@ -48,7 +48,7 @@ func newChatsPinCmd(flags *rootFlags, pin bool) *cobra.Command {
 		Use:   use,
 		Short: short,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runChatState(flags, opts, use, nil, func(ctx context.Context, a chatStateApp, jid types.JID) error {
+			return runChatState(flags, opts, use, chatStateDelegateRequest(use, 0), func(ctx context.Context, a chatStateApp, jid types.JID) error {
 				return a.PinChat(ctx, jid, pin)
 			})
 		},
@@ -64,7 +64,7 @@ func newChatsMuteCmd(flags *rootFlags) *cobra.Command {
 		Use:   "mute",
 		Short: "Mute a chat",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runChatState(flags, opts, "mute", nil, func(ctx context.Context, a chatStateApp, jid types.JID) error {
+			return runChatState(flags, opts, "mute", chatStateDelegateRequest("mute", duration), func(ctx context.Context, a chatStateApp, jid types.JID) error {
 				return a.MuteChat(ctx, jid, true, duration)
 			})
 		},
@@ -80,7 +80,7 @@ func newChatsUnmuteCmd(flags *rootFlags) *cobra.Command {
 		Use:   "unmute",
 		Short: "Unmute a chat",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runChatState(flags, opts, "unmute", nil, func(ctx context.Context, a chatStateApp, jid types.JID) error {
+			return runChatState(flags, opts, "unmute", chatStateDelegateRequest("unmute", 0), func(ctx context.Context, a chatStateApp, jid types.JID) error {
 				return a.MuteChat(ctx, jid, false, 0)
 			})
 		},
@@ -99,7 +99,8 @@ func newChatsMarkReadCmd(flags *rootFlags, read bool) *cobra.Command {
 		Use:   use,
 		Short: short,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runChatState(flags, opts, use, &read, func(ctx context.Context, a chatStateApp, jid types.JID) error {
+			delegate := sendDelegateRequest{Kind: markReadDelegateKind(opts.receipts), Read: &read, Receipts: opts.receipts}
+			return runChatState(flags, opts, use, delegate, func(ctx context.Context, a chatStateApp, jid types.JID) error {
 				return a.MarkChatRead(ctx, jid, read)
 			})
 		},
@@ -136,7 +137,16 @@ func (r chatStateReceipts) senderNotified() *bool {
 const (
 	markReadKind         = "mark_read"
 	markReadReceiptsKind = "mark_read_receipts"
+	chatStateKind        = "chat_state"
 )
+
+func chatStateDelegateRequest(action string, muteDuration time.Duration) sendDelegateRequest {
+	return sendDelegateRequest{
+		Kind:            chatStateKind,
+		ChatStateAction: action,
+		MuteDurationMS:  durationMillis(muteDuration),
+	}
+}
 
 // A separate kind makes old daemons reject receipts instead of ignoring a flag.
 func markReadDelegateKind(receipts bool) string {
@@ -154,7 +164,14 @@ func explainReceiptsDelegateError(err error, requested bool) error {
 	return fmt.Errorf("the running sync process does not support --receipts and left the chat unread; restart `wacli sync` after upgrading, then run this again: %w", err)
 }
 
-func runChatState(flags *rootFlags, opts chatStateOptions, action string, delegateRead *bool, run func(context.Context, chatStateApp, types.JID) error) error {
+func explainChatStateDelegateError(err error, action string) error {
+	if err == nil || !strings.Contains(err.Error(), "unsupported send kind") || !strings.Contains(err.Error(), chatStateKind) {
+		return err
+	}
+	return fmt.Errorf("the running sync process does not support delegated chats %s; restart `wacli sync` after upgrading, then run this again: %w", action, err)
+}
+
+func runChatState(flags *rootFlags, opts chatStateOptions, action string, delegate sendDelegateRequest, run func(context.Context, chatStateApp, types.JID) error) error {
 	if strings.TrimSpace(opts.chat) == "" {
 		return fmt.Errorf("--chat is required")
 	}
@@ -167,24 +184,21 @@ func runChatState(flags *rootFlags, opts chatStateOptions, action string, delega
 
 	a, lk, err := newApp(ctx, flags, true, false)
 	if err != nil {
-		if delegateRead != nil {
-			resp, delegated, delegateErr := tryDelegateSend(ctx, flags, err, sendDelegateRequest{
-				Kind:     markReadDelegateKind(opts.receipts),
-				To:       opts.chat,
-				Pick:     opts.pick,
-				Read:     delegateRead,
-				Receipts: opts.receipts,
-			})
-			if delegated {
-				if delegateErr != nil {
-					return explainReceiptsDelegateError(delegateErr, opts.receipts)
+		delegate.To = opts.chat
+		delegate.Pick = opts.pick
+		resp, delegated, delegateErr := tryDelegateSend(ctx, flags, err, delegate)
+		if delegated {
+			if delegateErr != nil {
+				if delegate.Kind == chatStateKind {
+					return explainChatStateDelegateError(delegateErr, action)
 				}
-				receipts, err := delegatedReceipts(resp, opts.receipts)
-				if err != nil {
-					return err
-				}
-				return writeChatStateResult(flags, action, resp.Chat, receipts)
+				return explainReceiptsDelegateError(delegateErr, opts.receipts)
 			}
+			receipts, err := delegatedReceipts(resp, opts.receipts)
+			if err != nil {
+				return err
+			}
+			return writeChatStateResult(flags, action, resp.Chat, receipts)
 		}
 		return err
 	}

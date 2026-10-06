@@ -8,6 +8,7 @@ builds:
     binary: wacli
     env:
       - CGO_ENABLED=1
+      - MACOSX_DEPLOYMENT_TARGET=15.0
     flags:
       - -trimpath
     tags:
