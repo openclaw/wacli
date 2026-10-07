@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Contacts: delegate `contacts check` to a running `sync --follow` process so registration lookups no longer fail on the store lock. (#425)
+- Contacts: delegate `contacts check` to a running `sync --follow` process so registration lookups no longer fail on the store lock. Thanks @ceifa (#453, #425).
 
 ## 0.20.0 - 2026-09-30
 
