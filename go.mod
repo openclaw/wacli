@@ -44,7 +44,7 @@ require (
 	github.com/ncruces/go-sqlite3-wasm/v6 v6.3.35304 // indirect
 	github.com/ncruces/julianday v1.0.0 // indirect
 	github.com/petermattis/goid v0.0.0-20260918085751-abfca077860b // indirect
-	github.com/pganalyze/pg_query_go/v6 v6.2.2 // indirect
+	github.com/pganalyze/pg_query_go/v6 v6.2.5 // indirect
 	github.com/pingcap/errors v0.11.5-0.20250523034308-74f78ae071ee // indirect
 	github.com/pingcap/failpoint v0.0.0-20260811232634-55ac33a48e3b // indirect
 	github.com/pingcap/log v1.1.0 // indirect
@@ -56,7 +56,7 @@ require (
 	github.com/sqlc-dev/doubleclick v1.0.0 // indirect
 	github.com/sqlc-dev/sqlc v1.31.1 // indirect
 	github.com/tetratelabs/wazero v1.12.0 // indirect
-	github.com/vektah/gqlparser/v2 v2.5.58 // indirect
+	github.com/vektah/gqlparser/v2 v2.5.60 // indirect
 	github.com/wasilibs/go-pgquery v0.0.0-20260915022521-81f99195012b // indirect
 	github.com/wasilibs/wazero-helpers v0.0.0-20250123031827-cd30c44769bb // indirect
 	go.mau.fi/util v0.10.1 // indirect
