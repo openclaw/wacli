@@ -9,7 +9,7 @@ for scope in production tests; do
   if [[ "$scope" == tests ]]; then
     args=(-test "${args[@]}")
   fi
-  if ! CGO_ENABLED=1 go run golang.org/x/tools/cmd/deadcode@v0.50.0 "${args[@]}" ./... > "$output_file"; then
+  if ! CGO_ENABLED=1 go run golang.org/x/tools/cmd/deadcode@v0.51.0 "${args[@]}" ./... > "$output_file"; then
     cat "$output_file"
     exit 1
   fi
