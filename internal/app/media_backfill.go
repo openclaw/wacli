@@ -73,7 +73,7 @@ func (a *App) BackfillMedia(ctx context.Context, opts BackfillMediaOptions) (Bac
 		return result, nil
 	}
 
-	jobs, err := a.db.ListPendingMediaDownloads(ctx, opts.ChatJID, opts.Limit)
+	jobs, err := a.db.ListPendingMediaDownloads(ctx, opts.ChatJID, "", opts.Limit)
 	if err != nil {
 		return result, fmt.Errorf("list pending media: %w", err)
 	}

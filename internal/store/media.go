@@ -51,11 +51,14 @@ func (d *DB) CountPendingMediaDownloads(ctx context.Context, chatJID string) (in
 }
 
 // ListPendingMediaDownloads returns messages with downloadable but not-yet-fetched
-// media, newest first. Pass a non-empty chatJID to scope to a single chat, and a
-// positive limit to cap the number of rows (limit <= 0 means no limit).
-func (d *DB) ListPendingMediaDownloads(ctx context.Context, chatJID string, limit int) ([]PendingMediaDownload, error) {
+// media, newest first. Pass a non-empty chatJID to scope to a single chat, a
+// non-empty mediaType (as stored: image, video, gif, audio, document, sticker)
+// to scope to one kind of media, and a positive limit to cap the number of rows
+// (limit <= 0 means no limit).
+func (d *DB) ListPendingMediaDownloads(ctx context.Context, chatJID, mediaType string, limit int) ([]PendingMediaDownload, error) {
 	rows, err := d.q.ListPendingMediaDownloads(ctx, storedb.ListPendingMediaDownloadsParams{
 		ChatJid:    chatJID,
+		MediaType:  mediaType,
 		LimitCount: int64(limit),
 	})
 	if err != nil {
@@ -70,10 +73,11 @@ func (d *DB) ListPendingMediaDownloads(ctx context.Context, chatJID string, limi
 
 // ListPendingMediaBefore is like ListPendingMediaDownloads but only returns
 // messages older than beforeUnix (seconds). Used to sample pending media by age.
-func (d *DB) ListPendingMediaBefore(ctx context.Context, chatJID string, beforeUnix int64, limit int) ([]PendingMediaDownload, error) {
+func (d *DB) ListPendingMediaBefore(ctx context.Context, chatJID, mediaType string, beforeUnix int64, limit int) ([]PendingMediaDownload, error) {
 	rows, err := d.q.ListPendingMediaBefore(ctx, storedb.ListPendingMediaBeforeParams{
 		BeforeTs:   beforeUnix,
 		ChatJid:    chatJID,
+		MediaType:  mediaType,
 		LimitCount: int64(limit),
 	})
 	if err != nil {
