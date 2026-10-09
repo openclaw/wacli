@@ -76,6 +76,8 @@ WACLI_READONLY=1 wacli --json doctor
 
 Write commands take a per-store lock. After a `sync --follow` process finishes startup, supported send commands, the `chats` state commands (`mark-read`, `archive`, `pin`, `mute`, and their inverses), and `contacts check` are delegated to it while it owns that lock. See [companion integrations](docs/integrations.md) for webhooks and safe read-only SQLite access.
 
+Coding agents can learn wacli from the skill embedded in the binary. Run `wacli skill install` to install it for Claude Code, Codex, and other agents that read `~/.agents/skills`; see [`skill`](docs/skill.md).
+
 ## Commands
 
 | Area | What it covers |

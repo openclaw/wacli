@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Skill: embed an agent skill in the binary; `wacli skill` prints it and `wacli skill install` installs it to `~/.agents/skills/wacli` and links it for Claude Code, never overwriting skills it did not write.
 - Contacts: delegate `contacts check` to a running `sync --follow` process so registration lookups no longer fail on the store lock. Thanks @ceifa (#453, #425).
 - Media: add `media retry --type` to recover one kind of media, including voice notes with `--type audio`, while applying chat/date filters and row limits to matching messages. Thanks @zarmat99 (#450).
 - Dependencies: update pnpm to 12.9.1, the dead-code checker to x/tools 0.51.0, and PostgreSQL and GraphQL tooling parsers after the 48-hour cooldown, preserving Go and Node minimums.
