@@ -11,6 +11,8 @@ Read when: building a local analytics, search, CRM, or agent-side companion tool
 - Use `sync --webhook` for live-message delivery to another process or service.
 - Use a read-only SQLite connection to `<store>/wacli.db` for local analytics that need joins, cursors, or incremental scans.
 
+Coding agents should start from the embedded skill (`wacli skill install`, see [skill](skill.md)), which documents the CLI surface and its safety rules.
+
 Prefer the CLI or webhook when possible. Direct SQLite reads are powerful, but the schema can evolve between releases.
 
 ## Store paths
