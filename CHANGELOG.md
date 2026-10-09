@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Skill: embed an agent skill in the binary; `wacli skill` prints it and `wacli skill install` installs it to `~/.agents/skills/wacli` and links it for Claude Code, never overwriting skills it did not write.
+
 ## 0.21.0 - 2026-10-11
 
 **Highlights:** opt-in full-history pairing, live presence events, media retry filters, and Go standard-library security fixes.
