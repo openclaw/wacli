@@ -8,6 +8,7 @@
 - Auth: add opt-in full-history pairing and history day, per-chat, and size limits, with validation before creating named accounts. Thanks @zarmat99 (#442, #461).
 - Presence: add contact subscriptions and presence/typing events, with bounded reconnect renewal and sync delegation. Thanks @zarmat99 (#451).
 - Messages: retain per-recipient delivery/read receipts and expose counts in message queries, preserving identities through phone/LID reconciliation. Thanks @zarmat99 (#440).
+- Docs: explain read-only MCP wrappers, command mapping, store locks, media output, and local health checks. Thanks @wacli-me (#434).
 - Contacts: delegate `contacts check` to a running `sync --follow` process so registration lookups no longer fail on the store lock. Thanks @ceifa (#453, #425).
 - Media: add `media retry --type` to recover one kind of media, including voice notes with `--type audio`, while applying chat/date filters and row limits to matching messages. Thanks @zarmat99 (#450).
 - Dependencies: update pnpm to 12.9.1, the dead-code checker to x/tools 0.51.0, and PostgreSQL and GraphQL tooling parsers after the 48-hour cooldown, preserving Go and Node minimums.

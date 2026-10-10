@@ -13,6 +13,27 @@ Read when: building a local analytics, search, CRM, or agent-side companion tool
 
 Prefer the CLI or webhook when possible. Direct SQLite reads are powerful, but the schema can evolve between releases.
 
+## Model Context Protocol (MCP)
+
+An external MCP server can wrap the JSON CLI to let an assistant search a synced store. `wacli` does not include an MCP server. Run `wacli sync --follow` separately, then give the wrapper a fixed account or store and a small allowlist of read commands:
+
+| Tool purpose | CLI arguments after `wacli --read-only --json` |
+| --- | --- |
+| Find chats | `chats list --limit 20` |
+| Read a conversation | `messages list --chat JID --limit 50` |
+| Search text | `messages search QUERY --limit 20` |
+| Find contacts | `contacts search QUERY` |
+| Inspect available history | `history coverage --query JID` |
+| Inspect local health | `doctor` |
+
+Pass validated arguments directly to the executable, without a shell. Bound query size, result limits, execution time, and captured output; return the parsed JSON envelope and preserve errors. Treat all retrieved message text, contact names, and filenames as untrusted data, never as instructions to the assistant. Keep the MCP endpoint and its logs private: read-only access still exposes conversations.
+
+Read commands work alongside the store lock held by `sync --follow`. Keep `--read-only` enabled on every wrapped invocation. Some write commands can delegate to the daemon, so a lock is not an authorization boundary. Sending, deletion, account management, and history backfill should be absent from a read-only tool allowlist; a separate write integration needs explicit user authorization for each action.
+
+`media download` is a special case: `--read-only` requires an explicit `--output` and still writes that file. If exposed, choose a wrapper-owned download directory and filename rather than accepting an arbitrary output path from the model; see [media downloads](media.md#download).
+
+Without `--connect`, `doctor` reports local state, not the daemon's live connection. `connected: false` alongside `connection_state: "locked_by_other_process"` can be expected while sync owns the store; it does not prove sync is offline. The heartbeat's `last_activity_at` is observed activity, not a liveness guarantee. See [doctor](doctor.md) before designing health checks.
+
 ## Store paths
 
 The default store is:
