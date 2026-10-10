@@ -34,7 +34,7 @@ fmt:
 
 lint:
 	GOWORK=off pnpm --silent lint
-	@test "$$(GOWORK=off go env GOVERSION)" = go1.27.1
+	@test "$$(GOWORK=off go env GOVERSION)" = go1.27.2
 	GOWORK=off pnpm --silent govulncheck:source
 	GOWORK=off pnpm --silent lint:deadcode
 

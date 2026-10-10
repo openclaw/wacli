@@ -52,9 +52,11 @@ export function classifyGovulncheckEvents(events) {
       : (event.finding.trace ?? []).some((frame) => frame.package)
         ? "package"
         : "module";
-    for (const frame of event.finding.trace ?? []) {
-      const module = frame.module || (frame.version?.startsWith("go") && frame.package ? "stdlib" : null);
-      if (!module) continue;
+    // The first frame owns the vulnerable symbol; later frames are callers.
+    // A stdlib caller does not turn a third-party finding into a stdlib one.
+    const frame = event.finding.trace?.[0];
+    const module = frame?.module || (frame?.version?.startsWith("go") && frame.package ? "stdlib" : null);
+    if (module) {
       const levels = moduleLevels.get(module) ?? new Set();
       levels.add(level);
       moduleLevels.set(module, levels);

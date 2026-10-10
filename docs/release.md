@@ -14,7 +14,7 @@ wacli uses the fleet-standard reusable Go CLI workflow from `openclaw/release-wo
 - Official Darwin archives target macOS 15.0 (Sequoia) or newer on both architectures; verify `LC_BUILD_VERSION` for each published binary.
 - Every Darwin binary retains the established `org.openclaw.wacli` identifier and OpenClaw Foundation Developer ID identity.
 - The independent rebuild must reproduce every staged Linux and Windows binary byte-for-byte before publication.
-- Build and verification use the exact preferred `toolchain` from the frozen commit's `go.mod` (currently Go 1.27.1); the `go` directive remains the Go 1.27.0 source minimum. Historical commits without a `toolchain` directive use their exact `go` version.
+- Build and verification use the exact preferred `toolchain` from the frozen commit's `go.mod` (currently Go 1.27.2); the `go` directive remains the Go 1.27.0 source minimum. Historical commits without a `toolchain` directive use their exact `go` version.
 - The published release must hand off exact verified assets to `openclaw/homebrew-tap`. Keep an empty `Unreleased` section above the dated release notes; if that section is absent, the workflow opens a closeout PR to restore it. Closeout does not bump the source version.
 
 ## Dispatch
