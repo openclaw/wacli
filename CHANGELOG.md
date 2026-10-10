@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Messages: keep the Click-to-WhatsApp ad or post a conversation started from, exposing it as an optional `ad_referral` object in message JSON output and webhook payloads without storing thumbnails. Thanks @nicolasbiondic (#473).
 - Builds: use Go 1.27.2 for its standard-library security fixes across development, CI, Docker, and release verification, retaining the Go 1.27.0 source minimum.
 - CI: attribute vulnerability findings to the vulnerable module rather than its callers, preserving standard-library failures and separate third-party notices.
 - Dependencies: refresh whatsmeow, eligible Go modules, and pnpm 12.10.1 after the 48-hour cooldown; retain Go and Node minimums.

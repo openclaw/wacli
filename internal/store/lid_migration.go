@@ -283,7 +283,7 @@ func migrateLIDMessagesToPN(tx *sql.Tx, lidJID, pnJID string) error {
 			is_forwarded, forwarding_score, reaction_to_id, reaction_emoji,
 			media_type, media_caption, filename, mime_type, direct_path,
 			media_key, file_sha256, file_enc_sha256, file_length, local_path, downloaded_at,
-			revoked, deleted_for_me, deleted_at, deletion_reason, payload_purged_at, edited, edited_ts, buttons
+			revoked, deleted_for_me, deleted_at, deletion_reason, payload_purged_at, edited, edited_ts, buttons, ad_referral
 		)
 		SELECT
 			?,
@@ -319,7 +319,8 @@ func migrateLIDMessagesToPN(tx *sql.Tx, lidJID, pnJID string) error {
 			payload_purged_at,
 			edited,
 			edited_ts,
-			buttons
+			buttons,
+			ad_referral
 		FROM messages AS source
 		WHERE chat_jid = ?
 			AND (source.payload_purged_at IS NOT NULL OR NOT EXISTS (
@@ -357,7 +358,8 @@ func migrateLIDMessagesToPN(tx *sql.Tx, lidJID, pnJID string) error {
 			payload_purged_at = COALESCE(messages.payload_purged_at, excluded.payload_purged_at),
 			edited = CASE WHEN messages.deleted_at IS NOT NULL OR excluded.deleted_at IS NOT NULL THEN 0 WHEN messages.edited != 0 OR excluded.edited != 0 THEN 1 ELSE 0 END,
 			edited_ts = CASE WHEN messages.deleted_at IS NOT NULL OR excluded.deleted_at IS NOT NULL THEN 0 ELSE max(COALESCE(messages.edited_ts, 0), COALESCE(excluded.edited_ts, 0)) END,
-			buttons = COALESCE(messages.buttons, excluded.buttons)
+			buttons = COALESCE(messages.buttons, excluded.buttons),
+			ad_referral = COALESCE(messages.ad_referral, excluded.ad_referral)
 		WHERE messages.payload_purged_at IS NULL
 	`, pnJID, lidJID, pnJID, lidJID, pnJID, lidJID, pnJID); err != nil {
 		return fmt.Errorf("merge lid messages into pn chat: %w", err)
@@ -424,7 +426,8 @@ func migrateLIDMessagesToPN(tx *sql.Tx, lidJID, pnJID string) error {
 			media_unavailable_at = NULL,
 			edited = 0,
 			edited_ts = 0,
-			buttons = NULL
+			buttons = NULL,
+			ad_referral = NULL
 		WHERE chat_jid = ? AND payload_purged_at IS NOT NULL
 	`, pnJID); err != nil {
 		return fmt.Errorf("preserve purged lid message tombstones: %w", err)

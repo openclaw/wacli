@@ -118,6 +118,7 @@ type Message struct {
 	Edited             int64
 	EditedTs           int64
 	Buttons            sql.NullString
+	AdReferral         sql.NullString
 }
 
 type MessageLocalMediaAlias struct {
@@ -143,6 +144,14 @@ type MessagePayloadPurge struct {
 	PurgedAt       int64
 	DeletedAt      int64
 	DeletionReason string
+}
+
+type MessageReceipt struct {
+	ChatJid      string
+	MsgID        string
+	RecipientJid string
+	Status       string
+	Ts           int64
 }
 
 type MessagesFt struct {

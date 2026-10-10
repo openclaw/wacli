@@ -512,6 +512,7 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 		QuotedMsgID:     pm.ReplyToID,
 		QuotedSenderJID: a.canonicalStoreJIDString(ctx, pm.ReplyToSenderJID),
 		Buttons:         waButtonsToStore(pm.Buttons),
+		AdReferral:      waAdReferralToStore(pm.AdReferral),
 		IsForwarded:     pm.IsForwarded,
 		ForwardingScore: pm.ForwardingScore,
 		ReactionToID:    pm.ReactionToID,
@@ -662,6 +663,21 @@ func waButtonsToStore(buttons []wa.Button) []store.Button {
 		}
 	}
 	return out
+}
+
+func waAdReferralToStore(ad *wa.AdReferral) *store.AdReferral {
+	if ad == nil {
+		return nil
+	}
+	return &store.AdReferral{
+		SourceType: ad.SourceType,
+		SourceID:   ad.SourceID,
+		SourceURL:  ad.SourceURL,
+		Title:      ad.Title,
+		Body:       ad.Body,
+		MediaType:  ad.MediaType,
+		CtwaClid:   ad.CtwaClid,
+	}
 }
 
 func (a *App) buildDisplayText(ctx context.Context, pm wa.ParsedMessage) string {

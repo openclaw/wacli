@@ -191,7 +191,7 @@ INSERT INTO messages(
     is_forwarded, forwarding_score, reaction_to_id, reaction_emoji,
     media_type, media_caption, filename, mime_type, direct_path,
     media_key, file_sha256, file_enc_sha256, file_length, revoked, deleted_for_me,
-    deleted_at, deletion_reason, edited, edited_ts, buttons
+    deleted_at, deletion_reason, edited, edited_ts, buttons, ad_referral
 ) SELECT
     ?, ?, ?, ?, ?,
     ?, ?, ?, ?,
@@ -200,7 +200,7 @@ INSERT INTO messages(
     ?, ?, ?, ?, ?,
     ?, ?, ?, ?,
     ?, ?, ?, ?,
-    ?, ?, ?
+    ?, ?, ?, ?
 WHERE NOT EXISTS (
     SELECT 1 FROM message_payload_purges p WHERE p.chat_jid = ? AND p.msg_id = ?
 )
@@ -236,7 +236,8 @@ ON CONFLICT(chat_jid, msg_id) DO UPDATE SET
     deletion_reason=CASE WHEN messages.deleted_at IS NOT NULL THEN COALESCE(NULLIF(messages.deletion_reason,''), excluded.deletion_reason) ELSE excluded.deletion_reason END,
     edited=CASE WHEN messages.deleted_at IS NOT NULL THEN messages.edited WHEN excluded.deleted_at IS NOT NULL THEN 0 WHEN excluded.edited != 0 THEN 1 WHEN messages.edited != 0 THEN messages.edited ELSE 0 END,
     edited_ts=CASE WHEN messages.deleted_at IS NOT NULL THEN messages.edited_ts WHEN excluded.deleted_at IS NOT NULL THEN 0 WHEN excluded.edited != 0 AND (messages.edited = 0 OR excluded.edited_ts > messages.edited_ts) THEN excluded.edited_ts WHEN messages.edited != 0 THEN messages.edited_ts ELSE 0 END,
-    buttons=CASE WHEN messages.deleted_at IS NOT NULL OR excluded.deleted_at IS NOT NULL THEN COALESCE(messages.buttons, excluded.buttons) WHEN (messages.edited != 0 AND excluded.edited = 0) OR (messages.edited != 0 AND excluded.edited != 0 AND excluded.edited_ts < messages.edited_ts) OR (messages.edited = 0 AND excluded.edited = 0 AND excluded.ts < messages.ts) THEN messages.buttons ELSE excluded.buttons END
+    buttons=CASE WHEN messages.deleted_at IS NOT NULL OR excluded.deleted_at IS NOT NULL THEN COALESCE(messages.buttons, excluded.buttons) WHEN (messages.edited != 0 AND excluded.edited = 0) OR (messages.edited != 0 AND excluded.edited != 0 AND excluded.edited_ts < messages.edited_ts) OR (messages.edited = 0 AND excluded.edited = 0 AND excluded.ts < messages.ts) THEN messages.buttons ELSE excluded.buttons END,
+    ad_referral=CASE WHEN messages.deleted_at IS NOT NULL OR excluded.deleted_at IS NOT NULL THEN COALESCE(messages.ad_referral, excluded.ad_referral) WHEN (messages.edited != 0 AND excluded.edited = 0) OR (messages.edited != 0 AND excluded.edited != 0 AND excluded.edited_ts < messages.edited_ts) OR (messages.edited = 0 AND excluded.edited = 0 AND excluded.ts < messages.ts) THEN messages.ad_referral ELSE COALESCE(excluded.ad_referral, messages.ad_referral) END
 WHERE messages.payload_purged_at IS NULL;
 
 -- name: MarkMessageRevoked :execrows

@@ -3,6 +3,7 @@
 package store
 
 import (
+	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
@@ -224,4 +225,53 @@ func TestFTSInjectionPrevented(t *testing.T) {
 			t.Errorf("expected m1 for 'hello world', got %v", ms)
 		}
 	})
+}
+
+// TestSearchFTSOnReadOnlyV0200StoreWithoutAdReferralColumn searches a
+// populated v0.20.0 store opened read-only through the FTS projection. The
+// store has the FTS table a v0.20.0 runtime would have built but no
+// ad_referral column, so the search must work and report no referral.
+func TestSearchFTSOnReadOnlyV0200StoreWithoutAdReferralColumn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "wacli.db")
+	buildPopulatedV0200Store(t, path)
+	raw, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	if _, err := raw.Exec(`
+		CREATE VIRTUAL TABLE messages_fts USING fts5(
+			text, media_caption, filename, chat_name, sender_name, display_text
+		);
+		INSERT INTO messages_fts(rowid, text, media_caption, filename, chat_name, sender_name, display_text)
+		SELECT rowid, COALESCE(text,''), COALESCE(media_caption,''), COALESCE(filename,''),
+			COALESCE(chat_name,''), COALESCE(sender_name,''), COALESCE(display_text,'')
+		FROM messages WHERE deleted_at IS NULL;
+	`); err != nil {
+		_ = raw.Close()
+		t.Fatalf("create v0.20.0 FTS table: %v", err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("raw close: %v", err)
+	}
+
+	db, err := OpenReadOnly(path)
+	if err != nil {
+		t.Fatalf("OpenReadOnly v0.20.0 store: %v", err)
+	}
+	defer db.Close()
+	if !db.HasFTS() {
+		t.Fatalf("expected FTS detection on the v0.20.0 fixture")
+	}
+	found, err := db.SearchMessages(SearchMessagesParams{Query: "hello", Limit: 10})
+	if err != nil {
+		t.Fatalf("FTS SearchMessages on read-only v0.20.0 store: %v", err)
+	}
+	if len(found) == 0 {
+		t.Fatalf("FTS search returned no messages")
+	}
+	for _, m := range found {
+		if m.AdReferral != nil {
+			t.Fatalf("FTS search returned a referral on a store without the column: %+v", m.AdReferral)
+		}
+	}
 }

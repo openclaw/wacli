@@ -1055,6 +1055,157 @@ func TestMessageButtonsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestMessageAdReferralRoundTrip(t *testing.T) {
+	db := openTestDB(t)
+
+	chat := "15551112222@s.whatsapp.net"
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := db.UpsertChat(chat, "dm", "Customer", now); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+
+	ad := &AdReferral{
+		SourceType: "ad",
+		SourceID:   "120212345678901234",
+		SourceURL:  "https://example.com/ad",
+		Title:      "Spring sneaker drop",
+		Body:       "Limited stock this week",
+		MediaType:  "image",
+		CtwaClid:   "ctwa-clid-token",
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID:    chat,
+		MsgID:      "ctwa1",
+		SenderJID:  chat,
+		Timestamp:  now,
+		Text:       "Hello! I want more information",
+		AdReferral: ad,
+	}); err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID:   chat,
+		MsgID:     "plain1",
+		SenderJID: chat,
+		Timestamp: now.Add(time.Second),
+		Text:      "a later plain message",
+	}); err != nil {
+		t.Fatalf("UpsertMessage plain: %v", err)
+	}
+
+	msg, err := db.GetMessage(chat, "ctwa1")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if msg.AdReferral == nil {
+		t.Fatalf("GetMessage: expected ad referral, got nil")
+	}
+	if *msg.AdReferral != *ad {
+		t.Fatalf("GetMessage: ad referral = %+v, want %+v", *msg.AdReferral, *ad)
+	}
+
+	plain, err := db.GetMessage(chat, "plain1")
+	if err != nil {
+		t.Fatalf("GetMessage plain: %v", err)
+	}
+	if plain.AdReferral != nil {
+		t.Fatalf("GetMessage plain: ad referral = %+v, want nil", plain.AdReferral)
+	}
+
+	msgs, err := db.ListMessages(ListMessagesParams{ChatJID: chat, Limit: 10, Asc: true})
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("ListMessages: expected 2 messages, got %d", len(msgs))
+	}
+	if msgs[0].AdReferral == nil || *msgs[0].AdReferral != *ad {
+		t.Fatalf("ListMessages: ad referral = %+v, want %+v", msgs[0].AdReferral, *ad)
+	}
+	if msgs[1].AdReferral != nil {
+		t.Fatalf("ListMessages: plain message ad referral = %+v, want nil", msgs[1].AdReferral)
+	}
+
+	ctxMsgs, err := db.MessageContext(chat, "plain1", 1, 0)
+	if err != nil {
+		t.Fatalf("MessageContext: %v", err)
+	}
+	if len(ctxMsgs) != 2 || ctxMsgs[0].AdReferral == nil || *ctxMsgs[0].AdReferral != *ad {
+		t.Fatalf("MessageContext: expected ad referral on context row, got %+v", ctxMsgs)
+	}
+}
+
+func TestMessageAdReferralSurvivesReupsertWithoutReferral(t *testing.T) {
+	db := openTestDB(t)
+
+	chat := "15551112222@s.whatsapp.net"
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := db.UpsertChat(chat, "dm", "Customer", now); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	ad := &AdReferral{SourceID: "120212345678901234", SourceURL: "https://example.com/ad"}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID:    chat,
+		MsgID:      "ctwa1",
+		SenderJID:  chat,
+		Timestamp:  now,
+		Text:       "Hello! I want more information",
+		AdReferral: ad,
+	}); err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+	// A later import of the same message without the referral must not erase it.
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID:   chat,
+		MsgID:     "ctwa1",
+		SenderJID: chat,
+		Timestamp: now.Add(time.Second),
+		Text:      "Hello! I want more information",
+	}); err != nil {
+		t.Fatalf("UpsertMessage reimport: %v", err)
+	}
+	msg, err := db.GetMessage(chat, "ctwa1")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if msg.AdReferral == nil || *msg.AdReferral != *ad {
+		t.Fatalf("ad referral after reimport = %+v, want %+v", msg.AdReferral, *ad)
+	}
+}
+
+func TestPurgeMessageClearsAdReferral(t *testing.T) {
+	db := openTestDB(t)
+
+	chat := "15551112222@s.whatsapp.net"
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := db.UpsertChat(chat, "dm", "Customer", now); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID:    chat,
+		MsgID:      "ctwa1",
+		SenderJID:  chat,
+		Timestamp:  now,
+		Text:       "Hello! I want more information",
+		AdReferral: &AdReferral{SourceID: "120212345678901234"},
+	}); err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+	if err := db.MarkMessageDeletedForMe(chat, "ctwa1", chat, false, now.Add(time.Minute)); err != nil {
+		t.Fatalf("MarkMessageDeletedForMe: %v", err)
+	}
+	if err := db.PurgeMessage(chat, "ctwa1"); err != nil {
+		t.Fatalf("PurgeMessage: %v", err)
+	}
+	msg, err := db.GetMessage(chat, "ctwa1")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if msg.AdReferral != nil {
+		t.Fatalf("ad referral after purge = %+v, want nil", msg.AdReferral)
+	}
+}
+
 func TestMessageButtonsListRowRoundTrip(t *testing.T) {
 	db := openTestDB(t)
 

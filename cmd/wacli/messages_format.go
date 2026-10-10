@@ -103,6 +103,19 @@ func writeMessageShow(dst io.Writer, m store.Message) error {
 			fmt.Fprintf(dst, "Downloaded at: %s\n", m.DownloadedAt.Local().Format(time.RFC3339))
 		}
 	}
+	if ar := m.AdReferral; ar != nil {
+		label := strings.TrimSpace(ar.Title)
+		if label == "" {
+			label = ar.SourceURL
+		}
+		if label == "" {
+			label = ar.SourceID
+		}
+		if label == "" {
+			label = "yes"
+		}
+		fmt.Fprintf(dst, "Ad referral: %s\n", sanitize(label))
+	}
 	if m.IsForwarded {
 		fmt.Fprintln(dst, "Forwarded: yes")
 		if m.ForwardingScore > 0 {

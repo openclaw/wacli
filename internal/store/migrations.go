@@ -43,6 +43,7 @@ var schemaMigrations = []migration{
 	{version: 27, name: "repair placeholder chat activity", up: migratePlaceholderChatActivity},
 	{version: 28, name: "unavailable app state keys", up: migrateUnavailableAppStateKeys},
 	{version: 29, name: "message receipts", up: ensureMessageReceiptsTable},
+	{version: 30, name: "messages ad_referral column", up: migrateMessagesAdReferralColumn},
 }
 
 func migratePlaceholderChatActivity(d *DB) error {
@@ -678,6 +679,27 @@ func migrateMessagesButtonsColumn(d *DB) error {
 	}
 	if _, err := d.sql.Exec(`ALTER TABLE messages ADD COLUMN buttons TEXT`); err != nil {
 		return fmt.Errorf("add messages.buttons column: %w", err)
+	}
+	return nil
+}
+
+func migrateMessagesAdReferralColumn(d *DB) error {
+	hasTable, err := d.tableExists("messages")
+	if err != nil {
+		return err
+	}
+	if !hasTable {
+		return nil
+	}
+	has, err := d.tableHasColumn("messages", "ad_referral")
+	if err != nil {
+		return err
+	}
+	if has {
+		return nil
+	}
+	if _, err := d.sql.Exec(`ALTER TABLE messages ADD COLUMN ad_referral TEXT`); err != nil {
+		return fmt.Errorf("add messages.ad_referral column: %w", err)
 	}
 	return nil
 }

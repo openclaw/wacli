@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/openclaw/wacli/internal/wa"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
+	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
@@ -113,6 +115,75 @@ func TestHandleLiveSyncMessagePostsSignedWebhookWithGroupName(t *testing.T) {
 		if !bytes.Contains(got.body, want) {
 			t.Fatalf("webhook body missing %s: %s", want, got.body)
 		}
+	}
+}
+
+func TestLiveSyncMessageStoresAndForwardsAdReferral(t *testing.T) {
+	a := newTestApp(t)
+	a.wa = newFakeWA()
+
+	chat := types.NewJID("15551234567", types.DefaultUserServer)
+	mediaType := waE2E.ContextInfo_ExternalAdReplyInfo_IMAGE
+	evt := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{Chat: chat, Sender: chat},
+			ID:            "ctwa-live",
+			Timestamp:     time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		},
+		Message: &waProto.Message{
+			ExtendedTextMessage: &waProto.ExtendedTextMessage{
+				Text: proto.String("Hello! I want more information"),
+				ContextInfo: &waProto.ContextInfo{
+					ExternalAdReply: &waE2E.ContextInfo_ExternalAdReplyInfo{
+						Title:     proto.String("Spring sneaker drop"),
+						MediaType: &mediaType,
+						Thumbnail: []byte{0x1},
+						SourceID:  proto.String("120212345678901234"),
+						SourceURL: proto.String("https://example.com/ad"),
+						CtwaClid:  proto.String("ctwa-clid-token"),
+					},
+				},
+			},
+		},
+	}
+
+	var stored atomic.Int64
+	var forwarded *wa.ParsedMessage
+	a.handleLiveSyncMessage(context.Background(), SyncOptions{}, evt, &stored, func(string, string) {}, func(pm wa.ParsedMessage) {
+		forwarded = &pm
+	})
+	if stored.Load() != 1 || forwarded == nil {
+		t.Fatalf("stored = %d, forwarded = %v; want 1 stored and forwarded message", stored.Load(), forwarded)
+	}
+
+	msg, err := a.db.GetMessage(chat.String(), "ctwa-live")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if msg.AdReferral == nil || msg.AdReferral.SourceID != "120212345678901234" || msg.AdReferral.MediaType != "image" {
+		t.Fatalf("stored ad referral = %+v", msg.AdReferral)
+	}
+
+	payload, err := json.Marshal(a.newSyncWebhookPayload(context.Background(), *forwarded))
+	if err != nil {
+		t.Fatalf("marshal webhook payload: %v", err)
+	}
+	for _, want := range [][]byte{
+		[]byte(`"AdReferral":{`),
+		[]byte(`"source_id":"120212345678901234"`),
+		[]byte(`"ctwa_clid":"ctwa-clid-token"`),
+	} {
+		if !bytes.Contains(payload, want) {
+			t.Fatalf("webhook payload missing %s: %s", want, payload)
+		}
+	}
+
+	plain, err := json.Marshal(a.newSyncWebhookPayload(context.Background(), wa.ParsedMessage{Chat: chat, ID: "plain"}))
+	if err != nil {
+		t.Fatalf("marshal plain payload: %v", err)
+	}
+	if bytes.Contains(plain, []byte(`"AdReferral"`)) {
+		t.Fatalf("plain payload unexpectedly carries AdReferral: %s", plain)
 	}
 }
 

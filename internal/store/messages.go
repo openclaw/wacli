@@ -26,6 +26,7 @@ type UpsertMessageParams struct {
 	QuotedMsgID     string
 	QuotedSenderJID string
 	Buttons         []Button
+	AdReferral      *AdReferral
 	IsForwarded     bool
 	ForwardingScore uint32
 	ReactionToID    string
@@ -47,7 +48,17 @@ type UpsertMessageParams struct {
 }
 
 func (d *DB) messageSelectColumns(snippet string) string {
-	return fmt.Sprintf(`m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.quoted_msg_id,''), COALESCE(m.quoted_sender_jid,''), m.is_forwarded, m.forwarding_score, COALESCE(m.reaction_to_id,''), COALESCE(m.reaction_emoji,''), COALESCE(m.media_type,''), COALESCE(m.media_caption,''), COALESCE(m.filename,''), COALESCE(m.mime_type,''), COALESCE(m.direct_path,''), COALESCE(m.local_path,''), COALESCE(m.downloaded_at,0), CASE WHEN s.msg_id IS NULL THEN 0 ELSE 1 END, COALESCE(s.starred_at,0), m.revoked, m.deleted_for_me, COALESCE(m.deleted_at,0), COALESCE(m.deletion_reason,''), COALESCE(m.payload_purged_at,0), m.edited, COALESCE(m.buttons,''), %s, %s`, d.receiptColumns(), snippetSQL(snippet))
+	return fmt.Sprintf(`m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.quoted_msg_id,''), COALESCE(m.quoted_sender_jid,''), m.is_forwarded, m.forwarding_score, COALESCE(m.reaction_to_id,''), COALESCE(m.reaction_emoji,''), COALESCE(m.media_type,''), COALESCE(m.media_caption,''), COALESCE(m.filename,''), COALESCE(m.mime_type,''), COALESCE(m.direct_path,''), COALESCE(m.local_path,''), COALESCE(m.downloaded_at,0), CASE WHEN s.msg_id IS NULL THEN 0 ELSE 1 END, COALESCE(s.starred_at,0), m.revoked, m.deleted_for_me, COALESCE(m.deleted_at,0), COALESCE(m.deletion_reason,''), COALESCE(m.payload_purged_at,0), m.edited, COALESCE(m.buttons,''), %s, %s, %s`, d.adReferralColumn(), d.receiptColumns(), snippetSQL(snippet))
+}
+
+// adReferralColumn projects the stored referral. A store from before the
+// column — possible only on a read-only open, which cannot migrate it in —
+// answers the empty string, the same value an absent referral stores.
+func (d *DB) adReferralColumn() string {
+	if !d.adReferralEnabled {
+		return `''`
+	}
+	return `COALESCE(m.ad_referral,'')`
 }
 
 // receiptColumns counts, per message, how many recipients have it and how many
@@ -94,6 +105,12 @@ func (d *DB) UpsertMessage(p UpsertMessageParams) error {
 			buttonsJSON = sql.NullString{String: string(b), Valid: true}
 		}
 	}
+	var adReferralJSON sql.NullString
+	if p.AdReferral != nil {
+		if b, err := json.Marshal(p.AdReferral); err == nil {
+			adReferralJSON = sql.NullString{String: string(b), Valid: true}
+		}
+	}
 	editedTS := int64(0)
 	if p.Edited {
 		editedTS = unix(p.Timestamp)
@@ -130,6 +147,7 @@ func (d *DB) UpsertMessage(p UpsertMessageParams) error {
 		Edited:          boolToInt64(p.Edited),
 		EditedTs:        editedTS,
 		Buttons:         buttonsJSON,
+		AdReferral:      adReferralJSON,
 		ChatJid_2:       strings.TrimSpace(p.ChatJID),
 		MsgID_2:         strings.TrimSpace(p.MsgID),
 	})
@@ -354,6 +372,7 @@ func (d *DB) PurgeMessage(chatJID, msgID string) error {
 			edited = 0,
 			edited_ts = 0,
 			buttons = NULL,
+			ad_referral = NULL,
 			payload_purged_at = COALESCE(payload_purged_at, ?)
 		WHERE chat_jid = ? AND msg_id = ?
 	`, purgedAt, chatJID, msgID); err != nil {
@@ -484,7 +503,11 @@ func (d *DB) GetMessage(chatJID, msgID string) (Message, error) {
 	if err != nil {
 		return Message{}, err
 	}
-	return messageFromGetRow(row), nil
+	out := []Message{messageFromGetRow(row)}
+	if err := d.attachAdReferrals(out); err != nil {
+		return Message{}, err
+	}
+	return out[0], nil
 }
 
 func (d *DB) CountMessages() (int64, error) {
@@ -585,7 +608,38 @@ func (d *DB) MessageContext(chatJID, msgID string, before, after int) ([]Message
 	out = append(out, beforeMessages...)
 	out = append(out, target)
 	out = append(out, afterMessages...)
+	if err := d.attachAdReferrals(out); err != nil {
+		return nil, err
+	}
 	return out, nil
+}
+
+// attachAdReferrals loads ad_referral for messages read through the static
+// show/context queries, which cannot reference the column on a store that
+// predates it. A writable open migrates the column in, so only older
+// read-only stores take the disabled branch and report no referral.
+func (d *DB) attachAdReferrals(msgs []Message) error {
+	if !d.adReferralEnabled {
+		return nil
+	}
+	for i := range msgs {
+		if msgs[i].AdReferral != nil {
+			continue
+		}
+		var raw sql.NullString
+		err := d.sql.QueryRow(
+			`SELECT ad_referral FROM messages WHERE chat_jid = ? AND msg_id = ?`,
+			msgs[i].ChatJID, msgs[i].MsgID,
+		).Scan(&raw)
+		if err != nil {
+			if isNoRows(err) {
+				continue
+			}
+			return err
+		}
+		msgs[i].AdReferral = adReferralFromJSON(raw.String)
+	}
+	return nil
 }
 
 func (d *DB) scanMessages(query string, args ...any) ([]Message, error) {
@@ -611,8 +665,9 @@ func (d *DB) scanMessages(query string, args ...any) ([]Message, error) {
 		var deletionReason string
 		var payloadPurgedAt int64
 		var buttonsJSON string
+		var adReferralJSON string
 		var edited int
-		if err := rows.Scan(&m.rowID, &m.ChatJID, &m.ChatName, &m.MsgID, &m.SenderJID, &m.SenderName, &ts, &fromMe, &m.Text, &m.DisplayText, &m.QuotedMsgID, &m.QuotedSenderJID, &forwarded, &forwardingScore, &m.ReactionToID, &m.ReactionEmoji, &m.MediaType, &m.MediaCaption, &m.Filename, &m.MimeType, &m.DirectPath, &m.LocalPath, &downloadedAt, &starred, &starredAt, &revoked, &deletedForMe, &deletedAt, &deletionReason, &payloadPurgedAt, &edited, &buttonsJSON, &m.DeliveredTo, &m.ReadBy, &m.Snippet); err != nil {
+		if err := rows.Scan(&m.rowID, &m.ChatJID, &m.ChatName, &m.MsgID, &m.SenderJID, &m.SenderName, &ts, &fromMe, &m.Text, &m.DisplayText, &m.QuotedMsgID, &m.QuotedSenderJID, &forwarded, &forwardingScore, &m.ReactionToID, &m.ReactionEmoji, &m.MediaType, &m.MediaCaption, &m.Filename, &m.MimeType, &m.DirectPath, &m.LocalPath, &downloadedAt, &starred, &starredAt, &revoked, &deletedForMe, &deletedAt, &deletionReason, &payloadPurgedAt, &edited, &buttonsJSON, &adReferralJSON, &m.DeliveredTo, &m.ReadBy, &m.Snippet); err != nil {
 			return nil, err
 		}
 		m.Timestamp = fromUnix(ts)
@@ -631,6 +686,7 @@ func (d *DB) scanMessages(query string, args ...any) ([]Message, error) {
 		if buttonsJSON != "" {
 			_ = json.Unmarshal([]byte(buttonsJSON), &m.Buttons)
 		}
+		m.AdReferral = adReferralFromJSON(adReferralJSON)
 		out = append(out, m)
 	}
 	return out, rows.Err()
@@ -643,7 +699,7 @@ func messageFromGetRow(row storedb.GetMessageRow) Message {
 		row.ForwardingScore, row.ReactionToID, row.ReactionEmoji, row.MediaType,
 		row.MediaCaption, row.Filename, row.MimeType, row.DirectPath, row.LocalPath,
 		row.DownloadedAt, row.Column24, row.StarredAt, row.Revoked, row.DeletedForMe,
-		row.DeletedAt, row.DeletionReason, row.PayloadPurgedAt, row.Edited, row.Buttons, row.Column33,
+		row.DeletedAt, row.DeletionReason, row.PayloadPurgedAt, row.Edited, row.Buttons, "", row.Column33,
 	)
 }
 
@@ -654,7 +710,7 @@ func messageFromBeforeRow(row storedb.MessageContextBeforeRow) Message {
 		row.ForwardingScore, row.ReactionToID, row.ReactionEmoji, row.MediaType,
 		row.MediaCaption, row.Filename, row.MimeType, row.DirectPath, row.LocalPath,
 		row.DownloadedAt, row.Column24, row.StarredAt, row.Revoked, row.DeletedForMe,
-		row.DeletedAt, row.DeletionReason, row.PayloadPurgedAt, row.Edited, row.Buttons, row.Column33,
+		row.DeletedAt, row.DeletionReason, row.PayloadPurgedAt, row.Edited, row.Buttons, "", row.Column33,
 	)
 }
 
@@ -665,11 +721,11 @@ func messageFromAfterRow(row storedb.MessageContextAfterRow) Message {
 		row.ForwardingScore, row.ReactionToID, row.ReactionEmoji, row.MediaType,
 		row.MediaCaption, row.Filename, row.MimeType, row.DirectPath, row.LocalPath,
 		row.DownloadedAt, row.Column24, row.StarredAt, row.Revoked, row.DeletedForMe,
-		row.DeletedAt, row.DeletionReason, row.PayloadPurgedAt, row.Edited, row.Buttons, row.Column33,
+		row.DeletedAt, row.DeletionReason, row.PayloadPurgedAt, row.Edited, row.Buttons, "", row.Column33,
 	)
 }
 
-func messageFromScalars(rowID int64, chatJID, chatName, msgID, senderJID, senderName string, ts, fromMe int64, text, displayText, quotedMsgID, quotedSenderJID string, forwarded, forwardingScore int64, reactionToID, reactionEmoji, mediaType, mediaCaption, filename, mimeType, directPath, localPath string, downloadedAt, starred, starredAt, revoked, deletedForMe, deletedAt int64, deletionReason string, payloadPurgedAt, edited int64, buttonsJSON, snippet string) Message {
+func messageFromScalars(rowID int64, chatJID, chatName, msgID, senderJID, senderName string, ts, fromMe int64, text, displayText, quotedMsgID, quotedSenderJID string, forwarded, forwardingScore int64, reactionToID, reactionEmoji, mediaType, mediaCaption, filename, mimeType, directPath, localPath string, downloadedAt, starred, starredAt, revoked, deletedForMe, deletedAt int64, deletionReason string, payloadPurgedAt, edited int64, buttonsJSON, adReferralJSON, snippet string) Message {
 	m := Message{
 		rowID:           rowID,
 		ChatJID:         chatJID,
@@ -707,7 +763,22 @@ func messageFromScalars(rowID int64, chatJID, chatName, msgID, senderJID, sender
 	if buttonsJSON != "" {
 		_ = json.Unmarshal([]byte(buttonsJSON), &m.Buttons)
 	}
+	m.AdReferral = adReferralFromJSON(adReferralJSON)
 	return m
+}
+
+func adReferralFromJSON(raw string) *AdReferral {
+	if raw == "" {
+		return nil
+	}
+	var ad AdReferral
+	if err := json.Unmarshal([]byte(raw), &ad); err != nil {
+		return nil
+	}
+	if ad == (AdReferral{}) {
+		return nil
+	}
+	return &ad
 }
 
 func timePointerFromUnix(value int64) *time.Time {

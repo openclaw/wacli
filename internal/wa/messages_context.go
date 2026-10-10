@@ -2,10 +2,51 @@ package wa
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 )
+
+// adReferralFieldLimit bounds each retained ExternalAdReply text field: the
+// protocol does not cap them, and the values are stored on the message row.
+const adReferralFieldLimit = 1024
+
+// adReferralFromContext keeps the fields that identify the ad or post a
+// conversation started from, dropping thumbnails and other media bytes.
+// It returns nil when every kept field is empty.
+func adReferralFromContext(info *waE2E.ContextInfo_ExternalAdReplyInfo) *AdReferral {
+	if info == nil {
+		return nil
+	}
+	ad := &AdReferral{
+		SourceType: adReferralField(info.GetSourceType()),
+		SourceID:   adReferralField(info.GetSourceID()),
+		SourceURL:  adReferralField(info.GetSourceURL()),
+		Title:      adReferralField(info.GetTitle()),
+		Body:       adReferralField(info.GetBody()),
+		CtwaClid:   adReferralField(info.GetCtwaClid()),
+	}
+	if mt := info.GetMediaType(); mt != waE2E.ContextInfo_ExternalAdReplyInfo_NONE {
+		ad.MediaType = strings.ToLower(mt.String())
+	}
+	if *ad == (AdReferral{}) {
+		return nil
+	}
+	return ad
+}
+
+func adReferralField(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= adReferralFieldLimit {
+		return s
+	}
+	cut := adReferralFieldLimit
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
+}
 
 func contextInfoForMessage(m *waProto.Message) *waProto.ContextInfo {
 	if m == nil {

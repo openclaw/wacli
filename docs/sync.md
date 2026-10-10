@@ -48,6 +48,7 @@ wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--stale-t
 - Sync stores WhatsApp call signaling and call-log metadata in `call_events`; inspect it with `wacli calls list`.
 - Sync stores WhatsApp status broadcasts in `status_messages`, separate from normal chat `messages`.
 - Sync stores location pins and live-location shares in `message_locations`, keyed by (`chat_jid`, `msg_id`); the message row keeps `media_type=location` (or `live_location`). Pins synced before this table existed have no coordinates and cannot be backfilled.
+- Sync keeps the Click-to-WhatsApp ad or Facebook/Instagram post a message was sent from in the message row's `ad_referral` column (see [messages](messages.md#ad-referrals)). Thumbnails and other referral media bytes are not stored. Messages synced before this column existed cannot be backfilled, but an ordinary re-ingestion fills it in.
 - Unreadable messages emit an `undecryptable_message` warning with chat, sender, and message ID. Its `recovery=requested_if_possible` field is conditional: the SDK requests a primary-device copy immediately when ciphertext is absent, or after a short delay on an eligible first decryption failure; repeated failures, cancelled requests, and bot-message secret failures can take different paths. `is_unavailable` also covers missing group sender keys, so it does not identify the exact retry path. Typed unavailable content, including `view_once`, can still prompt a protocol request without guaranteeing a readable copy. Restart an existing `sync --follow` process after upgrading to enable the updated client behavior.
 - In an interactive terminal, routine connected/history/progress updates share one updating stderr status line. Warnings and errors still print as separate lines so they remain visible.
 - `--stale-threshold DURATION` in follow mode detects keepalive failures. If whatsmeow reports that the last successful keepalive is older than this duration, sync force-closes the connection and reconnects. Healthy quiet sessions are not reconnected just because no chat events arrive. Disabled by default (`0`); accepted values are `1s` up to but not including `2m20s`, which reserves one maximum keepalive probe interval plus response deadline before whatsmeow's own 3-minute auto-reconnect window.
@@ -78,6 +79,12 @@ Messages use the stored live message payload documented above:
 ```
 
 Media messages include a `Media` object containing only `Type`, `Caption`, `Filename`, `MimeType`, and `FileLength`; messages without media retain `Media: null`. Attachment retrieval fields (`MediaKey`, `DirectPath`, `FileSHA256`, and `FileEncSHA256`) are not exported. Older releases exposed these fields unintentionally: consumers that downloaded from them should use `--download-media` or `media download` instead. Local download and retry data remains available in the store. Review retained webhook logs and queues from older releases for attachment keys.
+
+Messages sent from a Click-to-WhatsApp ad or a Facebook/Instagram post include an
+`AdReferral` object with the same `source_type`, `source_id`, `source_url`, `title`,
+`body`, `media_type`, and `ctwa_clid` fields as the CLI's `ad_referral` JSON (see
+[messages](messages.md#ad-referrals)); empty fields are omitted. Messages without a
+referral omit the `AdReferral` key entirely, so existing payloads are unchanged.
 
 `EventType: "receipt"` reports delivery and read state for messages you sent. Only
 `delivered`, `read`, and `played` cross the webhook; the protocol bookkeeping types

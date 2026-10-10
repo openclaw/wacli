@@ -44,6 +44,19 @@ type Button struct {
 	Index        int    `json:"index,omitempty"`
 }
 
+// AdReferral identifies the Click-to-WhatsApp ad or social-media post a
+// message was sent from (ContextInfo.ExternalAdReplyInfo). Only short text
+// fields are kept; thumbnails and other media bytes are deliberately dropped.
+type AdReferral struct {
+	SourceType string `json:"source_type,omitempty"`
+	SourceID   string `json:"source_id,omitempty"`
+	SourceURL  string `json:"source_url,omitempty"`
+	Title      string `json:"title,omitempty"`
+	Body       string `json:"body,omitempty"`
+	MediaType  string `json:"media_type,omitempty"`
+	CtwaClid   string `json:"ctwa_clid,omitempty"`
+}
+
 // Poll captures the question + option list extracted from an incoming
 // PollCreationMessage (any of V1/V2/V3/V4/V5/V6).
 type Poll struct {
@@ -92,6 +105,7 @@ type ParsedMessage struct {
 	ReactionEmoji    string
 	IsForwarded      bool
 	ForwardingScore  uint32
+	AdReferral       *AdReferral `json:",omitempty"`
 	StarredKnown     bool
 	Starred          bool
 	Edited           bool
@@ -267,6 +281,9 @@ func extractWAProto(m *waProto.Message, pm *ParsedMessage) *waProto.Message {
 		}
 		pm.ForwardingScore = ctx.GetForwardingScore()
 		pm.IsForwarded = ctx.GetIsForwarded() || pm.ForwardingScore > 0
+		if ad := adReferralFromContext(ctx.GetExternalAdReply()); ad != nil {
+			pm.AdReferral = ad
+		}
 	}
 	return m
 }

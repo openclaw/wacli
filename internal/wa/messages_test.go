@@ -1,8 +1,10 @@
 package wa
 
 import (
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow/proto/waE2E"
@@ -1296,6 +1298,166 @@ func TestParseLiveMessageEncryptedPollAddOptionRef(t *testing.T) {
 	}
 	if pm.PollAdd.PollMessageID != "POLL-1" || pm.PollAdd.Option != "" {
 		t.Fatalf("poll add = %+v", pm.PollAdd)
+	}
+}
+
+func TestParseLiveMessageKeepsExternalAdReferral(t *testing.T) {
+	mediaType := waE2E.ContextInfo_ExternalAdReplyInfo_IMAGE
+	adReply := &waE2E.ContextInfo_ExternalAdReplyInfo{
+		Title:        proto.String("  Spring sneaker drop  "),
+		Body:         proto.String("Limited stock this week"),
+		MediaType:    &mediaType,
+		Thumbnail:    []byte{0x1, 0x2},
+		ThumbnailURL: proto.String("https://example.com/thumb.jpg"),
+		MediaURL:     proto.String("https://example.com/media.mp4"),
+		SourceType:   proto.String("ad"),
+		SourceID:     proto.String("120212345678901234"),
+		SourceURL:    proto.String("https://example.com/ad"),
+		CtwaClid:     proto.String("ctwa-clid-token"),
+		Ref:          proto.String("ref-token"),
+	}
+
+	tests := []struct {
+		name string
+		msg  *waProto.Message
+	}{
+		{
+			name: "extended text",
+			msg: &waProto.Message{
+				ExtendedTextMessage: &waProto.ExtendedTextMessage{
+					Text:        proto.String("Hello! I want more information"),
+					ContextInfo: &waProto.ContextInfo{ExternalAdReply: adReply},
+				},
+			},
+		},
+		{
+			name: "image",
+			msg: &waProto.Message{
+				ImageMessage: &waProto.ImageMessage{
+					Caption:     proto.String("Hello! I want more information"),
+					ContextInfo: &waProto.ContextInfo{ExternalAdReply: adReply},
+				},
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			evt := &events.Message{
+				Info: types.MessageInfo{
+					MessageSource: types.MessageSource{
+						Chat:   types.NewJID("15551112222", types.DefaultUserServer),
+						Sender: types.NewJID("15551112222", types.DefaultUserServer),
+					},
+					ID:        "ctwa-1",
+					Timestamp: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+				},
+				Message: tc.msg,
+			}
+			pm := ParseLiveMessage(evt)
+			ad := pm.AdReferral
+			if ad == nil {
+				t.Fatalf("expected AdReferral, got nil; pm=%+v", pm)
+			}
+			if ad.SourceType != "ad" || ad.SourceID != "120212345678901234" || ad.SourceURL != "https://example.com/ad" {
+				t.Fatalf("ad source = %+v", ad)
+			}
+			if ad.Title != "Spring sneaker drop" || ad.Body != "Limited stock this week" {
+				t.Fatalf("ad text = %+v", ad)
+			}
+			if ad.MediaType != "image" {
+				t.Fatalf("ad media type = %q, want %q", ad.MediaType, "image")
+			}
+			if ad.CtwaClid != "ctwa-clid-token" {
+				t.Fatalf("ad ctwa_clid = %q", ad.CtwaClid)
+			}
+		})
+	}
+}
+
+func TestParseLiveMessageWithoutAdReferralStaysEmpty(t *testing.T) {
+	evt := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:   types.NewJID("15551112222", types.DefaultUserServer),
+				Sender: types.NewJID("15551112222", types.DefaultUserServer),
+			},
+			ID:        "plain-1",
+			Timestamp: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		},
+		Message: &waProto.Message{Conversation: proto.String("hello")},
+	}
+	pm := ParseLiveMessage(evt)
+	if pm.AdReferral != nil {
+		t.Fatalf("AdReferral = %+v, want nil", pm.AdReferral)
+	}
+}
+
+func TestParseHistoryMessageKeepsExternalAdReferral(t *testing.T) {
+	h := &waProto.WebMessageInfo{
+		Key: &waProto.MessageKey{
+			ID:          proto.String("ctwa-hist"),
+			FromMe:      proto.Bool(false),
+			Participant: proto.String("15551112222@s.whatsapp.net"),
+		},
+		MessageTimestamp: proto.Uint64(uint64(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).Unix())),
+		Message: &waProto.Message{
+			ExtendedTextMessage: &waProto.ExtendedTextMessage{
+				Text: proto.String("Hello! I want more information"),
+				ContextInfo: &waProto.ContextInfo{
+					ExternalAdReply: &waE2E.ContextInfo_ExternalAdReplyInfo{
+						SourceID: proto.String("120212345678901234"),
+					},
+				},
+			},
+		},
+	}
+	pm := ParseHistoryMessage("15551112222@s.whatsapp.net", h)
+	if pm.AdReferral == nil || pm.AdReferral.SourceID != "120212345678901234" {
+		t.Fatalf("AdReferral = %+v", pm.AdReferral)
+	}
+	if pm.AdReferral.MediaType != "" {
+		t.Fatalf("MediaType = %q, want empty for NONE", pm.AdReferral.MediaType)
+	}
+}
+
+func TestParseLiveMessageTruncatesOversizedAdReferralFields(t *testing.T) {
+	// The leading "x" puts the byte limit in the middle of a two-byte rune.
+	long := "x" + strings.Repeat("á", adReferralFieldLimit)
+	evt := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:   types.NewJID("15551112222", types.DefaultUserServer),
+				Sender: types.NewJID("15551112222", types.DefaultUserServer),
+			},
+			ID:        "ctwa-long",
+			Timestamp: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		},
+		Message: &waProto.Message{
+			ExtendedTextMessage: &waProto.ExtendedTextMessage{
+				Text: proto.String("Hello! I want more information"),
+				ContextInfo: &waProto.ContextInfo{
+					ExternalAdReply: &waE2E.ContextInfo_ExternalAdReplyInfo{
+						Title: proto.String(long),
+						Body:  proto.String(long),
+					},
+				},
+			},
+		},
+	}
+	pm := ParseLiveMessage(evt)
+	if pm.AdReferral == nil {
+		t.Fatalf("expected AdReferral, got nil")
+	}
+	for name, got := range map[string]string{"title": pm.AdReferral.Title, "body": pm.AdReferral.Body} {
+		if len(got) == 0 || len(got) > adReferralFieldLimit {
+			t.Fatalf("%s len = %d, want 1..%d", name, len(got), adReferralFieldLimit)
+		}
+		if !utf8.ValidString(got) {
+			t.Fatalf("%s truncation split a rune: %q", name, got)
+		}
+		if !strings.HasPrefix(long, got) {
+			t.Fatalf("%s truncated value is not a prefix of the input", name)
+		}
 	}
 }
 

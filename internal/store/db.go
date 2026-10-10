@@ -23,6 +23,10 @@ type DB struct {
 	// open cannot create one, so message queries ask for the counts only when
 	// the table is there.
 	receiptsEnabled bool
+	// A store written by an older build has no ad_referral column, and a
+	// read-only open cannot add it, so message queries project the referral
+	// only when the column is there.
+	adReferralEnabled bool
 }
 
 func Open(path string) (*DB, error) {
@@ -62,6 +66,7 @@ func open(path string, readOnly bool) (*DB, error) {
 		}
 		s.ftsEnabled = s.detectMessagesFTS()
 		s.receiptsEnabled = s.hasTable("message_receipts")
+		s.adReferralEnabled = s.hasColumn("messages", "ad_referral")
 		return s, nil
 	}
 	if err := s.init(); err != nil {
@@ -69,6 +74,7 @@ func open(path string, readOnly bool) (*DB, error) {
 		return nil, err
 	}
 	s.receiptsEnabled = s.hasTable("message_receipts")
+	s.adReferralEnabled = s.hasColumn("messages", "ad_referral")
 	if err := sqliteutil.ChmodFiles(path, 0o600); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -83,6 +89,11 @@ func (d *DB) validateReadable() error {
 
 func (d *DB) hasTable(name string) bool {
 	ok, err := d.tableExists(name)
+	return err == nil && ok
+}
+
+func (d *DB) hasColumn(table, column string) bool {
+	ok, err := d.tableHasColumn(table, column)
 	return err == nil && ok
 }
 

@@ -530,6 +530,98 @@ func TestMessagesExportCommandAppliesDateFilters(t *testing.T) {
 	}
 }
 
+func TestMessagesJSONOutputCarriesAdReferral(t *testing.T) {
+	storeDir := t.TempDir()
+	db, err := store.Open(filepath.Join(storeDir, "wacli.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	chat := "15551112222@s.whatsapp.net"
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := db.UpsertChat(chat, "dm", "Customer", base); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	ad := &store.AdReferral{
+		SourceType: "ad",
+		SourceID:   "120212345678901234",
+		SourceURL:  "https://example.com/ad",
+		Title:      "Spring sneaker drop",
+		Body:       "Limited stock this week",
+		MediaType:  "image",
+		CtwaClid:   "ctwa-clid-token",
+	}
+	for _, row := range []store.UpsertMessageParams{
+		{ChatJID: chat, MsgID: "ctwa", SenderJID: chat, Timestamp: base, Text: "Hello! I want more information", AdReferral: ad},
+		{ChatJID: chat, MsgID: "plain", SenderJID: chat, Timestamp: base.Add(time.Second), Text: "plain"},
+	} {
+		if err := db.UpsertMessage(row); err != nil {
+			t.Fatalf("UpsertMessage %s: %v", row.MsgID, err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	output := filepath.Join(storeDir, "export.json")
+	cmd := newMessagesExportCmd(&rootFlags{storeDir: storeDir, timeout: time.Minute})
+	cmd.SetArgs([]string{"--chat", chat, "--output", output, "--limit", "10"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("messages export: %v", err)
+	}
+
+	raw, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	var got struct {
+		Data struct {
+			Messages []map[string]json.RawMessage `json:"messages"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("Unmarshal export: %v\n%s", err, string(raw))
+	}
+	if len(got.Data.Messages) != 2 {
+		t.Fatalf("exported %d messages, want 2", len(got.Data.Messages))
+	}
+	adRaw, ok := got.Data.Messages[0]["ad_referral"]
+	if !ok {
+		t.Fatalf("first message has no ad_referral key:\n%s", string(raw))
+	}
+	var gotAd store.AdReferral
+	if err := json.Unmarshal(adRaw, &gotAd); err != nil {
+		t.Fatalf("Unmarshal ad_referral: %v", err)
+	}
+	if gotAd != *ad {
+		t.Fatalf("ad_referral = %+v, want %+v", gotAd, *ad)
+	}
+	if _, ok := got.Data.Messages[1]["ad_referral"]; ok {
+		t.Fatalf("plain message unexpectedly has ad_referral:\n%s", string(raw))
+	}
+}
+
+func TestWriteMessageShowIncludesAdReferral(t *testing.T) {
+	msg := store.Message{
+		ChatJID:   "15551112222@s.whatsapp.net",
+		SenderJID: "15551112222@s.whatsapp.net",
+		MsgID:     "ctwa",
+		Timestamp: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC),
+		Text:      "Hello! I want more information",
+		AdReferral: &store.AdReferral{
+			Title:     "Spring sneaker drop",
+			SourceURL: "https://example.com/ad",
+		},
+	}
+
+	var out bytes.Buffer
+	if err := writeMessageShow(&out, msg); err != nil {
+		t.Fatalf("writeMessageShow: %v", err)
+	}
+	if !strings.Contains(out.String(), "Ad referral: Spring sneaker drop") {
+		t.Fatalf("expected ad referral line, got:\n%s", out.String())
+	}
+}
+
 func TestWriteMessageShowIncludesForwardedMetadata(t *testing.T) {
 	msg := store.Message{
 		ChatJID:         "chat@s.whatsapp.net",

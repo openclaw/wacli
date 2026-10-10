@@ -44,6 +44,31 @@ Only reports that arrive while `sync` is connected are kept: WhatsApp announces 
 
 Plain audio messages have an empty `MediaCaption`. Their `Text` keeps the `[Audio]` display fallback, so they can still match searches for `Audio`. Text supplied alongside an audio payload remains its caption, including a literal `[Audio]` supplied by the sender. Existing rows are not migrated; an ordinary live or history re-ingestion can replace a legacy synthetic caption, subject to the existing edit and deletion rules.
 
+## Ad referrals
+
+When a customer starts a conversation from a Click-to-WhatsApp ad or a Facebook/Instagram post, WhatsApp attaches the originating ad or post to the first message. The prefilled text is often Meta's generic greeting, so this referral is what identifies the ad or product the customer is asking about.
+
+- The referral is stored on the message row (`ad_referral` column) and kept through edits and tombstones; `messages purge` removes it with the rest of the retained payload.
+- JSON output (`messages list`, `search`, `starred`, `show`, `context`, and `export` with `--json` where applicable) includes an optional `ad_referral` object. Messages without a referral omit the key:
+
+```json
+"ad_referral": {
+  "source_type": "ad",
+  "source_id": "120212345678901234",
+  "source_url": "https://fb.me/…",
+  "title": "Spring sneaker drop",
+  "body": "Limited stock this week",
+  "media_type": "image",
+  "ctwa_clid": "…"
+}
+```
+
+- Empty fields are omitted. `media_type` is the referral's own media kind (`image` or `video`), not the message's `media_type`. Each field is trimmed and capped at 1024 bytes.
+- Thumbnails and other referral media bytes are deliberately not stored.
+- `messages show` prints an `Ad referral:` line with the referral title (or source URL/ID).
+- Sync webhooks carry the same object as `AdReferral`; see [sync](sync.md#webhook-payloads).
+- Messages synced before this column existed have no referral; a live or history re-ingestion fills it in.
+
 ## Starred
 
 - `messages starred` lists starred messages ordered by star time when app-state events provide it; history-imported rows fall back to message time.
