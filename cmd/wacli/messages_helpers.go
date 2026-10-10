@@ -145,6 +145,12 @@ func getMessageByChatFilter(db *store.DB, chatJIDs []string, id string) (store.M
 	for _, chatJID := range chatJIDs {
 		m, err := db.GetMessage(chatJID, id)
 		if err == nil {
+			// GetMessage reads its own columns, so the delivery state has to be
+			// filled in here for `show` to agree with `list`.
+			if counts, cerr := db.MessageReceipts(m.ChatJID, m.MsgID); cerr == nil {
+				m.DeliveredTo = counts.Delivered
+				m.ReadBy = counts.Read
+			}
 			return m, nil
 		}
 		if !isNoRows(err) {
