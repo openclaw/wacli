@@ -531,6 +531,18 @@ func (c *Client) SendPresence(ctx context.Context, presence types.Presence) erro
 	return cli.SendPresence(ctx, presence)
 }
 
+// SubscribePresence asks WhatsApp to send a user's presence (online, last
+// seen) to this connection. The subscription ends with the connection.
+func (c *Client) SubscribePresence(ctx context.Context, jid types.JID) error {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || !cli.IsConnected() {
+		return fmt.Errorf("not connected")
+	}
+	return cli.SubscribePresence(ctx, jid)
+}
+
 func (c *Client) Logout(ctx context.Context) error {
 	c.mu.Lock()
 	cli := c.client

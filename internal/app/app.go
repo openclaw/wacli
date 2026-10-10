@@ -86,6 +86,7 @@ type WAClient interface {
 
 	SendChatPresence(ctx context.Context, jid types.JID, state types.ChatPresence, media types.ChatPresenceMedia) error
 	SendPresence(ctx context.Context, presence types.Presence) error
+	SubscribePresence(ctx context.Context, jid types.JID) error
 	ParseWebMessage(chatJID types.JID, webMsg *waWeb.WebMessageInfo) (*events.Message, error)
 	DecryptReaction(ctx context.Context, reaction *events.Message) (*waProto.ReactionMessage, error)
 	SetManualHistorySyncDownload(enabled bool)
@@ -135,6 +136,7 @@ type App struct {
 	manualFetches           map[string]int
 	heartbeatLast           atomic.Int64
 	groupInfo               groupInfoCache
+	presenceWatch           presenceWatch
 }
 
 func New(opts Options) (*App, error) {

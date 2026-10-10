@@ -64,6 +64,7 @@ type sendDelegateRequest struct {
 	Selectable           int      `json:"selectable,omitempty"`
 	PresenceState        string   `json:"presence_state,omitempty"`
 	PresenceMedia        string   `json:"presence_media,omitempty"`
+	PresenceWaitMS       int64    `json:"presence_wait_ms,omitempty"`
 	Read                 *bool    `json:"read,omitempty"`
 	Receipts             bool     `json:"receipts,omitempty"`
 	Phones               []string `json:"phones,omitempty"`
@@ -93,6 +94,7 @@ type sendDelegateResponse struct {
 	Receipts       *int                 `json:"receipts,omitempty"`
 	ReceiptType    string               `json:"receipt_type,omitempty"`
 	Contacts       []contactCheckResult `json:"contacts,omitempty"`
+	Presence       *app.PresenceState   `json:"presence,omitempty"`
 }
 
 type sendDelegateExecutor func(context.Context, sendDelegateRequest) (sendDelegateResponse, error)
@@ -261,6 +263,17 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDele
 		writeDelegateResult(conn, requestCtx, req, resp, err)
 		return
 	}
+	if req.Kind == presenceSubscribeKind {
+		// Watching presence puts nothing in a chat, and it may wait for an
+		// answer: it neither queues behind sends nor takes a paced send slot,
+		// but it keeps the same budget.
+		resp, err := execute(requestCtx, req)
+		if err != nil {
+			resp = sendDelegateResponse{OK: false, Error: err.Error()}
+		}
+		_ = json.NewEncoder(conn).Encode(resp)
+		return
+	}
 
 	refuse := func() {
 		msg := "request timed out in the send queue before dispatch; it was not sent"
@@ -345,6 +358,8 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 		return executeDelegatedButtonListSelect(ctx, a, req)
 	case "presence":
 		return executeDelegatedPresence(ctx, a, req)
+	case presenceSubscribeKind:
+		return executeDelegatedPresenceSubscribe(ctx, a, req)
 	case "edit":
 		return executeDelegatedEdit(ctx, a, req)
 	case markReadKind:
@@ -452,6 +467,25 @@ func executeDelegatedPresence(ctx context.Context, a *app.App, req sendDelegateR
 		return sendDelegateResponse{}, err
 	}
 	return sendDelegateResponse{OK: true, Sent: true, To: toJID.String()}, nil
+}
+
+type delegatedPresenceWatchApp interface {
+	WatchPresence(context.Context, types.JID, time.Duration) (*app.PresenceState, error)
+}
+
+func executeDelegatedPresenceSubscribe(ctx context.Context, a delegatedPresenceWatchApp, req sendDelegateRequest) (sendDelegateResponse, error) {
+	if req.PresenceWaitMS < 0 {
+		return sendDelegateResponse{}, fmt.Errorf("presence wait must be >= 0")
+	}
+	toJID, err := wa.ParseUserOrJID(req.To)
+	if err != nil {
+		return sendDelegateResponse{}, err
+	}
+	state, err := a.WatchPresence(ctx, toJID, time.Duration(req.PresenceWaitMS)*time.Millisecond)
+	if err != nil {
+		return sendDelegateResponse{}, err
+	}
+	return sendDelegateResponse{OK: true, To: toJID.String(), Presence: state}, nil
 }
 
 func executeDelegatedEdit(ctx context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {

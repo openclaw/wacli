@@ -133,6 +133,17 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 					enqueueWebhook(job)
 				}
 			}
+			if a.eventsEnabled() {
+				if data, ok := a.chatPresenceEventData(ctx, v); ok {
+					a.emitEvent("chat_presence", data)
+				}
+			}
+		case *events.Presence:
+			// Only users this device subscribed to (presence subscribe) send
+			// these. Like typing, they must not keep an idle-exit sync alive.
+			if a.eventsEnabled() {
+				a.emitEvent("presence", a.presenceEventData(ctx, v))
+			}
 		case *events.GroupInfo:
 			// The group changed: its next message asks for its info again.
 			a.forgetGroupInfo(v.JID)
@@ -179,6 +190,9 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 			ps.mu.Lock()
 			if !ps.cleanupStarted && opts.PresenceMode.SendsAvailablePresence() {
 				a.sendPresenceBounded(types.PresenceAvailable)
+				// Presence subscriptions end with the connection that made
+				// them. Started under ps.mu, so the cleanup stops every one.
+				a.renewPresenceWatches(ctx)
 			}
 			ps.mu.Unlock()
 		case *events.KeepAliveTimeout:

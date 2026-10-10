@@ -57,6 +57,9 @@ wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--stale-t
 - `--events` emits one NDJSON lifecycle event per stderr line for machine consumers. Routine human progress/status lines, interrupt prompts, and command errors are emitted as events while events are enabled.
 - `offline_sync_preview` reports the server's announced reconnect backlog with `total`, `messages`, `receipts`, `notifications`, and `app_data_changes`; `offline_sync_completed` reports the server's final `count`. Without `--events`, both print as status lines. Completion can arrive without a preview, including when there is no backlog.
 - These are server replay signals on stderr. Webhooks use a separate background queue, so completion does not mean queued HTTP deliveries have finished. Storage failures or webhook drops can also make delivery counts differ from the announced counts. Do not use these signals to classify individual webhook messages as replayed or live. Webhook payloads keep their existing shape.
+- With `--events`, typing and presence are reported too, under the JIDs the store uses for chats (a LID is mapped to the phone number when the mapping is known). Neither keeps an idle `--once` sync alive, and neither is printed without `--events`.
+  - `chat_presence` has `chat_jid`, `sender_jid`, `state` (`composing` or `paused`) and `media` (`audio` while a voice note is being recorded, otherwise empty). WhatsApp sends these only while sync shows as available (`--presence-mode normal`).
+  - `presence` has `jid`, `online` and, when WhatsApp shares it, `last_seen` (RFC 3339, UTC). It arrives only for contacts watched with [`presence subscribe`](presence.md), which the running sync keeps watching across reconnects (it asks again after each one); a `--presence-mode quiet` sync refuses the subscription.
 
 ## Webhook payloads
 
