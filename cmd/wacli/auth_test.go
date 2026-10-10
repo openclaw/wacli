@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"database/sql"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -309,6 +310,60 @@ func TestAuthCommandExposesQRFormat(t *testing.T) {
 	}
 	if cmd.Flags().Lookup("phone") == nil {
 		t.Fatal("expected --phone flag")
+	}
+}
+
+func TestValidateAuthOptionsHistoryLimits(t *testing.T) {
+	tests := []struct {
+		name        string
+		days        int
+		perChat     int
+		full        bool
+		sizeMB      int
+		wantErr     string
+		wantDays    uint32
+		wantPerChat uint32
+		wantSizeMB  uint32
+	}{
+		{name: "unset stays unlimited"},
+		{name: "kept as asked", days: 3, perChat: 50, wantDays: 3, wantPerChat: 50},
+		{name: "full history", full: true, days: 3650, wantDays: 3650},
+		{name: "full history with a size", full: true, sizeMB: 2048, wantSizeMB: 2048},
+		{name: "size without full history", sizeMB: 2048, wantErr: "--history-size-mb needs --full-history"},
+		{name: "negative size", full: true, sizeMB: -1, wantErr: "--history-size-mb cannot be negative"},
+		{name: "size above the field", full: true, sizeMB: math.MaxUint32 + 1, wantErr: "--history-size-mb cannot be above 4294967295"},
+		{name: "uint32 maximum", days: math.MaxUint32, wantDays: math.MaxUint32},
+		{name: "negative days", days: -1, wantErr: "--history-days cannot be negative"},
+		{name: "negative per chat", perChat: -1, wantErr: "--history-max-per-chat cannot be negative"},
+		{name: "days above the field", days: math.MaxUint32 + 1, wantErr: "--history-days cannot be above 4294967295"},
+		{name: "per chat above the field", perChat: math.MaxUint32 + 1, wantErr: "--history-max-per-chat cannot be above 4294967295"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := authOptions{qrFormat: "terminal", historyDays: tc.days, historyPerChat: tc.perChat, fullHistory: tc.full, historySizeMB: tc.sizeMB}
+			validated, err := validateAuthOptions(&rootFlags{}, opts)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("validateAuthOptions error = %v, want %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("validateAuthOptions: %v", err)
+			}
+			if validated.historyLimits.Days != tc.wantDays {
+				t.Fatalf("Days = %d, want %d", validated.historyLimits.Days, tc.wantDays)
+			}
+			if validated.historyLimits.MaxPerChat != tc.wantPerChat {
+				t.Fatalf("MaxPerChat = %d, want %d", validated.historyLimits.MaxPerChat, tc.wantPerChat)
+			}
+			if validated.historyLimits.Full != tc.full {
+				t.Fatalf("Full = %v, want %v", validated.historyLimits.Full, tc.full)
+			}
+			if validated.historyLimits.SizeMB != tc.wantSizeMB {
+				t.Fatalf("SizeMB = %d, want %d", validated.historyLimits.SizeMB, tc.wantSizeMB)
+			}
+		})
 	}
 }
 
