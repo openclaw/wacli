@@ -2,16 +2,21 @@
 
 ## Unreleased
 
-- Builds: use Go 1.27.2 for its standard-library security fixes across development, CI, Docker, and release verification, retaining the Go 1.27.0 source minimum.
-- CI: attribute vulnerability findings to the vulnerable module rather than its callers, preserving standard-library failures and separate third-party notices.
-- Dependencies: refresh whatsmeow, eligible Go modules, and pnpm 12.10.1 after the 48-hour cooldown; retain Go and Node minimums.
+## 0.21.0 - 2026-10-11
+
+**Highlights:** opt-in full-history pairing, live presence events, media retry filters, and Go standard-library security fixes.
+
 - Auth: add opt-in full-history pairing and history day, per-chat, and size limits, with validation before creating named accounts. Thanks @zarmat99 (#442, #461).
 - Presence: add contact subscriptions and presence/typing events, with bounded reconnect renewal and sync delegation. Thanks @zarmat99 (#451).
 - Messages: retain per-recipient delivery/read receipts and expose counts in message queries, preserving identities through phone/LID reconciliation. Thanks @zarmat99 (#440).
-- Docs: explain read-only MCP wrappers, command mapping, store locks, media output, and local health checks. Thanks @wacli-me (#434).
-- Contacts: delegate `contacts check` to a running `sync --follow` process so registration lookups no longer fail on the store lock. Thanks @ceifa (#453, #425).
 - Media: add `media retry --type` to recover one kind of media, including voice notes with `--type audio`, while applying chat/date filters and row limits to matching messages. Thanks @zarmat99 (#450).
+- Contacts: delegate `contacts check` to a running `sync --follow` process so registration lookups no longer fail on the store lock. Thanks @ceifa (#453, #425).
+- Builds: use Go 1.27.2 for its standard-library security fixes across development, CI, Docker, and release verification, retaining the Go 1.27.0 source minimum.
+- CI: attribute vulnerability findings to the vulnerable module rather than its callers, preserving standard-library failures and separate third-party notices.
+- Dependencies: refresh whatsmeow, eligible Go modules, and pnpm 12.10.1 after the 48-hour cooldown; retain Go and Node minimums.
 - Dependencies: update pnpm to 12.9.1, the dead-code checker to x/tools 0.51.0, and PostgreSQL and GraphQL tooling parsers after the 48-hour cooldown, preserving Go and Node minimums.
+- Docs: explain read-only MCP wrappers, command mapping, store locks, media output, and local health checks. Thanks @wacli-me (#434).
+- Release: verify the macOS 15.0 minimum on every Darwin binary slice before signing and publication.
 
 ## 0.20.0 - 2026-09-30
 

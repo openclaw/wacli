@@ -20,6 +20,8 @@ builds:
     goarch:
       - amd64
       - arm64
+    hooks:
+      post: bash scripts/check-macos-minimum.sh "{{ .Path }}"
 
 archives:
   - id: default
