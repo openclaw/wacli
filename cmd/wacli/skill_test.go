@@ -108,12 +108,56 @@ func TestSkillInstallWritesSharedSkillAndClaudeLink(t *testing.T) {
 	}
 
 	linkPath := filepath.Join(home, ".claude", "skills", "wacli")
+	// In the usual layout the link stays relative so it survives a moved home.
+	wantTarget := filepath.Join("..", "..", ".agents", "skills", "wacli")
 	target, err := os.Readlink(linkPath)
-	if err != nil || target != claudeSkillLinkTarget {
-		t.Fatalf("Claude link target = %q, %v; want %q", target, err, claudeSkillLinkTarget)
+	if err != nil || target != wantTarget {
+		t.Fatalf("Claude link target = %q, %v; want %q", target, err, wantTarget)
 	}
 	if got := readFileString(t, filepath.Join(linkPath, skillFilename)); got != want {
 		t.Fatalf("SKILL.md through Claude link differs from embedded skill")
+	}
+}
+
+// ~/.claude is often a symlink to a directory elsewhere (dotfiles repo,
+// another disk). A relative link target resolves against the link's real
+// parent, so a fixed "../../.agents/skills/wacli" would escape the home
+// directory and dangle.
+func TestSkillInstallLinksThroughRedirectedClaudeDir(t *testing.T) {
+	home := setSkillHome(t)
+	realClaude := filepath.Join(t.TempDir(), "mnt", "claude")
+	if err := os.MkdirAll(realClaude, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(realClaude, filepath.Join(home, ".claude")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	// The second run must recognise the link it wrote as its own.
+	for i := 0; i < 2; i++ {
+		res, err := installSkill()
+		if err != nil {
+			t.Fatalf("installSkill (run %d): %v", i+1, err)
+		}
+		if res.ClaudeMode != "symlink" {
+			t.Fatalf("claude_mode = %q, want symlink", res.ClaudeMode)
+		}
+	}
+
+	linkPath := filepath.Join(realClaude, "skills", "wacli")
+	resolved, err := filepath.EvalSymlinks(linkPath)
+	if err != nil {
+		t.Fatalf("Claude link does not resolve: %v", err)
+	}
+	wantDir, err := filepath.EvalSymlinks(filepath.Join(home, ".agents", "skills", "wacli"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != wantDir {
+		t.Fatalf("Claude link resolves to %q, want %q", resolved, wantDir)
+	}
+	if got := readFileString(t, filepath.Join(home, ".claude", "skills", "wacli", skillFilename)); got != embeddedSkillString(t) {
+		t.Fatalf("SKILL.md through redirected Claude link differs from embedded skill")
 	}
 }
 

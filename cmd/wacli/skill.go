@@ -18,10 +18,6 @@ const (
 	skillMarkerFile = ".managed-by-wacli"
 )
 
-// claudeSkillLinkTarget is relative so the link survives a moved home
-// directory. A link with any other target was not written by wacli.
-var claudeSkillLinkTarget = filepath.Join("..", "..", ".agents", "skills", skillName)
-
 // makeSkillSymlink is a seam so tests can exercise the copy fallback.
 var makeSkillSymlink = os.Symlink
 
@@ -110,7 +106,7 @@ func installSkill() (skillInstallResult, error) {
 		return res, nil
 	}
 	linkPath := filepath.Join(claudeDir, "skills", skillName)
-	mode, err := linkClaudeSkill(linkPath, data)
+	mode, err := linkClaudeSkill(linkPath, skillDir, data)
 	if err != nil {
 		return res, err
 	}
@@ -180,17 +176,27 @@ func writeSkillFile(path string, data []byte) error {
 	return nil
 }
 
-// linkClaudeSkill points ~/.claude/skills/wacli at the shared skill, falling
-// back to a managed copy where symlinks are unavailable. It reports "symlink"
-// or "copy".
-func linkClaudeSkill(linkPath string, data []byte) (string, error) {
+// linkClaudeSkill points ~/.claude/skills/wacli at the shared skill in
+// skillDir, falling back to a managed copy where symlinks are unavailable. It
+// reports "symlink" or "copy".
+func linkClaudeSkill(linkPath, skillDir string, data []byte) (string, error) {
+	if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
+		return "", fmt.Errorf("create Claude skills directory: %w", err)
+	}
+	realSkillDir, err := filepath.EvalSymlinks(skillDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve %s: %w", skillDir, err)
+	}
+
 	info, err := os.Lstat(linkPath)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 	case err != nil:
 		return "", fmt.Errorf("inspect %s: %w", linkPath, err)
 	case info.Mode()&os.ModeSymlink != 0:
-		if target, err := os.Readlink(linkPath); err == nil && target == claudeSkillLinkTarget {
+		// A link wacli wrote resolves to the shared skill; anything else is
+		// someone else's.
+		if resolved, err := filepath.EvalSymlinks(linkPath); err == nil && resolved == realSkillDir {
 			return "symlink", nil
 		}
 		return "", unmanagedSkillPathError(linkPath)
@@ -201,16 +207,37 @@ func linkClaudeSkill(linkPath string, data []byte) (string, error) {
 		return "", unmanagedSkillPathError(linkPath)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
-		return "", fmt.Errorf("create Claude skills directory: %w", err)
+	target, err := claudeSkillLinkTarget(filepath.Dir(linkPath), realSkillDir)
+	if err != nil {
+		return "", err
 	}
-	if err := makeSkillSymlink(claudeSkillLinkTarget, linkPath); err == nil {
+	if err := makeSkillSymlink(target, linkPath); err == nil {
 		return "symlink", nil
 	}
 	if err := writeManagedSkill(linkPath, data); err != nil {
 		return "", err
 	}
 	return "copy", nil
+}
+
+// claudeSkillLinkTarget returns the symlink target for a link created in
+// linkDir that must reach realSkillDir. A relative target is resolved by the
+// OS against the link's real parent, so it is computed from linkDir's resolved
+// path: ~/.claude may itself be a symlink (e.g. to /mnt/claude), and a fixed
+// "../../.agents/skills/wacli" would then point outside the home directory.
+// In the usual layout this is still "../../.agents/skills/wacli", which
+// survives a moved home directory. When no relative path exists (different
+// Windows volumes), the absolute path is used.
+func claudeSkillLinkTarget(linkDir, realSkillDir string) (string, error) {
+	realLinkDir, err := filepath.EvalSymlinks(linkDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve %s: %w", linkDir, err)
+	}
+	rel, err := filepath.Rel(realLinkDir, realSkillDir)
+	if err != nil {
+		return realSkillDir, nil
+	}
+	return rel, nil
 }
 
 func unmanagedSkillPathError(path string) error {
