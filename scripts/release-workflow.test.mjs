@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import {
   cpSync,
   existsSync,
@@ -45,6 +46,37 @@ test('shared workflow owns universal assembly and native verification', () => {
   assert.doesNotMatch(darwinConfig, /^universal_binaries:/m);
   assert.equal(existsSync(`${root}/.github/workflows/release-verify.yml`), false);
   assert.doesNotMatch(releaseDocs, /release-local\.mjs|NOTARYTOOL_KEYCHAIN_PROFILE|confirm-gatekeeper-vm/);
+});
+
+test('Darwin builds reject a missing or changed minimum on any slice', (t) => {
+  assert.match(darwinConfig, /post: bash scripts\/check-macos-minimum\.sh "\{\{ \.Path \}\}"/);
+  const fixture = realpathSync(mkdtempSync(path.join(tmpdir(), 'wacli-macos-minimum-')));
+  t.after(() => rmSync(fixture, { recursive: true, force: true }));
+  writeFileSync(path.join(fixture, 'lipo'), '#!/bin/sh\nprintf "%s\\n" "$TEST_ARCHS"\n', { mode: 0o755 });
+  writeFileSync(path.join(fixture, 'otool'), `#!/bin/sh
+if [ "$2" = arm64 ]; then minimum=$TEST_ARM_MINIMUM; else minimum=15.0; fi
+printf '      cmd LC_BUILD_VERSION\\n  cmdsize 32\\n platform 1\\n'
+if [ -n "$minimum" ]; then printf '    minos %s\\n' "$minimum"; fi
+printf '      sdk 26.0\\n'
+`, { mode: 0o755 });
+  const check = (minimum, architectures = 'x86_64 arm64') => spawnSync('bash', [
+    path.join(root, 'scripts/check-macos-minimum.sh'), 'synthetic-binary',
+  ], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PATH: `${fixture}${path.delimiter}${process.env.PATH}`,
+      TEST_ARCHS: architectures,
+      TEST_ARM_MINIMUM: minimum,
+    },
+  });
+  assert.equal(check('15.0').status, 0);
+  for (const minimum of ['26.0', '14.0', '']) {
+    const result = check(minimum);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Expected macOS 15\.0 minimum.*arm64/);
+  }
+  assert.notEqual(check('15.0', '').status, 0);
 });
 
 test('Darwin preparation requires a literally matching dated changelog heading', async (t) => {
