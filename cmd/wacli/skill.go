@@ -64,12 +64,13 @@ func newSkillInstallCmd(flags *rootFlags) *cobra.Command {
 			if flags.asJSON {
 				return out.WriteJSON(os.Stdout, res)
 			}
-			fmt.Fprintf(os.Stdout, "Installed skill to %s\n", res.SkillPath)
+			// Human hints go to stderr; stdout carries only data.
+			fmt.Fprintf(os.Stderr, "Installed skill to %s\n", sanitize(res.SkillPath))
 			switch res.ClaudeMode {
 			case "symlink":
-				fmt.Fprintf(os.Stdout, "Linked %s for Claude Code\n", res.ClaudePath)
+				fmt.Fprintf(os.Stderr, "Linked %s for Claude Code\n", sanitize(res.ClaudePath))
 			case "copy":
-				fmt.Fprintf(os.Stdout, "Copied skill to %s for Claude Code (symlinks unavailable)\n", res.ClaudePath)
+				fmt.Fprintf(os.Stderr, "Copied skill to %s for Claude Code (symlinks unavailable)\n", sanitize(res.ClaudePath))
 			}
 			return nil
 		},

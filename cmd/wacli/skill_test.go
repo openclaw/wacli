@@ -161,6 +161,32 @@ func TestSkillInstallLinksThroughRedirectedClaudeDir(t *testing.T) {
 	}
 }
 
+func TestSkillInstallHintsGoToStderr(t *testing.T) {
+	home := setSkillHome(t)
+	if err := os.Mkdir(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var stdout string
+	stderr := captureRootStderr(t, func() {
+		stdout = captureRootStdout(t, func() {
+			if err := execute([]string{"skill", "install"}); err != nil {
+				t.Fatalf("execute skill install: %v", err)
+			}
+		})
+	})
+	if stdout != "" {
+		t.Fatalf("skill install wrote to stdout: %q", stdout)
+	}
+	for _, want := range []string{
+		"Installed skill to " + filepath.Join(home, ".agents", "skills", "wacli", skillFilename),
+		"Linked " + filepath.Join(home, ".claude", "skills", "wacli") + " for Claude Code",
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("stderr = %q, want %q", stderr, want)
+		}
+	}
+}
+
 func TestSkillInstallSkipsClaudeWhenAbsent(t *testing.T) {
 	home := setSkillHome(t)
 	res, err := installSkill()
