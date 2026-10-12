@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"image/color"
 	"image/draw"
 	"image/jpeg"
 	"os"
@@ -41,13 +42,9 @@ func newGroupsPhotoSetCmd(flags *rootFlags) *cobra.Command {
 			if err := flags.requireWritable(); err != nil {
 				return err
 			}
-			imgBytes, err := readAsJPEG(file)
+			imgBytes, err := readAsSquareJPEG(file)
 			if err != nil {
 				return fmt.Errorf("read image: %w", err)
-			}
-			imgBytes, err = cropSquareJPEG(imgBytes)
-			if err != nil {
-				return fmt.Errorf("crop image: %w", err)
 			}
 			return runGroupsPhoto(flags, gjid.String(), imgBytes)
 		},
@@ -116,28 +113,49 @@ func runGroupsPhoto(flags *rootFlags, jidStr string, avatar []byte) error {
 	return nil
 }
 
-// cropSquareJPEG center-crops a JPEG to a square, since WhatsApp shows group
-// pictures as squares and rejects some other shapes.
-func cropSquareJPEG(data []byte) ([]byte, error) {
-	src, err := jpeg.Decode(bytes.NewReader(data))
+// readAsSquareJPEG reads a JPEG or PNG, center-crops it to a square (WhatsApp
+// shows group pictures as squares) before resizing it to at most 640px, so a
+// large rectangular photo keeps its resolution, and encodes it as JPEG.
+func readAsSquareJPEG(path string) ([]byte, error) {
+	data, err := readRegularFileLimited(path, profileMaxInputBytes)
 	if err != nil {
 		return nil, err
 	}
-	b := src.Bounds()
-	side := b.Dx()
-	if b.Dy() < side {
-		side = b.Dy()
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("unsupported image format: %w", err)
 	}
+	if cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width > profileMaxInputPixels/cfg.Height {
+		return nil, fmt.Errorf("image dimensions are too large")
+	}
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("unsupported image format: %w", err)
+	}
+	img = resizeIfNeeded(cropSquare(img), profileMaxPx)
+
+	// Composite onto white background to flatten any alpha channel.
+	bounds := img.Bounds()
+	rgba := image.NewRGBA(bounds)
+	draw.Draw(rgba, bounds, &image.Uniform{color.White}, image.Point{}, draw.Src)
+	draw.Draw(rgba, bounds, img, bounds.Min, draw.Over)
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, rgba, &jpeg.Options{Quality: 85}); err != nil {
+		return nil, fmt.Errorf("encode jpeg: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
+// cropSquare returns the centered square of src.
+func cropSquare(src image.Image) image.Image {
+	b := src.Bounds()
+	side := min(b.Dx(), b.Dy())
 	if b.Dx() == side && b.Dy() == side {
-		return data, nil
+		return src
 	}
 	x0 := b.Min.X + (b.Dx()-side)/2
 	y0 := b.Min.Y + (b.Dy()-side)/2
 	dst := image.NewRGBA(image.Rect(0, 0, side, side))
 	draw.Draw(dst, dst.Bounds(), src, image.Pt(x0, y0), draw.Src)
-	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: 85}); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
+	return dst
 }
