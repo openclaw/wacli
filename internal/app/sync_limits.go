@@ -16,6 +16,12 @@ type syncStorageLimits struct {
 	mu                sync.Mutex
 	err               error
 	persistenceFailed atomic.Bool
+	appStatePending   atomic.Int64
+}
+
+func (l *syncStorageLimits) canRecordFreshness() bool {
+	// Completion stores any failure before reducing the pending count.
+	return l == nil || (l.appStatePending.Load() == 0 && !l.persistenceFailed.Load())
 }
 
 func (l *syncStorageLimits) StoreParsedMessage(ctx context.Context, pm wa.ParsedMessage) error {

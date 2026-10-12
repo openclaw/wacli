@@ -45,6 +45,7 @@ var schemaMigrations = []migration{
 	{version: 29, name: "message receipts", up: ensureMessageReceiptsTable},
 	{version: 30, name: "retrieval identity, revision and sync state", up: migrateRetrieval},
 	{version: 31, name: "content-free message change journal", up: migrateChanges},
+	{version: 32, name: "message receipt retrieval revisions", up: migrateReceiptRetrieval},
 }
 
 func migratePlaceholderChatActivity(d *DB) error {

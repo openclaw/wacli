@@ -47,19 +47,19 @@ func (a *App) chatWithOurself(chat types.JID) bool {
 // handleOutgoingReceiptEvent records how far a message of ours has reached,
 // one row per recipient, so a group where one member has read is not mistaken
 // for one where everybody has.
-func (a *App) handleOutgoingReceiptEvent(ctx context.Context, evt *events.Receipt) {
+func (a *App) handleOutgoingReceiptEvent(ctx context.Context, evt *events.Receipt) error {
 	if evt == nil || evt.Chat.IsEmpty() || len(evt.MessageIDs) == 0 {
-		return
+		return nil
 	}
 	// A receipt we sent ourselves usually reports what we read on another
 	// device, which says nothing about our own messages. In our own chat it is
 	// the only report there is: the recipient is another of our devices.
 	if evt.IsFromMe && !a.chatWithOurself(evt.Chat) {
-		return
+		return nil
 	}
 	status, ok := receiptStatus(evt.Type)
 	if !ok {
-		return
+		return nil
 	}
 	chat := canonicalJIDString(a.canonicalStoreJID(ctx, evt.Chat))
 	recipient := evt.Sender
@@ -79,7 +79,8 @@ func (a *App) handleOutgoingReceiptEvent(ctx context.Context, evt *events.Receip
 				fmt.Sprintf("warning: failed to store a %s receipt for chat %s: %v", status, chat, err),
 				map[string]any{"chat_jid": chat, "status": status, "error": err.Error()},
 			)
-			return
+			return err
 		}
 	}
+	return nil
 }

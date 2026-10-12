@@ -440,7 +440,7 @@ func (a *App) completeLocalAppStateWrite(ctx context.Context, pending *pendingLo
 func (a *App) persistFetchedAppStateEvents(ctx context.Context, eventsToPersist []any, tracker *appStatePersistenceTracker) error {
 	tracker.begin()
 	for _, evt := range eventsToPersist {
-		a.handleAppStatePersistenceEvent(ctx, evt, tracker)
+		a.persistAppStateEvent(ctx, evt, tracker)
 	}
 	return tracker.end()
 }

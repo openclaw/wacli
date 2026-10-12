@@ -43,6 +43,24 @@ func migrateRetrieval(d *DB) error {
 	return tx.Commit()
 }
 
+// Receipt counts are part of exported messages. Add their revision triggers
+// separately so archives that already applied retrieval migration 30 acquire
+// invalidation without resetting identity or touching message journal state.
+func migrateReceiptRetrieval(d *DB) error {
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, op := range []string{"INSERT", "UPDATE", "DELETE"} {
+		name := "retrieval_message_receipts_" + strings.ToLower(op)
+		if _, err = tx.Exec(`CREATE TRIGGER IF NOT EXISTS ` + name + ` AFTER ` + op + ` ON message_receipts BEGIN UPDATE retrieval_state SET revision=revision+1 WHERE id=1; END`); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 func (d *DB) RecordSuccessfulSync(t time.Time) error {
 	_, err := d.sql.Exec(`UPDATE retrieval_state SET last_sync_at=? WHERE id=1`, t.UTC().Unix())
 	return err

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/openclaw/wacli/internal/store"
+	"go.mau.fi/whatsmeow/appstate"
 	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
@@ -173,10 +174,200 @@ func retrievalSQL(t *testing.T, dir, query string, args ...any) {
 		t.Fatal(e)
 	}
 }
+
+// Receipt counts are exported data, so a receipt arriving between pages must
+// invalidate the old snapshot in both fresh and previously migrated stores.
+func retrievalReceiptRevisions(t *testing.T, parent *retrievalCLI) {
+	for _, migrated := range []bool{false, true} {
+		t.Run(fmt.Sprintf("receipt-revision/migrated=%v", migrated), func(t *testing.T) {
+			h := &retrievalCLI{t: t, bin: parent.bin}
+			t.Cleanup(func() { parent.log.Write(h.log.Bytes()) })
+			a := newTestApp(t)
+			retrievalSeed(t, a, 6)
+			if err := a.db.UpsertMessage(store.UpsertMessageParams{ChatJID: "123@s.whatsapp.net", MsgID: "m000", Timestamp: time.Unix(1700000000, 0), FromMe: true, Text: "needle"}); err != nil {
+				t.Fatal(err)
+			}
+			a.Close()
+			if migrated {
+				fixture := `DROP TRIGGER IF EXISTS retrieval_message_receipts_insert;
+DROP TRIGGER IF EXISTS retrieval_message_receipts_update;
+DROP TRIGGER IF EXISTS retrieval_message_receipts_delete;
+DELETE FROM schema_migrations WHERE version=32;`
+				fmt.Fprintf(&h.log, "pre-receipt-revision fixture SQL: %s\n", fixture)
+				retrievalSQL(t, a.StoreDir(), fixture)
+			}
+			page := h.run(a.StoreDir(), "", "messages", "list", "--limit", "1")
+			cursor := page["page"].(map[string]any)["next_cursor"].(string)
+			continuation := h.run(a.StoreDir(), "", "messages", "list", "--limit", "1", "--cursor", cursor)
+			checkpoint := h.run(a.StoreDir(), "", "messages", "changes", "--checkpoint")["next_checkpoint"].(string)
+			h.write(a.StoreDir(), "doctor")
+			h.write(a.StoreDir(), "doctor")
+			if !reflect.DeepEqual(continuation, h.run(a.StoreDir(), "", "messages", "list", "--limit", "1", "--cursor", cursor)) {
+				t.Fatal("receipt trigger migration changed existing cursor or store identity")
+			}
+			writer, err := store.Open(filepath.Join(a.StoreDir(), "wacli.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer writer.Close()
+			for i, command := range [][]string{{"messages", "list"}, {"messages", "search", "needle"}, {"messages", "export"}} {
+				old := h.run(a.StoreDir(), "", append(command, "--limit", "1")...)["page"].(map[string]any)["next_cursor"].(string)
+				switch i {
+				case 0:
+					err = writer.UpsertMessageReceipt("123@s.whatsapp.net", "m000", "123@s.whatsapp.net", "delivered", time.Unix(1700000200, 0))
+				case 1:
+					err = writer.UpsertMessageReceipt("123@s.whatsapp.net", "m000", "123@s.whatsapp.net", "read", time.Unix(1700000201, 0))
+				case 2:
+					retrievalSQL(t, a.StoreDir(), `DELETE FROM message_receipts WHERE msg_id='m000'`)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				h.run(a.StoreDir(), "changed", append(command, "--limit", "1", "--cursor", old)...)
+			}
+			if got := h.run(a.StoreDir(), "", "messages", "changes", "--checkpoint")["next_checkpoint"]; got != checkpoint {
+				t.Fatal("receipt migration or updates changed journal checkpoint")
+			}
+			if changes := retrievalChanges(h.run(a.StoreDir(), "", "messages", "changes", "--since", checkpoint)); len(changes) != 0 {
+				t.Fatalf("receipt migration reseeded or added message changes: %v", changes)
+			}
+		})
+	}
+}
+
+// The CLI cannot inject WhatsApp replay faults. Drive the existing real Sync
+// boundary with fake transport and a real database fault, then read via CLI.
+func retrievalAppStateFreshness(t *testing.T, parent *retrievalCLI) {
+	for _, completion := range []struct{ offline, queued bool }{{}, {offline: true}, {offline: true, queued: true}} {
+		offline, queued := completion.offline, completion.queued
+		t.Run(fmt.Sprintf("app-state-freshness/offline=%v/queued=%v", offline, queued), func(t *testing.T) {
+			h := &retrievalCLI{t: t, bin: parent.bin}
+			t.Cleanup(func() { parent.log.Write(h.log.Bytes()) })
+			a := newTestApp(t)
+			retrievalSeed(t, a, 1)
+			fault := `CREATE TRIGGER fixture_refuse_delete BEFORE UPDATE ON messages WHEN new.deleted_for_me=1 BEGIN SELECT RAISE(ABORT,'fixture DeleteForMe storage fault');END`
+			fmt.Fprintf(&h.log, "app-state fault SQL: %s; offline completion=%v\n", fault, offline)
+			retrievalSQL(t, a.StoreDir(), fault)
+			f := newFakeWA()
+			a.wa = f
+			deliver := func() {
+				f.emit(&events.DeleteForMe{ChatJID: types.NewJID("123", types.DefaultUserServer), MessageID: "m000", Timestamp: time.Unix(1700000200, 0)})
+				if offline {
+					f.emit(&events.OfflineSyncCompleted{Count: 1})
+					if got, e := a.db.LastSuccessfulSync(); e != nil || got != nil {
+						t.Errorf("failed live deletion established offline freshness: %v %v", got, e)
+					}
+				}
+			}
+			if queued {
+				if _, err := a.db.MarkAppStateRecoveryGeneration(string(appstate.WAPatchRegularHigh)); err != nil {
+					t.Fatal(err)
+				}
+				// A live event can arrive while a full replay owns an earlier
+				// persistence ticket. Offline completion cannot certify pending work.
+				f.appStateFetchEvent = func(name string, _, _ bool) any {
+					if name == string(appstate.WAPatchRegularHigh) {
+						deliver()
+					}
+					return nil
+				}
+			}
+			_, err := a.Sync(context.Background(), SyncOptions{Mode: SyncModeOnce, IdleExit: time.Millisecond, AfterConnect: func(context.Context) error {
+				if !queued {
+					deliver()
+				}
+				return nil
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ids := retrievalIDs(h.run(a.StoreDir(), "", "messages", "list")); !reflect.DeepEqual(ids, []string{"m000"}) {
+				t.Fatalf("fault did not preserve undeleted message: %v", ids)
+			}
+			if required, e := a.db.AppStateRecoveryRequired(string(appstate.WAPatchRegularHigh)); e != nil || !required {
+				t.Errorf("failed live deletion lost recovery intent: %v %v", required, e)
+			}
+			if source := h.run(a.StoreDir(), "", "messages", "list")["source"].(map[string]any); source["last_sync_at"] != nil {
+				t.Errorf("failed live deletion established idle freshness: %v", source["last_sync_at"])
+			}
+			// Removing the fault and replaying through a later sync must recover
+			// the deletion, clear its intent and establish successful freshness.
+			retrievalSQL(t, a.StoreDir(), `DROP TRIGGER fixture_refuse_delete`)
+			f = newFakeWA()
+			f.appStateFetchEvent = func(name string, _, _ bool) any {
+				if name == string(appstate.WAPatchRegularHigh) {
+					return &events.DeleteForMe{ChatJID: types.NewJID("123", types.DefaultUserServer), MessageID: "m000", Timestamp: time.Unix(1700000200, 0)}
+				}
+				return nil
+			}
+			a.wa = f
+			if _, err = a.Sync(context.Background(), SyncOptions{Mode: SyncModeOnce, IdleExit: time.Millisecond}); err != nil {
+				t.Fatal(err)
+			}
+			if ids := retrievalIDs(h.run(a.StoreDir(), "", "messages", "list")); len(ids) != 0 {
+				t.Errorf("startup replay did not recover deletion: %v", ids)
+			}
+			if required, e := a.db.AppStateRecoveryRequired(string(appstate.WAPatchRegularHigh)); e != nil || required {
+				t.Errorf("successful startup replay retained recovery intent: %v %v", required, e)
+			}
+			if source := h.run(a.StoreDir(), "", "messages", "list")["source"].(map[string]any); source["last_sync_at"] == nil {
+				t.Error("successful startup replay did not establish freshness")
+			}
+		})
+	}
+}
+
+func retrievalReceiptFreshness(t *testing.T, parent *retrievalCLI) {
+	for _, offline := range []bool{false, true} {
+		t.Run(fmt.Sprintf("receipt-freshness/offline=%v", offline), func(t *testing.T) {
+			h := &retrievalCLI{t: t, bin: parent.bin}
+			t.Cleanup(func() { parent.log.Write(h.log.Bytes()) })
+			a := newTestApp(t)
+			retrievalSeed(t, a, 1)
+			fault := `UPDATE messages SET from_me=1 WHERE msg_id='m000'; CREATE TRIGGER fixture_refuse_receipt BEFORE INSERT ON message_receipts BEGIN SELECT RAISE(ABORT,'fixture receipt storage fault');END`
+			fmt.Fprintf(&h.log, "receipt fault SQL: %s; offline completion=%v\n", fault, offline)
+			retrievalSQL(t, a.StoreDir(), fault)
+			receipt := &events.Receipt{MessageSource: types.MessageSource{Chat: types.NewJID("123", types.DefaultUserServer)}, Type: types.ReceiptTypeRead, MessageIDs: []types.MessageID{"m000"}, Timestamp: time.Unix(1700000200, 0)}
+			f := newFakeWA()
+			a.wa = f
+			if _, err := a.Sync(context.Background(), SyncOptions{Mode: SyncModeOnce, IdleExit: time.Millisecond, AfterConnect: func(context.Context) error {
+				f.emit(receipt)
+				if offline {
+					f.emit(&events.OfflineSyncCompleted{Count: 1})
+					if got, e := a.db.LastSuccessfulSync(); e != nil || got != nil {
+						t.Errorf("failed receipt write established offline freshness: %v %v", got, e)
+					}
+				}
+				return nil
+			}}); err != nil {
+				t.Fatal(err)
+			}
+			messages := h.run(a.StoreDir(), "", "messages", "list")
+			m := messages["messages"].([]any)[0].(map[string]any)
+			if m["ReadBy"] != float64(0) || m["DeliveredTo"] != float64(0) {
+				t.Fatal("receipt fault did not block the stored receipt")
+			}
+			if source := messages["source"].(map[string]any); source["last_sync_at"] != nil {
+				t.Errorf("failed receipt write established idle freshness: %v", source["last_sync_at"])
+			}
+			retrievalSQL(t, a.StoreDir(), `DROP TRIGGER fixture_refuse_receipt`)
+			retrievalSyncEvents(t, a, receipt)
+			messages = h.run(a.StoreDir(), "", "messages", "list")
+			m = messages["messages"].([]any)[0].(map[string]any)
+			if m["ReadBy"] != float64(1) || m["DeliveredTo"] != float64(1) || messages["source"].(map[string]any)["last_sync_at"] == nil {
+				t.Fatal("successful receipt retry did not establish counts and freshness")
+			}
+		})
+	}
+}
+
 func TestRetrievalStage1CLI(t *testing.T) {
 	a := newTestApp(t)
 	retrievalSeed(t, a, 37)
 	h := newRetrievalCLI(t, a)
+	retrievalReceiptRevisions(t, h)
+	retrievalAppStateFreshness(t, h)
+	retrievalReceiptFreshness(t, h)
 	for _, args := range [][]string{{"messages", "list"}, {"messages", "list", "--asc"}, {"messages", "export"}, {"messages", "search", "needle"}} {
 		full := retrievalIDs(h.run(a.StoreDir(), "", append(args, "--limit", "100")...))
 		var got []string
@@ -366,7 +557,7 @@ func retrievalUpgradeFixtures(t *testing.T, parent *retrievalCLI) {
 DROP TRIGGER changes_payload_purge;DROP TABLE message_changes;DROP TABLE change_state;`
 			}
 			if fixture == "upstream-0.21" {
-				for _, table := range []string{"chats", "contacts", "contact_aliases", "starred", "message_locations"} {
+				for _, table := range []string{"chats", "contacts", "contact_aliases", "starred", "message_locations", "message_receipts"} {
 					for _, op := range []string{"insert", "update", "delete"} {
 						query += "DROP TRIGGER IF EXISTS retrieval_" + table + "_" + op + ";"
 					}

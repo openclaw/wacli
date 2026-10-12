@@ -112,7 +112,17 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 		case *events.AppState, *events.Star, *events.DeleteForMe,
 			*events.Archive, *events.Pin, *events.Mute, *events.MarkChatAsRead:
 			lastEvent.Store(nowUTC().UnixNano())
-			a.handleAppStatePersistenceEvent(ctx, v, nil)
+			if limits != nil {
+				limits.appStatePending.Add(1)
+			}
+			a.handleAppStatePersistenceEvent(ctx, v, func(err error) {
+				if limits != nil {
+					if err != nil {
+						limits.persistenceFailed.Store(true)
+					}
+					limits.appStatePending.Add(-1)
+				}
+			})
 		case *events.HistorySync:
 			lastEvent.Store(nowUTC().UnixNano())
 			a.handleHistorySync(ctx, opts, v, messagesStored, lastEvent, enqueueMedia, limits)
@@ -123,7 +133,9 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 		case *events.Receipt:
 			lastEvent.Store(nowUTC().UnixNano())
 			a.handleReceiptPersistenceEvent(ctx, v)
-			a.handleOutgoingReceiptEvent(ctx, v)
+			if err := a.handleOutgoingReceiptEvent(ctx, v); err != nil && limits != nil {
+				limits.persistenceFailed.Store(true)
+			}
 			if opts.WebhookEvents.Enabled(SyncWebhookEventReceipt) {
 				if job, ok := newSyncWebhookReceiptEvent(v); ok {
 					enqueueWebhook(job)
@@ -183,7 +195,7 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 				"app_data_changes": v.AppDataChanges,
 			}, "\nReplaying offline backlog: %d message(s), %d event(s) total.\n", v.Messages, v.Total)
 		case *events.OfflineSyncCompleted:
-			if ctx.Err() == nil && (limits == nil || !limits.persistenceFailed.Load()) && a.wa.IsConnected() && a.wa.IsAuthed() {
+			if ctx.Err() == nil && limits.canRecordFreshness() && a.wa.IsConnected() && a.wa.IsAuthed() {
 				if err := a.db.RecordSuccessfulSync(nowUTC()); err != nil {
 					a.emitWarning("sync_state_write_failed", fmt.Sprintf("record successful sync: %v", err), nil)
 				}
@@ -294,10 +306,13 @@ func syncActivityEvent(evt any) bool {
 	}
 }
 
-func (a *App) handleAppStatePersistenceEvent(ctx context.Context, evt any, tracker *appStatePersistenceTracker) {
-	if tracker != nil {
-		a.persistAppStateEvent(ctx, evt, tracker)
-		return
+// onPersisted runs at the ordered write boundary, including when this event
+// was queued behind startup replay. Sync uses it to track freshness safely.
+func (a *App) handleAppStatePersistenceEvent(ctx context.Context, evt any, onPersisted func(error)) {
+	report := func(err error) {
+		if onPersisted != nil {
+			onPersisted(err)
+		}
 	}
 	ticket := a.appStatePersist.reserveLive()
 	markers, markerErr := a.markLiveAppStateRecovery(evt)
@@ -308,7 +323,7 @@ func (a *App) handleAppStatePersistenceEvent(ctx context.Context, evt any, track
 			map[string]any{"error": markerErr.Error()},
 		)
 		persistCtx := context.WithoutCancel(ctx)
-		a.persistAppStateEvent(persistCtx, evt, nil)
+		firstErr := a.persistAppStateEvent(persistCtx, evt, nil)
 		retryMarkers, retryErr := a.markLiveAppStateRecovery(evt)
 		if retryErr != nil {
 			a.emitWarning(
@@ -319,6 +334,7 @@ func (a *App) handleAppStatePersistenceEvent(ctx context.Context, evt any, track
 		}
 		a.appStatePersist.completeOne(ticket, func() {
 			orderedErr := a.persistAppStateEvent(persistCtx, evt, nil)
+			report(errors.Join(markerErr, firstErr, retryErr, orderedErr))
 			if orderedErr == nil {
 				a.clearLiveAppStateRecovery(retryMarkers)
 			} else if retryErr != nil {
@@ -339,6 +355,7 @@ func (a *App) handleAppStatePersistenceEvent(ctx context.Context, evt any, track
 		if persistenceErr == nil {
 			a.clearLiveAppStateRecovery(markers)
 		}
+		report(persistenceErr)
 	})
 }
 

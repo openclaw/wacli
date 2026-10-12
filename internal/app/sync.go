@@ -258,7 +258,7 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	if err != nil {
 		return SyncResult{MessagesStored: messagesStored.Load()}, err
 	}
-	if opts.Mode != SyncModeFollow && syncCtx.Err() == nil && !limits.persistenceFailed.Load() && a.wa.IsConnected() && a.wa.IsAuthed() {
+	if opts.Mode != SyncModeFollow && syncCtx.Err() == nil && limits.canRecordFreshness() && a.wa.IsConnected() && a.wa.IsAuthed() {
 		if err := a.db.RecordSuccessfulSync(nowUTC()); err != nil {
 			return SyncResult{MessagesStored: messagesStored.Load()}, fmt.Errorf("record successful sync: %w", err)
 		}
