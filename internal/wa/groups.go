@@ -96,6 +96,19 @@ func (c *Client) SetGroupLocked(ctx context.Context, jid types.JID, locked bool)
 	return cli.SetGroupLocked(ctx, jid, locked)
 }
 
+// SetGroupPhoto sets the picture of a group or community the account administers.
+// avatar must be JPEG bytes; pass nil to remove the picture.
+// Returns the new picture ID assigned by WhatsApp, or "remove".
+func (c *Client) SetGroupPhoto(ctx context.Context, jid types.JID, avatar []byte) (string, error) {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || !cli.IsConnected() {
+		return "", fmt.Errorf("not connected")
+	}
+	return cli.SetGroupPhoto(ctx, jid, avatar)
+}
+
 type GroupParticipantAction string
 
 const (

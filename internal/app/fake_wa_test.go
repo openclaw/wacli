@@ -441,6 +441,13 @@ func (f *fakeWA) SetGroupAnnounce(ctx context.Context, jid types.JID, announce b
 	return nil
 }
 
+func (f *fakeWA) SetGroupPhoto(ctx context.Context, jid types.JID, avatar []byte) (string, error) {
+	if avatar == nil {
+		return "remove", nil
+	}
+	return "fake-group-picture-id", nil
+}
+
 func (f *fakeWA) SetGroupLocked(ctx context.Context, jid types.JID, locked bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

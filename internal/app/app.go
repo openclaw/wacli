@@ -49,6 +49,7 @@ type WAClient interface {
 	SetGroupTopic(ctx context.Context, jid types.JID, topic string) error
 	SetGroupAnnounce(ctx context.Context, jid types.JID, announce bool) error
 	SetGroupLocked(ctx context.Context, jid types.JID, locked bool) error
+	SetGroupPhoto(ctx context.Context, jid types.JID, avatar []byte) (string, error)
 	UpdateGroupParticipants(ctx context.Context, group types.JID, users []types.JID, action wa.GroupParticipantAction) ([]types.GroupParticipant, error)
 	GetGroupRequestParticipants(ctx context.Context, group types.JID) ([]types.GroupParticipantRequest, error)
 	UpdateGroupRequestParticipants(ctx context.Context, group types.JID, users []types.JID, action wa.GroupParticipantRequestAction) ([]types.GroupParticipant, error)
