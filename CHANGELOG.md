@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- History: add `history backfill --before MSG_ID` to request the messages preceding a stored message, filling gaps inside local history that oldest-anchor backfill cannot reach.
+
 ## 0.21.0 - 2026-10-11
 
 **Highlights:** opt-in full-history pairing, live presence events, media retry filters, and Go standard-library security fixes.
