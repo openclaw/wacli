@@ -475,6 +475,39 @@ func (f *fakeWA) SetGroupAdminAdd(ctx context.Context, jid types.JID, adminsOnly
 	return nil
 }
 
+func (f *fakeWA) LinkGroup(ctx context.Context, community, group types.JID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	g := f.groups[group]
+	if g == nil {
+		g = &types.GroupInfo{JID: group}
+		f.groups[group] = g
+	}
+	g.LinkedParentJID = community
+	return nil
+}
+
+func (f *fakeWA) UnlinkGroup(ctx context.Context, community, group types.JID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if g := f.groups[group]; g != nil && g.LinkedParentJID == community {
+		g.LinkedParentJID = types.JID{}
+	}
+	return nil
+}
+
+func (f *fakeWA) GetSubGroups(ctx context.Context, community types.JID) ([]*types.GroupLinkTarget, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []*types.GroupLinkTarget
+	for _, g := range f.groups {
+		if g.LinkedParentJID == community {
+			out = append(out, &types.GroupLinkTarget{JID: g.JID, GroupName: g.GroupName})
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeWA) SetGroupLocked(ctx context.Context, jid types.JID, locked bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

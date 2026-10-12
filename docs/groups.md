@@ -21,6 +21,9 @@ wacli groups join-approval --jid GROUP_JID (--on|--off)
 wacli groups admin-add --jid GROUP_JID (--on|--off)
 wacli groups photo set --jid GROUP_JID --file IMAGE
 wacli groups photo remove --jid GROUP_JID
+wacli groups community groups --community COMMUNITY_JID
+wacli groups community link --community COMMUNITY_JID --jid GROUP_JID
+wacli groups community unlink --community COMMUNITY_JID --jid GROUP_JID
 wacli groups leave --jid GROUP_JID
 wacli groups participants add --jid GROUP_JID --user PHONE_OR_JID [--user ...]
 wacli groups participants remove --jid GROUP_JID --user PHONE_OR_JID [--user ...]
@@ -53,6 +56,7 @@ wacli groups prune [--days N] [--left-only=false|--include-active] [--dry-run] [
 - `join-approval --on` makes new members ask to join and wait for an admin (in a community, members see the group but must request it); `--off` lets them join directly.
 - `admin-add --on` lets only admins add members; `--off` lets every member add people.
 - `photo set` sets the picture of a group or community the account administers. The image (JPEG or PNG) is center-cropped to a square, then resized to at most 640px and sent as JPEG. `photo remove` removes it. WhatsApp announces both changes in the group.
+- `community groups` lists a community's groups live; `community link` moves an existing group the account administers into a community, and `community unlink` takes it out (the group itself stays).
 - `requests` lists, approves, or rejects pending join requests for groups with join approval enabled.
 - `leave` marks the group left locally after WhatsApp confirms.
 - `prune` only deletes local group/chat/message rows from `wacli.db`. It does not leave WhatsApp groups or delete anything from WhatsApp servers.

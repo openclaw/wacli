@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"go.mau.fi/whatsmeow/types"
 )
 
 func TestReadAsSquareJPEGCropsBeforeResizing(t *testing.T) {
@@ -48,9 +50,17 @@ func TestCropSquareKeepsCenteredSquare(t *testing.T) {
 
 func TestGroupsCommandExposesPhotoSubcommands(t *testing.T) {
 	cmd := newGroupsCmd(&rootFlags{})
-	for _, path := range [][]string{{"photo", "set"}, {"photo", "remove"}, {"join-approval"}, {"admin-add"}} {
+	for _, path := range [][]string{{"photo", "set"}, {"photo", "remove"}, {"join-approval"}, {"admin-add"}, {"community", "groups"}, {"community", "link"}, {"community", "unlink"}} {
 		if _, _, err := cmd.Find(path); err != nil {
 			t.Fatalf("missing groups %v command: %v", path, err)
 		}
+	}
+}
+
+func TestCommunityGroupEntriesSkipsNil(t *testing.T) {
+	jid := types.NewJID("123", types.GroupServer)
+	got := communityGroupEntries([]*types.GroupLinkTarget{nil, {JID: jid, GroupName: types.GroupName{Name: "General"}, GroupIsDefaultSub: types.GroupIsDefaultSub{IsDefaultSubGroup: true}}})
+	if len(got) != 1 || got[0].JID != jid.String() || got[0].Name != "General" || !got[0].DefaultGroup {
+		t.Fatalf("unexpected entries: %+v", got)
 	}
 }

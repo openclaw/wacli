@@ -52,6 +52,9 @@ type WAClient interface {
 	SetGroupPhoto(ctx context.Context, jid types.JID, avatar []byte) (string, error)
 	SetGroupJoinApproval(ctx context.Context, jid types.JID, required bool) error
 	SetGroupAdminAdd(ctx context.Context, jid types.JID, adminsOnly bool) error
+	LinkGroup(ctx context.Context, community, group types.JID) error
+	UnlinkGroup(ctx context.Context, community, group types.JID) error
+	GetSubGroups(ctx context.Context, community types.JID) ([]*types.GroupLinkTarget, error)
 	UpdateGroupParticipants(ctx context.Context, group types.JID, users []types.JID, action wa.GroupParticipantAction) ([]types.GroupParticipant, error)
 	GetGroupRequestParticipants(ctx context.Context, group types.JID) ([]types.GroupParticipantRequest, error)
 	UpdateGroupRequestParticipants(ctx context.Context, group types.JID, users []types.JID, action wa.GroupParticipantRequestAction) ([]types.GroupParticipant, error)

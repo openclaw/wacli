@@ -19,6 +19,7 @@ func newGroupsCmd(flags *rootFlags) *cobra.Command {
 	cmd.AddCommand(newGroupsJoinApprovalCmd(flags))
 	cmd.AddCommand(newGroupsAdminAddCmd(flags))
 	cmd.AddCommand(newGroupsPhotoCmd(flags))
+	cmd.AddCommand(newGroupsCommunityCmd(flags))
 	cmd.AddCommand(newGroupsParticipantsCmd(flags))
 	cmd.AddCommand(newGroupsRequestsCmd(flags))
 	cmd.AddCommand(newGroupsInviteCmd(flags))
