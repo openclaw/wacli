@@ -135,7 +135,8 @@ func newGroupsCommunityLinkCmd(flags *rootFlags, action, short string) *cobra.Co
 			if flags.asJSON {
 				return out.WriteJSON(os.Stdout, map[string]any{"community": community.String(), "jid": gjid.String(), "linked": action == "link"})
 			}
-			fmt.Fprintln(os.Stdout, "OK")
+			// Human confirmation goes to stderr; stdout is for structured data.
+			fmt.Fprintln(os.Stderr, "OK")
 			return nil
 		},
 	}

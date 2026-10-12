@@ -105,11 +105,12 @@ func runGroupsPhoto(flags *rootFlags, jidStr string, avatar []byte) error {
 	if flags.asJSON {
 		return out.WriteJSON(os.Stdout, map[string]any{"jid": gjid.String(), "picture_id": pictureID, "removed": removed})
 	}
+	// Human confirmations go to stderr; stdout is for structured data.
 	if removed {
-		fmt.Fprintln(os.Stdout, "Group picture removed.")
+		fmt.Fprintln(os.Stderr, "Group picture removed.")
 		return nil
 	}
-	fmt.Fprintf(os.Stdout, "Group picture updated (id: %s)\n", pictureID)
+	fmt.Fprintf(os.Stderr, "Group picture updated (id: %s)\n", pictureID)
 	return nil
 }
 

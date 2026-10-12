@@ -41,18 +41,38 @@ func TestReadAsSquareJPEGCropsBeforeResizing(t *testing.T) {
 	}
 }
 
-func TestCropSquareKeepsCenteredSquare(t *testing.T) {
-	got := cropSquare(image.NewRGBA(image.Rect(0, 0, 300, 120)))
-	if b := got.Bounds(); b.Dx() != 120 || b.Dy() != 120 {
-		t.Fatalf("expected 120x120, got %dx%d", b.Dx(), b.Dy())
+func TestCropSquareKeepsTheCenter(t *testing.T) {
+	// Three 100px bands: red, green, blue. The centered square is the green band.
+	src := image.NewRGBA(image.Rect(0, 0, 300, 100))
+	for y := 0; y < 100; y++ {
+		for x := 0; x < 300; x++ {
+			c := color.RGBA{G: 255, A: 255}
+			if x < 100 {
+				c = color.RGBA{R: 255, A: 255}
+			} else if x >= 200 {
+				c = color.RGBA{B: 255, A: 255}
+			}
+			src.Set(x, y, c)
+		}
+	}
+	got := cropSquare(src)
+	b := got.Bounds()
+	if b.Dx() != 100 || b.Dy() != 100 {
+		t.Fatalf("expected 100x100, got %dx%d", b.Dx(), b.Dy())
+	}
+	for _, p := range []image.Point{{b.Min.X, b.Min.Y}, {b.Max.X - 1, b.Max.Y - 1}, {b.Min.X + 50, b.Min.Y + 50}} {
+		if r, g, bl, _ := got.At(p.X, p.Y).RGBA(); r != 0 || bl != 0 || g == 0 {
+			t.Fatalf("pixel %v is not from the center band: r=%d g=%d b=%d", p, r, g, bl)
+		}
 	}
 }
 
-func TestGroupsCommandExposesPhotoSubcommands(t *testing.T) {
+func TestGroupsCommandExposesAdminSubcommands(t *testing.T) {
 	cmd := newGroupsCmd(&rootFlags{})
 	for _, path := range [][]string{{"photo", "set"}, {"photo", "remove"}, {"join-approval"}, {"admin-add"}, {"community", "groups"}, {"community", "link"}, {"community", "unlink"}} {
-		if _, _, err := cmd.Find(path); err != nil {
-			t.Fatalf("missing groups %v command: %v", path, err)
+		found, rest, err := cmd.Find(path)
+		if err != nil || len(rest) != 0 || found.Name() != path[len(path)-1] || !found.Runnable() {
+			t.Fatalf("groups %v: found %q, rest %v, err %v", path, found.Name(), rest, err)
 		}
 	}
 }
