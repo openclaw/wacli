@@ -109,6 +109,32 @@ func (c *Client) SetGroupPhoto(ctx context.Context, jid types.JID, avatar []byte
 	return cli.SetGroupPhoto(ctx, jid, avatar)
 }
 
+// SetGroupJoinApproval sets whether new members need an admin's approval to join.
+func (c *Client) SetGroupJoinApproval(ctx context.Context, jid types.JID, required bool) error {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || !cli.IsConnected() {
+		return fmt.Errorf("not connected")
+	}
+	return cli.SetGroupJoinApprovalMode(ctx, jid, required)
+}
+
+// SetGroupAdminAdd sets whether only admins (true) or every member (false) can add people.
+func (c *Client) SetGroupAdminAdd(ctx context.Context, jid types.JID, adminsOnly bool) error {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || !cli.IsConnected() {
+		return fmt.Errorf("not connected")
+	}
+	mode := types.GroupMemberAddModeAllMember
+	if adminsOnly {
+		mode = types.GroupMemberAddModeAdmin
+	}
+	return cli.SetGroupMemberAddMode(ctx, jid, mode)
+}
+
 type GroupParticipantAction string
 
 const (

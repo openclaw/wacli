@@ -48,7 +48,7 @@ func TestCropSquareKeepsCenteredSquare(t *testing.T) {
 
 func TestGroupsCommandExposesPhotoSubcommands(t *testing.T) {
 	cmd := newGroupsCmd(&rootFlags{})
-	for _, path := range [][]string{{"photo", "set"}, {"photo", "remove"}} {
+	for _, path := range [][]string{{"photo", "set"}, {"photo", "remove"}, {"join-approval"}, {"admin-add"}} {
 		if _, _, err := cmd.Find(path); err != nil {
 			t.Fatalf("missing groups %v command: %v", path, err)
 		}

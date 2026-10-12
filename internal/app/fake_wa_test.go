@@ -448,6 +448,33 @@ func (f *fakeWA) SetGroupPhoto(ctx context.Context, jid types.JID, avatar []byte
 	return "fake-group-picture-id", nil
 }
 
+func (f *fakeWA) SetGroupJoinApproval(ctx context.Context, jid types.JID, required bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	g := f.groups[jid]
+	if g == nil {
+		g = &types.GroupInfo{JID: jid}
+		f.groups[jid] = g
+	}
+	g.GroupMembershipApprovalMode.IsJoinApprovalRequired = required
+	return nil
+}
+
+func (f *fakeWA) SetGroupAdminAdd(ctx context.Context, jid types.JID, adminsOnly bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	g := f.groups[jid]
+	if g == nil {
+		g = &types.GroupInfo{JID: jid}
+		f.groups[jid] = g
+	}
+	g.MemberAddMode = types.GroupMemberAddModeAllMember
+	if adminsOnly {
+		g.MemberAddMode = types.GroupMemberAddModeAdmin
+	}
+	return nil
+}
+
 func (f *fakeWA) SetGroupLocked(ctx context.Context, jid types.JID, locked bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

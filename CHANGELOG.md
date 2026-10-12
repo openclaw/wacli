@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Groups: add `groups photo set|remove` to set or remove a group or community picture (center-cropped to a square, resized to at most 640px), `groups join-approval` to require admin approval to join, and `groups admin-add` to choose whether only admins can add members.
 - Messages: add bounded chronological search context and exact local chat/contact name filters with explicit ambiguity errors.
 - Messages: add a content-free incremental journal, bounded drains, retention expiry, and identity reconciliation.
 - Messages: add bounded cursor reads for list, search, and export, with explicit archive invalidation and shared successful-sync freshness.
