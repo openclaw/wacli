@@ -21,7 +21,111 @@ wacli messages revoke --chat JID --id MSG_ID [--post-send-wait 2s]
 wacli messages forward --chat JID --id MSG_ID --to RECIPIENT [--pick N] [--post-send-wait 2s]
 ```
 
+## Pagination and freshness
+
+`list`, `search`, and `export` accept `--cursor TOKEN`. Repeat the original
+query and filters; `--limit` can change. List defaults to newest first, export
+to oldest first, and FTS search to relevance. Limits of zero or less retain the
+legacy default of 50.
+
+JSON keeps `data.messages` and `data.fts`, adding
+`page: {has_more, next_cursor}` and
+`source: {last_sync_at, scope: "local_archive"}`. An extra matching row determines
+`has_more`. A cursor is returned only when there is another page and the store
+supports cursors. Human output prints a continuation hint on stderr.
+
+Cursors bind to the store, command, filters, order, and search backend. Message
+writes, name/star changes, pruning, identity normalization, and index rebuilds
+invalidate them. Restart at the first page after an invalidation; do not advance
+`--after` by one second, because messages can share timestamps. Reads use one
+SQLite view for rows, revision, and freshness. No snapshot files are created.
+
+Old stores opened read-only keep first-page reads but cannot emit or consume
+cursors until the next ordinary writable store open applies migrations.
+`last_sync_at` is null until a successful connected one-shot/bootstrap sync or
+an offline-backlog completion is recorded. Doctor uses this same state.
+Heartbeats and the newest message timestamp do not establish successful sync.
+
+All results describe retained local history only. A finished page traversal and
+a recent sync do not certify complete WhatsApp history or continuous connectivity.
+
+## Incremental changes
+
+```bash
+wacli --read-only --json messages changes --checkpoint
+wacli --read-only --json messages changes --since beginning --limit 100
+wacli --read-only --json messages changes --since CHECKPOINT --limit 100
+```
+
+This command never connects to WhatsApp. Supply `--since` or `--checkpoint`;
+there are no chat/query filters. `data` contains `changes`, `has_more`, and
+`next_checkpoint`, plus `store_id` for deduplication. A checkpoint captures the current sequence without reading
+historical entries. It is distinct from a pagination cursor.
+
+Records contain a store-local sequence, local recording time, message time,
+operation, chat JID/message ID, and a reason when known. Operations are `upsert`,
+`delete`, and `identity_move`. Identity moves include the new chat identity;
+remove the old key and fetch the new key. Local cleanup emits `local_removal`;
+remote tombstones retain their existing WhatsApp reason; payload purge emits
+`hard_purge`. Message time never controls sequence ordering.
+
+The journal has no text, captions, media, filenames, or credentials. Fetch current
+state with existing reads. Intermediate content versions cannot be reconstructed.
+Stored message columns are meaningful, excluding the internal edit-order timestamp
+and changes to an already-recorded deletion time. Identical stored values produce
+no journal entry. Sync/history/backfill, local sends, edits, deletion, cleanup, and
+identity normalization share atomic SQLite mutation triggers. Rollback exposes
+neither the message mutation nor its change record.
+
+A paginated drain captures a high-water boundary. New arrivals wait until the
+next drain. Save `next_checkpoint` only after processing a successful response.
+Retry the same checkpoint after failure; deduplicate by store identity and sequence.
+This gives replay-safe reads, not exactly-once downstream processing.
+
+Migration atomically seeds payload-free `upsert` references for every retained
+message, including tombstones, without inventing past edits or removals. Read-only
+unmigrated stores reject changes with writable-migration guidance.
+
+Writable opens also reconcile pre-release retrieval migration numbers with the
+receipt schema, preserving existing store identities and journal checkpoints.
+Read-only opens never repair migration state.
+
+Retention is **30 days, capped at 100,000 entries**, whichever removes older
+entries first. Cleanup runs on writable opens and journal insertions. Reads never
+perform cleanup. `beginning` and interrupted drains reject explicitly when their
+unread range expires. If the seeded baseline exceeds the cap, `beginning` expires
+immediately; retained messages and search results remain unchanged. Hard purge
+removes retained journal references for that message and expires checkpoints whose
+replay range now has a gap. The sequence high-water survives retention deletes.
+
+To rebuild after expiry: capture a fresh checkpoint **before** a full paginated
+export, process the export, then replay changes since that checkpoint. If a write
+invalidates the export, discard its partial pages and restart it with the original
+checkpoint. Keeping that anchor also catches arrivals with old message timestamps.
+If the checkpoint expires during recovery, start a fresh recovery and report the
+unrecoverable replay gap. All of this covers the local archive only.
+
 ## Search
+
+Add `--context-before N --context-after N` to include visible chronological
+neighbors around each hit. Each count is 0..20; context requests allow at most
+100 hits per page. Zero/zero preserves the original output. JSON leaves matches
+in `data.messages` and adds `data.context`, an array keyed by `chat_jid` and
+`msg_id`, with a `messages` collection that includes the hit. Human output labels
+context separately and marks the hit. Pagination counts hits only; context can
+fall outside query and time filters. Deleted neighbors remain hidden. Verified
+phone/LID equivalents share context, ordered by timestamp and row ID.
+
+`--chat`, search `--from`, and list `--sender` accept numbers, JIDs, or exact
+case-insensitive local names. Chat filters also match chat names. Sender filters
+match local contact names and aliases. Explicit numbers/JIDs take precedence.
+No network lookup or address-book change occurs. Missing names return an error;
+ambiguous names list up to ten candidates and require an explicit JID.
+
+```bash
+wacli --read-only --json messages search invoice --chat "Ada" --context-before 3 --context-after 2
+wacli --read-only --json messages list --sender "Ada" --limit 100
+```
 
 - Uses SQLite FTS5 when the binary was built with `-tags sqlite_fts5`.
 - Falls back to `LIKE` if FTS5 is not available.

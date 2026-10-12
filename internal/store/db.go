@@ -23,6 +23,7 @@ type DB struct {
 	// open cannot create one, so message queries ask for the counts only when
 	// the table is there.
 	receiptsEnabled bool
+	readRows        queryRows
 }
 
 func Open(path string) (*DB, error) {
@@ -89,7 +90,7 @@ func (d *DB) hasTable(name string) bool {
 func sqliteURI(path string, readOnly bool) string {
 	params := "_foreign_keys=on&_busy_timeout=5000"
 	if readOnly {
-		params += "&mode=ro&_query_only=1"
+		params += "&mode=ro&_query_only=1&readonly_shm=1"
 		if !sqliteSidecarsExist(path) {
 			params += "&immutable=1"
 		}
@@ -121,6 +122,10 @@ func (d *DB) init() error {
 	_, _ = d.sql.Exec("PRAGMA foreign_keys=ON;")
 
 	if err := d.ensureSchema(); err != nil {
+		return err
+	}
+
+	if err := d.cleanupChanges(); err != nil {
 		return err
 	}
 

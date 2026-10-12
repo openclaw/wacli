@@ -43,6 +43,8 @@ var schemaMigrations = []migration{
 	{version: 27, name: "repair placeholder chat activity", up: migratePlaceholderChatActivity},
 	{version: 28, name: "unavailable app state keys", up: migrateUnavailableAppStateKeys},
 	{version: 29, name: "message receipts", up: ensureMessageReceiptsTable},
+	{version: 30, name: "retrieval identity, revision and sync state", up: migrateRetrieval},
+	{version: 31, name: "content-free message change journal", up: migrateChanges},
 }
 
 func migratePlaceholderChatActivity(d *DB) error {
@@ -123,24 +125,76 @@ func ensureMessageLocalMediaAliasesTable(d *DB) error {
 	return nil
 }
 
+const messageReceiptsSchema = `
+ CREATE TABLE IF NOT EXISTS message_receipts (
+  chat_jid TEXT NOT NULL,
+  msg_id TEXT NOT NULL,
+  recipient_jid TEXT NOT NULL,
+  status TEXT NOT NULL,
+  ts INTEGER NOT NULL,
+  PRIMARY KEY (chat_jid, msg_id, recipient_jid),
+  FOREIGN KEY (chat_jid) REFERENCES chats(jid) ON DELETE CASCADE
+ );
+ CREATE INDEX IF NOT EXISTS idx_message_receipts_msg ON message_receipts(chat_jid, msg_id);
+`
+
 // ensureMessageReceiptsTable adds the receipt table to stores created before it
 // existed. The core schema only runs once, so a new table needs its own step.
 func ensureMessageReceiptsTable(d *DB) error {
-	if _, err := d.sql.Exec(`
-		CREATE TABLE IF NOT EXISTS message_receipts (
-			chat_jid TEXT NOT NULL,
-			msg_id TEXT NOT NULL,
-			recipient_jid TEXT NOT NULL,
-			status TEXT NOT NULL,
-			ts INTEGER NOT NULL,
-			PRIMARY KEY (chat_jid, msg_id, recipient_jid),
-			FOREIGN KEY (chat_jid) REFERENCES chats(jid) ON DELETE CASCADE
-		)
-	`); err != nil {
+	if _, err := d.sql.Exec(messageReceiptsSchema); err != nil {
 		return fmt.Errorf("ensure message receipts: %w", err)
 	}
-	if _, err := d.sql.Exec(`CREATE INDEX IF NOT EXISTS idx_message_receipts_msg ON message_receipts(chat_jid, msg_id)`); err != nil {
-		return fmt.Errorf("ensure message receipts index: %w", err)
+	return nil
+}
+
+// Prerelease retrieval builds occupied 29 and 30 before upstream assigned 29
+// to receipts. Move only those exact markers; do not rerun or reseed their
+// migrations, which already own durable identities, revisions and checkpoints.
+func reconcilePreReleaseRetrievalMigrations(d *DB) error {
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return fmt.Errorf("begin retrieval migration reconciliation: %w", err)
+	}
+	defer tx.Rollback()
+	var legacy int
+	if err = tx.QueryRow(`SELECT count(*) FROM schema_migrations
+ WHERE (version=29 AND name='retrieval identity, revision and sync state')
+ OR (version=30 AND name='content-free message change journal')`).Scan(&legacy); err != nil {
+		return fmt.Errorf("inspect prerelease retrieval migrations: %w", err)
+	}
+	if legacy == 0 {
+		return tx.Commit()
+	}
+	// An interrupted earlier open can already have recorded the new journal
+	// marker. Accept matching markers, but never overwrite an unknown migration.
+	var conflicts int
+	if err = tx.QueryRow(`SELECT count(*) FROM schema_migrations WHERE
+ (version=29 AND name NOT IN ('message receipts','retrieval identity, revision and sync state')) OR
+ (version=30 AND name NOT IN ('retrieval identity, revision and sync state','content-free message change journal')) OR
+ (version=31 AND name!='content-free message change journal')`).Scan(&conflicts); err != nil {
+		return fmt.Errorf("inspect retrieval migration conflicts: %w", err)
+	}
+	if conflicts != 0 {
+		return fmt.Errorf("cannot reconcile unknown retrieval migration ownership")
+	}
+	if _, err = tx.Exec(messageReceiptsSchema); err != nil {
+		return fmt.Errorf("reconcile prerelease message receipts: %w", err)
+	}
+	if _, err = tx.Exec(`
+ INSERT OR IGNORE INTO schema_migrations(version,name,applied_at)
+ SELECT 31,name,applied_at FROM schema_migrations
+ WHERE version=30 AND name='content-free message change journal';
+ DELETE FROM schema_migrations WHERE version=30 AND name='content-free message change journal';
+ INSERT OR IGNORE INTO schema_migrations(version,name,applied_at)
+ SELECT 30,name,applied_at FROM schema_migrations
+ WHERE version=29 AND name='retrieval identity, revision and sync state';
+ DELETE FROM schema_migrations WHERE version=29 AND name='retrieval identity, revision and sync state';
+ INSERT OR IGNORE INTO schema_migrations(version,name,applied_at) VALUES(29,'message receipts',?);
+ `, nowUTC().Unix()); err != nil {
+		return fmt.Errorf("reconcile prerelease retrieval markers: %w", err)
+	}
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("commit retrieval migration reconciliation: %w", err)
 	}
 	return nil
 }
@@ -346,6 +400,10 @@ func (d *DB) ensureSchema() error {
 		)
 	`); err != nil {
 		return fmt.Errorf("create schema_migrations table: %w", err)
+	}
+
+	if err := reconcilePreReleaseRetrievalMigrations(d); err != nil {
+		return err
 	}
 
 	applied := map[int]bool{}
@@ -822,6 +880,15 @@ func migrateContactsSystemNameColumn(d *DB) error {
 }
 
 func migrateMessagesFTS(d *DB) error {
+	// Rebuilding/changing the index invalidates any outstanding ranked cursor.
+	if exists, err := d.tableExists("retrieval_state"); err != nil {
+		return err
+	} else if exists {
+		if _, err := d.sql.Exec(`UPDATE retrieval_state SET revision=revision+1 WHERE id=1`); err != nil {
+			return err
+		}
+	}
+
 	ftsExists, err := d.tableExists("messages_fts")
 	if err != nil {
 		return err

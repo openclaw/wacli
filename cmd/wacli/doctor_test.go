@@ -74,7 +74,7 @@ func TestDoctorStoreStatsFromStoreStats(t *testing.T) {
 	if !got.StatsKnown {
 		t.Fatal("StatsKnown = false, want true")
 	}
-	if got.LastSyncAt != "2024-04-01T10:30:00Z" {
+	if got.LastSyncAt != "" {
 		t.Fatalf("LastSyncAt = %q", got.LastSyncAt)
 	}
 }

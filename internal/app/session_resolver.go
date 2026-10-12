@@ -41,7 +41,7 @@ func openReadOnlySessionResolver(path string) (*readOnlySessionResolver, error) 
 }
 
 func readOnlySessionURI(path string) string {
-	params := "_foreign_keys=on&_busy_timeout=5000&mode=ro&_query_only=1"
+	params := "_foreign_keys=on&_busy_timeout=5000&mode=ro&_query_only=1&readonly_shm=1"
 	if !sessionSQLiteSidecarsExist(path) {
 		params += "&immutable=1"
 	}

@@ -3,6 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -911,7 +916,12 @@ func TestBuildTextMessageAttachesMentions(t *testing.T) {
 }
 
 func TestSendTextMessageKeepsPlainTextFastPathWithoutEphemeral(t *testing.T) {
-	db := openSendTestDB(t)
+	dir := t.TempDir()
+	db, err := store.Open(filepath.Join(dir, "wacli.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
 	chat := types.JID{User: "15551234567", Server: types.DefaultUserServer}
 	sender := &recordingTextSender{}
 
@@ -928,6 +938,68 @@ func TestSendTextMessageKeepsPlainTextFastPathWithoutEphemeral(t *testing.T) {
 	if sender.textRecipient != chat || sender.text != "hello" {
 		t.Fatalf("plain send = (%s, %q), want (%s, hello)", sender.textRecipient, sender.text, chat)
 	}
+	// Exercise the same successful-send persistence path as `send text`, then
+	// observe its journal and message state through real read-only subprocesses.
+	if err = persistOutboundTextWith(context.Background(), db, fakeTextResolver{}, chat, string(id), "hello", time.Unix(1700000000, 0)); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(t.TempDir(), "wacli")
+	buildArgs := []string{"build", "-o", bin}
+	mode := "plain"
+	if db.HasFTS() {
+		buildArgs = append(buildArgs, "-tags", "sqlite_fts5")
+		mode = "fts"
+	}
+	buildArgs = append(buildArgs, "./cmd/wacli")
+	build := exec.Command("go", buildArgs...)
+	build.Dir = "../.."
+	if b, e := build.CombinedOutput(); e != nil {
+		t.Fatalf("build: %v %s", e, b)
+	}
+	var artifact bytes.Buffer
+	for _, args := range [][]string{{"messages", "changes", "--since", "beginning"}, {"messages", "show", "--chat", chat.String(), "--id", string(id)}} {
+		argv := append([]string{"--store", dir, "--read-only", "--json"}, args...)
+		c := exec.Command(bin, argv...)
+		b, e := c.CombinedOutput()
+		fmt.Fprintf(&artifact, "command: %q\nstdout: %s\nexit: %v\n", argv, b, e)
+		if e != nil {
+			t.Fatalf("read: %s %v", b, e)
+		}
+		var envelope struct {
+			Success bool            `json:"success"`
+			Data    json.RawMessage `json:"data"`
+		}
+		if e = json.Unmarshal(b, &envelope); e != nil || !envelope.Success {
+			t.Fatalf("JSON: %s %v", b, e)
+		}
+		if args[1] == "changes" {
+			var page store.ChangesPage
+			if e = json.Unmarshal(envelope.Data, &page); e != nil {
+				t.Fatal(e)
+			}
+			if len(page.Changes) != 1 || page.Changes[0].Operation != "upsert" || page.Changes[0].MsgID != string(id) || page.Changes[0].ChatJID != chat.String() {
+				t.Fatalf("outgoing change: %+v", page)
+			}
+		} else {
+			var msg store.Message
+			if e = json.Unmarshal(envelope.Data, &msg); e != nil {
+				t.Fatal(e)
+			}
+			if msg.Text != "hello" || !msg.FromMe {
+				t.Fatalf("outgoing state: %+v", msg)
+			}
+		}
+	}
+	artifactDir := os.Getenv("WACLI_RETRIEVAL_ARTIFACTS")
+	if artifactDir != "" {
+		if err = os.MkdirAll(artifactDir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err = os.WriteFile(filepath.Join(artifactDir, "local-send-"+mode+".log"), artifact.Bytes(), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 }
 
 func TestSendTextMessageUsesDefaultEphemeralExpirationForPrivateEphemeralWithoutDuration(t *testing.T) {

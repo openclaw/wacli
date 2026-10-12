@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Messages: add bounded chronological search context and exact local chat/contact name filters with explicit ambiguity errors.
+- Messages: add a content-free incremental journal, bounded drains, retention expiry, and identity reconciliation.
+- Messages: add bounded cursor reads for list, search, and export, with explicit archive invalidation and shared successful-sync freshness.
+
 ## 0.21.0 - 2026-10-11
 
 **Highlights:** opt-in full-history pairing, live presence events, media retry filters, and Go standard-library security fixes.

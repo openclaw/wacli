@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 
 	"github.com/openclaw/wacli/internal/wa"
 )
@@ -12,19 +13,25 @@ type syncStorageLimits struct {
 	opts   SyncOptions
 	cancel context.CancelFunc
 
-	mu  sync.Mutex
-	err error
+	mu                sync.Mutex
+	err               error
+	persistenceFailed atomic.Bool
 }
 
 func (l *syncStorageLimits) StoreParsedMessage(ctx context.Context, pm wa.ParsedMessage) error {
-	if l == nil || (l.opts.MaxMessages <= 0 && l.opts.MaxDBSizeBytes <= 0) {
-		return l.app.storeParsedMessage(ctx, pm)
+	if l.opts.MaxMessages <= 0 && l.opts.MaxDBSizeBytes <= 0 {
+		err := l.app.storeParsedMessage(ctx, pm)
+		if err != nil {
+			l.persistenceFailed.Store(true)
+		}
+		return err
 	}
 	if err := l.app.checkSyncStorageLimits(l.opts); err != nil {
 		l.setErr(err)
 		return err
 	}
 	if err := l.app.storeParsedMessage(ctx, pm); err != nil {
+		l.persistenceFailed.Store(true)
 		return err
 	}
 	if err := l.app.checkSyncStorageLimits(l.opts); err != nil {

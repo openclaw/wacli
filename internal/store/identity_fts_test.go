@@ -3,6 +3,8 @@
 package store
 
 import (
+	"github.com/mattn/go-sqlite3"
+	"strings"
 	"testing"
 	"time"
 )
@@ -19,20 +21,25 @@ func TestMessageIdentityUpdatesDoNotRewriteFTS(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	var before, after int
-	if err := db.sql.QueryRow(`SELECT total_changes()`).Scan(&before); err != nil {
-		t.Fatal(err)
+	// Fault mode: the index cannot accept writes. Identity-only mutations must
+	// still succeed, while an indexed-text mutation must fail atomically. This
+	// isolates physical index churn that unchanged search results cannot expose.
+	for _, op := range []string{"INSERT", "UPDATE", "DELETE"} {
+		if _, err := db.sql.Exec(`CREATE TRIGGER fixture_fts_` + strings.ToLower(op) + ` BEFORE ` + op + ` ON messages_fts_content BEGIN SELECT RAISE(ABORT,'fixture index write refused');END`); err != nil {
+			t.Fatal(err)
+		}
 	}
+
 	if _, err := db.sql.Exec(`UPDATE messages SET sender_jid = ?, quoted_sender_jid = ? WHERE msg_id = ?`,
 		"15550000001@s.whatsapp.net", "15550000002@s.whatsapp.net", "identity"); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.sql.QueryRow(`SELECT total_changes()`).Scan(&after); err != nil {
-		t.Fatal(err)
+	if _, err := db.sql.Exec(`UPDATE messages SET text='replacement' WHERE msg_id='identity'`); err == nil {
+		t.Fatal("indexed mutation bypassed the injected index failure")
+	} else if fault, ok := err.(sqlite3.Error); !ok || fault.Code != sqlite3.ErrConstraint {
+		t.Fatalf("expected index constraint fault, got %v", err)
 	}
-	if writes := after - before; writes != 1 {
-		t.Fatalf("identity-only update wrote %d rows, want only the message row", writes)
-	}
+
 	msgs, err := db.SearchMessages(SearchMessagesParams{Query: "needle", Limit: 10})
 	if err != nil || len(msgs) != 1 || msgs[0].SenderJID != "15550000001@s.whatsapp.net" {
 		t.Fatalf("search after identity update: %+v, %v", msgs, err)

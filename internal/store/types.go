@@ -70,6 +70,7 @@ type Button struct {
 }
 
 type Message struct {
+	rank            float64
 	ChatJID         string
 	ChatName        string
 	MsgID           string

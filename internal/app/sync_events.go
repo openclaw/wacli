@@ -77,6 +77,9 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 		// process. Include event type, stack trace, and a running counter.
 		defer func() {
 			if r := recover(); r != nil {
+				if limits != nil {
+					limits.persistenceFailed.Store(true)
+				}
 				n := panicCount.Add(1)
 				if a.eventsEnabled() {
 					a.emitEvent("event_handler_panic", map[string]any{
@@ -180,6 +183,11 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 				"app_data_changes": v.AppDataChanges,
 			}, "\nReplaying offline backlog: %d message(s), %d event(s) total.\n", v.Messages, v.Total)
 		case *events.OfflineSyncCompleted:
+			if ctx.Err() == nil && (limits == nil || !limits.persistenceFailed.Load()) && a.wa.IsConnected() && a.wa.IsAuthed() {
+				if err := a.db.RecordSuccessfulSync(nowUTC()); err != nil {
+					a.emitWarning("sync_state_write_failed", fmt.Sprintf("record successful sync: %v", err), nil)
+				}
+			}
 			a.emitOrPrint("offline_sync_completed", map[string]any{
 				"count": v.Count,
 			}, "\nOffline backlog replayed (%d event(s)).\n", v.Count)

@@ -7,6 +7,7 @@ import (
 )
 
 type SearchMessagesParams struct {
+	key       *messagePageKey
 	Query     string
 	ChatJID   string
 	ChatJIDs  []string
@@ -65,6 +66,10 @@ func (d *DB) searchLIKE(p SearchMessagesParams) ([]Message, error) {
 	needle := likeContains(p.Query)
 	args := []any{needle, needle, needle, needle, needle, needle, needle}
 	query, args = applyMessageFilters(query, args, p)
+	if p.key != nil {
+		query += ` AND (m.ts<? OR (m.ts=? AND m.rowid<?))`
+		args = append(args, p.key.ts, p.key.ts, p.key.row)
+	}
 	query += " ORDER BY m.ts DESC, m.rowid DESC LIMIT ?"
 	args = append(args, p.Limit)
 	return d.scanMessages(query, args...)
@@ -90,7 +95,7 @@ func sanitizeFTSQuery(q string) string {
 
 func (d *DB) searchFTS(p SearchMessagesParams) ([]Message, error) {
 	query := `
-		SELECT ` + d.messageSelectColumns("snippet(messages_fts, 0, '[', ']', '…', 12)") + `
+		SELECT ` + d.messageSelectColumns("snippet(messages_fts, 0, '[', ']', '…', 12)") + `,bm25(messages_fts)` + `
 		FROM messages_fts
 		JOIN messages m ON messages_fts.rowid = m.rowid
 		LEFT JOIN chats c ON c.jid = m.chat_jid
@@ -101,9 +106,13 @@ func (d *DB) searchFTS(p SearchMessagesParams) ([]Message, error) {
 	// as implicit AND (both words present, any order).
 	args := []any{sanitizeFTSQuery(p.Query)}
 	query, args = applyMessageFilters(query, args, p)
+	if p.key != nil {
+		query += ` AND (bm25(messages_fts)>? OR (bm25(messages_fts)=? AND m.rowid<?))`
+		args = append(args, p.key.score, p.key.score, p.key.row)
+	}
 	query += " ORDER BY bm25(messages_fts), m.rowid DESC LIMIT ?"
 	args = append(args, p.Limit)
-	return d.scanMessages(query, args...)
+	return scanMessagesFrom(d.readQuery(), true, query, args...)
 }
 
 func applyMessageFilters(query string, args []any, p SearchMessagesParams) (string, []any) {

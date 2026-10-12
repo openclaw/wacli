@@ -58,7 +58,7 @@ func readOnlyAuthStatus(storeDir string) (bool, string, error) {
 }
 
 func readOnlySessionSQLiteURI(path string) string {
-	params := "mode=ro&_query_only=1&_busy_timeout=5000"
+	params := "mode=ro&_query_only=1&readonly_shm=1&_busy_timeout=5000"
 	if !sqliteSessionSidecarsExist(path) {
 		params += "&immutable=1"
 	}

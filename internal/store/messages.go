@@ -363,6 +363,7 @@ func (d *DB) PurgeMessage(chatJID, msgID string) error {
 }
 
 type ListMessagesParams struct {
+	key       *messagePageKey
 	ChatJID   string
 	ChatJIDs  []string
 	SenderJID string
@@ -419,6 +420,14 @@ func (d *DB) ListMessages(p ListMessagesParams) ([]Message, error) {
 func (p ListMessagesParams) messageFilter() (string, []any) {
 	var filter string
 	var args []any
+	if p.key != nil {
+		op := "<"
+		if p.Asc {
+			op = ">"
+		}
+		filter += " AND (m.ts" + op + "? OR (m.ts=? AND m.rowid" + op + "?))"
+		args = append(args, p.key.ts, p.key.ts, p.key.row)
+	}
 	if p.After != nil {
 		filter += " AND m.ts > ?"
 		args = append(args, unix(*p.After))
@@ -589,12 +598,15 @@ func (d *DB) MessageContext(chatJID, msgID string, before, after int) ([]Message
 }
 
 func (d *DB) scanMessages(query string, args ...any) ([]Message, error) {
-	rows, err := d.sql.Query(query, args...)
+	return scanMessagesFrom(d.readQuery(), false, query, args...)
+}
+
+func scanMessagesFrom(db queryRows, ranked bool, query string, args ...any) ([]Message, error) {
+	rows, err := db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
 	var out []Message
 	for rows.Next() {
 		var m Message
@@ -612,7 +624,11 @@ func (d *DB) scanMessages(query string, args ...any) ([]Message, error) {
 		var payloadPurgedAt int64
 		var buttonsJSON string
 		var edited int
-		if err := rows.Scan(&m.rowID, &m.ChatJID, &m.ChatName, &m.MsgID, &m.SenderJID, &m.SenderName, &ts, &fromMe, &m.Text, &m.DisplayText, &m.QuotedMsgID, &m.QuotedSenderJID, &forwarded, &forwardingScore, &m.ReactionToID, &m.ReactionEmoji, &m.MediaType, &m.MediaCaption, &m.Filename, &m.MimeType, &m.DirectPath, &m.LocalPath, &downloadedAt, &starred, &starredAt, &revoked, &deletedForMe, &deletedAt, &deletionReason, &payloadPurgedAt, &edited, &buttonsJSON, &m.DeliveredTo, &m.ReadBy, &m.Snippet); err != nil {
+		dest := []any{&m.rowID, &m.ChatJID, &m.ChatName, &m.MsgID, &m.SenderJID, &m.SenderName, &ts, &fromMe, &m.Text, &m.DisplayText, &m.QuotedMsgID, &m.QuotedSenderJID, &forwarded, &forwardingScore, &m.ReactionToID, &m.ReactionEmoji, &m.MediaType, &m.MediaCaption, &m.Filename, &m.MimeType, &m.DirectPath, &m.LocalPath, &downloadedAt, &starred, &starredAt, &revoked, &deletedForMe, &deletedAt, &deletionReason, &payloadPurgedAt, &edited, &buttonsJSON, &m.DeliveredTo, &m.ReadBy, &m.Snippet}
+		if ranked {
+			dest = append(dest, &m.rank)
+		}
+		if err := rows.Scan(dest...); err != nil {
 			return nil, err
 		}
 		m.Timestamp = fromUnix(ts)

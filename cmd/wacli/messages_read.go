@@ -15,6 +15,7 @@ func newMessagesListCmd(flags *rootFlags) *cobra.Command {
 	var chat string
 	var sender string
 	var limit int
+	var cursor string
 	var afterStr string
 	var beforeStr string
 	var fromMe bool
@@ -55,12 +56,16 @@ func newMessagesListCmd(flags *rootFlags) *cobra.Command {
 				fromMeFilter = &v
 			}
 
+			sender, err = localMessageIdentifier(a.DB(), sender, false)
+			if err != nil {
+				return err
+			}
 			chatJIDs, err := messageChatJIDFilter(ctx, a, chat)
 			if err != nil {
 				return err
 			}
 
-			msgs, err := a.DB().ListMessages(store.ListMessagesParams{
+			page, err := readListMessagePage(ctx, a, cmd.Name(), store.ListMessagesParams{
 				ChatJIDs:  chatJIDs,
 				SenderJID: sender,
 				Limit:     limit,
@@ -70,25 +75,24 @@ func newMessagesListCmd(flags *rootFlags) *cobra.Command {
 				Asc:       asc,
 				Forwarded: forwarded,
 				Starred:   starred,
-			})
+			}, cursor)
 			if err != nil {
 				return err
 			}
-			msgs = resolveMessageSenderNames(ctx, a, msgs)
+			msgs := page.Messages
+			messagePageHint(page)
 
 			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{
-					"messages": msgs,
-					"fts":      a.DB().HasFTS(),
-				})
+				return out.WriteJSON(os.Stdout, page)
 			}
 
 			return writeMessagesList(os.Stdout, msgs, fullTableOutput(flags.fullOutput))
 		},
 	}
 
-	cmd.Flags().StringVar(&chat, "chat", "", "filter by chat JID")
-	cmd.Flags().StringVar(&sender, "sender", "", "filter by sender JID")
+	cmd.Flags().StringVar(&chat, "chat", "", "filter by chat number, JID, or exact local name")
+	cmd.Flags().StringVar(&sender, "sender", "", "filter by sender number, JID, or exact local contact name")
+	cmd.Flags().StringVar(&cursor, "cursor", "", "continue an unchanged local archive read; repeat original filters")
 	cmd.Flags().IntVar(&limit, "limit", 50, "max number of messages to return")
 	cmd.Flags().StringVar(&afterStr, "after", "", "only messages after time (RFC3339 or YYYY-MM-DD)")
 	cmd.Flags().StringVar(&beforeStr, "before", "", "only messages before time (RFC3339 or YYYY-MM-DD)")
@@ -104,12 +108,14 @@ func newMessagesSearchCmd(flags *rootFlags) *cobra.Command {
 	var chat string
 	var from string
 	var limit int
+	var cursor string
 	var afterStr string
 	var beforeStr string
 	var hasMedia bool
 	var msgType string
 	var forwarded bool
 	var starred bool
+	var contextBefore, contextAfter int
 
 	cmd := &cobra.Command{
 		Use:   "search <query>",
@@ -130,12 +136,16 @@ func newMessagesSearchCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 
+			from, err = localMessageIdentifier(a.DB(), from, false)
+			if err != nil {
+				return err
+			}
 			chatJIDs, err := messageChatJIDFilter(ctx, a, chat)
 			if err != nil {
 				return err
 			}
 
-			msgs, err := a.DB().SearchMessages(store.SearchMessagesParams{
+			page, contexts, err := readSearchMessagePage(ctx, a, store.SearchMessagesParams{
 				Query:     args[0],
 				ChatJIDs:  chatJIDs,
 				From:      from,
@@ -146,21 +156,29 @@ func newMessagesSearchCmd(flags *rootFlags) *cobra.Command {
 				Type:      msgType,
 				Forwarded: forwarded,
 				Starred:   starred,
-			})
+			}, cursor, contextBefore, contextAfter)
 			if err != nil {
 				return err
 			}
-			msgs = resolveMessageSenderNames(ctx, a, msgs)
+			msgs := page.Messages
+			messagePageHint(page)
 
 			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{
-					"messages": msgs,
-					"fts":      a.DB().HasFTS(),
-				})
+				data := map[string]any{"messages": page.Messages, "fts": page.FTS, "page": page.Page, "source": page.Source}
+				if contextBefore > 0 || contextAfter > 0 {
+					data["context"] = contexts
+				}
+				return out.WriteJSON(os.Stdout, data)
 			}
 
 			if err := writeMessagesSearch(os.Stdout, msgs, fullTableOutput(flags.fullOutput)); err != nil {
 				return err
+			}
+			for _, c := range contexts {
+				fmt.Fprintf(os.Stdout, "\nContext for %s in %s:\n", sanitize(c.MsgID), sanitize(c.ChatJID))
+				if err := writeMessageContext(os.Stdout, c.Messages, c.MsgID, fullTableOutput(flags.fullOutput)); err != nil {
+					return err
+				}
 			}
 			if !a.DB().HasFTS() {
 				fmt.Fprintln(os.Stderr, "Note: FTS5 not enabled; search is using LIKE (slow).")
@@ -169,8 +187,11 @@ func newMessagesSearchCmd(flags *rootFlags) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&chat, "chat", "", "chat JID")
-	cmd.Flags().StringVar(&from, "from", "", "sender JID")
+	cmd.Flags().IntVar(&contextBefore, "context-before", 0, "visible neighbors before each hit (0..20; at most 100 hits)")
+	cmd.Flags().IntVar(&contextAfter, "context-after", 0, "visible neighbors after each hit (0..20; at most 100 hits)")
+	cmd.Flags().StringVar(&chat, "chat", "", "chat number, JID, or exact local name")
+	cmd.Flags().StringVar(&from, "from", "", "sender number, JID, or exact local contact name")
+	cmd.Flags().StringVar(&cursor, "cursor", "", "continue an unchanged local archive read; repeat original filters")
 	cmd.Flags().IntVar(&limit, "limit", 50, "limit results")
 	cmd.Flags().StringVar(&afterStr, "after", "", "only messages after time (RFC3339 or YYYY-MM-DD)")
 	cmd.Flags().StringVar(&beforeStr, "before", "", "only messages before time (RFC3339 or YYYY-MM-DD)")
@@ -231,7 +252,7 @@ func newMessagesStarredCmd(flags *rootFlags) *cobra.Command {
 			return writeMessagesStarred(os.Stdout, msgs, fullTableOutput(flags.fullOutput))
 		},
 	}
-	cmd.Flags().StringVar(&chat, "chat", "", "filter by chat JID")
+	cmd.Flags().StringVar(&chat, "chat", "", "filter by chat number, JID, or exact local name")
 	cmd.Flags().IntVar(&limit, "limit", 50, "max number of messages to return")
 	cmd.Flags().StringVar(&afterStr, "after", "", "only messages with stored star time after time (RFC3339 or YYYY-MM-DD)")
 	cmd.Flags().StringVar(&beforeStr, "before", "", "only messages with stored star time before time (RFC3339 or YYYY-MM-DD)")
@@ -278,7 +299,7 @@ func newMessagesShowCmd(flags *rootFlags) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&chat, "chat", "", "chat JID")
+	cmd.Flags().StringVar(&chat, "chat", "", "chat number, JID, or exact local name")
 	cmd.Flags().StringVar(&id, "id", "", "message ID")
 	return cmd
 }
@@ -323,7 +344,7 @@ func newMessagesContextCmd(flags *rootFlags) *cobra.Command {
 			return writeMessageContext(os.Stdout, msgs, id, fullTableOutput(flags.fullOutput))
 		},
 	}
-	cmd.Flags().StringVar(&chat, "chat", "", "chat JID")
+	cmd.Flags().StringVar(&chat, "chat", "", "chat number, JID, or exact local name")
 	cmd.Flags().StringVar(&id, "id", "", "message ID")
 	cmd.Flags().IntVar(&before, "before", 5, "messages before")
 	cmd.Flags().IntVar(&after, "after", 5, "messages after")
@@ -333,6 +354,7 @@ func newMessagesContextCmd(flags *rootFlags) *cobra.Command {
 func newMessagesExportCmd(flags *rootFlags) *cobra.Command {
 	var chat string
 	var limit int
+	var cursor string
 	var afterStr string
 	var beforeStr string
 	var output string
@@ -360,17 +382,17 @@ func newMessagesExportCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 
-			msgs, err := a.DB().ListMessages(store.ListMessagesParams{
+			page, err := readListMessagePage(ctx, a, cmd.Name(), store.ListMessagesParams{
 				ChatJIDs: chatJIDs,
 				Limit:    limit,
 				After:    after,
 				Before:   before,
 				Asc:      true,
-			})
+			}, cursor)
 			if err != nil {
 				return err
 			}
-			msgs = resolveMessageSenderNames(ctx, a, msgs)
+			messagePageHint(page)
 
 			dst := os.Stdout
 			if output != "" {
@@ -382,14 +404,12 @@ func newMessagesExportCmd(flags *rootFlags) *cobra.Command {
 				dst = f
 			}
 
-			return out.WriteJSON(dst, map[string]any{
-				"messages": msgs,
-				"fts":      a.DB().HasFTS(),
-			})
+			return out.WriteJSON(dst, page)
 		},
 	}
 
-	cmd.Flags().StringVar(&chat, "chat", "", "filter by chat JID")
+	cmd.Flags().StringVar(&chat, "chat", "", "filter by chat number, JID, or exact local name")
+	cmd.Flags().StringVar(&cursor, "cursor", "", "continue an unchanged local archive read; repeat original filters")
 	cmd.Flags().IntVar(&limit, "limit", 1000, "max number of messages to export")
 	cmd.Flags().StringVar(&afterStr, "after", "", "only messages after time (RFC3339 or YYYY-MM-DD)")
 	cmd.Flags().StringVar(&beforeStr, "before", "", "only messages before time (RFC3339 or YYYY-MM-DD)")
@@ -413,4 +433,14 @@ func messageTimeBounds(afterStr, beforeStr string) (after, before *time.Time, er
 		before = &t
 	}
 	return after, before, nil
+}
+
+func messagePageHint(page store.MessagePage) {
+	if page.Page.HasMore {
+		if page.Page.NextCursor != nil {
+			fmt.Fprintf(os.Stderr, "More local messages: repeat this command with --cursor %s\n", *page.Page.NextCursor)
+		} else {
+			fmt.Fprintln(os.Stderr, "More local messages; cursor support requires a writable store migration.")
+		}
+	}
 }

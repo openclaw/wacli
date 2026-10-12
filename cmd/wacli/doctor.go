@@ -100,9 +100,7 @@ func doctorStoreStatsFromStoreStats(stats store.StoreStats) doctorStoreStats {
 		Contacts:   stats.Contacts,
 		Groups:     stats.Groups,
 	}
-	if stats.LastMessageTS > 0 {
-		out.LastSyncAt = time.Unix(stats.LastMessageTS, 0).UTC().Format(time.RFC3339)
-	}
+
 	return out
 }
 
@@ -246,6 +244,11 @@ func newDoctorCmd(flags *rootFlags) *cobra.Command {
 				if raw, err := db.Stats(); err == nil {
 					converted := doctorStoreStatsFromStoreStats(raw)
 					stats = &converted
+					if synced, err := db.LastSuccessfulSync(); err != nil {
+						storeErr = err.Error()
+					} else if synced != nil {
+						stats.LastSyncAt = synced.UTC().Format(time.RFC3339)
+					}
 				} else if storeErr == "" {
 					storeErr = err.Error()
 				}

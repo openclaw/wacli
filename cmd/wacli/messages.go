@@ -8,6 +8,7 @@ func newMessagesCmd(flags *rootFlags) *cobra.Command {
 		Short: "List and search messages from the local DB",
 	}
 	cmd.AddCommand(newMessagesListCmd(flags))
+	cmd.AddCommand(newMessagesChangesCmd(flags))
 	cmd.AddCommand(newMessagesSearchCmd(flags))
 	cmd.AddCommand(newMessagesStarredCmd(flags))
 	cmd.AddCommand(newMessagesShowCmd(flags))
