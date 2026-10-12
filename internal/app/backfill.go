@@ -23,6 +23,9 @@ type BackfillOptions struct {
 	Requests       int
 	WaitPerRequest time.Duration
 	IdleExit       time.Duration
+	// Before anchors the first request on this stored message instead of the
+	// oldest one, so a gap inside the local history can be requested.
+	Before string
 }
 
 const (
@@ -226,6 +229,9 @@ func (a *App) BackfillHistory(ctx context.Context, opts BackfillOptions) (Backfi
 			// Sync can learn mappings and migrate old LID rows while connecting.
 			// Resolve the local identity only after that migration has completed.
 			chatStr := a.canonicalStoreJID(ctx, chat).String()
+			if before := strings.TrimSpace(opts.Before); before != "" {
+				return a.backfillBefore(ctx, chatStr, before, requestAnchor)
+			}
 			for i := 0; i < opts.Requests; i++ {
 				oldest, err := a.db.GetOldestMessageInfo(chatStr)
 				if err != nil {
@@ -299,6 +305,37 @@ func (a *App) BackfillHistory(ctx context.Context, opts BackfillOptions) (Backfi
 		MessagesAdded:  afterCount - beforeCount,
 		MessagesSynced: syncRes.MessagesStored,
 	}, nil
+}
+
+// backfillBefore requests the messages preceding a stored anchor once. The
+// primary device answers with history older than the anchor, which fills a
+// gap between two stored messages; rows already present are deduplicated.
+func (a *App) backfillBefore(ctx context.Context, chatStr, msgID string, requestAnchor func(context.Context, store.MessageInfo) (onDemandResponse, error)) error {
+	msg, err := a.db.GetMessage(chatStr, msgID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("message %s not found in %s; --before needs a locally stored message", msgID, chatStr)
+		}
+		return err
+	}
+	resp, err := requestAnchor(ctx, store.MessageInfo{
+		ChatJID:    msg.ChatJID,
+		MsgID:      msg.MsgID,
+		Timestamp:  msg.Timestamp,
+		FromMe:     msg.FromMe,
+		SenderJID:  msg.SenderJID,
+		SenderName: msg.SenderName,
+	})
+	if err != nil {
+		return err
+	}
+	a.emitOrPrint("backfill_response", map[string]any{
+		"chat_jid":      chatStr,
+		"conversations": resp.conversations,
+		"messages":      resp.messages,
+		"anchor_msg_id": msgID,
+	}, "On-demand history sync before %s: %d conversations, %d messages.\n", msgID, resp.conversations, resp.messages)
+	return nil
 }
 
 func normalizeBackfillOptions(opts BackfillOptions) BackfillOptions {
