@@ -1,6 +1,6 @@
 # groups
 
-Read when: listing, refreshing, inspecting, renaming, joining, leaving, inviting, pruning stale local group rows, or managing group participants.
+Read when: listing, refreshing, inspecting, renaming, setting the picture or permissions of, joining, leaving, inviting, pruning stale local group rows, or managing group participants.
 
 `wacli groups` combines local group rows with live WhatsApp operations. Commands that mutate WhatsApp require writable mode.
 
@@ -17,6 +17,13 @@ wacli groups topic --jid GROUP_JID --text TEXT
 wacli groups description --jid GROUP_JID --text TEXT
 wacli groups announce-only --jid GROUP_JID (--on|--off)
 wacli groups locked --jid GROUP_JID (--on|--off)
+wacli groups join-approval --jid GROUP_JID (--on|--off)
+wacli groups admin-add --jid GROUP_JID (--on|--off)
+wacli groups photo set --jid GROUP_JID --file IMAGE
+wacli groups photo remove --jid GROUP_JID
+wacli groups community groups --community COMMUNITY_JID
+wacli groups community link --community COMMUNITY_JID --jid GROUP_JID
+wacli groups community unlink --community COMMUNITY_JID --jid GROUP_JID
 wacli groups leave --jid GROUP_JID
 wacli groups participants add --jid GROUP_JID --user PHONE_OR_JID [--user ...]
 wacli groups participants remove --jid GROUP_JID --user PHONE_OR_JID [--user ...]
@@ -46,6 +53,10 @@ wacli groups prune [--days N] [--left-only=false|--include-active] [--dry-run] [
 - `topic` and `description` both set the WhatsApp group description. Passing `--text ""` clears it.
 - `announce-only --on` makes the group admin-send-only; `--off` restores participant sends.
 - `locked --on` makes group info editable only by admins; `--off` allows member edits again.
+- `join-approval --on` makes new members ask to join and wait for an admin (in a community, members see the group but must request it); `--off` lets them join directly.
+- `admin-add --on` lets only admins add members; `--off` lets every member add people.
+- `photo set` sets the picture of a group or community the account administers. The image (JPEG or PNG) is center-cropped to a square, then resized to at most 640px and sent as JPEG. `photo remove` removes it. WhatsApp announces both changes in the group.
+- `community groups` lists a community's groups live; `community link` moves an existing group the account administers into a community, and `community unlink` takes it out (the group itself stays).
 - `requests` lists, approves, or rejects pending join requests for groups with join approval enabled.
 - `leave` marks the group left locally after WhatsApp confirms.
 - `prune` only deletes local group/chat/message rows from `wacli.db`. It does not leave WhatsApp groups or delete anything from WhatsApp servers.
@@ -65,6 +76,8 @@ wacli groups info --jid 123456789@g.us
 wacli groups rename --jid 123456789@g.us --name "New name"
 wacli groups topic --jid 123456789@g.us --text "Launch planning"
 wacli groups announce-only --jid 123456789@g.us --on
+wacli groups join-approval --jid 123456789@g.us --on
+wacli groups photo set --jid 123456789@g.us --file ./logo.png
 wacli --read-only groups participants list --jid 123456789@g.us --json
 wacli groups participants add --jid 123456789@g.us --user "+1 (234) 567-8900"
 wacli groups requests approve --jid 123456789@g.us --user "+1 (234) 567-8900"

@@ -161,6 +161,18 @@ func newGroupsLockedCmd(flags *rootFlags) *cobra.Command {
 	}, "locked")
 }
 
+func newGroupsJoinApprovalCmd(flags *rootFlags) *cobra.Command {
+	return newGroupsToggleCmd(flags, "join-approval", "Set whether new members need an admin's approval to join", func(ctx context.Context, client appcore.WAClient, jid types.JID, enabled bool) error {
+		return client.SetGroupJoinApproval(ctx, jid, enabled)
+	}, "join_approval")
+}
+
+func newGroupsAdminAddCmd(flags *rootFlags) *cobra.Command {
+	return newGroupsToggleCmd(flags, "admin-add", "Set whether only admins can add members (--off lets every member add)", func(ctx context.Context, client appcore.WAClient, jid types.JID, enabled bool) error {
+		return client.SetGroupAdminAdd(ctx, jid, enabled)
+	}, "admin_add")
+}
+
 func newGroupsToggleCmd(flags *rootFlags, use, short string, apply func(context.Context, appcore.WAClient, types.JID, bool) error, jsonKey string) *cobra.Command {
 	var jidStr string
 	var on bool

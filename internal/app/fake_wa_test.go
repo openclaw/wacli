@@ -441,6 +441,73 @@ func (f *fakeWA) SetGroupAnnounce(ctx context.Context, jid types.JID, announce b
 	return nil
 }
 
+func (f *fakeWA) SetGroupPhoto(ctx context.Context, jid types.JID, avatar []byte) (string, error) {
+	if avatar == nil {
+		return "remove", nil
+	}
+	return "fake-group-picture-id", nil
+}
+
+func (f *fakeWA) SetGroupJoinApproval(ctx context.Context, jid types.JID, required bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	g := f.groups[jid]
+	if g == nil {
+		g = &types.GroupInfo{JID: jid}
+		f.groups[jid] = g
+	}
+	g.GroupMembershipApprovalMode.IsJoinApprovalRequired = required
+	return nil
+}
+
+func (f *fakeWA) SetGroupAdminAdd(ctx context.Context, jid types.JID, adminsOnly bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	g := f.groups[jid]
+	if g == nil {
+		g = &types.GroupInfo{JID: jid}
+		f.groups[jid] = g
+	}
+	g.MemberAddMode = types.GroupMemberAddModeAllMember
+	if adminsOnly {
+		g.MemberAddMode = types.GroupMemberAddModeAdmin
+	}
+	return nil
+}
+
+func (f *fakeWA) LinkGroup(ctx context.Context, community, group types.JID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	g := f.groups[group]
+	if g == nil {
+		g = &types.GroupInfo{JID: group}
+		f.groups[group] = g
+	}
+	g.LinkedParentJID = community
+	return nil
+}
+
+func (f *fakeWA) UnlinkGroup(ctx context.Context, community, group types.JID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if g := f.groups[group]; g != nil && g.LinkedParentJID == community {
+		g.LinkedParentJID = types.JID{}
+	}
+	return nil
+}
+
+func (f *fakeWA) GetSubGroups(ctx context.Context, community types.JID) ([]*types.GroupLinkTarget, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []*types.GroupLinkTarget
+	for _, g := range f.groups {
+		if g.LinkedParentJID == community {
+			out = append(out, &types.GroupLinkTarget{JID: g.JID, GroupName: g.GroupName})
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeWA) SetGroupLocked(ctx context.Context, jid types.JID, locked bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

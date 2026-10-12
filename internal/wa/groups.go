@@ -96,6 +96,78 @@ func (c *Client) SetGroupLocked(ctx context.Context, jid types.JID, locked bool)
 	return cli.SetGroupLocked(ctx, jid, locked)
 }
 
+// SetGroupPhoto sets the picture of a group or community the account administers.
+// avatar must be JPEG bytes; pass nil to remove the picture.
+// Returns the new picture ID assigned by WhatsApp, or "remove".
+func (c *Client) SetGroupPhoto(ctx context.Context, jid types.JID, avatar []byte) (string, error) {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || !cli.IsConnected() {
+		return "", fmt.Errorf("not connected")
+	}
+	return cli.SetGroupPhoto(ctx, jid, avatar)
+}
+
+// SetGroupJoinApproval sets whether new members need an admin's approval to join.
+func (c *Client) SetGroupJoinApproval(ctx context.Context, jid types.JID, required bool) error {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || !cli.IsConnected() {
+		return fmt.Errorf("not connected")
+	}
+	return cli.SetGroupJoinApprovalMode(ctx, jid, required)
+}
+
+// SetGroupAdminAdd sets whether only admins (true) or every member (false) can add people.
+func (c *Client) SetGroupAdminAdd(ctx context.Context, jid types.JID, adminsOnly bool) error {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || !cli.IsConnected() {
+		return fmt.Errorf("not connected")
+	}
+	mode := types.GroupMemberAddModeAllMember
+	if adminsOnly {
+		mode = types.GroupMemberAddModeAdmin
+	}
+	return cli.SetGroupMemberAddMode(ctx, jid, mode)
+}
+
+// LinkGroup moves an existing group into a community the account administers.
+func (c *Client) LinkGroup(ctx context.Context, community, group types.JID) error {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || !cli.IsConnected() {
+		return fmt.Errorf("not connected")
+	}
+	return cli.LinkGroup(ctx, community, group)
+}
+
+// UnlinkGroup takes a group out of a community; the group itself stays.
+func (c *Client) UnlinkGroup(ctx context.Context, community, group types.JID) error {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || !cli.IsConnected() {
+		return fmt.Errorf("not connected")
+	}
+	return cli.UnlinkGroup(ctx, community, group)
+}
+
+// GetSubGroups lists the groups of a community, live.
+func (c *Client) GetSubGroups(ctx context.Context, community types.JID) ([]*types.GroupLinkTarget, error) {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || !cli.IsConnected() {
+		return nil, fmt.Errorf("not connected")
+	}
+	return cli.GetSubGroups(ctx, community)
+}
+
 type GroupParticipantAction string
 
 const (
