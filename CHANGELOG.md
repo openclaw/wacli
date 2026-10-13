@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- History: add `history backfill --from-newest` to request the window before the newest local message, filling recent gaps the initial history sync skipped.
 - Messages: add bounded chronological search context and exact local chat/contact name filters with explicit ambiguity errors.
 - Messages: add a content-free incremental journal, bounded drains, retention expiry, and identity reconciliation.
 - Messages: add bounded cursor reads for list, search, and export, with explicit archive invalidation and shared successful-sync freshness.

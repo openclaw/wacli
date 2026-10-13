@@ -131,6 +131,7 @@ func newHistoryBackfillCmd(flags *rootFlags) *cobra.Command {
 	var requests int
 	var wait time.Duration
 	var idleExit time.Duration
+	var fromNewest bool
 
 	cmd := &cobra.Command{
 		Use:   "backfill",
@@ -158,6 +159,7 @@ func newHistoryBackfillCmd(flags *rootFlags) *cobra.Command {
 				Requests:       requests,
 				WaitPerRequest: wait,
 				IdleExit:       idleExit,
+				FromNewest:     fromNewest,
 			})
 			if err != nil {
 				return err
@@ -183,6 +185,7 @@ func newHistoryBackfillCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().IntVar(&requests, "requests", app.DefaultBackfillRequests, "number of history batches to request (each may retry once after a timeout)")
 	cmd.Flags().DurationVar(&wait, "wait", 60*time.Second, "time to wait for an on-demand response per request")
 	cmd.Flags().DurationVar(&idleExit, "idle-exit", 5*time.Second, "exit after being idle (after backfill requests)")
+	cmd.Flags().BoolVar(&fromNewest, "from-newest", false, "send one request anchored at the newest local message to fill recent gaps")
 	return cmd
 }
 

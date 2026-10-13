@@ -346,6 +346,54 @@ func TestBackfillHistoryDownloadsManualOnDemandNotification(t *testing.T) {
 	}
 }
 
+func TestBackfillHistoryFromNewestFillsRecentGap(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		respond bool
+	}{
+		{name: "answered", respond: true},
+		{name: "unanswered", respond: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, f, chat, base := newBackfillRetryTest(t, "oldest")
+			newest := storeUpsertMessage(chat, "newest", base.Add(time.Hour), "existing text")
+			if err := a.db.UpsertMessage(newest); err != nil {
+				t.Fatalf("UpsertMessage: %v", err)
+			}
+			var anchors []string
+			f.onDemandHistory = func(info types.MessageInfo, count int) *events.HistorySync {
+				anchors = append(anchors, info.ID)
+				if !tc.respond {
+					return nil
+				}
+				return backfillTestResponse(chat, "gap", base.Add(30*time.Minute))
+			}
+			opts := backfillRetryOptions(chat)
+			opts.FromNewest = true
+			res, err := a.BackfillHistory(context.Background(), opts)
+			// No next-anchor retry: that would move forward past the newest row.
+			if !slices.Equal(anchors, []string{"newest"}) {
+				t.Fatalf("anchors = %v, want [newest]", anchors)
+			}
+			if !tc.respond {
+				if err == nil || !strings.Contains(err.Error(), "timed out waiting for on-demand history sync response") {
+					t.Fatalf("error = %v, want timeout", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("BackfillHistory: %v", err)
+			}
+			if res.RequestsSent != 1 || res.MessagesAdded != 1 {
+				t.Fatalf("result = %+v", res)
+			}
+			if _, err := a.db.GetMessage(chat, "gap"); err != nil {
+				t.Fatalf("gap message not stored: %v", err)
+			}
+		})
+	}
+}
+
 func TestNormalizeBackfillOptions(t *testing.T) {
 	opts := normalizeBackfillOptions(BackfillOptions{})
 
@@ -375,6 +423,11 @@ func TestValidateBackfillOptionsCapsWork(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "--requests") {
 		t.Fatalf("requests error = %v", err)
+	}
+
+	err = validateBackfillOptions(BackfillOptions{Count: DefaultBackfillCount, Requests: 2, FromNewest: true})
+	if err == nil || !strings.Contains(err.Error(), "--from-newest") {
+		t.Fatalf("from-newest error = %v", err)
 	}
 }
 

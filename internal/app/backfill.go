@@ -23,6 +23,10 @@ type BackfillOptions struct {
 	Requests       int
 	WaitPerRequest time.Duration
 	IdleExit       time.Duration
+	// FromNewest anchors a single request at the newest local message, so the
+	// phone returns the window just before it instead of history older than
+	// the oldest local row. It fills recent gaps rather than extending history.
+	FromNewest bool
 }
 
 const (
@@ -234,9 +238,17 @@ func (a *App) BackfillHistory(ctx context.Context, opts BackfillOptions) (Backfi
 					}
 					return err
 				}
+				anchor := oldest
+				if opts.FromNewest {
+					if anchor, err = a.db.GetLatestMessageInfo(chatStr); err != nil {
+						return err
+					}
+				}
 
-				resp, err := requestAnchor(ctx, oldest)
-				if errors.Is(err, errResponseTimeout) && ctx.Err() == nil {
+				resp, err := requestAnchor(ctx, anchor)
+				// The next-anchor retry moves forward in time, which only makes
+				// sense when starting from the oldest row.
+				if !opts.FromNewest && errors.Is(err, errResponseTimeout) && ctx.Err() == nil {
 					next, nextErr := a.db.GetNextMessageInfo(chatStr, oldest.MsgID)
 					if nextErr != nil && !errors.Is(nextErr, sql.ErrNoRows) {
 						return nextErr
@@ -258,6 +270,9 @@ func (a *App) BackfillHistory(ctx context.Context, opts BackfillOptions) (Backfi
 					"messages":       resp.messages,
 					"responses_seen": responsesSeen,
 				}, "On-demand history sync: %d conversations, %d messages.\n", resp.conversations, resp.messages)
+				if opts.FromNewest {
+					return nil
+				}
 
 				newOldest, err := a.db.GetOldestMessageInfo(chatStr)
 				// A retry's newer anchor is not progress past the original oldest row.
@@ -323,6 +338,9 @@ func validateBackfillOptions(opts BackfillOptions) error {
 	}
 	if opts.Requests > MaxBackfillRequests {
 		return fmt.Errorf("--requests must be <= %d (got %d)", MaxBackfillRequests, opts.Requests)
+	}
+	if opts.FromNewest && opts.Requests > 1 {
+		return fmt.Errorf("--from-newest sends a single request; raise --count instead of --requests")
 	}
 	return nil
 }
