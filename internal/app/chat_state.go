@@ -290,11 +290,22 @@ type appStateRecoveryCapture struct {
 	mu         sync.Mutex
 	captured   []any
 	finished   bool
-	completed  chan []any
+	completed  chan appStateRecoveryCompletion
+}
+
+// appStateRecoveryCompletion carries the captured snapshot events together
+// with the persistence ticket reserved at the dispatch boundary. Reserving
+// inside the sentinel's event handler fixes the snapshot's position in the
+// shared persistence order before whatsmeow can hand a newer live event to
+// the persistence handler, so a late snapshot can never be replayed after a
+// newer live mutation that overtook a sleeping continuation goroutine.
+type appStateRecoveryCompletion struct {
+	events []any
+	ticket uint64
 }
 
 func (a *App) newAppStateRecoveryCapture(collection appstate.WAPatchName) *appStateRecoveryCapture {
-	c := &appStateRecoveryCapture{app: a, collection: collection, completed: make(chan []any, 1)}
+	c := &appStateRecoveryCapture{app: a, collection: collection, completed: make(chan appStateRecoveryCompletion, 1)}
 	// whatsmeow dispatches recovery mutations synchronously and emits this
 	// collection's AppStateSyncComplete last, so the sentinel closes the drain.
 	c.handlerID = a.wa.AddEventHandler(c.handle)
@@ -310,7 +321,13 @@ func (c *appStateRecoveryCapture) handle(evt any) {
 	if syncComplete, ok := evt.(*events.AppStateSyncComplete); ok {
 		if syncComplete != nil && syncComplete.Recovery && syncComplete.Name == c.collection {
 			c.finished = true
-			c.completed <- append([]any(nil), c.captured...)
+			// Reserve the snapshot's ordered write position here, at the
+			// dispatch boundary. reserve only increments a counter under a
+			// mutex, so whatsmeow's dispatch never blocks on persistence.
+			c.completed <- appStateRecoveryCompletion{
+				events: append([]any(nil), c.captured...),
+				ticket: c.app.appStatePersist.reserve(),
+			}
 		}
 		return
 	}
@@ -320,12 +337,18 @@ func (c *appStateRecoveryCapture) handle(evt any) {
 }
 
 // stop finishes the capture and removes its event handler. Safe to call more
-// than once.
+// than once. A completion nobody consumed still owns a persistence ticket
+// reserved at the dispatch boundary; release it so later writes keep draining.
 func (c *appStateRecoveryCapture) stop() {
 	c.mu.Lock()
 	c.finished = true
 	c.mu.Unlock()
 	c.app.wa.RemoveEventHandler(c.handlerID)
+	select {
+	case completion := <-c.completed:
+		c.app.appStatePersist.complete(completion.ticket, func() {})
+	default:
+	}
 }
 
 // waitForPrimaryAppStateRecovery requests a recovery snapshot from the primary
@@ -343,9 +366,13 @@ func (a *App) waitForPrimaryAppStateRecovery(ctx context.Context, collection app
 		onRequested(requestID)
 	}
 	select {
-	case eventsToPersist := <-capture.completed:
+	case completion := <-capture.completed:
 		capture.stop()
-		return eventsToPersist, nil, nil
+		// The timely waiter persists under the ticket its caller reserved
+		// before the request was sent; release the dispatch-boundary ticket
+		// without work so the queue keeps draining.
+		a.appStatePersist.complete(completion.ticket, func() {})
+		return completion.events, nil, nil
 	case <-ctx.Done():
 		return nil, capture, fmt.Errorf("wait for WhatsApp app state recovery for %s: %w", collection, ctx.Err())
 	}
@@ -396,9 +423,9 @@ func (a *App) adoptLateAppStateRecovery(collection appstate.WAPatchName, generat
 func (a *App) runLateAppStateRecovery(collection appstate.WAPatchName, cont *lateAppStateRecovery, stop <-chan struct{}) {
 	timer := time.NewTimer(lateAppStateRecoveryMaxWait)
 	defer timer.Stop()
-	var eventsToPersist []any
+	var completion appStateRecoveryCompletion
 	select {
-	case eventsToPersist = <-cont.capture.completed:
+	case completion = <-cont.capture.completed:
 	case <-cont.superseded:
 		// The superseding attempt already removed this entry from the registry.
 		cont.capture.stop()
@@ -411,14 +438,15 @@ func (a *App) runLateAppStateRecovery(collection appstate.WAPatchName, cont *lat
 		return
 	}
 	a.finishLateAppStateRecovery(collection, cont)
-	// Same ordered persistence as the timely path, from a goroutine that holds
-	// neither chatStateSync nor whatsmeow's dispatch.
+	// Same ordered persistence as the timely path. The write position was
+	// reserved when the sentinel was dispatched, so a newer live event that
+	// arrived after the snapshot persists after it, even though this goroutine
+	// runs outside whatsmeow's dispatch and holds no chatStateSync.
 	persistCtx := context.Background()
-	ticket := a.appStatePersist.reserve()
 	tracker := &appStatePersistenceTracker{}
 	result := make(chan error, 1)
-	frontier := a.appStatePersist.complete(ticket, func() {
-		result <- a.persistFetchedAppStateEvents(persistCtx, eventsToPersist, tracker)
+	frontier := a.appStatePersist.complete(completion.ticket, func() {
+		result <- a.persistFetchedAppStateEvents(persistCtx, completion.events, tracker)
 	})
 	if err := a.appStatePersist.waitThrough(persistCtx, frontier); err != nil {
 		a.warnAppStateRecovery(string(collection), err)

@@ -133,6 +133,52 @@ func TestLateAppStateRecoveryKeepsMarkersNewerThanAttempt(t *testing.T) {
 	}
 }
 
+// A deterministic interleaving of a late snapshot with a newer live event.
+// The snapshot's ordered write position must be reserved when its completion
+// sentinel is dispatched, not when the continuation goroutine wakes up: a live
+// unarchive handed to the persistence handler right after the sentinel has to
+// persist after the snapshot's stale archive=true, so the newer state wins.
+func TestLateAppStateRecoveryOrdersSnapshotBeforeNewerLiveEvents(t *testing.T) {
+	chat := types.JID{User: "15550000013", Server: types.DefaultUserServer}
+	a, f := lateRecoveryTestApp(t, chat)
+	name := string(appstate.WAPatchRegularLow)
+	gen, err := a.db.MarkAppStateRecoveryGeneration(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The state a timed-out attempt leaves behind: a still-registered capture
+	// owned by a continuation whose goroutine has not been scheduled yet.
+	capture := a.newAppStateRecoveryCapture(appstate.WAPatchRegularLow)
+	cont := &lateAppStateRecovery{capture: capture, generation: gen, superseded: make(chan struct{})}
+
+	// The phone answers late: whatsmeow dispatches the stale snapshot and the
+	// recovery completion sentinel...
+	f.emit(&events.Archive{JID: chat, Action: &waSyncAction.ArchiveChatAction{Archived: proto.Bool(true)}})
+	f.emit(&events.AppStateSyncComplete{Name: appstate.WAPatchRegularLow, Recovery: true})
+	// ...and a newer live unarchive reaches the persistence handler before the
+	// continuation goroutine has run.
+	a.handleAppStatePersistenceEvent(context.Background(), &events.Archive{
+		JID:    chat,
+		Action: &waSyncAction.ArchiveChatAction{Archived: proto.Bool(false)},
+	}, nil)
+
+	// Only now does the continuation run, deterministically after the live
+	// event was admitted to the persistence owner.
+	a.runLateAppStateRecovery(appstate.WAPatchRegularLow, cont, make(chan struct{}))
+
+	stored, err := a.db.GetChat(chat.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Archived {
+		t.Fatalf("stale late snapshot was replayed after the newer live unarchive: %+v", stored)
+	}
+	if required, err := a.db.AppStateRecoveryRequired(name); err != nil || required {
+		t.Fatalf("late recovery did not clear its markers: %v, %v", required, err)
+	}
+}
+
 func TestLateAppStateRecoveryContinuationStopsOnClose(t *testing.T) {
 	chat := types.JID{User: "15550000012", Server: types.DefaultUserServer}
 	a, f := lateRecoveryTestApp(t, chat)
