@@ -2458,8 +2458,11 @@ func TestArchiveChatBoundsPrimaryRecoveryWait(t *testing.T) {
 	if archiveCalls != 0 {
 		t.Fatalf("archive calls = %d, want 0 after recovery timeout", archiveCalls)
 	}
-	if handlers != 0 {
-		t.Fatalf("event handlers after recovery timeout = %d, want 0", handlers)
+	// The timed out attempt hands its capture to a background continuation, so
+	// its event handler intentionally stays registered until a late answer,
+	// supersession, or App.Close (see TestLateAppStateRecovery*).
+	if handlers != 1 {
+		t.Fatalf("event handlers after recovery timeout = %d, want 1 (late recovery capture)", handlers)
 	}
 	required, markerErr := a.db.AppStateRecoveryRequired(string(appstate.WAPatchRegularLow))
 	if markerErr != nil {

@@ -24,6 +24,10 @@ const (
 	appStateRetryInitialDelay = 250 * time.Millisecond
 	appStateRetryMaxDelay     = 5 * time.Second
 	appStateRecoveryMaxWait   = 5 * time.Minute
+	// How long a background continuation keeps waiting for a recovery the
+	// primary answers after the synchronous waiter gave up. Real phones have
+	// been observed to answer 71 seconds and even hours later.
+	lateAppStateRecoveryMaxWait = 24 * time.Hour
 )
 
 // AddChatStatePersistenceHandler captures app-state events that arrive while a
@@ -247,7 +251,13 @@ func (a *App) replayRequiredAppState(ctx context.Context, collection appstate.WA
 
 func (a *App) recoverMismatchingAppState(ctx context.Context, collection appstate.WAPatchName, markerGeneration int64, tracker *appStatePersistenceTracker, onRequested func(types.MessageID)) error {
 	ticket := a.appStatePersist.reserve()
-	eventsToPersist, recoveryErr := a.waitForPrimaryAppStateRecovery(ctx, collection, onRequested)
+	eventsToPersist, lateCapture, recoveryErr := a.waitForPrimaryAppStateRecovery(ctx, collection, onRequested)
+	if lateCapture != nil {
+		// The request reached the primary but the answer did not arrive in
+		// time. Keep the capture alive in a background continuation so a late
+		// answer still gets persisted and clears this attempt's markers.
+		a.adoptLateAppStateRecovery(collection, markerGeneration, lateCapture)
+	}
 	persistCtx := context.WithoutCancel(ctx)
 	result := make(chan error, 1)
 	frontier := a.appStatePersist.complete(ticket, func() {
@@ -269,51 +279,171 @@ func (a *App) recoverMismatchingAppState(ctx context.Context, collection appstat
 	return a.clearCompletedAppStateRecovery(collection, markerGeneration)
 }
 
-func (a *App) waitForPrimaryAppStateRecovery(ctx context.Context, collection appstate.WAPatchName, onRequested func(types.MessageID)) ([]any, error) {
-	completed := make(chan []any, 1)
-	var mu sync.Mutex
-	var captured []any
-	finished := false
+// appStateRecoveryCapture buffers this collection's app state events until the
+// recovery's AppStateSyncComplete sentinel arrives. Its event handler only
+// appends to a slice and signals a buffered channel, so whatsmeow's dispatch
+// never blocks on persistence.
+type appStateRecoveryCapture struct {
+	app        *App
+	collection appstate.WAPatchName
+	handlerID  uint32
+	mu         sync.Mutex
+	captured   []any
+	finished   bool
+	completed  chan []any
+}
+
+func (a *App) newAppStateRecoveryCapture(collection appstate.WAPatchName) *appStateRecoveryCapture {
+	c := &appStateRecoveryCapture{app: a, collection: collection, completed: make(chan []any, 1)}
 	// whatsmeow dispatches recovery mutations synchronously and emits this
 	// collection's AppStateSyncComplete last, so the sentinel closes the drain.
-	handlerID := a.wa.AddEventHandler(func(evt any) {
-		mu.Lock()
-		defer mu.Unlock()
-		if finished {
-			return
-		}
-		if syncComplete, ok := evt.(*events.AppStateSyncComplete); ok {
-			if syncComplete != nil && syncComplete.Recovery && syncComplete.Name == collection {
-				finished = true
-				completed <- append([]any(nil), captured...)
-			}
-			return
-		}
-		if slices.Contains(appStateCollectionsForEvent(evt), collection) {
-			captured = append(captured, evt)
-		}
-	})
-	defer a.wa.RemoveEventHandler(handlerID)
+	c.handlerID = a.wa.AddEventHandler(c.handle)
+	return c
+}
 
+func (c *appStateRecoveryCapture) handle(evt any) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.finished {
+		return
+	}
+	if syncComplete, ok := evt.(*events.AppStateSyncComplete); ok {
+		if syncComplete != nil && syncComplete.Recovery && syncComplete.Name == c.collection {
+			c.finished = true
+			c.completed <- append([]any(nil), c.captured...)
+		}
+		return
+	}
+	if slices.Contains(appStateCollectionsForEvent(evt), c.collection) {
+		c.captured = append(c.captured, evt)
+	}
+}
+
+// stop finishes the capture and removes its event handler. Safe to call more
+// than once.
+func (c *appStateRecoveryCapture) stop() {
+	c.mu.Lock()
+	c.finished = true
+	c.mu.Unlock()
+	c.app.wa.RemoveEventHandler(c.handlerID)
+}
+
+// waitForPrimaryAppStateRecovery requests a recovery snapshot from the primary
+// and waits for the captured events. When the wait times out after the request
+// was sent, the still-registered capture is returned so the caller can hand it
+// to a background continuation instead of dropping a late answer.
+func (a *App) waitForPrimaryAppStateRecovery(ctx context.Context, collection appstate.WAPatchName, onRequested func(types.MessageID)) ([]any, *appStateRecoveryCapture, error) {
+	capture := a.newAppStateRecoveryCapture(collection)
 	requestID, err := a.wa.RequestAppStateRecovery(ctx, string(collection))
 	if err != nil {
-		mu.Lock()
-		finished = true
-		mu.Unlock()
-		return nil, fmt.Errorf("request WhatsApp app state recovery for %s: %w", collection, err)
+		capture.stop()
+		return nil, nil, fmt.Errorf("request WhatsApp app state recovery for %s: %w", collection, err)
 	}
 	if onRequested != nil {
 		onRequested(requestID)
 	}
 	select {
-	case eventsToPersist := <-completed:
-		return eventsToPersist, nil
+	case eventsToPersist := <-capture.completed:
+		capture.stop()
+		return eventsToPersist, nil, nil
 	case <-ctx.Done():
-		mu.Lock()
-		finished = true
-		mu.Unlock()
-		return nil, fmt.Errorf("wait for WhatsApp app state recovery for %s: %w", collection, ctx.Err())
+		return nil, capture, fmt.Errorf("wait for WhatsApp app state recovery for %s: %w", collection, ctx.Err())
 	}
+}
+
+// lateAppStateRecovery is a background continuation of a recovery attempt
+// whose synchronous waiter timed out after the request was sent.
+type lateAppStateRecovery struct {
+	capture    *appStateRecoveryCapture
+	generation int64
+	superseded chan struct{}
+}
+
+// adoptLateAppStateRecovery registers at most one continuation per collection;
+// a newer attempt's higher generation supersedes an older one. The capture is
+// dropped when the app is closing or an equal-or-newer continuation exists.
+func (a *App) adoptLateAppStateRecovery(collection appstate.WAPatchName, generation int64, capture *appStateRecoveryCapture) {
+	a.appStateRecoveryMu.Lock()
+	if a.appStateRecoveryClosing {
+		a.appStateRecoveryMu.Unlock()
+		capture.stop()
+		return
+	}
+	if existing := a.lateRecoveries[string(collection)]; existing != nil {
+		if existing.generation >= generation {
+			a.appStateRecoveryMu.Unlock()
+			capture.stop()
+			return
+		}
+		close(existing.superseded)
+		delete(a.lateRecoveries, string(collection))
+	}
+	if a.lateRecoveries == nil {
+		a.lateRecoveries = make(map[string]*lateAppStateRecovery)
+	}
+	if a.lateRecoveryStop == nil {
+		a.lateRecoveryStop = make(chan struct{})
+	}
+	cont := &lateAppStateRecovery{capture: capture, generation: generation, superseded: make(chan struct{})}
+	a.lateRecoveries[string(collection)] = cont
+	stop := a.lateRecoveryStop
+	a.appStateRecoveryWorkers.Go(func() {
+		a.runLateAppStateRecovery(collection, cont, stop)
+	})
+	a.appStateRecoveryMu.Unlock()
+}
+
+func (a *App) runLateAppStateRecovery(collection appstate.WAPatchName, cont *lateAppStateRecovery, stop <-chan struct{}) {
+	timer := time.NewTimer(lateAppStateRecoveryMaxWait)
+	defer timer.Stop()
+	var eventsToPersist []any
+	select {
+	case eventsToPersist = <-cont.capture.completed:
+	case <-cont.superseded:
+		// The superseding attempt already removed this entry from the registry.
+		cont.capture.stop()
+		return
+	case <-stop:
+		a.finishLateAppStateRecovery(collection, cont)
+		return
+	case <-timer.C:
+		a.finishLateAppStateRecovery(collection, cont)
+		return
+	}
+	a.finishLateAppStateRecovery(collection, cont)
+	// Same ordered persistence as the timely path, from a goroutine that holds
+	// neither chatStateSync nor whatsmeow's dispatch.
+	persistCtx := context.Background()
+	ticket := a.appStatePersist.reserve()
+	tracker := &appStatePersistenceTracker{}
+	result := make(chan error, 1)
+	frontier := a.appStatePersist.complete(ticket, func() {
+		result <- a.persistFetchedAppStateEvents(persistCtx, eventsToPersist, tracker)
+	})
+	if err := a.appStatePersist.waitThrough(persistCtx, frontier); err != nil {
+		a.warnAppStateRecovery(string(collection), err)
+		return
+	}
+	if persistenceErr := <-result; persistenceErr != nil {
+		a.warnAppStateRecovery(string(collection), fmt.Errorf("persist late recovered app state %s: %w", collection, persistenceErr))
+		return
+	}
+	if err := a.clearCompletedAppStateRecovery(collection, cont.generation); err != nil {
+		a.warnAppStateRecovery(string(collection), err)
+		return
+	}
+	a.emitWarning("app_state_recovery_completed_late",
+		fmt.Sprintf("App state %s recovered late from primary", collection),
+		map[string]any{"name": string(collection), "generation": cont.generation})
+}
+
+func (a *App) finishLateAppStateRecovery(collection appstate.WAPatchName, cont *lateAppStateRecovery) {
+	cont.capture.stop()
+	a.appStateRecoveryMu.Lock()
+	if a.lateRecoveries[string(collection)] == cont {
+		delete(a.lateRecoveries, string(collection))
+	}
+	a.appStateRecoveryMu.Unlock()
 }
 
 func (a *App) fetchAndPersistAppState(ctx context.Context, collection appstate.WAPatchName, fullSync bool, tracker *appStatePersistenceTracker) (fetchErr, persistenceErr error) {
