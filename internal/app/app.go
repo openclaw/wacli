@@ -96,6 +96,7 @@ type WAClient interface {
 	FetchAppState(ctx context.Context, name string, fullSync, onlyIfNotSynced bool) error
 	FetchAppStateEvents(ctx context.Context, name string, fullSync, onlyIfNotSynced bool) ([]any, error)
 	RequestAppStateRecovery(ctx context.Context, name string) (types.MessageID, error)
+	HasLocalAppState(ctx context.Context, name string) (bool, error)
 	Logout(ctx context.Context) error
 	LinkedJID() string
 	LinkedLID() string
@@ -134,9 +135,15 @@ type App struct {
 	appStateRecoveryClosing bool
 	manualFetchMu           sync.Mutex
 	manualFetches           map[string]int
-	heartbeatLast           atomic.Int64
-	groupInfo               groupInfoCache
-	presenceWatch           presenceWatch
+	// Degraded app-state mode: collections whose last full sync in this
+	// process is known not to verify, and the time of the last background
+	// recovery request per collection. Guarded by appStateDegradedMu.
+	appStateDegradedMu        sync.Mutex
+	appStateFullSyncBroken    map[string]bool
+	appStateRecoveryRequested map[string]time.Time
+	heartbeatLast             atomic.Int64
+	groupInfo                 groupInfoCache
+	presenceWatch             presenceWatch
 }
 
 func New(opts Options) (*App, error) {

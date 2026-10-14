@@ -88,6 +88,7 @@ type fakeWA struct {
 	manualHistorySyncCalls      []bool
 	appStateRecoveries          []string
 	appStateFetches             []fakeAppStateFetch
+	hasLocalAppState            bool
 
 	presenceCalls   []types.Presence
 	sendPresenceErr error
@@ -806,6 +807,12 @@ func (f *fakeWA) RequestHistorySyncOnDemand(ctx context.Context, lastKnown types
 		}
 	}
 	return types.MessageID("req"), nil
+}
+
+func (f *fakeWA) HasLocalAppState(ctx context.Context, name string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.hasLocalAppState, nil
 }
 
 func (f *fakeWA) RequestAppStateRecovery(ctx context.Context, name string) (types.MessageID, error) {
