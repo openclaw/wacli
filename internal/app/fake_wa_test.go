@@ -815,6 +815,19 @@ func (f *fakeWA) HasLocalAppState(ctx context.Context, name string) (bool, error
 	return f.hasLocalAppState, nil
 }
 
+// noteFullSyncResult models stock whatsmeow's destructive full sync:
+// fetchAppState deletes the saved collection version before decoding, so a
+// failed full sync leaves no local app state behind, and a verified one
+// stores a fresh version.
+func (f *fakeWA) noteFullSyncResult(fullSync bool, err error) {
+	if !fullSync {
+		return
+	}
+	f.mu.Lock()
+	f.hasLocalAppState = err == nil
+	f.mu.Unlock()
+}
+
 func (f *fakeWA) RequestAppStateRecovery(ctx context.Context, name string) (types.MessageID, error) {
 	f.mu.Lock()
 	if f.appStateRecoveryErr != nil {
@@ -916,6 +929,7 @@ func (f *fakeWA) FetchAppStateEvents(ctx context.Context, name string, fullSync,
 	}
 	eventCB := f.appStateFetchEvent
 	f.mu.Unlock()
+	f.noteFullSyncResult(fullSync, err)
 	if err != nil {
 		if !errors.Is(err, appstate.ErrKeyNotFound) {
 			f.emit(&events.AppStateSyncError{Name: appstate.WAPatchName(name), FullSync: fullSync, Error: err})

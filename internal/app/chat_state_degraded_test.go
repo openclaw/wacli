@@ -2,13 +2,18 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"go.mau.fi/whatsmeow/appstate"
+	"go.mau.fi/whatsmeow/proto/waSyncAction"
 	"go.mau.fi/whatsmeow/types"
+	"go.mau.fi/whatsmeow/types/events"
+	"google.golang.org/protobuf/proto"
 )
 
 // degradedTestApp builds an app whose WA fake can distinguish full and
@@ -46,9 +51,31 @@ func forceBrokenFullSync(t *testing.T, a *App, f *appStateContextWA, collection 
 	}
 }
 
-// (a) On a flagged collection, a successful local write whose post-send
-// persistence succeeded leaves no replay debt behind.
-func TestDegradedCollectionWriteKeepsNoMarker(t *testing.T) {
+// recoveryIntentExists reports whether one exact durable recovery intent is
+// still present in wacli.db.
+func recoveryIntentExists(t *testing.T, a *App, name string, id int64) bool {
+	t.Helper()
+	raw, err := sql.Open("sqlite3", filepath.Join(a.StoreDir(), "wacli.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	var exists bool
+	if err := raw.QueryRow(
+		`SELECT EXISTS(SELECT 1 FROM app_state_recovery_intents WHERE collection = ? AND id = ?)`, name, id,
+	).Scan(&exists); err != nil {
+		t.Fatal(err)
+	}
+	return exists
+}
+
+// (a) Even on a flagged collection a successful write keeps its own durable
+// replay intent: pinned whatsmeow's SendAppState dispatches the post-send
+// fetched mutations in a goroutine after it returns, so a nil persistence
+// error does not prove that batch reached wacli.db. The intent survives until
+// a verified replay covers it — and later writes still proceed without the
+// phone, through the degraded pre-write path.
+func TestDegradedCollectionWriteKeepsDurableSendIntent(t *testing.T) {
 	chat := types.JID{User: "15550000020", Server: types.DefaultUserServer}
 	a, f := degradedTestApp(t, chat)
 	name := appstate.WAPatchRegularLow
@@ -61,8 +88,10 @@ func TestDegradedCollectionWriteKeepsNoMarker(t *testing.T) {
 	f.requestAppStateRecovery = func(context.Context, string) (types.MessageID, error) {
 		return types.MessageID("bg-req"), nil
 	}
-	f.hasLocalAppState = true
 	forceBrokenFullSync(t, a, f, name)
+	// The primary's recovery snapshot later restored local state (the failed
+	// full sync itself deleted the saved version, as stock whatsmeow does).
+	f.hasLocalAppState = true
 
 	if err := a.ArchiveChat(t.Context(), chat, true); err != nil {
 		t.Fatalf("ArchiveChat on flagged collection: %v", err)
@@ -70,12 +99,68 @@ func TestDegradedCollectionWriteKeepsNoMarker(t *testing.T) {
 	if stored, err := a.db.GetChat(chat.String()); err != nil || !stored.Archived {
 		t.Fatalf("archive not persisted: %+v, %v", stored, err)
 	}
-	required, err := a.db.AppStateRecoveryRequired(string(name))
-	if err != nil {
-		t.Fatal(err)
+	if required, err := a.db.AppStateRecoveryRequired(string(name)); err != nil || !required {
+		t.Fatalf("send intent after the write = %v, %v; want kept (post-send mutations dispatch asynchronously)", required, err)
 	}
-	if required {
-		t.Fatal("flagged collection kept a replay marker after a fully persisted write")
+
+	// The kept debt must not push later writes back into the full replay plus
+	// phone wait: the degraded path settles them with an incremental fetch.
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	start := time.Now()
+	if err := a.ArchiveChat(ctx, chat, false); err != nil {
+		t.Fatalf("second write with kept send intent: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Fatalf("second write took %v; it must not wait for the phone", elapsed)
+	}
+	if required, err := a.db.AppStateRecoveryRequired(string(name)); err != nil || !required {
+		t.Fatalf("send intent after the second write = %v, %v; want kept", required, err)
+	}
+}
+
+// A live mutation advanced whatsmeow's collection cursor but its wacli.db
+// persistence failed, leaving a durable recovery intent. The next degraded
+// pre-write replay sees an empty incremental delta — the cursor is already
+// past the mutation — which is not a replay: the intent must survive while
+// the write still proceeds.
+func TestDegradedReplayKeepsIntentOfUnpersistedLiveMutation(t *testing.T) {
+	chat := types.JID{User: "15550000025", Server: types.DefaultUserServer}
+	a, f := degradedTestApp(t, chat)
+	name := appstate.WAPatchRegularLow
+	f.fetchEvents = func(_ context.Context, _ string, fullSync, _ bool) ([]any, error) {
+		if fullSync {
+			return nil, appstate.ErrMismatchingLTHash
+		}
+		return nil, nil
+	}
+	f.requestAppStateRecovery = func(context.Context, string) (types.MessageID, error) {
+		return types.MessageID("bg-req"), nil
+	}
+	forceBrokenFullSync(t, a, f, name)
+	f.hasLocalAppState = true
+
+	// The write-ahead marker a live event leaves when its ordered persistence
+	// into wacli.db fails after whatsmeow already consumed the mutation.
+	markers, err := a.markLiveAppStateRecovery(&events.Archive{
+		JID:    chat,
+		Action: &waSyncAction.ArchiveChatAction{Archived: proto.Bool(true)},
+	})
+	if err != nil || len(markers) != 1 {
+		t.Fatalf("mark live recovery: %v, %v", markers, err)
+	}
+	failedGen := markers[0].generation
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	if err := a.ArchiveChat(ctx, chat, true); err != nil {
+		t.Fatalf("degraded write with unpersisted live mutation debt: %v", err)
+	}
+	if !recoveryIntentExists(t, a, string(name), failedGen) {
+		t.Fatal("degraded replay cleared the intent of a live mutation that never reached wacli.db; an empty incremental delta is not a replay")
+	}
+	if required, err := a.db.AppStateRecoveryRequired(string(name)); err != nil || !required {
+		t.Fatalf("replay debt after degraded write = %v, %v; want kept", required, err)
 	}
 }
 
@@ -98,10 +183,13 @@ func TestDegradedReplayWritesWithoutWaitingForPrimary(t *testing.T) {
 		recoveryRequests.Add(1)
 		return types.MessageID("bg-req"), nil
 	}
-	f.hasLocalAppState = true
 	forceBrokenFullSync(t, a, f, name)
-	// Stale replay debt from an earlier write.
-	if _, err := a.db.MarkAppStateRecoveryGeneration(string(name)); err != nil {
+	// The primary's recovery snapshot later restored local state.
+	f.hasLocalAppState = true
+	// Stale replay debt from an earlier write whose post-send batch was never
+	// proven persisted.
+	staleGen, err := a.db.MarkAppStateRecoveryGeneration(string(name))
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -125,14 +213,13 @@ func TestDegradedReplayWritesWithoutWaitingForPrimary(t *testing.T) {
 	if got := recoveryRequests.Load(); got != 1 {
 		t.Fatalf("background recovery requests = %d, want 1", got)
 	}
-	if required, err := a.db.AppStateRecoveryRequired(string(name)); err != nil || required {
-		t.Fatalf("replay debt after degraded write = %v, %v; want cleared", required, err)
+	// The write proceeded, but the stale debt is not provably replayed by an
+	// incremental fetch: it must survive for a later verified replay.
+	if !recoveryIntentExists(t, a, string(name), staleGen) {
+		t.Fatal("degraded write cleared stale replay debt it did not replay")
 	}
 
 	// A second degraded write inside the rate-limit window sends no new request.
-	if _, err := a.db.MarkAppStateRecoveryGeneration(string(name)); err != nil {
-		t.Fatal(err)
-	}
 	if err := a.ArchiveChat(ctx, chat, false); err != nil {
 		t.Fatalf("second degraded write: %v", err)
 	}
@@ -197,7 +284,8 @@ func TestDegradedFlagWithoutLocalStateStillWaitsForPrimary(t *testing.T) {
 		recoveryRequests.Add(1)
 		return types.MessageID("req"), nil
 	}
-	// No local state: f.hasLocalAppState stays false.
+	// No local state: the failed full sync deleted the saved collection
+	// version (stock whatsmeow) and no recovery snapshot restored it.
 	forceBrokenFullSync(t, a, f, name)
 	if _, err := a.db.MarkAppStateRecoveryGeneration(string(name)); err != nil {
 		t.Fatal(err)
@@ -217,53 +305,71 @@ func TestDegradedFlagWithoutLocalStateStillWaitsForPrimary(t *testing.T) {
 	}
 }
 
-// (e) Right after a restart the flag is not armed yet. The first write with
-// replay debt pays one full sync (which arms the flag) and must then take the
-// degraded path in the same call instead of waiting minutes for the phone.
-func TestFirstReplayAfterRestartArmsFlagAndSkipsPhoneWait(t *testing.T) {
+// (e) The "full sync does not verify" flag is durable. With stock whatsmeow a
+// full sync deletes the saved collection version before decoding, so right
+// after the failure there is no local state and the degraded path cannot
+// engage in the same process until a primary recovery snapshot restores it.
+// What must work is the next process: the persisted flag makes the pre-write
+// degraded path run before any destructive full sync, so a restart with
+// restored local state writes without repeating the known-broken full replay
+// and without waiting for the phone.
+func TestFullSyncBrokenFlagPersistsAcrossRestart(t *testing.T) {
 	chat := types.JID{User: "15550000024", Server: types.DefaultUserServer}
 	a, f := degradedTestApp(t, chat)
 	name := appstate.WAPatchRegularLow
-	var recoveryRequests, fullSyncs atomic.Int32
-	f.fetchEvents = func(_ context.Context, _ string, fullSync, _ bool) ([]any, error) {
+	f.requestAppStateRecovery = func(context.Context, string) (types.MessageID, error) {
+		return types.MessageID("bg-req"), nil
+	}
+	f.hasLocalAppState = true
+	forceBrokenFullSync(t, a, f, name)
+	// The fake models the stock SDK: the failed full sync deleted the version.
+	if hasLocal, err := f.HasLocalAppState(t.Context(), string(name)); err != nil || hasLocal {
+		t.Fatalf("local app state after failed full sync = %v, %v; the fake must model the destructive full sync", hasLocal, err)
+	}
+	// Replay debt left by a write before the restart.
+	if _, err := a.db.MarkAppStateRecoveryGeneration(string(name)); err != nil {
+		t.Fatal(err)
+	}
+	a.Close() // restart
+
+	a2, err := New(Options{StoreDir: a.StoreDir()})
+	if err != nil {
+		t.Fatalf("reopen app after restart: %v", err)
+	}
+	t.Cleanup(a2.Close)
+	f2 := &appStateContextWA{fakeWA: newFakeWA()}
+	var fullSyncs, recoveryRequests atomic.Int32
+	f2.fetchEvents = func(_ context.Context, _ string, fullSync, _ bool) ([]any, error) {
 		if fullSync {
 			fullSyncs.Add(1)
 			return nil, appstate.ErrMismatchingLTHash
 		}
 		return nil, nil
 	}
-	f.requestAppStateRecovery = func(context.Context, string) (types.MessageID, error) {
+	f2.requestAppStateRecovery = func(context.Context, string) (types.MessageID, error) {
 		recoveryRequests.Add(1)
 		return types.MessageID("bg-req"), nil
 	}
-	f.hasLocalAppState = true
-	if a.isAppStateFullSyncBroken(name) {
-		t.Fatal("flag must start unarmed in a fresh process")
-	}
-	// Replay debt left by a write before the restart.
-	if _, err := a.db.MarkAppStateRecoveryGeneration(string(name)); err != nil {
-		t.Fatal(err)
-	}
+	// The primary's recovery snapshot restored local state before the restart.
+	f2.hasLocalAppState = true
+	a2.wa = f2
 
+	if !a2.isAppStateFullSyncBroken(name) {
+		t.Fatal("the persisted flag must be rehydrated from wacli.db after a restart")
+	}
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	start := time.Now()
-	if err := a.ArchiveChat(ctx, chat, true); err != nil {
+	if err := a2.ArchiveChat(ctx, chat, true); err != nil {
 		t.Fatalf("first write after restart: %v", err)
 	}
 	if elapsed := time.Since(start); elapsed > 3*time.Second {
 		t.Fatalf("first write after restart took %v; it must not wait for the phone", elapsed)
 	}
-	if got := fullSyncs.Load(); got != 1 {
-		t.Fatalf("full syncs = %d, want exactly 1 (the one that arms the flag)", got)
-	}
-	if !a.isAppStateFullSyncBroken(name) {
-		t.Fatal("the failed full sync must arm the flag")
+	if got := fullSyncs.Load(); got != 0 {
+		t.Fatalf("full syncs after restart = %d, want 0 (no destructive replay on a known-broken collection)", got)
 	}
 	if got := recoveryRequests.Load(); got != 1 {
 		t.Fatalf("recovery requests = %d, want 1 background request", got)
-	}
-	if required, err := a.db.AppStateRecoveryRequired(string(name)); err != nil || required {
-		t.Fatalf("replay debt after the write = %v, %v; want cleared", required, err)
 	}
 }

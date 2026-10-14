@@ -135,10 +135,12 @@ type App struct {
 	appStateRecoveryClosing bool
 	manualFetchMu           sync.Mutex
 	manualFetches           map[string]int
-	// Degraded app-state mode: collections whose last full sync in this
-	// process is known not to verify, and the time of the last background
-	// recovery request per collection. Guarded by appStateDegradedMu.
+	// Degraded app-state mode: collections whose last full sync is known not
+	// to verify (mirrored durably in wacli.db and rehydrated once per
+	// process), and the time of the last background recovery request per
+	// collection. Guarded by appStateDegradedMu.
 	appStateDegradedMu        sync.Mutex
+	appStateFullSyncLoaded    bool
 	appStateFullSyncBroken    map[string]bool
 	appStateRecoveryRequested map[string]time.Time
 	heartbeatLast             atomic.Int64

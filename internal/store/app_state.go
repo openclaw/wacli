@@ -156,6 +156,56 @@ func (d *DB) ClearAppStateRecoveryGeneration(collection string, generation int64
 	return !remaining, nil
 }
 
+// SetAppStateFullSyncBroken durably records whether the latest full sync of
+// the collection failed verification. The flag survives restarts so a
+// known-broken collection is not sent through another destructive full sync
+// (stock whatsmeow deletes the saved collection version before decoding a
+// full sync) on the first write after the process restarts.
+func (d *DB) SetAppStateFullSyncBroken(collection string, broken bool) error {
+	collection = strings.TrimSpace(collection)
+	if collection == "" {
+		return fmt.Errorf("app state collection is required")
+	}
+	var err error
+	if broken {
+		_, err = d.sql.Exec(`
+			INSERT INTO app_state_full_sync_broken(collection, marked_at)
+			VALUES(?, ?)
+			ON CONFLICT(collection) DO UPDATE SET marked_at = excluded.marked_at
+		`, collection, nowUTC().Unix())
+	} else {
+		_, err = d.sql.Exec(`DELETE FROM app_state_full_sync_broken WHERE collection = ?`, collection)
+	}
+	if err != nil {
+		return fmt.Errorf("record app state full sync verification for %s: %w", collection, err)
+	}
+	return nil
+}
+
+// AppStateFullSyncBrokenCollections lists the collections whose latest full
+// sync is durably recorded as failing verification. Tolerates stores created
+// before the table existed (read-only opens skip schema maintenance).
+func (d *DB) AppStateFullSyncBrokenCollections() ([]string, error) {
+	exists, err := d.tableExists("app_state_full_sync_broken")
+	if err != nil || !exists {
+		return nil, err
+	}
+	rows, err := d.sql.Query(`SELECT collection FROM app_state_full_sync_broken ORDER BY collection`)
+	if err != nil {
+		return nil, fmt.Errorf("list app state full sync verification flags: %w", err)
+	}
+	defer rows.Close()
+	var collections []string
+	for rows.Next() {
+		var collection string
+		if err := rows.Scan(&collection); err != nil {
+			return nil, err
+		}
+		collections = append(collections, collection)
+	}
+	return collections, rows.Err()
+}
+
 func (d *DB) ClearAppStateRecoveryIntent(collection string, generation int64) error {
 	collection = strings.TrimSpace(collection)
 	if collection == "" {
