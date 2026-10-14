@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Chats: settle pre-write replay debt with an incremental sync on collections whose full sync is known not to verify, clearing a fully persisted write's own marker instead of forcing every write through a failing full replay and a five-minute wait for the phone (#NNN).
+- Chats: settle pre-write replay debt with an incremental sync on collections whose full sync is known not to verify, clearing a fully persisted write's own marker instead of forcing every write through a failing full replay and a five-minute wait for the phone (#490).
 
 - Messages: add bounded chronological search context and exact local chat/contact name filters with explicit ambiguity errors.
 - Messages: add a content-free incremental journal, bounded drains, retention expiry, and identity reconciliation.
