@@ -250,6 +250,9 @@ func writeChatStateResult(flags *rootFlags, action, chat string, receipts *chatS
 		}
 		if receipts != nil {
 			result["receipts"] = receipts.count
+			if receipts.count == 0 {
+				result["local_only"] = true
+			}
 			if receipts.kind != "" {
 				result["receipt"] = receipts.kind
 				result["sender_notified"] = receipts.senderNotified()
@@ -262,7 +265,9 @@ func writeChatStateResult(flags *rootFlags, action, chat string, receipts *chatS
 		return nil
 	}
 	note := ""
-	if receipts.kind == string(types.ReceiptTypeReadSelf) {
+	if receipts.count == 0 {
+		note = ", local state only; no messages acknowledged"
+	} else if receipts.kind == string(types.ReceiptTypeReadSelf) {
 		note = fmt.Sprintf(", sent as %s: your read-receipt privacy setting keeps them from the sender", receipts.kind)
 	} else if receipts.count > 0 {
 		note = ", sender notification unknown; WhatsApp applies your privacy setting"

@@ -428,3 +428,40 @@ func TestReceiptModeClearsEmptyMarkerWithoutNetwork(t *testing.T) {
 		t.Fatal("empty marker not cleared")
 	}
 }
+
+func TestReceiptModeClearsUnavailableUnreadLocallyWithoutAcknowledgingMessages(t *testing.T) {
+	for _, withRows := range []bool{false, true} {
+		t.Run(fmt.Sprint(withRows), func(t *testing.T) {
+			a := newTestApp(t)
+			f := newFakeWA()
+			a.wa = f
+			chat := types.NewJID("456", types.DefaultUserServer)
+			seedReceiptChat(t, a, chat, "dm", nil, 7)
+			if withRows {
+				for _, m := range []store.UpsertMessageParams{
+					{MsgID: "outgoing", FromMe: true, Text: "reply"},
+					{MsgID: "placeholder", DisplayText: "(message)"},
+					{MsgID: "reaction", ReactionToID: "outgoing", ReactionEmoji: "ok"},
+					{MsgID: "revoked", Revoked: true, Text: "old"},
+					{MsgID: "deleted", DeletedForMe: true, Text: "old"},
+				} {
+					m.ChatJID, m.Timestamp = chat.String(), time.Unix(1700000000, 0)
+					if err := a.db.UpsertMessage(m); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			n, kind, err := a.MarkChatReadWithReceipts(t.Context(), chat)
+			if err != nil || n != 0 || kind != "" {
+				t.Fatalf("local-only result = %d, %q, %v", n, kind, err)
+			}
+			c, err := a.db.GetChat(chat.String())
+			if err != nil || c.Unread || c.UnreadCount != 0 {
+				t.Fatalf("local unread metadata = %+v, %v", c, err)
+			}
+			if len(readReceiptCallsOf(f)) != 0 || len(f.markReadCalls) != 0 || len(f.appStateFetches) != 0 {
+				t.Fatal("unavailable messages were acknowledged over the network")
+			}
+		})
+	}
+}

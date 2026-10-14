@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Chats: let `mark-read --receipts` clear local unread metadata when no eligible incoming message is stored, report the zero-receipt result as local-only, and preserve arrivals during the clear (#NNN).
 - Messages: add bounded chronological search context and exact local chat/contact name filters with explicit ambiguity errors.
 - Messages: add a content-free incremental journal, bounded drains, retention expiry, and identity reconciliation.
 - Messages: add bounded cursor reads for list, search, and export, with explicit archive invalidation and shared successful-sync freshness.

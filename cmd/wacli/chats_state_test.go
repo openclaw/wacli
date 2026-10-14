@@ -62,7 +62,7 @@ func (f *orderedMarkReadApp) DB() *store.DB { return nil }
 func (f *orderedMarkReadApp) MarkChatReadWithReceipts(_ context.Context, chat types.JID) (int, types.ReceiptType, error) {
 	f.steps = append(f.steps, "receipts "+chat.String())
 	kind := f.receiptType
-	if kind == "" {
+	if kind == "" && f.receipts > 0 {
 		kind = types.ReceiptType("unknown")
 	}
 	return f.receipts, kind, f.receiptErr
@@ -199,6 +199,42 @@ func TestReceiptJSONReportsUncertainSenderNotification(t *testing.T) {
 	value, ok := data["sender_notified"]
 	if !ok || value != nil || data["receipt"] != "unknown" {
 		t.Fatalf("uncertainty lost: %s", raw)
+	}
+}
+
+func TestZeroReceiptsReportLocalOnlyWithoutClaimingAcknowledgement(t *testing.T) {
+	fake := &orderedMarkReadApp{}
+	resp, err := executeDelegatedMarkRead(t.Context(), fake, sendDelegateRequest{
+		Kind: markReadReceiptsKind, To: "123@s.whatsapp.net", Receipts: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipts, err := delegatedReceipts(resp, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := captureRootStdout(t, func() {
+		if err := writeChatStateResult(&rootFlags{asJSON: true}, resp.Action, resp.Chat, receipts); err != nil {
+			t.Fatal(err)
+		}
+	})
+	var result struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Data["receipts"] != float64(0) || result.Data["local_only"] != true || result.Data["receipt"] != nil || result.Data["sender_notified"] != nil {
+		t.Fatalf("zero-receipt result claims acknowledgement: %s", raw)
+	}
+	text := captureRootStdout(t, func() {
+		if err := writeChatStateResult(&rootFlags{}, resp.Action, resp.Chat, receipts); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(text, "local state only; no messages acknowledged") {
+		t.Fatalf("missing local-only explanation: %s", text)
 	}
 }
 
