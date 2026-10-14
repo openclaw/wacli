@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Chats: settle pre-write replay debt with an incremental sync on collections whose full sync is known not to verify, clearing a fully persisted write's own marker instead of forcing every write through a failing full replay and a five-minute wait for the phone (#490).
+- Chats: on collections whose full sync is known not to verify, let chat-state writes proceed after an incremental sync instead of a failing full replay and a five-minute wait for the phone; only the pre-write attempt marker is cleared, while older recovery intents and each write's post-send intent are kept until a verified full replay or a primary recovery snapshot covers them (#490).
 
 - Messages: add bounded chronological search context and exact local chat/contact name filters with explicit ambiguity errors.
 - Messages: add a content-free incremental journal, bounded drains, retention expiry, and identity reconciliation.
