@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Chats: finish an app-state recovery the primary answers after the waiter timed out, persisting the late snapshot and clearing that attempt's replay markers (#NNN).
+- Chats: finish an app-state recovery the primary answers after the waiter timed out, persisting the late snapshot and clearing that attempt's replay markers (#489).
 
 - Messages: add bounded chronological search context and exact local chat/contact name filters with explicit ambiguity errors.
 - Messages: add a content-free incremental journal, bounded drains, retention expiry, and identity reconciliation.
