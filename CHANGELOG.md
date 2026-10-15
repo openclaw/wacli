@@ -18,6 +18,7 @@
 - Messages: add bounded chronological search context and exact local chat/contact name filters with explicit ambiguity errors.
 - Messages: add a content-free incremental journal, bounded drains, retention expiry, and identity reconciliation.
 - Messages: add bounded cursor reads for list, search, and export, with explicit archive invalidation and shared successful-sync freshness.
+- Messages: keep Click-to-WhatsApp ad referrals (ad ID, source, headline, media type, click ID) and expose them as `ad_referral` in message JSON, sync webhook payloads, and a `messages show` line. Each text field is capped at 1024 bytes and thumbnails are not stored. Thanks @nicolasbiondic (#473).
 
 ## 0.21.0 - 2026-10-11
 

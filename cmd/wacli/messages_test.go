@@ -530,6 +530,38 @@ func TestMessagesExportCommandAppliesDateFilters(t *testing.T) {
 	}
 }
 
+func TestWriteMessageShowAdReferralLabelFallbacks(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		ad   *store.AdReferral
+		want string
+	}{
+		{"title", &store.AdReferral{Title: " Spring drop ", SourceURL: "https://example.com/ad"}, "Ad referral: Spring drop\n"},
+		{"url", &store.AdReferral{SourceURL: "https://example.com/ad", SourceID: "1"}, "Ad referral: https://example.com/ad\n"},
+		{"id", &store.AdReferral{SourceID: "120212345678901234"}, "Ad referral: 120212345678901234\n"},
+		{"other fields only", &store.AdReferral{CtwaClid: "clid"}, "Ad referral: yes\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			msg := store.Message{MsgID: "m", Timestamp: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), AdReferral: tc.ad}
+			if err := writeMessageShow(&out, msg); err != nil {
+				t.Fatalf("writeMessageShow: %v", err)
+			}
+			if !strings.Contains(out.String(), tc.want) {
+				t.Fatalf("missing %q in:\n%s", tc.want, out.String())
+			}
+		})
+	}
+
+	var out bytes.Buffer
+	if err := writeMessageShow(&out, store.Message{MsgID: "m", Timestamp: time.Now()}); err != nil {
+		t.Fatalf("writeMessageShow: %v", err)
+	}
+	if strings.Contains(out.String(), "Ad referral") {
+		t.Fatalf("plain message printed an ad referral line:\n%s", out.String())
+	}
+}
+
 func TestWriteMessageShowIncludesForwardedMetadata(t *testing.T) {
 	msg := store.Message{
 		ChatJID:         "chat@s.whatsapp.net",

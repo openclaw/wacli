@@ -148,6 +148,23 @@ Only reports that arrive while `sync` is connected are kept: WhatsApp announces 
 
 Plain audio messages have an empty `MediaCaption`. Their `Text` keeps the `[Audio]` display fallback, so they can still match searches for `Audio`. Text supplied alongside an audio payload remains its caption, including a literal `[Audio]` supplied by the sender. Existing rows are not migrated; an ordinary live or history re-ingestion can replace a legacy synthetic caption, subject to the existing edit and deletion rules.
 
+## Ad referrals
+
+When someone opens a chat from a Click-to-WhatsApp ad, WhatsApp attaches the ad
+to their first message. Sync and history imports keep it, and JSON output adds
+`ad_referral` to that message with `source_type`, `source_id` (the ad ID),
+`source_url`, `source_app`, `title`, `body`, `media_type`, `ctwa_clid`,
+`conversion_source`, `entry_point_source`, and `entry_point_app`. Empty fields
+are omitted, and messages without ad context have no `ad_referral`. A later copy
+of the message without ad context keeps the stored referral; `messages purge`
+clears it.
+
+- `media_type` is the ad's own media kind (`image` or `video`), not the message's `media_type`.
+- Each text field is trimmed and capped at 1024 bytes, cut on a valid UTF-8 boundary.
+- Thumbnails and other ad media bytes are not stored.
+- `messages show` prints an `Ad referral:` line with the title, or the source URL or ID when there is no title.
+- Sync webhooks carry the same object as `AdReferral`; see [sync](sync.md#webhook-payloads).
+
 ## Starred
 
 - `messages starred` lists starred messages ordered by star time when app-state events provide it; history-imported rows fall back to message time.

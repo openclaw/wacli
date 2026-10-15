@@ -79,6 +79,13 @@ Messages use the stored live message payload documented above:
 
 Media messages include a `Media` object containing only `Type`, `Caption`, `Filename`, `MimeType`, and `FileLength`; messages without media retain `Media: null`. Attachment retrieval fields (`MediaKey`, `DirectPath`, `FileSHA256`, and `FileEncSHA256`) are not exported. Older releases exposed these fields unintentionally: consumers that downloaded from them should use `--download-media` or `media download` instead. Local download and retry data remains available in the store. Review retained webhook logs and queues from older releases for attachment keys.
 
+Messages sent from a Click-to-WhatsApp ad include an `AdReferral` object with the
+same fields as the CLI's `ad_referral` JSON (`source_type`, `source_id`,
+`source_url`, `source_app`, `title`, `body`, `media_type`, `ctwa_clid`,
+`conversion_source`, `entry_point_source`, `entry_point_app`; see
+[messages](messages.md#ad-referrals)). Empty fields are omitted. Messages without a
+referral omit the `AdReferral` key, so existing payloads are unchanged.
+
 `EventType: "receipt"` reports delivery and read state for messages you sent. Only
 `delivered`, `read`, and `played` cross the webhook; the protocol bookkeeping types
 (`sender`, `retry`, `read-self`, `played-self`, `inactive`, `server-error`, `peer_msg`,
