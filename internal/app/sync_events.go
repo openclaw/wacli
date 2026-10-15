@@ -460,7 +460,7 @@ func (a *App) handleReceiptEvent(ctx context.Context, evt *events.Receipt) {
 	chatJID := canonicalJIDString(chat)
 	through, ids, err := a.receiptReadPosition(chatJID, evt)
 	if err == nil {
-		err = a.db.ClearChatUnreadThrough(chatJID, through, ids)
+		err = a.clearChatUnreadFromEvent(chatJID, through, ids)
 	}
 	if err != nil {
 		a.emitWarning(
@@ -608,6 +608,14 @@ func (a *App) handleLiveSyncMessage(ctx context.Context, opts SyncOptions, v *ev
 	pm := wa.ParseLiveMessage(v)
 	if pm.ReactionToID != "" && pm.ReactionEmoji == "" && v.Message != nil && v.Message.GetEncReactionMessage() != nil {
 		a.decryptEncryptedReaction(ctx, &pm, v)
+	}
+	// Protocol retries can share an ID with decoded content. Preserve useful
+	// payloads so a later retry cannot look like a first unread transition.
+	if !pm.HasContent() && pm.ID != "" && !pm.Chat.IsEmpty() && pm.Chat != types.StatusBroadcastJID {
+		chat := canonicalJIDString(a.canonicalStoreJID(ctx, pm.Chat))
+		if existing, err := a.db.GetMessage(chat, pm.ID); err == nil && !liveUnreadPlaceholder(existing) {
+			return
+		}
 	}
 	incrementUnread := a.shouldIncrementLiveUnread(ctx, pm)
 	if err := a.storeParsedMessageForSync(ctx, pm, limits...); err == nil {
@@ -832,8 +840,21 @@ func (a *App) shouldIncrementLiveUnread(ctx context.Context, pm wa.ParsedMessage
 	if chat == "" {
 		return false
 	}
-	_, err := a.db.GetMessage(chat, pm.ID)
-	return errors.Is(err, sql.ErrNoRows)
+	existing, err := a.db.GetMessage(chat, pm.ID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return true
+	}
+	return err == nil && liveUnreadPlaceholder(existing)
+}
+
+// Contentless protocol rows never contributed unread content. Edits, deletion
+// tombstones and previously read payloads must remain duplicates even if empty.
+func liveUnreadPlaceholder(m store.Message) bool {
+	return m.DisplayText == "(message)" && strings.TrimSpace(m.Text) == "" &&
+		!m.FromMe && !m.Edited && !m.Revoked && !m.DeletedForMe &&
+		m.DeletedAt == nil && m.PayloadPurgedAt == nil &&
+		m.ReactionToID == "" && m.ReactionEmoji == "" &&
+		m.MediaType == "" && len(m.Buttons) == 0
 }
 
 func (a *App) storeHistoryUnreadCount(ctx context.Context, chatID string, conv *waHistorySync.Conversation) {

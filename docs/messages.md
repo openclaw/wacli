@@ -194,3 +194,5 @@ wacli messages purge --chat 1234567890@s.whatsapp.net --id ABC123 --dry-run
 wacli messages revoke --chat 1234567890@s.whatsapp.net --id ABC123
 wacli messages forward --chat 1234567890@s.whatsapp.net --id ABC123 --to "Family"
 ```
+
+Raw message text, captions, and explicit edits retain their original whitespace in stored records and JSON output. Human display text remains normalized. Content trimmed by an older version cannot be reconstructed from the local store alone.

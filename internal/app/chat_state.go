@@ -122,13 +122,40 @@ func (a *App) MuteChat(ctx context.Context, jid types.JID, mute bool, duration t
 }
 
 func (a *App) MarkChatRead(ctx context.Context, jid types.JID, read bool) error {
+	return a.markChatRead(ctx, jid, read, "")
+}
+
+// MarkChatReadThrough fixes the inbound read position before recovery or a
+// network write. Recovery must never extend what the caller has actually read.
+func (a *App) MarkChatReadThrough(ctx context.Context, jid types.JID, messageID string) error {
+	if strings.TrimSpace(messageID) == "" {
+		return fmt.Errorf("--through-message-id requires an exact nonempty message ID")
+	}
+	return a.markChatRead(ctx, jid, true, messageID)
+}
+
+func (a *App) markChatRead(ctx context.Context, jid types.JID, read bool, throughID string) error {
+	var chatJID string
+	var lastTS time.Time
+	var lastKey *waCommon.MessageKey
+	if throughID != "" {
+		chatJID = canonicalJIDString(a.canonicalStoreJID(ctx, jid))
+		m, err := a.db.ReadBoundary(chatJID, throughID)
+		if err != nil {
+			return err
+		}
+		lastTS, lastKey = m.Timestamp, messageKeyFromStore(m)
+	}
 	release, err := a.beginChatStateWrite(ctx, appstate.WAPatchRegularLow)
 	if err != nil {
 		return err
 	}
 	defer release()
-	chatJID := canonicalJIDString(a.canonicalStoreJID(ctx, jid))
-	lastTS, lastKey := a.latestMessageRange(chatJID)
+	if throughID == "" {
+		// Keep legacy resolution and latest-message capture after recovery.
+		chatJID = canonicalJIDString(a.canonicalStoreJID(ctx, jid))
+		lastTS, lastKey = a.latestMessageRange(chatJID)
+	}
 	pending, err := a.beginLocalAppStateWrite(appstate.WAPatchRegularLow)
 	if err != nil {
 		return err
@@ -147,6 +174,9 @@ func (a *App) MarkChatRead(ctx context.Context, jid types.JID, read bool) error 
 		var ids []string
 		if lastKey != nil {
 			ids = []string{lastKey.GetID()}
+		}
+		if throughID != "" {
+			return a.db.ClearChatUnreadThroughPreservingMarker(chatJID, lastTS, ids)
 		}
 		return a.db.ClearChatUnreadThrough(chatJID, lastTS, ids)
 	})
@@ -512,7 +542,7 @@ func (a *App) handleChatStateEvent(ctx context.Context, evt any) error {
 		var err error
 		if v.Action.GetRead() {
 			through, ids := markChatAsReadPosition(v)
-			err = a.db.ClearChatUnreadThrough(canonicalJIDString(chat), through, ids)
+			err = a.clearChatUnreadFromEvent(canonicalJIDString(chat), through, ids)
 		} else {
 			err = a.db.SetChatUnread(canonicalJIDString(chat), true)
 		}

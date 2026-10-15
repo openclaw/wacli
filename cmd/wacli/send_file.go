@@ -196,29 +196,37 @@ func sendFile(ctx context.Context, a interface {
 			FileLength:    up.FileLength,
 		})
 	} else {
-		chatName := a.WA().ResolveChatName(ctx, to, "")
-		kind := chatKindFromJID(to)
-		if err := a.DB().UpsertChat(to.String(), kind, chatName, now); err != nil {
+		// Match text-send and receipt history using the authoritative LID
+		// mapping. Keep the actual wire destination and accepted ID unchanged.
+		storedChat := to.ToNonAD()
+		if to.Server == types.HiddenUserServer {
+			storedChat = canonicalOutboundChat(ctx, a.WA(), to)
+		}
+		chatName := a.WA().ResolveChatName(ctx, storedChat, "")
+		kind := chatKindFromJID(storedChat)
+		if err := a.DB().UpsertChat(storedChat.String(), kind, chatName, now); err != nil {
 			storeErr = fmt.Errorf("chat update: %w", err)
 		}
 		if err := a.DB().UpsertMessage(store.UpsertMessageParams{
-			ChatJID:       to.String(),
-			ChatName:      chatName,
-			MsgID:         id,
-			SenderJID:     "",
-			SenderName:    "me",
-			Timestamp:     now,
-			FromMe:        true,
-			Text:          opts.caption,
-			MediaType:     mediaType,
-			MediaCaption:  opts.caption,
-			Filename:      name,
-			MimeType:      mimeType,
-			DirectPath:    up.DirectPath,
-			MediaKey:      up.MediaKey,
-			FileSHA256:    up.FileSHA256,
-			FileEncSHA256: up.FileEncSHA256,
-			FileLength:    up.FileLength,
+			ChatJID:         storedChat.String(),
+			ChatName:        chatName,
+			MsgID:           id,
+			SenderJID:       "",
+			SenderName:      "me",
+			Timestamp:       now,
+			FromMe:          true,
+			Text:            opts.caption,
+			QuotedMsgID:     replyContext.GetStanzaID(),
+			QuotedSenderJID: canonicalOutboundQuoteSender(ctx, a.WA(), replyContext.GetParticipant()),
+			MediaType:       mediaType,
+			MediaCaption:    opts.caption,
+			Filename:        name,
+			MimeType:        mimeType,
+			DirectPath:      up.DirectPath,
+			MediaKey:        up.MediaKey,
+			FileSHA256:      up.FileSHA256,
+			FileEncSHA256:   up.FileEncSHA256,
+			FileLength:      up.FileLength,
 		}); err != nil {
 			storeErr = errors.Join(storeErr, fmt.Errorf("message update: %w", err))
 		}

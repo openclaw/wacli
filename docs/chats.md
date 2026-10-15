@@ -15,7 +15,7 @@ wacli chats pin --chat CHAT [--pick N]
 wacli chats unpin --chat CHAT [--pick N]
 wacli chats mute --chat CHAT [--duration DURATION] [--pick N]
 wacli chats unmute --chat CHAT [--pick N]
-wacli chats mark-read --chat CHAT [--pick N] [--receipts]
+wacli chats mark-read --chat CHAT [--pick N] [--through-message-id ID] [--receipts]
 wacli chats mark-unread --chat CHAT [--pick N]
 wacli chats cleanup [--days N] [--jid JID] [--dry-run] [--confirm]
 ```
@@ -30,6 +30,7 @@ wacli chats cleanup [--days N] [--jid JID] [--dry-run] [--confirm]
 - `list --unread` matches counted and marker-only unread chats; `list --no-unread` excludes both.
 - Replayed read signals reduce the unread count only through the messages they cover; older reads cannot restore already-read messages. Known message IDs distinguish arrivals in the same second, using their local insertion order. Without a known ID boundary, messages at the cutoff second remain unread. Content-free system events, reactions, and revocations do not add to live unread counts.
 - `mark-unread` sets the unread marker without inventing an unread count; `mark-read` clears the marker and count through its captured message boundary; arrivals beyond it remain unread.
+- `mark-read --through-message-id ID` fixes that boundary to an exact stored inbound message in the resolved chat, before app-state recovery starts. Missing, outgoing, deleted, revoked, reaction, and content-free placeholder anchors fail before any read update. Newer messages, including later rows in the same second, remain unread. Without this flag, mark-read keeps its existing behavior.
 - Reading a chat on the phone clears it here too while `sync` is connected. WhatsApp reports that read as a `read-self` receipt only while read receipts are turned off; with them on it arrives as an ordinary read receipt sent by this account, and both are honoured.
 - `show` accepts the stored JID. If a phone JID maps to a historical `@lid` row, it can show that row too.
 - State commands use `--chat` and resolve names, phone numbers, groups, and JIDs like send commands. Use `--pick N` for ambiguous matches.
@@ -45,7 +46,11 @@ wacli chats cleanup [--days N] [--jid JID] [--dry-run] [--confirm]
 
 ## Read receipts
 
+Read events carrying message IDs are applied as bounded ranges, including live echoes and later recovery replay. If newer readable messages remain, an existing marker-only unread state is preserved even when the event came from another device or a plain mark-read. Events containing only a timestamp keep their existing clearing behavior. Replaying an older range never restores a marker that has already been cleared.
+
 Use `wacli chats mark-read --chat CHAT --receipts` to send receipts for stored unread incoming messages. Plain `mark-read` keeps its existing app-state behavior and does not notify message senders. `mark-unread` remains available through a running sync process.
+
+Add `--through-message-id ID` to send receipts only for the current unread selection at or before that inbound message. The 100-message cap, group sender batching, and read-receipt privacy setting still apply. Repeat with the same ID to finish a capped selection; newer messages remain unread. Both direct execution and delegation honor this cutoff. Older sync processes reject the separate bounded request without falling back to an unbounded read; restart `wacli sync` after upgrading.
 
 Receipt mode does not wait for app-state recovery, so it can run while the primary phone cannot provide an app-state snapshot. It works directly or through a same-store `sync --follow` process. Restart older sync processes after upgrading: the separate receipt request is rejected by an older daemon before it changes the chat.
 
@@ -68,5 +73,6 @@ wacli chats show --jid 1234567890@s.whatsapp.net
 wacli chats mute --chat "+1 555 123 4567" --duration 8h
 wacli chats mark-read --chat family --pick 1
 wacli chats mark-read --chat family --pick 1 --receipts --json
+wacli chats mark-read --chat family --pick 1 --through-message-id HANDLED_MESSAGE_ID
 wacli chats cleanup --days 365 --dry-run
 ```

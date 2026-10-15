@@ -26,13 +26,24 @@ func runSendOperation[T any](
 	reconnect func(context.Context) error,
 	op func(context.Context) (T, error),
 ) (T, error) {
+	return runOperationWithRetry(ctx, reconnect, op, isRetryableSendError)
+}
+
+// Share the bounded attempt/reconnect mechanics while allowing idempotent
+// presence updates to retain a broader policy than fresh message operations.
+func runOperationWithRetry[T any](
+	ctx context.Context,
+	reconnect func(context.Context) error,
+	op func(context.Context) (T, error),
+	retryable func(error) bool,
+) (T, error) {
 	result, err := runSendAttempt(ctx, sendAttemptTimeout, op)
 	if err == nil {
 		return result, nil
 	}
 
 	var zero T
-	if !isRetryableSendError(err) || ctx.Err() != nil {
+	if !retryable(err) || ctx.Err() != nil {
 		return zero, err
 	}
 	if reconnectErr := reconnect(ctx); reconnectErr != nil {
@@ -80,11 +91,13 @@ func isRetryableSendError(err error) bool {
 	}
 
 	msg := strings.ToLower(err.Error())
+	// Lookup failures precede message transmission. A generic disconnect does
+	// not: whatsmeow can return it while recovering an already-submitted frame.
+	// Starting the whole operation again could create a second message ID.
 	return strings.Contains(msg, "failed to send usync query") ||
 		strings.Contains(msg, "failed to get user info") ||
 		strings.Contains(msg, "failed to get device list") ||
-		strings.Contains(msg, "info query timed out") ||
-		strings.Contains(msg, "not connected")
+		strings.Contains(msg, "info query timed out")
 }
 
 func reconnectForSend(a interface {

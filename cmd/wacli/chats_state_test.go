@@ -14,12 +14,12 @@ import (
 )
 
 func TestMarkReadDelegateKindSeparatesReceipts(t *testing.T) {
-	if got := markReadDelegateKind(false); got != markReadKind {
+	if got := markReadDelegateKind(false, ""); got != markReadKind {
 		t.Fatalf("plain mark-read kind = %q, want %q", got, markReadKind)
 	}
 	// Its own kind is what makes an old daemon reject the request instead of
 	// clearing the unread count the receipts come from.
-	if got := markReadDelegateKind(true); got != markReadReceiptsKind {
+	if got := markReadDelegateKind(true, ""); got != markReadReceiptsKind {
 		t.Fatalf("--receipts kind = %q, want %q", got, markReadReceiptsKind)
 	}
 }
@@ -50,6 +50,48 @@ func TestChatsMarkReadReceiptsFlagOnlyOnMarkRead(t *testing.T) {
 	}
 }
 
+func TestChatsMarkReadExplicitBoundaryFlag(t *testing.T) {
+	flags := &rootFlags{}
+	if newChatsMarkReadCmd(flags, true).Flags().Lookup("through-message-id") == nil {
+		t.Fatal("mark-read has no explicit inbound boundary flag")
+	}
+	if newChatsMarkReadCmd(flags, false).Flags().Lookup("through-message-id") != nil {
+		t.Fatal("mark-unread must not accept an explicit read boundary")
+	}
+}
+
+func TestExplicitReadBoundaryRequestValidation(t *testing.T) {
+	for _, receipts := range []bool{false, true} {
+		if got := markReadDelegateKind(receipts, "handled"); got != markReadThroughKind {
+			t.Fatalf("bounded kind = %q", got)
+		}
+	}
+	for _, id := range []string{"", " ", " handled", "handled "} {
+		var err error
+		captureRootStderr(t, func() {
+			err = execute([]string{"--store", t.TempDir(), "chats", "mark-read", "--chat", "123@s.whatsapp.net", "--through-message-id", id})
+		})
+		if err == nil || !strings.Contains(err.Error(), "requires an exact nonempty message ID") {
+			t.Fatalf("ID %q: %v", id, err)
+		}
+	}
+	fake := &orderedMarkReadApp{}
+	unread := false
+	for _, req := range []sendDelegateRequest{
+		{Kind: markReadThroughKind},
+		{Kind: markReadThroughKind, ThroughMessageID: "handled", Read: &unread},
+		{Kind: markReadKind, ThroughMessageID: "handled"},
+		{Kind: markReadReceiptsKind, ThroughMessageID: "handled", Receipts: true},
+	} {
+		if _, err := executeDelegatedMarkRead(context.Background(), fake, req); err == nil {
+			t.Fatalf("invalid bounded request accepted: %+v", req)
+		}
+	}
+	if len(fake.steps) != 0 {
+		t.Fatalf("invalid request reached updates: %v", fake.steps)
+	}
+}
+
 type orderedMarkReadApp struct {
 	steps       []string
 	receipts    int
@@ -58,6 +100,16 @@ type orderedMarkReadApp struct {
 }
 
 func (f *orderedMarkReadApp) DB() *store.DB { return nil }
+
+func (f *orderedMarkReadApp) MarkChatReadThrough(ctx context.Context, chat types.JID, id string) error {
+	f.steps = append(f.steps, "through:"+id)
+	return f.MarkChatRead(ctx, chat, true)
+}
+
+func (f *orderedMarkReadApp) MarkChatReadWithReceiptsThrough(ctx context.Context, chat types.JID, id string) (int, types.ReceiptType, error) {
+	f.steps = append(f.steps, "through:"+id)
+	return f.MarkChatReadWithReceipts(ctx, chat)
+}
 
 func (f *orderedMarkReadApp) MarkChatReadWithReceipts(_ context.Context, chat types.JID) (int, types.ReceiptType, error) {
 	f.steps = append(f.steps, "receipts "+chat.String())
@@ -203,12 +255,15 @@ func TestReceiptJSONReportsUncertainSenderNotification(t *testing.T) {
 }
 
 func TestReceiptModeHonorsReadOnlyBeforeOpeningStore(t *testing.T) {
-	var commandErr error
-	captureRootStderr(t, func() {
-		commandErr = execute([]string{"--store", t.TempDir(), "--read-only", "--json", "chats", "mark-read", "--chat", "123@s.whatsapp.net", "--receipts"})
-	})
-	if commandErr == nil || !strings.Contains(commandErr.Error(), "read-only mode") {
-		t.Fatalf("error=%v, want read-only rejection", commandErr)
+	for _, extra := range [][]string{{"--receipts"}, {"--through-message-id", "handled"}, {"--through-message-id", "handled", "--receipts"}} {
+		var commandErr error
+		captureRootStderr(t, func() {
+			args := []string{"--store", t.TempDir(), "--read-only", "--json", "chats", "mark-read", "--chat", "123@s.whatsapp.net"}
+			commandErr = execute(append(args, extra...))
+		})
+		if commandErr == nil || !strings.Contains(commandErr.Error(), "read-only mode") {
+			t.Fatalf("flags=%v error=%v, want read-only rejection", extra, commandErr)
+		}
 	}
 }
 

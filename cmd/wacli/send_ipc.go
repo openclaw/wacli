@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/openclaw/wacli/internal/app"
@@ -67,12 +69,14 @@ type sendDelegateRequest struct {
 	PresenceWaitMS       int64    `json:"presence_wait_ms,omitempty"`
 	Read                 *bool    `json:"read,omitempty"`
 	Receipts             bool     `json:"receipts,omitempty"`
+	ThroughMessageID     string   `json:"through_message_id,omitempty"`
 	Phones               []string `json:"phones,omitempty"`
 	ChatStateAction      string   `json:"chat_state_action,omitempty"`
 	MuteDurationMS       int64    `json:"mute_duration_ms,omitempty"`
 	PostSendWaitMS       int64    `json:"post_send_wait_ms,omitempty"`
 	TimeoutMS            int64    `json:"timeout_ms,omitempty"`
 	DeadlineUnixMS       int64    `json:"deadline_unix_ms,omitempty"`
+	RetryOnPhone         bool     `json:"retry_on_phone,omitempty"`
 }
 
 type sendDelegateResponse struct {
@@ -95,6 +99,7 @@ type sendDelegateResponse struct {
 	ReceiptType    string               `json:"receipt_type,omitempty"`
 	Contacts       []contactCheckResult `json:"contacts,omitempty"`
 	Presence       *app.PresenceState   `json:"presence,omitempty"`
+	Media          *mediaDownloadResult `json:"media,omitempty"`
 }
 
 type sendDelegateExecutor func(context.Context, sendDelegateRequest) (sendDelegateResponse, error)
@@ -120,6 +125,17 @@ func delegateSend(ctx context.Context, flags *rootFlags, req sendDelegateRequest
 	defer conn.Close()
 
 	deadline := time.Now().Add(commandTimeout(flags))
+	if req.Kind == mediaDownloadKind {
+		// Cache inspection and lock waits already consumed this command's
+		// budget. Never grant recovery a new full timeout after those stages.
+		if parentDeadline, ok := ctx.Deadline(); ok && parentDeadline.Before(deadline) {
+			deadline = parentDeadline
+		}
+		// DialContext alone does not cancel an established socket. Closing it
+		// wakes a blocked read and tells the owner to cancel this media request.
+		stopCancel := context.AfterFunc(ctx, func() { _ = conn.Close() })
+		defer stopCancel()
+	}
 	req.DeadlineUnixMS = deadline.UnixMilli()
 	_ = conn.SetDeadline(deadline)
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
@@ -127,8 +143,14 @@ func delegateSend(ctx context.Context, flags *rootFlags, req sendDelegateRequest
 	}
 	var resp sendDelegateResponse
 	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
+		if req.Kind == mediaDownloadKind && ctx.Err() != nil {
+			return sendDelegateResponse{}, fmt.Errorf("media caller stopped waiting; recovery may have completed, check the exact local file before retrying: %w", ctx.Err())
+		}
 		var netErr net.Error
 		if errors.As(err, &netErr) && netErr.Timeout() {
+			if req.Kind == mediaDownloadKind {
+				return sendDelegateResponse{}, fmt.Errorf("no recovery reply before the timeout; check the exact verified local file before retrying: %w", err)
+			}
 			// The request reached the daemon, which may have started it just
 			// before the deadline. Say so, because a blind retry can send twice.
 			return sendDelegateResponse{}, fmt.Errorf("no reply from the running sync process before the timeout; the %s may still have gone through, so check before retrying: %w", req.Kind, err)
@@ -182,6 +204,10 @@ func startSendDelegateServerForStore(ctx context.Context, storeDir string, spaci
 	// its caller gives up is refused instead of running late (#446).
 	sendSlot := make(chan struct{}, 1)
 	sendSlot <- struct{}{}
+	// Media waits never consume a send slot. A separate per-owner slot ensures
+	// concurrent exact downloads recheck the cache before requesting the phone.
+	mediaSlot := make(chan struct{}, 1)
+	mediaSlot <- struct{}{}
 	// One pacer shared across connections: it spaces the serialized delegated
 	// sends so a burst of `wacli send` processes delegating to this daemon
 	// leaves the wire paced instead of back-to-back. Disabled = no-op.
@@ -193,7 +219,7 @@ func startSendDelegateServerForStore(ctx context.Context, storeDir string, spaci
 			if err != nil {
 				return
 			}
-			go handleSendDelegateConn(ctx, conn, execute, sendSlot, pacer)
+			go handleSendDelegateConn(ctx, conn, execute, sendSlot, pacer, mediaSlot)
 		}
 	}()
 
@@ -219,7 +245,13 @@ func removeStaleSendDelegateSocket(path string) error {
 	return os.Remove(path)
 }
 
-func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDelegateExecutor, sendSlot chan struct{}, pacer *sendPacer) {
+func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDelegateExecutor, sendSlot chan struct{}, pacer *sendPacer, mediaSlots ...chan struct{}) {
+	// Existing direct handler tests omit media support; the production server
+	// supplies one shared media slot across all of its accepted connections.
+	var mediaSlot chan struct{}
+	if len(mediaSlots) != 0 {
+		mediaSlot = mediaSlots[0]
+	}
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(5 * time.Minute))
 
@@ -252,6 +284,37 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDele
 	// transport alive through its budget and the final response write.
 	_ = conn.SetDeadline(deadline.Add(sendDelegateResponseGrace))
 
+	if req.Kind == mediaDownloadKind {
+		if mediaSlot == nil || req.Version != sendDelegateVersion {
+			_ = json.NewEncoder(conn).Encode(sendDelegateResponse{OK: false, Error: "unsupported media recovery delegate"})
+			return
+		}
+		// Requests carry one JSON value and clients leave the socket open for
+		// the reply. A peer disconnect cancels queued or running recovery; it
+		// must not silently continue after a canceled caller goes away.
+		// Drain trailing framing bytes, including a split JSON newline; only
+		// EOF/read failure denotes disconnection, not that harmless whitespace.
+		go func() { _, _ = io.Copy(io.Discard, conn); cancel() }()
+		select {
+		case <-requestCtx.Done():
+			_ = json.NewEncoder(conn).Encode(sendDelegateResponse{OK: false, Error: "media request expired before recovery dispatch"})
+			return
+		case <-mediaSlot:
+			defer func() { mediaSlot <- struct{}{} }()
+		}
+		if requestCtx.Err() != nil {
+			_ = json.NewEncoder(conn).Encode(sendDelegateResponse{OK: false, Error: "media request expired before recovery dispatch"})
+			return
+		}
+		resp, err := execute(requestCtx, req)
+		// A lost answer is uncertain recovery, never permission to repeat a
+		// phone request without reconciling the exact verified local file.
+		if err != nil {
+			resp = sendDelegateResponse{OK: false, Error: err.Error()}
+		}
+		_ = json.NewEncoder(conn).Encode(resp)
+		return
+	}
 	if req.Kind == chatStateKind {
 		// App-state writes are serialized by the app and can wait minutes on
 		// recovery, so they must not hold the send queue.
@@ -340,6 +403,12 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 	defer cancel()
 
 	switch req.Kind {
+	case mediaDownloadKind:
+		if req.To == "" || req.ID == "" {
+			return sendDelegateResponse{}, fmt.Errorf("exact media chat and message ID are required")
+		}
+		result, err := executeExactMediaDownload(ctx, a, req.To, req.ID, req.RetryOnPhone)
+		return sendDelegateResponse{OK: err == nil, Media: result}, err
 	case "text":
 		return executeDelegatedText(ctx, a, req)
 	case "file", "voice":
@@ -364,6 +433,8 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 		return executeDelegatedEdit(ctx, a, req)
 	case markReadKind:
 		return executeDelegatedMarkRead(ctx, a, req)
+	case markReadThroughKind:
+		return executeDelegatedMarkRead(ctx, a, req)
 	case markReadReceiptsKind:
 		// Its own kind, so daemons without receipt support reject it here
 		// instead of marking the chat read and dropping the unread count.
@@ -381,7 +452,9 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 type delegatedMarkReadApp interface {
 	recipientResolverApp
 	MarkChatRead(context.Context, types.JID, bool) error
+	MarkChatReadThrough(context.Context, types.JID, string) error
 	MarkChatReadWithReceipts(context.Context, types.JID) (int, types.ReceiptType, error)
+	MarkChatReadWithReceiptsThrough(context.Context, types.JID, string) (int, types.ReceiptType, error)
 }
 
 func executeDelegatedMarkRead(ctx context.Context, a delegatedMarkReadApp, req sendDelegateRequest) (sendDelegateResponse, error) {
@@ -392,6 +465,13 @@ func executeDelegatedMarkRead(ctx context.Context, a delegatedMarkReadApp, req s
 	if req.Receipts && !read {
 		return sendDelegateResponse{}, fmt.Errorf("--receipts only applies to mark-read")
 	}
+	if req.Kind == markReadThroughKind {
+		if !read || strings.TrimSpace(req.ThroughMessageID) == "" || req.ThroughMessageID != strings.TrimSpace(req.ThroughMessageID) {
+			return sendDelegateResponse{}, fmt.Errorf("bounded mark-read requires an exact nonempty inbound message ID and read=true")
+		}
+	} else if req.ThroughMessageID != "" {
+		return sendDelegateResponse{}, fmt.Errorf("explicit read boundary requires send kind %q", markReadThroughKind)
+	}
 	toJID, err := resolveRecipient(a, req.To, recipientOptions{pick: req.Pick, asJSON: true})
 	if err != nil {
 		return sendDelegateResponse{}, err
@@ -400,14 +480,22 @@ func executeDelegatedMarkRead(ctx context.Context, a delegatedMarkReadApp, req s
 	var receipts *int
 	var receiptType string
 	if req.Receipts {
-		n, kind, err := a.MarkChatReadWithReceipts(ctx, toJID)
+		n, kind, err := markReadReceipts(ctx, a, toJID, req.ThroughMessageID)
 		if err != nil {
 			return sendDelegateResponse{}, err
 		}
 		receipts = &n
 		receiptType = string(kind)
-	} else if err := a.MarkChatRead(ctx, toJID, read); err != nil {
-		return sendDelegateResponse{}, err
+	} else {
+		var err error
+		if req.ThroughMessageID != "" {
+			err = a.MarkChatReadThrough(ctx, toJID, req.ThroughMessageID)
+		} else {
+			err = a.MarkChatRead(ctx, toJID, read)
+		}
+		if err != nil {
+			return sendDelegateResponse{}, err
+		}
 	}
 	action := "mark-read"
 	if !read {
@@ -539,14 +627,10 @@ func executeDelegatedText(ctx context.Context, a *app.App, req sendDelegateReque
 		return sendDelegateResponse{}, err
 	}
 	preview := fetchLinkPreview(ctx, req.Message, req.NoPreview)
-	msgID, err := runSendOperation(ctx, reconnectForSend(a), func(ctx context.Context) (types.MessageID, error) {
-		return sendTextMessage(ctx, a, toJID, req.Message, req.ReplyTo, req.ReplyToSender, preview, mentionedJIDs, ephemeral, textSendOptions{allowSelf: req.AllowSelf})
-	})
+	msgID, storeErr, err := sendTextWithHistory(ctx, a, reconnectForSend(a), toJID, req.Message, req.ReplyTo, req.ReplyToSender, preview, mentionedJIDs, ephemeral, textSendOptions{allowSelf: req.AllowSelf})
 	if err != nil {
 		return sendDelegateResponse{}, err
 	}
-	now := time.Now().UTC()
-	storeErr := persistOutboundText(ctx, a, toJID, string(msgID), req.Message, now)
 	waitForPostSendRetryReceipts(ctx, millisDuration(req.PostSendWaitMS, 0))
 	resp := sendDelegateResponse{OK: true, Sent: true, To: toJID.String(), ID: string(msgID)}
 	if storeErr != nil {

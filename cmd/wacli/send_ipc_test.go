@@ -407,12 +407,16 @@ func TestExecuteDelegatedSendRoutesMarkRead(t *testing.T) {
 	}
 	t.Cleanup(a.Close)
 
-	_, err = executeDelegatedSend(context.Background(), a, sendDelegateRequest{
-		Version: sendDelegateVersion,
-		Kind:    "mark_read",
-	})
-	if err == nil || !strings.Contains(err.Error(), "--to is required") {
-		t.Fatalf("error = %v, want mark-read recipient validation", err)
+	for _, req := range []sendDelegateRequest{
+		{Kind: markReadKind},
+		{Kind: markReadThroughKind, ThroughMessageID: "handled"},
+		{Kind: markReadThroughKind, ThroughMessageID: "handled", Receipts: true},
+	} {
+		req.Version = sendDelegateVersion
+		_, err = executeDelegatedSend(context.Background(), a, req)
+		if err == nil || !strings.Contains(err.Error(), "--to is required") {
+			t.Fatalf("kind %s: error = %v, want mark-read recipient validation", req.Kind, err)
+		}
 	}
 }
 
@@ -423,11 +427,26 @@ type delegatedMarkReadCall struct {
 
 type fakeDelegatedMarkReadApp struct {
 	calls        chan delegatedMarkReadCall
+	boundaries   chan string
 	receipts     int
 	receiptCalls chan types.JID
 }
 
 func (f *fakeDelegatedMarkReadApp) DB() *store.DB { return nil }
+
+func (f *fakeDelegatedMarkReadApp) MarkChatReadThrough(ctx context.Context, chat types.JID, id string) error {
+	if f.boundaries != nil {
+		f.boundaries <- id
+	}
+	return f.MarkChatRead(ctx, chat, true)
+}
+
+func (f *fakeDelegatedMarkReadApp) MarkChatReadWithReceiptsThrough(ctx context.Context, chat types.JID, id string) (int, types.ReceiptType, error) {
+	if f.boundaries != nil {
+		f.boundaries <- id
+	}
+	return f.MarkChatReadWithReceipts(ctx, chat)
+}
 
 func (f *fakeDelegatedMarkReadApp) MarkChatReadWithReceipts(_ context.Context, chat types.JID) (int, types.ReceiptType, error) {
 	if f.receiptCalls != nil {
@@ -452,6 +471,7 @@ func TestChatsMarkReadDelegatesThroughProductionServerWhenStoreLocked(t *testing
 
 	fake := &fakeDelegatedMarkReadApp{
 		calls:        make(chan delegatedMarkReadCall, 3),
+		boundaries:   make(chan string, 3),
 		receipts:     2,
 		receiptCalls: make(chan types.JID, 3),
 	}
@@ -461,6 +481,10 @@ func TestChatsMarkReadDelegatesThroughProductionServerWhenStoreLocked(t *testing
 		}
 		switch req.Kind {
 		case markReadKind:
+		case markReadThroughKind:
+			if req.ThroughMessageID != "handled" {
+				return sendDelegateResponse{}, fmt.Errorf("wrong delegated cutoff %q", req.ThroughMessageID)
+			}
 		case markReadReceiptsKind:
 			req.Receipts = true // as executeDelegatedSend does for this kind
 		default:
@@ -492,10 +516,13 @@ func TestChatsMarkReadDelegatesThroughProductionServerWhenStoreLocked(t *testing
 		command  string
 		read     bool
 		receipts bool
+		through  string
 	}{
 		{name: "mark-read", command: "mark-read", read: true},
 		{name: "mark-unread", command: "mark-unread", read: false},
 		{name: "mark-read receipts", command: "mark-read", read: true, receipts: true},
+		{name: "bounded mark-read", command: "mark-read", read: true, through: "handled"},
+		{name: "bounded receipts", command: "mark-read", read: true, receipts: true, through: "handled"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -506,9 +533,22 @@ func TestChatsMarkReadDelegatesThroughProductionServerWhenStoreLocked(t *testing
 			if tt.receipts {
 				args = append(args, "--receipts")
 			}
+			if tt.through != "" {
+				args = append(args, "--through-message-id", tt.through)
+			}
 			stdout, stderr, err := runPresenceDelegateHelper(t, args)
 			if err != nil {
 				t.Fatalf("chats %s failed: %v stdout=%q stderr=%q", tt.command, err, stdout, stderr)
+			}
+			select {
+			case id := <-fake.boundaries:
+				if id != tt.through || id == "" {
+					t.Fatalf("boundary = %q; want %q", id, tt.through)
+				}
+			default:
+				if tt.through != "" {
+					t.Fatal("explicit boundary dropped during delegation")
+				}
 			}
 
 			if tt.receipts {
@@ -563,6 +603,49 @@ func TestChatsMarkReadDelegatesThroughProductionServerWhenStoreLocked(t *testing
 
 type fakeDelegatedChatStateApp struct {
 	calls chan string
+}
+
+func TestExplicitReadBoundaryOldOwnerRejectsWithoutFallback(t *testing.T) {
+	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
+	storeDir := shortPresenceDelegateStoreDir(t)
+	lk, err := lock.Acquire(storeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lk.Release()
+	requests := make(chan sendDelegateRequest, 4)
+	stop, err := startSendDelegateServerForStore(context.Background(), storeDir, sendSpacing{}, func(_ context.Context, req sendDelegateRequest) (sendDelegateResponse, error) {
+		requests <- req
+		// This is the pre-boundary owner's dispatch contract. It must refuse a
+		// bounded operation instead of interpreting it as legacy mark-read.
+		if req.Kind != markReadKind && req.Kind != markReadReceiptsKind {
+			return sendDelegateResponse{}, fmt.Errorf("unsupported send kind %q", req.Kind)
+		}
+		return sendDelegateResponse{OK: true}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	for _, receipts := range []bool{false, true} {
+		args := []string{"--store", storeDir, "--timeout", "750ms", "chats", "mark-read", "--chat", "123@s.whatsapp.net", "--through-message-id", "handled"}
+		if receipts {
+			args = append(args, "--receipts")
+		}
+		stdout, stderr, err := runPresenceDelegateHelper(t, args)
+		if err == nil || stdout != "" || !strings.Contains(stderr, "does not support --through-message-id") || !strings.Contains(stderr, "left the chat unread") || !strings.Contains(stderr, "restart `wacli sync`") {
+			t.Fatalf("old owner rejection: err=%v stdout=%q stderr=%q", err, stdout, stderr)
+		}
+		req := <-requests
+		if req.Kind != markReadThroughKind || req.ThroughMessageID != "handled" || req.Receipts != receipts {
+			t.Fatalf("wrong IPC request: %+v", req)
+		}
+		select {
+		case req := <-requests:
+			t.Fatalf("unexpected retry/fallback: %+v", req)
+		default:
+		}
+	}
 }
 
 func (f *fakeDelegatedChatStateApp) DB() *store.DB { return nil }

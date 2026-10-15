@@ -1,7 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -17,19 +21,31 @@ import (
 // panics through the embedded nil interface, catching accidental coupling.
 type fakeSendFileWA struct {
 	app.WAClient
-	sentID types.MessageID
+	sentID     types.MessageID
+	mappedChat types.JID
+	wireTarget types.JID
 }
 
-func (f *fakeSendFileWA) Upload(context.Context, []byte, whatsmeow.MediaType) (whatsmeow.UploadResponse, error) {
-	return whatsmeow.UploadResponse{}, nil
+func (f *fakeSendFileWA) Upload(_ context.Context, data []byte, _ whatsmeow.MediaType) (whatsmeow.UploadResponse, error) {
+	// Preserve real content identity across the fake upload/store boundary.
+	hash := sha256.Sum256(data)
+	return whatsmeow.UploadResponse{FileSHA256: hash[:], FileLength: uint64(len(data))}, nil
 }
 
-func (f *fakeSendFileWA) SendProtoMessage(context.Context, types.JID, *waProto.Message) (types.MessageID, error) {
+func (f *fakeSendFileWA) SendProtoMessage(_ context.Context, to types.JID, _ *waProto.Message) (types.MessageID, error) {
+	f.wireTarget = to
 	return f.sentID, nil
 }
 
 func (f *fakeSendFileWA) ResolveChatName(context.Context, types.JID, string) string {
 	return "Test Chat"
+}
+
+func (f *fakeSendFileWA) ResolveLIDToPN(_ context.Context, jid types.JID) types.JID {
+	if !f.mappedChat.IsEmpty() {
+		return f.mappedChat
+	}
+	return jid
 }
 
 type fakeSendFileApp struct {
@@ -73,6 +89,54 @@ func TestSendFilePersistsHistory(t *testing.T) {
 	}
 	if !msg.FromMe || msg.Text != "hi" {
 		t.Fatalf("unexpected persisted message: %+v", msg)
+	}
+}
+
+func TestSendFilePersistsCanonicalRecipient(t *testing.T) {
+	phone := types.NewJID("15550000001", types.DefaultUserServer)
+	lid := types.NewJID("20001", types.HiddenUserServer)
+	for _, tc := range []struct {
+		name               string
+		to, mapped, stored types.JID
+	}{
+		{name: "mapped LID", to: lid, mapped: phone, stored: phone},
+		{name: "unknown LID", to: lid, stored: lid},
+		{name: "phone", to: phone, stored: phone},
+		{name: "group", to: types.NewJID("123-456", types.GroupServer), stored: types.NewJID("123-456", types.GroupServer)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, db, filePath := newSendFileFixture(t)
+			fake := a.wa.(*fakeSendFileWA)
+			fake.mappedChat = tc.mapped
+			res, err := sendFile(context.Background(), a, tc.to, filePath, sendFileOptions{caption: "caption"})
+			if err != nil || res.storeWarning != nil || res.id != "MSG1" {
+				t.Fatalf("accepted outcome = %+v, err %v", res, err)
+			}
+			if fake.wireTarget != tc.to {
+				t.Fatalf("wire target = %s, want %s", fake.wireTarget, tc.to)
+			}
+			message, err := db.GetMessage(tc.stored.String(), res.id)
+			if err != nil || message.MediaCaption != "caption" || !message.FromMe {
+				t.Fatalf("exact canonical attachment history = %+v, err %v", message, err)
+			}
+			if _, err := db.GetChat(tc.stored.String()); err != nil {
+				t.Fatalf("canonical chat missing: %v", err)
+			}
+			media, err := db.GetMediaDownloadInfo(tc.stored.String(), res.id)
+			hash := sha256.Sum256([]byte("hello"))
+			if err != nil || !bytes.Equal(media.FileSHA256, hash[:]) || media.FileLength != 5 {
+				t.Fatalf("accepted attachment identity = %+v, err %v", media, err)
+			}
+			// A mapped transport alias must not create a sibling message or chat.
+			if tc.stored != tc.to {
+				if _, err := db.GetMessage(tc.to.String(), res.id); !errors.Is(err, sql.ErrNoRows) {
+					t.Fatalf("transport sibling message lookup = %v", err)
+				}
+				if _, err := db.GetChat(tc.to.String()); !errors.Is(err, sql.ErrNoRows) {
+					t.Fatalf("transport sibling chat lookup = %v", err)
+				}
+			}
+		})
 	}
 }
 

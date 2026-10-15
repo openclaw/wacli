@@ -14,9 +14,10 @@ import (
 )
 
 type chatStateOptions struct {
-	chat     string
-	pick     int
-	receipts bool
+	chat             string
+	pick             int
+	receipts         bool
+	throughMessageID string
 }
 
 func newChatsArchiveCmd(flags *rootFlags, archive bool) *cobra.Command {
@@ -99,14 +100,21 @@ func newChatsMarkReadCmd(flags *rootFlags, read bool) *cobra.Command {
 		Use:   use,
 		Short: short,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			delegate := sendDelegateRequest{Kind: markReadDelegateKind(opts.receipts), Read: &read, Receipts: opts.receipts}
+			if cmd.Flags().Changed("through-message-id") && (strings.TrimSpace(opts.throughMessageID) == "" || opts.throughMessageID != strings.TrimSpace(opts.throughMessageID)) {
+				return fmt.Errorf("--through-message-id requires an exact nonempty message ID")
+			}
+			delegate := sendDelegateRequest{Kind: markReadDelegateKind(opts.receipts, opts.throughMessageID), Read: &read, Receipts: opts.receipts, ThroughMessageID: opts.throughMessageID}
 			return runChatState(flags, opts, use, delegate, func(ctx context.Context, a chatStateApp, jid types.JID) error {
+				if opts.throughMessageID != "" {
+					return a.MarkChatReadThrough(ctx, jid, opts.throughMessageID)
+				}
 				return a.MarkChatRead(ctx, jid, read)
 			})
 		},
 	}
 	addChatStateFlags(cmd, &opts)
 	if read {
+		cmd.Flags().StringVar(&opts.throughMessageID, "through-message-id", "", "mark read only through this exact stored inbound message ID")
 		cmd.Flags().BoolVar(&opts.receipts, "receipts", false, "send read receipts for up to 100 unread messages without waiting for app-state recovery; follows your read-receipt privacy setting")
 	}
 	return cmd
@@ -117,7 +125,9 @@ type chatStateApp interface {
 	PinChat(context.Context, types.JID, bool) error
 	MuteChat(context.Context, types.JID, bool, time.Duration) error
 	MarkChatRead(context.Context, types.JID, bool) error
+	MarkChatReadThrough(context.Context, types.JID, string) error
 	MarkChatReadWithReceipts(context.Context, types.JID) (int, types.ReceiptType, error)
+	MarkChatReadWithReceiptsThrough(context.Context, types.JID, string) (int, types.ReceiptType, error)
 }
 
 // Receipt dispatch does not prove that a sender received a notification.
@@ -137,6 +147,7 @@ func (r chatStateReceipts) senderNotified() *bool {
 const (
 	markReadKind         = "mark_read"
 	markReadReceiptsKind = "mark_read_receipts"
+	markReadThroughKind  = "mark_read_through"
 	chatStateKind        = "chat_state"
 )
 
@@ -149,11 +160,23 @@ func chatStateDelegateRequest(action string, muteDuration time.Duration) sendDel
 }
 
 // A separate kind makes old daemons reject receipts instead of ignoring a flag.
-func markReadDelegateKind(receipts bool) string {
+func markReadDelegateKind(receipts bool, throughID string) string {
+	// Older owners must reject the whole bounded operation, including receipts,
+	// rather than ignore a new JSON field and acknowledge newer messages.
+	if throughID != "" {
+		return markReadThroughKind
+	}
 	if receipts {
 		return markReadReceiptsKind
 	}
 	return markReadKind
+}
+
+func explainReadBoundaryDelegateError(err error) error {
+	if err == nil || !strings.Contains(err.Error(), "unsupported send kind") || !strings.Contains(err.Error(), markReadThroughKind) {
+		return err
+	}
+	return fmt.Errorf("the running sync process does not support --through-message-id and left the chat unread; restart `wacli sync` after upgrading, then run this again: %w", err)
 }
 
 // explainReceiptsDelegateError turns that rejection into the action to take.
@@ -189,6 +212,9 @@ func runChatState(flags *rootFlags, opts chatStateOptions, action string, delega
 		resp, delegated, delegateErr := tryDelegateSend(ctx, flags, err, delegate)
 		if delegated {
 			if delegateErr != nil {
+				if delegate.Kind == markReadThroughKind {
+					return explainReadBoundaryDelegateError(delegateErr)
+				}
 				if delegate.Kind == chatStateKind {
 					return explainChatStateDelegateError(delegateErr, action)
 				}
@@ -228,7 +254,7 @@ func runChatState(flags *rootFlags, opts chatStateOptions, action string, delega
 	// Receipt mode owns its local read boundary and bypasses app-state recovery.
 	var receipts *chatStateReceipts
 	if opts.receipts {
-		n, kind, err := a.MarkChatReadWithReceipts(ctx, jid)
+		n, kind, err := markReadReceipts(ctx, a, jid, opts.throughMessageID)
 		if err != nil {
 			return err
 		}
@@ -237,6 +263,18 @@ func runChatState(flags *rootFlags, opts chatStateOptions, action string, delega
 		return err
 	}
 	return writeChatStateResult(flags, action, jid.String(), receipts)
+}
+
+// Both direct and delegated receipt execution share this dispatch, so adding a
+// cutoff cannot accidentally retain the unbounded receipt path in either mode.
+func markReadReceipts(ctx context.Context, a interface {
+	MarkChatReadWithReceipts(context.Context, types.JID) (int, types.ReceiptType, error)
+	MarkChatReadWithReceiptsThrough(context.Context, types.JID, string) (int, types.ReceiptType, error)
+}, jid types.JID, throughID string) (int, types.ReceiptType, error) {
+	if throughID != "" {
+		return a.MarkChatReadWithReceiptsThrough(ctx, jid, throughID)
+	}
+	return a.MarkChatReadWithReceipts(ctx, jid)
 }
 
 // writeChatStateResult prints a state command's result. receipts is set only

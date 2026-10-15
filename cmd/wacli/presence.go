@@ -270,8 +270,12 @@ func presenceStateFromString(state string) (types.ChatPresence, error) {
 }
 
 func sendPresenceWithRetry(ctx context.Context, reconnect func(context.Context) error, send func(context.Context) error) error {
-	_, err := runSendOperation(ctx, reconnect, func(ctx context.Context) (struct{}, error) {
+	_, err := runOperationWithRetry(ctx, reconnect, func(ctx context.Context) (struct{}, error) {
 		return struct{}{}, send(ctx)
+	}, func(err error) bool {
+		// Repeating a presence state does not create a second chat message.
+		// Keep its prior reconnect behavior without weakening send uncertainty.
+		return isRetryableSendError(err) || (err != nil && strings.Contains(strings.ToLower(err.Error()), "not connected"))
 	})
 	return err
 }

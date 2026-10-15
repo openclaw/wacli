@@ -66,6 +66,60 @@ type mediaRetryKey struct {
 // skip it. Recovery only works while the phone is online and still holds the
 // media. Requires an authenticated, connected client.
 func (a *App) RetryMedia(ctx context.Context, opts RetryMediaOptions) (MediaRetryResult, error) {
+	return a.retryMedia(ctx, opts, nil)
+}
+
+// RetryMediaMessage asks the phone once for exactly this stored message, even
+// when its recorded local file is missing or invalid. The caller owns the
+// writable store and connected client; this method does not connect or lock.
+// The complete attempt is bounded by thirty seconds and the caller's deadline.
+func (a *App) RetryMediaMessage(ctx context.Context, chatJID, msgID string, wait time.Duration) (outcome MediaRetryOutcome, err error) {
+	chatJID, msgID = strings.TrimSpace(chatJID), strings.TrimSpace(msgID)
+	out := MediaRetryOutcome{ChatJID: chatJID, MsgID: msgID, Status: "error"}
+	if chatJID == "" || msgID == "" {
+		return out, fmt.Errorf("exact chat JID and message ID are required")
+	}
+	if wait < 0 {
+		return out, fmt.Errorf("wait must be >= 0")
+	}
+	if wait == 0 || wait > 30*time.Second {
+		wait = 30 * time.Second
+	}
+	// Keep receipt dispatch and download bounded too, rather than limiting only
+	// the notification timer. WithTimeout retains an earlier caller deadline.
+	bounded, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	// Exact recovery has a single observable lifecycle. These metadata-only
+	// events distinguish an accepted receipt from cancellation and late writes;
+	// they never expose media keys, download URLs or recording contents.
+	a.emitEvent("media_recovery", map[string]any{"phase": "started", "chat_jid": chatJID, "msg_id": msgID})
+	defer func() {
+		phase := "finished"
+		if bounded.Err() != nil || ctx.Err() != nil {
+			phase = "canceled"
+		}
+		a.emitEvent("media_recovery", map[string]any{"phase": phase, "chat_jid": chatJID, "msg_id": msgID, "status": outcome.Status})
+	}()
+	key := mediaRetryKey{chatJID: chatJID, msgID: msgID}
+	result, err := a.retryMedia(bounded, RetryMediaOptions{ChatJID: chatJID, Wait: wait, BatchSize: 1}, &key)
+	if len(result.Outcomes) == 1 {
+		// Our own notification ceiling is a silent phone, whereas a caller
+		// cancellation remains an error. Keep download/dispatch failures distinct.
+		if result.Outcomes[0].Status == "no_response" && ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) {
+			err = nil
+		}
+		return result.Outcomes[0], err
+	}
+	if err != nil {
+		out.Detail = err.Error()
+		return out, err
+	}
+	return out, fmt.Errorf("exact media retry produced no outcome")
+}
+
+// A non-nil exact selector bypasses pending/date queries and disables the
+// batch command's second receipt. Preparation and integrity checks stay shared.
+func (a *App) retryMedia(ctx context.Context, opts RetryMediaOptions, exact *mediaRetryKey) (MediaRetryResult, error) {
 	if err := ctx.Err(); err != nil {
 		return MediaRetryResult{}, err
 	}
@@ -89,7 +143,9 @@ func (a *App) RetryMedia(ctx context.Context, opts RetryMediaOptions) (MediaRetr
 
 	var pending []store.PendingMediaDownload
 	var err error
-	if opts.BeforeSet || opts.BeforeUnix != 0 {
+	if exact != nil {
+		pending = []store.PendingMediaDownload{{ChatJID: exact.chatJID, MsgID: exact.msgID}}
+	} else if opts.BeforeSet || opts.BeforeUnix != 0 {
 		pending, err = a.db.ListPendingMediaBefore(ctx, opts.ChatJID, opts.MediaType, opts.BeforeUnix, opts.Limit)
 	} else {
 		pending, err = a.db.ListPendingMediaDownloads(ctx, opts.ChatJID, opts.MediaType, opts.Limit)
@@ -149,6 +205,13 @@ func (a *App) RetryMedia(ctx context.Context, opts RetryMediaOptions) (MediaRetr
 		if err != nil {
 			result.Failed++
 			result.Outcomes = append(result.Outcomes, MediaRetryOutcome{ChatJID: p.ChatJID, MsgID: p.MsgID, Status: "error", Detail: fmt.Sprintf("load info: %v", err)})
+			continue
+		}
+		// Pending batch queries enforce this metadata requirement themselves.
+		// An exact lookup also sees text-only or incomplete media rows.
+		if exact != nil && (strings.TrimSpace(info.MediaType) == "" || len(info.MediaKey) == 0 || strings.TrimSpace(info.DirectPath) == "") {
+			result.Failed++
+			result.Outcomes = append(result.Outcomes, MediaRetryOutcome{ChatJID: p.ChatJID, MsgID: p.MsgID, Status: "error", Detail: "message has no downloadable media metadata"})
 			continue
 		}
 		msg, err := a.db.GetMessage(p.ChatJID, p.MsgID)
@@ -215,11 +278,22 @@ func (a *App) RetryMedia(ctx context.Context, opts RetryMediaOptions) (MediaRetr
 
 	sendReceipt := func(key mediaRetryKey) bool {
 		r := prepared[key]
+		// Even if a queued caller disconnects just before dispatch, do not ask
+		// the phone after cancellation. No second exact attempt is scheduled.
+		if err := ctx.Err(); err != nil {
+			mu.Lock()
+			notifs[key] = retryNotif{err: err}
+			mu.Unlock()
+			return false
+		}
 		if err := a.wa.SendMediaRetryReceipt(ctx, r.mi, r.info.MediaKey); err != nil {
 			mu.Lock()
 			notifs[key] = retryNotif{err: err}
 			mu.Unlock()
 			return false
+		}
+		if exact != nil {
+			a.emitEvent("media_recovery", map[string]any{"phase": "receipt_sent", "chat_jid": key.chatJID, "msg_id": key.msgID})
 		}
 		return true
 	}
@@ -276,7 +350,7 @@ func (a *App) RetryMedia(ctx context.Context, opts RetryMediaOptions) (MediaRetr
 		}
 		waitForBatch(batch)
 		// One second attempt for non-responders (often just timing).
-		if retryIDs := missing(batch); len(retryIDs) > 0 && ctx.Err() == nil {
+		if retryIDs := missing(batch); exact == nil && len(retryIDs) > 0 && ctx.Err() == nil {
 			for _, key := range retryIDs {
 				sendReceipt(key)
 			}
@@ -284,7 +358,7 @@ func (a *App) RetryMedia(ctx context.Context, opts RetryMediaOptions) (MediaRetr
 		}
 
 		for _, key := range batch {
-			if err := ctx.Err(); err != nil {
+			if err := ctx.Err(); err != nil && exact == nil {
 				return result, err
 			}
 			mu.Lock()
@@ -363,6 +437,12 @@ func (a *App) classifyRetry(ctx context.Context, info store.MediaDownloadInfo, i
 }
 
 func isExpiredMediaDownload(err error) bool {
+	return IsExpiredMediaDownload(err)
+}
+
+// IsExpiredMediaDownload identifies only WhatsApp's explicit 403, 404 and 410
+// media failures. Network and integrity errors must not mark media unavailable.
+func IsExpiredMediaDownload(err error) bool {
 	return errors.Is(err, whatsmeow.ErrMediaDownloadFailedWith403) ||
 		errors.Is(err, whatsmeow.ErrMediaDownloadFailedWith404) ||
 		errors.Is(err, whatsmeow.ErrMediaDownloadFailedWith410)

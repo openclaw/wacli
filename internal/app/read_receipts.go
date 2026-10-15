@@ -20,12 +20,36 @@ type readReceiptBatch struct {
 // MarkChatReadWithReceipts uses the receipt transport independently of app-state
 // recovery. Only a fully dispatched selection advances the local read boundary.
 func (a *App) MarkChatReadWithReceipts(ctx context.Context, jid types.JID) (int, types.ReceiptType, error) {
+	return a.markChatReadWithReceipts(ctx, jid, "")
+}
+
+// MarkChatReadWithReceiptsThrough keeps receipt privacy and batching unchanged,
+// while acknowledging only unread messages at or before the exact inbound ID.
+func (a *App) MarkChatReadWithReceiptsThrough(ctx context.Context, jid types.JID, messageID string) (int, types.ReceiptType, error) {
+	if strings.TrimSpace(messageID) == "" {
+		return 0, "", fmt.Errorf("--through-message-id requires an exact nonempty message ID")
+	}
+	return a.markChatReadWithReceipts(ctx, jid, messageID)
+}
+
+func (a *App) markChatReadWithReceipts(ctx context.Context, jid types.JID, throughID string) (int, types.ReceiptType, error) {
 	chatJID := canonicalJIDString(a.canonicalStoreJID(ctx, jid))
-	msgs, err := a.db.ReadReceiptCandidates(chatJID, maxReadReceiptMessages)
+	var msgs []store.MessageInfo
+	var err error
+	if throughID == "" {
+		msgs, err = a.db.ReadReceiptCandidates(chatJID, maxReadReceiptMessages)
+	} else {
+		msgs, err = a.db.ReadReceiptCandidatesThrough(chatJID, throughID, maxReadReceiptMessages)
+	}
 	if err != nil {
 		return 0, "", fmt.Errorf("select unread messages for %s: %w", chatJID, err)
 	}
 	if len(msgs) == 0 {
+		if throughID != "" {
+			// The unread suffix (or marker's latest message) can be entirely
+			// beyond the handled anchor. Nothing was acknowledged in that case.
+			return 0, "", nil
+		}
 		return 0, "", a.db.ClearChatUnreadMarker(chatJID)
 	}
 	isGroup := jid.Server == types.GroupServer
@@ -60,7 +84,13 @@ func (a *App) MarkChatReadWithReceipts(ctx context.Context, jid types.JID) (int,
 	for _, m := range msgs {
 		ids = append(ids, m.MsgID)
 	}
-	if err := a.db.ClearChatUnreadThrough(chatJID, msgs[len(msgs)-1].Timestamp, ids); err != nil {
+	clearUnread := a.db.ClearChatUnreadThrough
+	if throughID != "" {
+		// A marker-only arrival after selection must stay pending even when
+		// its counter has not advanced by the time receipt transport finishes.
+		clearUnread = a.db.ClearChatUnreadThroughPreservingMarker
+	}
+	if err := clearUnread(chatJID, msgs[len(msgs)-1].Timestamp, ids); err != nil {
 		return sent, receipt, fmt.Errorf("receipts sent, but updating local unread state failed: %w", err)
 	}
 	return sent, receipt, nil
