@@ -27,3 +27,5 @@ gh workflow run release.yml --repo openclaw/wacli --ref main -f version=0.20.0
 Watch the exact run through completion. A successful run is not sufficient on its own: verify the public release is non-draft and non-prerelease, its tag peels to the frozen protected-main commit, every expected asset is present, `checksums.txt` validates the downloaded assets, both native macOS verifier jobs passed, the Homebrew update run succeeded, and the empty `Unreleased` section is present. If a closeout PR was needed, merge it after its checks pass.
 
 Retries reuse the immutable annotated version tag and its frozen commit. Never move or replace a consumer release tag to recover from a failed run; fix the shared workflow or caller on `main`, then dispatch the same version again.
+
+For a nonpublishing verification after dependency or toolchain updates, dispatch Release on `main` with the current version and `dry_run=true`. The shared workflow builds and verifies artifacts without creating tags or releases.

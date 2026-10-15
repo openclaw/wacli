@@ -136,3 +136,9 @@ test('Darwin preparation requires a literally matching dated changelog heading',
     });
   }
 });
+
+
+test('release caller forwards the optional nonpublishing dry run', () => {
+  assert.match(releaseWorkflow, /dry_run:[\s\S]*?default: false[\s\S]*?type: boolean/);
+  assert.match(releaseWorkflow, /dry-run: \$\{\{ inputs\.dry_run \}\}/);
+});

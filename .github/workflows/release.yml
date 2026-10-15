@@ -7,6 +7,11 @@ on:
         description: SemVer to release
         required: true
         type: string
+      dry_run:
+        description: Build and verify without publishing tags or releases
+        required: false
+        default: false
+        type: boolean
 
 permissions: {}
 
@@ -21,6 +26,7 @@ jobs:
     uses: openclaw/release-workflows/.github/workflows/release-go-cli.yml@v1
     with:
       version: ${{ inputs.version }}
+      dry-run: ${{ inputs.dry_run }}
       repository-type: openclaw
       homebrew-tap: openclaw/homebrew-tap
       homebrew-formula: wacli
