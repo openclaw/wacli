@@ -11,6 +11,10 @@
 - Dependencies: update Go networking, crypto, terminal, protocol and parser modules, pnpm 12.13.0, and the dead-code checker after the 48-hour cooldown; fix five reachable x/net advisories while retaining Go and Node minimums.
 - Release: expose the shared workflow’s nonpublishing dry run for dependency and toolchain verification.
 
+- Chats: finish an app-state recovery the primary answers after the waiter timed out, persisting the late snapshot and clearing that attempt's replay markers. Thanks @nicolasbiondic (#489).
+- Chats: on collections whose full sync is known not to verify, let chat-state writes proceed after an incremental sync instead of a failing full replay and a five-minute wait for the phone; only the pre-write attempt marker is cleared, while older recovery intents and each write's post-send intent are kept until a verified full replay or a primary recovery snapshot covers them. Thanks @nicolasbiondic (#490).
+
+- Chats: let `mark-read --receipts` clear local unread metadata when no eligible incoming message is stored, report the zero-receipt result as local-only, and preserve arrivals during the clear. Thanks @nicolasbiondic (#491).
 - Messages: add bounded chronological search context and exact local chat/contact name filters with explicit ambiguity errors.
 - Messages: add a content-free incremental journal, bounded drains, retention expiry, and identity reconciliation.
 - Messages: add bounded cursor reads for list, search, and export, with explicit archive invalidation and shared successful-sync freshness.

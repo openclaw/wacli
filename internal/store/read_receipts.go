@@ -78,7 +78,10 @@ func (d *DB) readReceiptCandidates(jid, throughID string, limit int) ([]MessageI
 	if err := tx.QueryRow("SELECT COUNT(*) FROM messages WHERE "+receiptEligible, jid).Scan(&available); err != nil {
 		return nil, err
 	}
-	if count > available {
+	// With no eligible rows, the caller can clear local metadata without
+	// acknowledging any message. Keep the guard for a nonempty partial history:
+	// its receipt boundary would otherwise clear the unknown unread remainder.
+	if count > available && available > 0 {
 		return nil, fmt.Errorf("chat has %d unread messages but only %d eligible messages stored; sync its history before sending receipts", count, available)
 	}
 	want := count
@@ -111,7 +114,10 @@ func (d *DB) readReceiptCandidates(jid, throughID string, limit int) ([]MessageI
 	return messages, tx.Commit()
 }
 
+// ClearChatUnreadMarker clears only local unread metadata when there is nothing
+// to acknowledge. Recheck eligibility atomically so an arrival after selection
+// keeps its count or marker. No message read boundary or network state changes.
 func (d *DB) ClearChatUnreadMarker(jid string) error {
-	_, err := d.sql.ExecContext(storeCtx(), "UPDATE chats SET unread = unread_count > 0 WHERE jid = ?", jid)
+	_, err := d.sql.ExecContext(storeCtx(), "UPDATE chats SET unread = 0, unread_count = 0 WHERE jid = ? AND NOT EXISTS (SELECT 1 FROM messages WHERE "+receiptEligible+")", jid, jid)
 	return err
 }

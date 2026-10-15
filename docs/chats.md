@@ -54,7 +54,9 @@ Add `--through-message-id ID` to send receipts only for the current unread selec
 
 Receipt mode does not wait for app-state recovery, so it can run while the primary phone cannot provide an app-state snapshot. It works directly or through a same-store `sync --follow` process. Restart older sync processes after upgrading: the separate receipt request is rejected by an older daemon before it changes the chat.
 
-Each call handles at most 100 messages, starting with the oldest messages in the current unread selection. Repeat the command for larger counts; unsent messages and arrivals during dispatch remain unread. Reactions, outgoing messages, content-free placeholders, and deleted messages are excluded before the limit. Group messages are batched by sender. Missing group sender identities or an unread count larger than the eligible local history fail before dispatch; sync the missing history first. A marker-only chat uses its latest eligible incoming message, or clears only the local marker when no such message is stored.
+Each call handles at most 100 messages, starting with the oldest messages in the current unread selection. Repeat the command for larger counts; unsent messages and arrivals during dispatch remain unread. Reactions, outgoing messages, content-free placeholders, and deleted messages are excluded before the limit. Group messages are batched by sender. Missing group sender identities or an unread count larger than a nonempty eligible local history fail before dispatch; sync the missing history first. A marker-only chat uses its latest eligible incoming message.
+
+If no eligible incoming message is stored, receipt mode clears only the local unread count and marker, even when the phone reported an unread count. It sends no receipt or app-state patch and does not acknowledge unseen messages or change the phone's unread state. A newly stored eligible message prevents the local clear. Zero-receipt results include `local_only: true` in JSON; text output says `local state only; no messages acknowledged`. Sync the missing history if you need receipts for those messages.
 
 WhatsApp's read-receipt privacy setting is respected and never changed. JSON output adds `receipts`, the number of dispatched messages. When nonzero it also includes `receipt` and `sender_notified`:
 
@@ -76,3 +78,5 @@ wacli chats mark-read --chat family --pick 1 --receipts --json
 wacli chats mark-read --chat family --pick 1 --through-message-id HANDLED_MESSAGE_ID
 wacli chats cleanup --days 365 --dry-run
 ```
+
+When the primary phone answers an app-state recovery after the command times out, a running process continues waiting for up to 24 hours and persists that snapshot. Closing the process stops that wait; durable recovery intents remain available for a later retry. A collection whose full snapshot fails hash verification retains a durable broken-snapshot flag. Subsequent writes can use an incremental sync only when the SDK has local collection state; older replay debt remains until a verified full sync or primary recovery covers it. This does not guarantee that the local chat index already includes every server-side mutation.

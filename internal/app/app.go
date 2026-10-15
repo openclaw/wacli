@@ -96,6 +96,7 @@ type WAClient interface {
 	FetchAppState(ctx context.Context, name string, fullSync, onlyIfNotSynced bool) error
 	FetchAppStateEvents(ctx context.Context, name string, fullSync, onlyIfNotSynced bool) ([]any, error)
 	RequestAppStateRecovery(ctx context.Context, name string) (types.MessageID, error)
+	HasLocalAppState(ctx context.Context, name string) (bool, error)
 	Logout(ctx context.Context) error
 	LinkedJID() string
 	LinkedLID() string
@@ -132,11 +133,23 @@ type App struct {
 	appStateRecoveryWorkers sync.WaitGroup
 	appStateRecoveryMu      sync.Mutex
 	appStateRecoveryClosing bool
-	manualFetchMu           sync.Mutex
-	manualFetches           map[string]int
-	heartbeatLast           atomic.Int64
-	groupInfo               groupInfoCache
-	presenceWatch           presenceWatch
+	// Background continuations of recovery attempts the primary answered late,
+	// at most one per collection. Guarded by appStateRecoveryMu.
+	lateRecoveries   map[string]*lateAppStateRecovery
+	lateRecoveryStop chan struct{}
+	manualFetchMu    sync.Mutex
+	manualFetches    map[string]int
+	// Degraded app-state mode: collections whose last full sync is known not
+	// to verify (mirrored durably in wacli.db and rehydrated once per
+	// process), and the time of the last background recovery request per
+	// collection. Guarded by appStateDegradedMu.
+	appStateDegradedMu        sync.Mutex
+	appStateFullSyncLoaded    bool
+	appStateFullSyncBroken    map[string]bool
+	appStateRecoveryRequested map[string]time.Time
+	heartbeatLast             atomic.Int64
+	groupInfo                 groupInfoCache
+	presenceWatch             presenceWatch
 }
 
 func New(opts Options) (*App, error) {
@@ -197,6 +210,10 @@ func (a *App) OpenWA() error {
 func (a *App) Close() {
 	a.appStateRecoveryMu.Lock()
 	a.appStateRecoveryClosing = true
+	if a.lateRecoveryStop != nil {
+		close(a.lateRecoveryStop)
+		a.lateRecoveryStop = nil
+	}
 	a.appStateRecoveryMu.Unlock()
 	a.waMu.Lock()
 	waClient := a.wa

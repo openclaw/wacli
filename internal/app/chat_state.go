@@ -24,6 +24,13 @@ const (
 	appStateRetryInitialDelay = 250 * time.Millisecond
 	appStateRetryMaxDelay     = 5 * time.Second
 	appStateRecoveryMaxWait   = 5 * time.Minute
+	// How long a background continuation keeps waiting for a recovery the
+	// primary answers after the synchronous waiter gave up. Real phones have
+	// been observed to answer 71 seconds and even hours later.
+	lateAppStateRecoveryMaxWait = 24 * time.Hour
+	// Minimum spacing between background recovery requests sent by the
+	// degraded (full-sync-known-broken) pre-write path, per collection.
+	backgroundAppStateRecoveryInterval = 6 * time.Hour
 )
 
 // AddChatStatePersistenceHandler captures app-state events that arrive while a
@@ -215,6 +222,9 @@ func (a *App) syncChatStateBeforeWrite(ctx context.Context, collection appstate.
 	}
 	tracker := &appStatePersistenceTracker{}
 	if recoveryRequired {
+		if handled, degradedErr := a.degradedAppStateReplay(ctx, collection, markerGeneration, tracker); handled {
+			return degradedErr
+		}
 		return a.replayRequiredAppState(ctx, collection, markerGeneration, tracker)
 	}
 
@@ -249,6 +259,12 @@ func (a *App) replayRequiredAppState(ctx context.Context, collection appstate.WA
 		if fetchErr == nil {
 			return a.clearCompletedAppStateRecovery(collection, markerGeneration)
 		}
+		// An ErrMismatchingLTHash here just armed (and persisted) the "full
+		// sync does not verify" flag, but with stock whatsmeow the failed full
+		// sync already deleted the saved collection version, so the degraded
+		// incremental path cannot engage until a primary recovery snapshot
+		// restores local state. Later writes check the persisted flag before
+		// starting another destructive full sync.
 		if errors.Is(fetchErr, appstate.ErrMismatchingLTHash) || errors.Is(fetchErr, wa.ErrEmptyAppStateKeyShare) {
 			return a.recoverMismatchingAppState(ctx, collection, markerGeneration, tracker, nil)
 		}
@@ -275,9 +291,149 @@ func (a *App) replayRequiredAppState(ctx context.Context, collection appstate.WA
 	}
 }
 
+// setAppStateFullSyncResult records whether the latest full sync of the
+// collection verified. On accounts hitting persistent LTHash mismatches a full
+// sync can never verify its snapshot, so the flag stays set until a full sync
+// verifies again. The flag is mirrored durably in wacli.db: stock whatsmeow's
+// full sync deletes the saved collection version before decoding, so the next
+// process must know the collection is broken before it starts another
+// destructive full sync.
+func (a *App) setAppStateFullSyncResult(collection appstate.WAPatchName, broken bool) {
+	a.appStateDegradedMu.Lock()
+	a.loadAppStateFullSyncResultsLocked()
+	if a.appStateFullSyncBroken == nil {
+		a.appStateFullSyncBroken = make(map[string]bool)
+	}
+	changed := a.appStateFullSyncBroken[string(collection)] != broken
+	a.appStateFullSyncBroken[string(collection)] = broken
+	a.appStateDegradedMu.Unlock()
+	if !changed {
+		return
+	}
+	// Best-effort persistence: this process is still protected by the
+	// in-memory flag, and the next failed full sync re-arms it.
+	if err := a.db.SetAppStateFullSyncBroken(string(collection), broken); err != nil {
+		a.warnAppStateRecovery(string(collection), fmt.Errorf("persist full sync verification flag: %w", err))
+	}
+}
+
+func (a *App) isAppStateFullSyncBroken(collection appstate.WAPatchName) bool {
+	a.appStateDegradedMu.Lock()
+	defer a.appStateDegradedMu.Unlock()
+	a.loadAppStateFullSyncResultsLocked()
+	return a.appStateFullSyncBroken[string(collection)]
+}
+
+// loadAppStateFullSyncResultsLocked hydrates the in-memory flags from
+// wacli.db once per process. On a load failure the process simply behaves
+// like today's main (full replay first) until a failed full sync re-arms the
+// flag, so the error is not fatal.
+func (a *App) loadAppStateFullSyncResultsLocked() {
+	if a.appStateFullSyncLoaded {
+		return
+	}
+	a.appStateFullSyncLoaded = true
+	collections, err := a.db.AppStateFullSyncBrokenCollections()
+	if err != nil {
+		a.emitWarning("app_state_full_sync_flags_load_failed",
+			fmt.Sprintf("warning: failed to load app state full sync verification flags: %v", err),
+			map[string]any{"error": err.Error()})
+		return
+	}
+	if a.appStateFullSyncBroken == nil {
+		a.appStateFullSyncBroken = make(map[string]bool, len(collections))
+	}
+	for _, collection := range collections {
+		a.appStateFullSyncBroken[collection] = true
+	}
+}
+
+// degradedAppStateReplay handles pre-write replay debt on collections whose
+// full sync is known not to verify. Replaying there repeats the very full sync
+// that already failed — destroying the local collection version with stock
+// whatsmeow — and then waits up to appStateRecoveryMaxWait for the primary,
+// which is often asleep. Instead, with local state present, an incremental
+// fetch from the local version confirms the server accepted our patches and
+// the write proceeds. Only this attempt's own write-ahead marker is cleared:
+// older intents can stand for mutations whatsmeow's cursor already consumed
+// but wacli.db never persisted, and an empty incremental delta is not a
+// replay of those, so that debt stays durable until a verified full replay or
+// a primary recovery snapshot covers it (both clear through their own, newer
+// generation). One background recovery request per collection per 6h still
+// nudges the primary, since only it can repair the broken full sync.
+//
+// Returns handled=false (fall back to today's full replay + phone wait) when
+// the flag is not set, there is no local state, or the incremental fetch
+// fails.
+func (a *App) degradedAppStateReplay(ctx context.Context, collection appstate.WAPatchName, markerGeneration int64, tracker *appStatePersistenceTracker) (handled bool, err error) {
+	if !a.isAppStateFullSyncBroken(collection) {
+		return false, nil
+	}
+	hasLocal, err := a.wa.HasLocalAppState(ctx, string(collection))
+	if err != nil {
+		a.warnAppStateRecovery(string(collection), fmt.Errorf("check local app state before degraded replay: %w", err))
+		return false, nil
+	}
+	if !hasLocal {
+		return false, nil
+	}
+	fetchErr, persistenceErr := a.fetchAndPersistAppState(ctx, collection, false, tracker)
+	if persistenceErr != nil {
+		return true, fmt.Errorf("persist degraded app state replay %s: %w", collection, persistenceErr)
+	}
+	if fetchErr != nil {
+		// LTHash mismatch (or any other failure): today's behavior.
+		return false, nil
+	}
+	a.emitWarning("app_state_degraded_replay",
+		fmt.Sprintf("app state %s: full sync is known not to verify on this account; proceeding after an incremental sync and keeping the durable replay debt", collection),
+		map[string]any{"name": string(collection), "generation": markerGeneration})
+	a.requestBackgroundAppStateRecovery(ctx, collection, markerGeneration)
+	// Clear only this attempt's own write-ahead marker; see the function
+	// comment for why older intents must survive an empty incremental delta.
+	if err := a.db.ClearAppStateRecoveryIntent(string(collection), markerGeneration); err != nil {
+		return true, fmt.Errorf("clear degraded replay marker for %s: %w", collection, err)
+	}
+	return true, nil
+}
+
+// requestBackgroundAppStateRecovery sends one recovery request to the primary
+// without waiting for the answer, rate-limited per collection. whatsmeow
+// adopts a late answer on its own when the snapshot is newer than the local
+// state, and the dispatched events are persisted by the regular handlers.
+func (a *App) requestBackgroundAppStateRecovery(ctx context.Context, collection appstate.WAPatchName, markerGeneration int64) {
+	name := string(collection)
+	now := time.Now()
+	a.appStateDegradedMu.Lock()
+	if last, ok := a.appStateRecoveryRequested[name]; ok && now.Sub(last) < backgroundAppStateRecoveryInterval {
+		a.appStateDegradedMu.Unlock()
+		return
+	}
+	if a.appStateRecoveryRequested == nil {
+		a.appStateRecoveryRequested = make(map[string]time.Time)
+	}
+	a.appStateRecoveryRequested[name] = now
+	a.appStateDegradedMu.Unlock()
+
+	requestID, err := a.wa.RequestAppStateRecovery(ctx, name)
+	if err != nil {
+		a.warnAppStateRecovery(name, fmt.Errorf("background recovery request: %w", err))
+		return
+	}
+	a.emitWarning("app_state_recovery_requested_background",
+		fmt.Sprintf("app state %s: requested recovery snapshot from the primary in the background (id %s)", name, requestID),
+		map[string]any{"name": name, "id": string(requestID), "generation": markerGeneration})
+}
+
 func (a *App) recoverMismatchingAppState(ctx context.Context, collection appstate.WAPatchName, markerGeneration int64, tracker *appStatePersistenceTracker, onRequested func(types.MessageID)) error {
 	ticket := a.appStatePersist.reserve()
-	eventsToPersist, recoveryErr := a.waitForPrimaryAppStateRecovery(ctx, collection, onRequested)
+	eventsToPersist, lateCapture, recoveryErr := a.waitForPrimaryAppStateRecovery(ctx, collection, onRequested)
+	if lateCapture != nil {
+		// The request reached the primary but the answer did not arrive in
+		// time. Keep the capture alive in a background continuation so a late
+		// answer still gets persisted and clears this attempt's markers.
+		a.adoptLateAppStateRecovery(collection, markerGeneration, lateCapture)
+	}
 	persistCtx := context.WithoutCancel(ctx)
 	result := make(chan error, 1)
 	frontier := a.appStatePersist.complete(ticket, func() {
@@ -299,51 +455,199 @@ func (a *App) recoverMismatchingAppState(ctx context.Context, collection appstat
 	return a.clearCompletedAppStateRecovery(collection, markerGeneration)
 }
 
-func (a *App) waitForPrimaryAppStateRecovery(ctx context.Context, collection appstate.WAPatchName, onRequested func(types.MessageID)) ([]any, error) {
-	completed := make(chan []any, 1)
-	var mu sync.Mutex
-	var captured []any
-	finished := false
+// appStateRecoveryCapture buffers this collection's app state events until the
+// recovery's AppStateSyncComplete sentinel arrives. Its event handler only
+// appends to a slice and signals a buffered channel, so whatsmeow's dispatch
+// never blocks on persistence.
+type appStateRecoveryCapture struct {
+	app        *App
+	collection appstate.WAPatchName
+	handlerID  uint32
+	mu         sync.Mutex
+	captured   []any
+	finished   bool
+	completed  chan appStateRecoveryCompletion
+}
+
+// appStateRecoveryCompletion carries the captured snapshot events together
+// with the persistence ticket reserved at the dispatch boundary. Reserving
+// inside the sentinel's event handler fixes the snapshot's position in the
+// shared persistence order before whatsmeow can hand a newer live event to
+// the persistence handler, so a late snapshot can never be replayed after a
+// newer live mutation that overtook a sleeping continuation goroutine.
+type appStateRecoveryCompletion struct {
+	events []any
+	ticket uint64
+}
+
+func (a *App) newAppStateRecoveryCapture(collection appstate.WAPatchName) *appStateRecoveryCapture {
+	c := &appStateRecoveryCapture{app: a, collection: collection, completed: make(chan appStateRecoveryCompletion, 1)}
 	// whatsmeow dispatches recovery mutations synchronously and emits this
 	// collection's AppStateSyncComplete last, so the sentinel closes the drain.
-	handlerID := a.wa.AddEventHandler(func(evt any) {
-		mu.Lock()
-		defer mu.Unlock()
-		if finished {
-			return
-		}
-		if syncComplete, ok := evt.(*events.AppStateSyncComplete); ok {
-			if syncComplete != nil && syncComplete.Recovery && syncComplete.Name == collection {
-				finished = true
-				completed <- append([]any(nil), captured...)
-			}
-			return
-		}
-		if slices.Contains(appStateCollectionsForEvent(evt), collection) {
-			captured = append(captured, evt)
-		}
-	})
-	defer a.wa.RemoveEventHandler(handlerID)
+	c.handlerID = a.wa.AddEventHandler(c.handle)
+	return c
+}
 
+func (c *appStateRecoveryCapture) handle(evt any) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.finished {
+		return
+	}
+	if syncComplete, ok := evt.(*events.AppStateSyncComplete); ok {
+		if syncComplete != nil && syncComplete.Recovery && syncComplete.Name == c.collection {
+			c.finished = true
+			// Reserve the snapshot's ordered write position here, at the
+			// dispatch boundary. reserve only increments a counter under a
+			// mutex, so whatsmeow's dispatch never blocks on persistence.
+			c.completed <- appStateRecoveryCompletion{
+				events: append([]any(nil), c.captured...),
+				ticket: c.app.appStatePersist.reserve(),
+			}
+		}
+		return
+	}
+	if slices.Contains(appStateCollectionsForEvent(evt), c.collection) {
+		c.captured = append(c.captured, evt)
+	}
+}
+
+// stop finishes the capture and removes its event handler. Safe to call more
+// than once. A completion nobody consumed still owns a persistence ticket
+// reserved at the dispatch boundary; release it so later writes keep draining.
+func (c *appStateRecoveryCapture) stop() {
+	c.mu.Lock()
+	c.finished = true
+	c.mu.Unlock()
+	c.app.wa.RemoveEventHandler(c.handlerID)
+	select {
+	case completion := <-c.completed:
+		c.app.appStatePersist.complete(completion.ticket, func() {})
+	default:
+	}
+}
+
+// waitForPrimaryAppStateRecovery requests a recovery snapshot from the primary
+// and waits for the captured events. When the wait times out after the request
+// was sent, the still-registered capture is returned so the caller can hand it
+// to a background continuation instead of dropping a late answer.
+func (a *App) waitForPrimaryAppStateRecovery(ctx context.Context, collection appstate.WAPatchName, onRequested func(types.MessageID)) ([]any, *appStateRecoveryCapture, error) {
+	capture := a.newAppStateRecoveryCapture(collection)
 	requestID, err := a.wa.RequestAppStateRecovery(ctx, string(collection))
 	if err != nil {
-		mu.Lock()
-		finished = true
-		mu.Unlock()
-		return nil, fmt.Errorf("request WhatsApp app state recovery for %s: %w", collection, err)
+		capture.stop()
+		return nil, nil, fmt.Errorf("request WhatsApp app state recovery for %s: %w", collection, err)
 	}
 	if onRequested != nil {
 		onRequested(requestID)
 	}
 	select {
-	case eventsToPersist := <-completed:
-		return eventsToPersist, nil
+	case completion := <-capture.completed:
+		capture.stop()
+		// The timely waiter persists under the ticket its caller reserved
+		// before the request was sent; release the dispatch-boundary ticket
+		// without work so the queue keeps draining.
+		a.appStatePersist.complete(completion.ticket, func() {})
+		return completion.events, nil, nil
 	case <-ctx.Done():
-		mu.Lock()
-		finished = true
-		mu.Unlock()
-		return nil, fmt.Errorf("wait for WhatsApp app state recovery for %s: %w", collection, ctx.Err())
+		return nil, capture, fmt.Errorf("wait for WhatsApp app state recovery for %s: %w", collection, ctx.Err())
 	}
+}
+
+// lateAppStateRecovery is a background continuation of a recovery attempt
+// whose synchronous waiter timed out after the request was sent.
+type lateAppStateRecovery struct {
+	capture    *appStateRecoveryCapture
+	generation int64
+	superseded chan struct{}
+}
+
+// adoptLateAppStateRecovery registers at most one continuation per collection;
+// a newer attempt's higher generation supersedes an older one. The capture is
+// dropped when the app is closing or an equal-or-newer continuation exists.
+func (a *App) adoptLateAppStateRecovery(collection appstate.WAPatchName, generation int64, capture *appStateRecoveryCapture) {
+	a.appStateRecoveryMu.Lock()
+	if a.appStateRecoveryClosing {
+		a.appStateRecoveryMu.Unlock()
+		capture.stop()
+		return
+	}
+	if existing := a.lateRecoveries[string(collection)]; existing != nil {
+		if existing.generation >= generation {
+			a.appStateRecoveryMu.Unlock()
+			capture.stop()
+			return
+		}
+		close(existing.superseded)
+		delete(a.lateRecoveries, string(collection))
+	}
+	if a.lateRecoveries == nil {
+		a.lateRecoveries = make(map[string]*lateAppStateRecovery)
+	}
+	if a.lateRecoveryStop == nil {
+		a.lateRecoveryStop = make(chan struct{})
+	}
+	cont := &lateAppStateRecovery{capture: capture, generation: generation, superseded: make(chan struct{})}
+	a.lateRecoveries[string(collection)] = cont
+	stop := a.lateRecoveryStop
+	a.appStateRecoveryWorkers.Go(func() {
+		a.runLateAppStateRecovery(collection, cont, stop)
+	})
+	a.appStateRecoveryMu.Unlock()
+}
+
+func (a *App) runLateAppStateRecovery(collection appstate.WAPatchName, cont *lateAppStateRecovery, stop <-chan struct{}) {
+	timer := time.NewTimer(lateAppStateRecoveryMaxWait)
+	defer timer.Stop()
+	var completion appStateRecoveryCompletion
+	select {
+	case completion = <-cont.capture.completed:
+	case <-cont.superseded:
+		// The superseding attempt already removed this entry from the registry.
+		cont.capture.stop()
+		return
+	case <-stop:
+		a.finishLateAppStateRecovery(collection, cont)
+		return
+	case <-timer.C:
+		a.finishLateAppStateRecovery(collection, cont)
+		return
+	}
+	a.finishLateAppStateRecovery(collection, cont)
+	// Same ordered persistence as the timely path. The write position was
+	// reserved when the sentinel was dispatched, so a newer live event that
+	// arrived after the snapshot persists after it, even though this goroutine
+	// runs outside whatsmeow's dispatch and holds no chatStateSync.
+	persistCtx := context.Background()
+	tracker := &appStatePersistenceTracker{}
+	result := make(chan error, 1)
+	frontier := a.appStatePersist.complete(completion.ticket, func() {
+		result <- a.persistFetchedAppStateEvents(persistCtx, completion.events, tracker)
+	})
+	if err := a.appStatePersist.waitThrough(persistCtx, frontier); err != nil {
+		a.warnAppStateRecovery(string(collection), err)
+		return
+	}
+	if persistenceErr := <-result; persistenceErr != nil {
+		a.warnAppStateRecovery(string(collection), fmt.Errorf("persist late recovered app state %s: %w", collection, persistenceErr))
+		return
+	}
+	if err := a.clearCompletedAppStateRecovery(collection, cont.generation); err != nil {
+		a.warnAppStateRecovery(string(collection), err)
+		return
+	}
+	a.emitWarning("app_state_recovery_completed_late",
+		fmt.Sprintf("App state %s recovered late from primary", collection),
+		map[string]any{"name": string(collection), "generation": cont.generation})
+}
+
+func (a *App) finishLateAppStateRecovery(collection appstate.WAPatchName, cont *lateAppStateRecovery) {
+	cont.capture.stop()
+	a.appStateRecoveryMu.Lock()
+	if a.lateRecoveries[string(collection)] == cont {
+		delete(a.lateRecoveries, string(collection))
+	}
+	a.appStateRecoveryMu.Unlock()
 }
 
 func (a *App) fetchAndPersistAppState(ctx context.Context, collection appstate.WAPatchName, fullSync bool, tracker *appStatePersistenceTracker) (fetchErr, persistenceErr error) {
@@ -354,6 +658,15 @@ func (a *App) fetchAndPersistAppState(ctx context.Context, collection appstate.W
 		defer releaseFetch()
 		eventsToPersist, fetchErr = a.wa.FetchAppStateEvents(ctx, string(collection), fullSync, false)
 	}()
+	// Track whether full syncs of this collection verify. Set on an LTHash
+	// mismatch, cleared when a full sync verifies again.
+	if fullSync {
+		if fetchErr == nil {
+			a.setAppStateFullSyncResult(collection, false)
+		} else if errors.Is(fetchErr, appstate.ErrMismatchingLTHash) {
+			a.setAppStateFullSyncResult(collection, true)
+		}
+	}
 	result := make(chan error, 1)
 	frontier := a.appStatePersist.complete(ticket, func() {
 		result <- a.persistFetchedAppStateEvents(ctx, eventsToPersist, tracker)
@@ -462,8 +775,16 @@ func (a *App) completeLocalAppStateWrite(ctx context.Context, pending *pendingLo
 	if err := a.appStatePersist.waitThrough(persistCtx, frontier); err != nil {
 		return err
 	}
-	// Another whatsmeow fetch can advance the cursor and dispatch later. Keep
-	// replay debt durable until the next pre-write full replay.
+	// Keep this write's intent durable even though persistErr == nil: pinned
+	// whatsmeow's SendAppState advances the collection cursor and dispatches
+	// the post-send fetched mutations in a goroutine after returning, so a nil
+	// persistErr only proves the explicit local update and already-admitted
+	// tasks completed — not that the SDK's complete post-send batch reached
+	// wacli.db. Deleting the intent here would leave no marker if the process
+	// exits before that goroutine runs, and future incremental deltas would
+	// skip the batch forever. On broken collections the degraded pre-write
+	// path keeps later writes fast despite the kept debt; a verified full
+	// replay or primary recovery snapshot clears it.
 	return <-result
 }
 

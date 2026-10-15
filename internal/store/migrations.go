@@ -274,6 +274,22 @@ func reconcilePreReleaseAppStateMigrations(d *DB) error {
 	return nil
 }
 
+// ensureAppStateFullSyncBroken creates the per-collection "latest full sync
+// did not verify" flag table. It lives in ensureCurrentSchema like the other
+// idempotent guards instead of a numbered migration: older binaries simply
+// ignore the extra table, so stores stay forward- and backward-compatible.
+func ensureAppStateFullSyncBroken(d *DB) error {
+	if _, err := d.sql.Exec(`
+		CREATE TABLE IF NOT EXISTS app_state_full_sync_broken (
+			collection TEXT PRIMARY KEY,
+			marked_at INTEGER NOT NULL
+		)
+	`); err != nil {
+		return fmt.Errorf("create app state full sync verification table: %w", err)
+	}
+	return nil
+}
+
 func ensureAppStateRecoveryIntents(d *DB) error {
 	if _, err := d.sql.Exec(`
 		CREATE TABLE IF NOT EXISTS app_state_recovery_intents (
@@ -481,6 +497,9 @@ func (d *DB) ensureCurrentSchema() error {
 	}
 	if err := ensureAppStateRecoveryIntents(d); err != nil {
 		return fmt.Errorf("ensure current app state recovery intents: %w", err)
+	}
+	if err := ensureAppStateFullSyncBroken(d); err != nil {
+		return fmt.Errorf("ensure current app state full sync verification flags: %w", err)
 	}
 	if err := migrateMessageLocations(d); err != nil {
 		return fmt.Errorf("ensure current message locations schema: %w", err)

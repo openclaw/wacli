@@ -33,9 +33,13 @@ func (f *appStateContextWA) FetchAppState(ctx context.Context, name string, full
 
 func (f *appStateContextWA) FetchAppStateEvents(ctx context.Context, name string, fullSync, onlyIfNotSynced bool) ([]any, error) {
 	if f.fetchEvents != nil {
-		return f.fetchEvents(ctx, name, fullSync, onlyIfNotSynced)
+		evts, err := f.fetchEvents(ctx, name, fullSync, onlyIfNotSynced)
+		f.noteFullSyncResult(fullSync, err)
+		return evts, err
 	}
-	return nil, f.fetchAppState(ctx, name, fullSync, onlyIfNotSynced)
+	err := f.fetchAppState(ctx, name, fullSync, onlyIfNotSynced)
+	f.noteFullSyncResult(fullSync, err)
+	return nil, err
 }
 
 func (f *appStateContextWA) RequestAppStateRecovery(ctx context.Context, name string) (types.MessageID, error) {
