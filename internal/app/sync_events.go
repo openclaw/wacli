@@ -611,7 +611,8 @@ func (a *App) handleLiveSyncMessage(ctx context.Context, opts SyncOptions, v *ev
 	}
 	// Protocol retries can share an ID with decoded content. Preserve useful
 	// payloads so a later retry cannot look like a first unread transition.
-	if !pm.HasContent() && pm.ID != "" && !pm.Chat.IsEmpty() && pm.Chat != types.StatusBroadcastJID {
+	// An explicit empty edit is a content update, not a protocol retry.
+	if !pm.Edited && !pm.HasContent() && pm.ID != "" && !pm.Chat.IsEmpty() && pm.Chat != types.StatusBroadcastJID {
 		chat := canonicalJIDString(a.canonicalStoreJID(ctx, pm.Chat))
 		if existing, err := a.db.GetMessage(chat, pm.ID); err == nil && !liveUnreadPlaceholder(existing) {
 			return

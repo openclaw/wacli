@@ -5,7 +5,7 @@
 - Send: avoid fresh message retries after ambiguous disconnects while retaining safe lookup and presence retries. Thanks @artemgetmann (#483).
 - Messages: preserve exact raw text, captions, and edits, including surrounding whitespace. Thanks @artemgetmann (#484).
 - Send: retain native quote IDs and canonical sender identities in immediate text and attachment history, and save attachments under the canonical recipient. Thanks @artemgetmann (#485, #486).
-- Sync: count the first decoded group payload after a protocol placeholder once and preserve it across empty replays. Thanks @artemgetmann (#487).
+- Sync: count the first decoded group payload after a protocol placeholder once and preserve it across empty protocol replays without discarding explicit empty edits. Thanks @artemgetmann (#487).
 - Media: reuse verified cached downloads and add bounded exact phone recovery through the running sync owner. Thanks @artemgetmann (#482).
 - Chats: add an exact inbound mark-read boundary that preserves newer unread work through receipts, sync echoes, and recovery replay. Thanks @artemgetmann (#488).
 - Dependencies: update Go networking, crypto, terminal, protocol and parser modules, pnpm 12.13.0, and the dead-code checker after the 48-hour cooldown; fix five reachable x/net advisories while retaining Go and Node minimums.
