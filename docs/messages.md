@@ -148,6 +148,45 @@ Only reports that arrive while `sync` is connected are kept: WhatsApp announces 
 
 Plain audio messages have an empty `MediaCaption`. Their `Text` keeps the `[Audio]` display fallback, so they can still match searches for `Audio`. Text supplied alongside an audio payload remains its caption, including a literal `[Audio]` supplied by the sender. Existing rows are not migrated; an ordinary live or history re-ingestion can replace a legacy synthetic caption, subject to the existing edit and deletion rules.
 
+## Ad referrals
+
+WhatsApp attaches conversion context to some messages, and sync and history
+imports keep it as `ad_referral` in JSON output. It can carry two kinds of
+fields:
+
+- **Ad or post identity**: `source_type` (`ad` or `post`), `source_id` (the
+  ad or post ID), `source_url`, `source_app`, `title`, `body`, `media_type` and
+  `ctwa_clid`. WhatsApp sends these on the message a person sends after tapping
+  a Click-to-WhatsApp ad or post. `ctwa_clid` is unique per tap.
+- **Conversion context**: `conversion_source`, `entry_point_source` and
+  `entry_point_app`. These also appear on later messages in the same chat,
+  including replies sent from the business's own phone or WhatsApp Web, and on
+  chats opened from places that are not ads, such as `click_to_chat_link`,
+  `global_search_new_chat` or `phone_number_hyperlink`.
+
+The presence of `ad_referral` alone therefore does not mean a new paid-ad lead.
+To count taps on an ad, look for `source_id` or `ctwa_clid`, and treat
+`entry_point_source` as the place the chat was opened from.
+
+Empty fields are omitted, and messages without this context have no
+`ad_referral`. A later copy of the message without it keeps the stored
+referral; `messages purge` clears it.
+
+The next writable open applies migration 35 (33 is ordered chat auto-unarchive;
+34 is reserved for lists). It also checks the column and refreshes the change
+triggers if another migration already occupies that number, without reseeding
+the journal. Older ad-referral builds recorded migration 33, which makes the
+number-only migration runner skip main's auto-unarchive step. Its existing
+schema guard still adds the archive columns and preference table on writable
+open, preserving referrals and leaving unknown archive preferences for recovery.
+Read-only opens never migrate and omit referrals when the column is absent.
+
+- `media_type` is the ad's own media kind (`image` or `video`), not the message's `media_type`.
+- Each text field is trimmed and capped at 1024 bytes, cut on a valid UTF-8 boundary.
+- Thumbnails and other ad media bytes are not stored.
+- `messages show` prints an `Ad referral:` line with the title, or the source URL or ID when there is no title.
+- Sync webhooks carry the same object as `AdReferral`; see [sync](sync.md#webhook-payloads).
+
 ## Starred
 
 - `messages starred` lists starred messages ordered by star time when app-state events provide it; history-imported rows fall back to message time.

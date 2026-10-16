@@ -47,6 +47,9 @@ var schemaMigrations = []migration{
 	{version: 31, name: "content-free message change journal", up: migrateChanges},
 	{version: 32, name: "message receipt retrieval revisions", up: migrateReceiptRetrieval},
 	{version: 33, name: "ordered chat auto-unarchive", up: migrateChatAutoUnarchive},
+	// Version 34 is reserved for lists. Older ad-referral builds used 33;
+	// both schema guards below repair stores whose version rows collide.
+	{version: 35, name: "messages ad_referral column", up: migrateMessagesAdReferralColumn},
 }
 
 func migratePlaceholderChatActivity(d *DB) error {
@@ -511,6 +514,9 @@ func (d *DB) ensureCurrentSchema() error {
 	if err := migrateChatAutoUnarchive(d); err != nil {
 		return fmt.Errorf("ensure chat auto-unarchive state: %w", err)
 	}
+	if err := migrateMessagesAdReferralColumn(d); err != nil {
+		return fmt.Errorf("ensure current messages ad_referral column: %w", err)
+	}
 	return nil
 }
 
@@ -762,6 +768,52 @@ func migrateMessagesButtonsColumn(d *DB) error {
 		return fmt.Errorf("add messages.buttons column: %w", err)
 	}
 	return nil
+}
+
+func migrateMessagesAdReferralColumn(d *DB) error {
+	hasTable, err := d.tableExists("messages")
+	if err != nil {
+		return err
+	}
+	if !hasTable {
+		return nil
+	}
+	has, err := d.tableHasColumn("messages", "ad_referral")
+	if err != nil {
+		return err
+	}
+	if !has {
+		if _, err := d.sql.Exec(`ALTER TABLE messages ADD COLUMN ad_referral TEXT`); err != nil {
+			return fmt.Errorf("add messages.ad_referral column: %w", err)
+		}
+	}
+	return refreshMessageChangeTriggers(d, "ad_referral")
+}
+
+// The update trigger compares the columns that existed when migration 31 built
+// it. Rebuild it when a later column is missing from the comparison, leaving
+// the journal, archive identity and checkpoints alone.
+func refreshMessageChangeTriggers(d *DB, column string) error {
+	var triggerSQL sql.NullString
+	err := d.sql.QueryRow(`SELECT sql FROM sqlite_master WHERE type='trigger' AND name='retrieval_messages_update'`).Scan(&triggerSQL)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect message change triggers: %w", err)
+	}
+	if strings.Contains(triggerSQL.String, "old."+column+" IS NOT new."+column) {
+		return nil
+	}
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := createMessageChangeTriggers(tx); err != nil {
+		return fmt.Errorf("rebuild message change triggers: %w", err)
+	}
+	return tx.Commit()
 }
 
 func migrateMessagesEditedColumns(d *DB) error {
