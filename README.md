@@ -83,7 +83,7 @@ Write commands take a per-store lock. After a `sync --follow` process finishes s
 | [`auth`](docs/auth.md), [`accounts`](docs/accounts.md) | Pair a linked device and manage isolated account stores. |
 | [`sync`](docs/sync.md), [`history`](docs/history.md) | Mirror new events and request older per-chat history. |
 | [`messages`](docs/messages.md), [`calls`](docs/calls.md) | Search, inspect, export, and manage local records. |
-| [`send`](docs/send.md), [`media`](docs/media.md) | Send text and files or download synced media. |
+| [`send`](docs/send.md), [`media`](docs/media.md), [`stickers`](docs/stickers.md) | Send text and files or download synced media and stickers. |
 | [`contacts`](docs/contacts.md), [`chats`](docs/chats.md) | Find people and manage local or remote chat state. |
 | [`groups`](docs/groups.md), [`channels`](docs/channels.md) | Inspect and manage groups, communities, and channels. |
 | [`profile`](docs/profile.md), [`presence`](docs/presence.md) | Manage profile details and chat presence. |

@@ -46,6 +46,7 @@ var schemaMigrations = []migration{
 	{version: 30, name: "retrieval identity, revision and sync state", up: migrateRetrieval},
 	{version: 31, name: "content-free message change journal", up: migrateChanges},
 	{version: 32, name: "message receipt retrieval revisions", up: migrateReceiptRetrieval},
+	{version: 33, name: "stickers", up: ensureStickersTable},
 }
 
 func migratePlaceholderChatActivity(d *DB) error {
@@ -506,6 +507,9 @@ func (d *DB) ensureCurrentSchema() error {
 	}
 	if err := migrateUnavailableAppStateKeys(d); err != nil {
 		return fmt.Errorf("ensure unavailable app state keys: %w", err)
+	}
+	if err := ensureStickersTable(d); err != nil {
+		return fmt.Errorf("ensure current stickers schema: %w", err)
 	}
 	return nil
 }
