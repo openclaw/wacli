@@ -19,8 +19,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const stickersRefreshKind = "stickers_refresh"
-
 func newStickersCmd(flags *rootFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "stickers",
@@ -123,7 +121,7 @@ type stickerDownloadResult struct {
 	Error    string `json:"error,omitempty"`
 }
 
-type stickerDownloader func(ctx context.Context, s store.Sticker, target string) (int64, error)
+type stickerDownloader func(ctx context.Context, info store.StickerDownloadInfo, target string) (int64, error)
 
 func newStickersDownloadCmd(flags *rootFlags) *cobra.Command {
 	var favorites, recent bool
@@ -148,7 +146,7 @@ func newStickersDownloadCmd(flags *rootFlags) *cobra.Command {
 			}
 			defer closeApp(a, lk)
 
-			stickers, err := a.DB().ListStickers(store.ListStickersParams{Favorites: favorites, Recent: recent})
+			stickers, err := a.DB().ListStickerDownloads(store.ListStickersParams{Favorites: favorites, Recent: recent})
 			if err != nil {
 				return err
 			}
@@ -171,15 +169,15 @@ func newStickersDownloadCmd(flags *rootFlags) *cobra.Command {
 	return cmd
 }
 
-func selectStickersByHash(stickers []store.Sticker, hashes []string) ([]store.Sticker, error) {
+func selectStickersByHash(stickers []store.StickerDownloadInfo, hashes []string) ([]store.StickerDownloadInfo, error) {
 	if len(hashes) == 0 {
 		return stickers, nil
 	}
-	byHash := make(map[string]store.Sticker, len(stickers))
+	byHash := make(map[string]store.StickerDownloadInfo, len(stickers))
 	for _, s := range stickers {
 		byHash[s.FileHash] = s
 	}
-	selected := make([]store.Sticker, 0, len(hashes))
+	selected := make([]store.StickerDownloadInfo, 0, len(hashes))
 	for _, hash := range hashes {
 		s, ok := byHash[strings.TrimSpace(hash)]
 		if !ok {
@@ -190,28 +188,16 @@ func selectStickersByHash(stickers []store.Sticker, hashes []string) ([]store.St
 	return selected, nil
 }
 
-func downloadStickers(ctx context.Context, stickers []store.Sticker, dir string, download stickerDownloader) []stickerDownloadResult {
+func downloadStickers(ctx context.Context, stickers []store.StickerDownloadInfo, dir string, download stickerDownloader) []stickerDownloadResult {
 	results := make([]stickerDownloadResult, 0, len(stickers))
-	for _, s := range stickers {
-		result := stickerDownloadResult{FileHash: s.FileHash}
-		target := filepath.Join(dir, stickerFilename(s))
-		if n, ok := stickerFileVerified(target, s.Media.FileSHA256); ok {
+	for _, info := range stickers {
+		result := stickerDownloadResult{FileHash: info.FileHash}
+		target := filepath.Join(dir, stickerFilename(info))
+		if n, ok := stickerFileVerified(target, info.FileSHA256); ok {
 			result.Path, result.Bytes, result.Source = target, n, "cache"
-			results = append(results, result)
-			continue
-		}
-		if len(s.Media.FileSHA256) != sha256.Size {
-			result.Error = "file hash is not a base64 SHA-256 digest, so a download could not be verified"
-			results = append(results, result)
-			continue
-		}
-		if !s.Downloadable {
-			result.Error = "no download descriptor stored; run `wacli stickers refresh`"
-			results = append(results, result)
-			continue
-		}
-		n, err := download(ctx, s, target)
-		if err != nil {
+		} else if err := requireStickerMetadata(info); err != nil {
+			result.Error = err.Error()
+		} else if n, err := download(ctx, info, target); err != nil {
 			result.Error = err.Error()
 		} else {
 			result.Path, result.Bytes, result.Source = target, n, "server"
@@ -221,23 +207,33 @@ func downloadStickers(ctx context.Context, stickers []store.Sticker, dir string,
 	return results
 }
 
-func downloadStickerDirect(ctx context.Context, s store.Sticker, target string) (int64, error) {
-	return wa.DownloadMediaDirectToFile(ctx, s.Media.DirectPath, s.Media.FileEncSHA256, s.Media.FileSHA256, s.Media.MediaKey, s.FileLength, "sticker", target)
-}
-
-func stickerFilename(s store.Sticker) string {
-	base := pathutil.SanitizeFilename(s.FileHash)
-	if len(s.Media.FileSHA256) == sha256.Size {
-		base = hex.EncodeToString(s.Media.FileSHA256)
+func requireStickerMetadata(info store.StickerDownloadInfo) error {
+	if len(info.FileSHA256) != sha256.Size {
+		return fmt.Errorf("file hash is not a base64 SHA-256 digest, so a download could not be verified")
 	}
-	return base + stickerExtension(s)
+	if info.DirectPath == "" || len(info.MediaKey) == 0 || len(info.FileEncSHA256) == 0 {
+		return fmt.Errorf("sticker has no downloadable media metadata (run `wacli stickers refresh`)")
+	}
+	return nil
 }
 
-func stickerExtension(s store.Sticker) string {
-	if s.IsLottie {
+func downloadStickerDirect(ctx context.Context, info store.StickerDownloadInfo, target string) (int64, error) {
+	return wa.DownloadMediaDirectToFile(ctx, info.DirectPath, info.FileEncSHA256, info.FileSHA256, info.MediaKey, info.FileLength, "sticker", target)
+}
+
+func stickerFilename(info store.StickerDownloadInfo) string {
+	base := pathutil.SanitizeFilename(info.FileHash)
+	if len(info.FileSHA256) == sha256.Size {
+		base = hex.EncodeToString(info.FileSHA256)
+	}
+	return base + stickerExtension(info)
+}
+
+func stickerExtension(info store.StickerDownloadInfo) string {
+	if info.IsLottie {
 		return ".was"
 	}
-	if exts, err := mime.ExtensionsByType(s.MimeType); err == nil && len(exts) > 0 {
+	if exts, err := mime.ExtensionsByType(info.MimeType); err == nil && len(exts) > 0 {
 		return exts[0]
 	}
 	return ".webp"
@@ -294,81 +290,51 @@ func writeStickerDownloadResults(flags *rootFlags, results []stickerDownloadResu
 func newStickersRefreshCmd(flags *rootFlags) *cobra.Command {
 	return &cobra.Command{
 		Use:   "refresh",
-		Short: "Fetch your favorite stickers again from WhatsApp",
+		Short: "Fetch favorite stickers (live) and update local DB",
 		Long: "Replay WhatsApp's synced app state in full, so favorites saved before this\n" +
 			"store recorded them are stored. Favorites changed afterwards arrive during\n" +
-			"sync without this command. A running `sync --follow` performs the replay.",
+			"sync without this command. To refresh from `sync --follow`, pass\n" +
+			"`--refresh-stickers` to it instead.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := flags.requireWritable(); err != nil {
 				return err
 			}
 			ctx, cancel := withTimeout(cmd.Context(), flags)
 			defer cancel()
-			if err := refreshFavoriteStickers(ctx, flags); err != nil {
-				return err
-			}
-			a, lk, err := newApp(ctx, flags, false, false)
+
+			a, lk, err := newApp(ctx, flags, true, false)
 			if err != nil {
 				return err
 			}
 			defer closeApp(a, lk)
+
+			if err := a.EnsureAuthed(ctx); err != nil {
+				return err
+			}
+			removePersistenceHandler, err := a.AddChatStatePersistenceHandler(ctx)
+			if err != nil {
+				return err
+			}
+			defer func() {
+				a.WA().Disconnect()
+				removePersistenceHandler()
+			}()
+			if err := a.Connect(ctx, false, nil); err != nil {
+				return err
+			}
+			if err := a.RefreshFavoriteStickers(ctx); err != nil {
+				return err
+			}
+
 			favorites, err := a.DB().ListStickers(store.ListStickersParams{Favorites: true})
 			if err != nil {
 				return err
 			}
 			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{"ok": true, "favorites": len(favorites)})
+				return out.WriteJSON(os.Stdout, map[string]any{"stickers": len(favorites)})
 			}
-			fmt.Fprintf(os.Stdout, "Favorite stickers: %d\n", len(favorites))
+			fmt.Fprintf(os.Stdout, "Imported %d favorite stickers.\n", len(favorites))
 			return nil
 		},
 	}
-}
-
-func refreshFavoriteStickers(ctx context.Context, flags *rootFlags) error {
-	a, lk, err := newApp(ctx, flags, true, false)
-	if err != nil {
-		_, delegated, delegateErr := tryDelegateSend(ctx, flags, err, sendDelegateRequest{Kind: stickersRefreshKind})
-		if delegated {
-			return explainStickersRefreshDelegateError(delegateErr)
-		}
-		return delegateErr
-	}
-	defer closeApp(a, lk)
-
-	if err := a.EnsureAuthed(ctx); err != nil {
-		return err
-	}
-	removePersistenceHandler, err := a.AddChatStatePersistenceHandler(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		// As for chat state: close the socket first, then let App.Close drain
-		// the persistence the handler queued.
-		a.WA().Disconnect()
-		removePersistenceHandler()
-	}()
-	if err := a.Connect(ctx, false, nil); err != nil {
-		return err
-	}
-	return a.RefreshFavoriteStickers(ctx)
-}
-
-type stickersRefreshApp interface {
-	RefreshFavoriteStickers(context.Context) error
-}
-
-func executeDelegatedStickersRefresh(ctx context.Context, a stickersRefreshApp) (sendDelegateResponse, error) {
-	if err := a.RefreshFavoriteStickers(ctx); err != nil {
-		return sendDelegateResponse{}, err
-	}
-	return sendDelegateResponse{OK: true}, nil
-}
-
-func explainStickersRefreshDelegateError(err error) error {
-	if err == nil || !strings.Contains(err.Error(), "unsupported send kind") || !strings.Contains(err.Error(), stickersRefreshKind) {
-		return err
-	}
-	return fmt.Errorf("the running sync process does not support stickers refresh; restart `wacli sync` after upgrading, then run this again: %w", err)
 }

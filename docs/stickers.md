@@ -40,8 +40,9 @@ Stores favorites saved before this store recorded them. It replays the full `reg
 
 ### Notes
 
-- Run it once after upgrading. A running `sync --follow` performs the replay over its local endpoint; otherwise the command connects with the store lock.
+- Run it once after upgrading. Like `groups refresh`, it connects with the store lock; with a running `sync --follow`, restart it with `--refresh-stickers` instead, which runs the same replay at sync start.
 - If the replay fails, the request stays recorded and the next `wacli sync` retries it.
+- Prints `Imported N favorite stickers.`; JSON reports `stickers`.
 - On accounts whose full replays are known not to verify, wacli asks the phone for a recovery snapshot instead; favorites arrive when the phone answers.
 - Not available in `--read-only` mode.
 
@@ -49,6 +50,7 @@ Stores favorites saved before this store recorded them. It replays the full `reg
 
 ```bash
 wacli stickers refresh
+wacli sync --follow --refresh-stickers
 wacli stickers list --favorites
 wacli stickers list --json
 wacli stickers download --favorites --output ./stickers

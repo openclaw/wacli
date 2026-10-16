@@ -399,10 +399,7 @@ func (a *App) persistAppStateEvent(ctx context.Context, evt any, tracker *appSta
 	var err error
 	switch v := evt.(type) {
 	case *events.AppState:
-		var handled bool
-		if handled, err = a.handleStickerAppStateEvent(v); !handled {
-			err = a.handleLiveCallEvent(ctx, v)
-		}
+		err = errors.Join(a.handleStickerAppStateEvent(v), a.handleLiveCallEvent(ctx, v))
 	case *events.Star:
 		err = a.handleStarEvent(ctx, v)
 	case *events.DeleteForMe:

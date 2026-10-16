@@ -11,8 +11,6 @@ import (
 	"go.mau.fi/whatsmeow/types/events"
 )
 
-// FileHash is the base64 SHA-256 of the sticker file, WhatsApp's identity
-// for it and the app-state mutation index.
 type ParsedSticker struct {
 	FileHash      string
 	DirectPath    string
@@ -26,8 +24,6 @@ type ParsedSticker struct {
 	IsAvatar      bool
 }
 
-// WhatsApp unfavorites with a SET carrying Favorite=false, never a syncd
-// REMOVE, so whatsmeow's SET-only AppState events see both directions.
 type ParsedFavoriteSticker struct {
 	Sticker   ParsedSticker
 	Favorite  bool
@@ -51,7 +47,6 @@ func ParseFavoriteStickerAppState(evt *events.AppState) (ParsedFavoriteSticker, 
 		return ParsedFavoriteSticker{}, false
 	}
 	action := evt.GetStickerAction()
-	// WhatsApp Web rejects a sticker action without isFavorite as malformed.
 	if action == nil || action.IsFavorite == nil {
 		return ParsedFavoriteSticker{}, false
 	}

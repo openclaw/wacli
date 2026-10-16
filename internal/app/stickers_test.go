@@ -56,6 +56,7 @@ func favoriteStickerHashes(t *testing.T, a *App) []string {
 
 func TestLiveFavoriteStickerEventsPersistThroughAppStateQueue(t *testing.T) {
 	a := newTestApp(t)
+	a.wa = newFakeWA()
 	at := time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)
 	added := favoriteStickerAppState("cat", true, at)
 	if got := appStateCollectionsForEvent(added); !slices.Equal(got, []appstate.WAPatchName{appstate.WAPatchRegularLow}) {
@@ -107,6 +108,34 @@ func TestRefreshFavoriteStickersReplaysRegularLowInFull(t *testing.T) {
 	}
 	if required, err := a.db.AppStateRecoveryRequired(string(appstate.WAPatchRegularLow)); err != nil || required {
 		t.Fatalf("completed refresh left replay debt: %v, %v", required, err)
+	}
+}
+
+func TestSyncRefreshStickersReplaysRegularLowAtStart(t *testing.T) {
+	a := newTestApp(t)
+	f := &appStateContextWA{fakeWA: newFakeWA()}
+	var fullFetches []string
+	f.fetchEvents = func(_ context.Context, name string, fullSync, _ bool) ([]any, error) {
+		if fullSync {
+			fullFetches = append(fullFetches, name)
+		}
+		return []any{favoriteStickerAppState("cat", true, time.Now())}, nil
+	}
+	f.fetchAppState = func(context.Context, string, bool, bool) error { return nil }
+	f.requestAppStateRecovery = func(context.Context, string) (types.MessageID, error) {
+		t.Error("a verified full replay must not ask the phone for a snapshot")
+		return "", nil
+	}
+	a.wa = f
+
+	if _, err := a.Sync(t.Context(), SyncOptions{Mode: SyncModeOnce, IdleExit: time.Millisecond, RefreshStickers: true}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(fullFetches, []string{"regular_low"}) {
+		t.Fatalf("full fetches = %v, want one regular_low replay", fullFetches)
+	}
+	if got := favoriteStickerHashes(t, a); len(got) != 1 {
+		t.Fatalf("favorites after sync --refresh-stickers = %v", got)
 	}
 }
 

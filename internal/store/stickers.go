@@ -8,10 +8,7 @@ import (
 	"time"
 )
 
-// The *_ts columns hold Unix milliseconds, because favorite mutations ordered
-// newest-wins can land within one second. A NULL favorite_ts means only the
-// pairing history sync listed the sticker. recent_removed_ts keeps a removal
-// that arrives before that history sync.
+// *_ts columns are Unix milliseconds: favorite changes can share a second.
 const stickersSchema = `
  CREATE TABLE IF NOT EXISTS stickers (
   file_hash TEXT PRIMARY KEY,
@@ -42,42 +39,59 @@ func ensureStickersTable(d *DB) error {
 }
 
 type Sticker struct {
-	FileHash     string       `json:"file_hash"`
-	Favorite     bool         `json:"favorite"`
-	FavoritedAt  *time.Time   `json:"favorited_at,omitempty"`
-	Recent       bool         `json:"recent"`
-	RecentWeight float64      `json:"recent_weight,omitempty"`
-	LastSentAt   *time.Time   `json:"last_sent_at,omitempty"`
-	MimeType     string       `json:"mime_type,omitempty"`
-	Width        int64        `json:"width,omitempty"`
-	Height       int64        `json:"height,omitempty"`
-	FileLength   uint64       `json:"file_length,omitempty"`
-	IsLottie     bool         `json:"is_lottie,omitempty"`
-	IsAvatar     bool         `json:"is_avatar,omitempty"`
-	Downloadable bool         `json:"downloadable"`
-	UpdatedAt    time.Time    `json:"updated_at"`
-	Media        StickerMedia `json:"-"`
+	FileHash     string     `json:"file_hash"`
+	Favorite     bool       `json:"favorite"`
+	FavoritedAt  *time.Time `json:"favorited_at,omitempty"`
+	Recent       bool       `json:"recent"`
+	RecentWeight float64    `json:"recent_weight,omitempty"`
+	LastSentAt   *time.Time `json:"last_sent_at,omitempty"`
+	MimeType     string     `json:"mime_type,omitempty"`
+	Width        int64      `json:"width,omitempty"`
+	Height       int64      `json:"height,omitempty"`
+	FileLength   uint64     `json:"file_length,omitempty"`
+	IsLottie     bool       `json:"is_lottie,omitempty"`
+	IsAvatar     bool       `json:"is_avatar,omitempty"`
+	Downloadable bool       `json:"downloadable"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+}
+
+type StickerDownloadInfo struct {
+	FileHash      string
+	MimeType      string
+	IsLottie      bool
+	DirectPath    string
+	MediaKey      []byte
+	FileSHA256    []byte
+	FileEncSHA256 []byte
+	FileLength    uint64
 }
 
 type StickerMedia struct {
 	DirectPath    string
 	MediaKey      []byte
 	FileEncSHA256 []byte
-	// Decoded from the file hash: favorite mutations carry no plaintext digest.
-	FileSHA256 []byte
-}
-
-type StickerParams struct {
-	FileHash      string
-	DirectPath    string
-	MediaKey      []byte
-	FileEncSHA256 []byte
+	FileLength    uint64
 	MimeType      string
 	Width         uint32
 	Height        uint32
-	FileLength    uint64
 	IsLottie      bool
 	IsAvatar      bool
+}
+
+type SetFavoriteStickerParams struct {
+	FileHash  string
+	Media     StickerMedia
+	Favorite  bool
+	ChangedAt time.Time
+}
+
+type UpsertHistoryStickerParams struct {
+	FileHash   string
+	Media      StickerMedia
+	Favorite   bool
+	Recent     bool
+	Weight     float32
+	LastSentAt time.Time
 }
 
 type ListStickersParams struct {
@@ -86,26 +100,26 @@ type ListStickersParams struct {
 	Limit     int
 }
 
-var stickerDescriptorColumns = []string{
+var stickerMediaColumns = []string{
 	"direct_path", "media_key", "file_enc_sha256", "file_length",
 	"mime_type", "width", "height", "is_lottie", "is_avatar",
 }
 
-func (p StickerParams) descriptorValues() []any {
-	if strings.TrimSpace(p.DirectPath) == "" || len(p.MediaKey) == 0 || len(p.FileEncSHA256) == 0 {
+func (m StickerMedia) values() []any {
+	if strings.TrimSpace(m.DirectPath) == "" || len(m.MediaKey) == 0 || len(m.FileEncSHA256) == 0 {
 		return []any{nil, nil, nil, nil, nil, nil, nil, 0, 0}
 	}
 	return []any{
-		strings.TrimSpace(p.DirectPath), p.MediaKey, p.FileEncSHA256, int64(p.FileLength),
-		nullIfEmpty(p.MimeType), int64(p.Width), int64(p.Height), boolToInt64(p.IsLottie), boolToInt64(p.IsAvatar),
+		strings.TrimSpace(m.DirectPath), m.MediaKey, m.FileEncSHA256, int64(m.FileLength),
+		nullIfEmpty(m.MimeType), int64(m.Width), int64(m.Height), boolToInt64(m.IsLottie), boolToInt64(m.IsAvatar),
 	}
 }
 
-// The descriptor is replaced as a unit, and only by a complete one, because a
-// media key decrypts only its own upload.
-func stickerDescriptorUpdate(when string) string {
-	assignments := make([]string, 0, len(stickerDescriptorColumns))
-	for _, col := range stickerDescriptorColumns {
+// Media is replaced as a unit, and only by a complete set, because a media key
+// decrypts only its own upload.
+func stickerMediaUpdate(when string) string {
+	assignments := make([]string, 0, len(stickerMediaColumns))
+	for _, col := range stickerMediaColumns {
 		assignments = append(assignments, fmt.Sprintf(
 			"%[1]s = CASE WHEN excluded.direct_path IS NOT NULL AND (%[2]s) THEN excluded.%[1]s ELSE stickers.%[1]s END",
 			col, when))
@@ -137,59 +151,47 @@ func stickerFileHash(fileHash string) (string, error) {
 }
 
 // Full replays and live updates arrive in either order; the newer one wins.
-func (d *DB) SetFavoriteSticker(p StickerParams, favorite bool, changedAt time.Time) error {
+func (d *DB) SetFavoriteSticker(p SetFavoriteStickerParams) error {
 	fileHash, err := stickerFileHash(p.FileHash)
 	if err != nil {
 		return err
 	}
-	args := append([]any{fileHash, boolToInt64(favorite), stickerMillis(changedAt)}, p.descriptorValues()...)
+	args := append([]any{fileHash, boolToInt64(p.Favorite), stickerMillis(p.ChangedAt)}, p.Media.values()...)
 	args = append(args, nowUTC().Unix())
 	_, err = d.sql.Exec(`
-		INSERT INTO stickers(file_hash, favorite, favorite_ts, `+strings.Join(stickerDescriptorColumns, ", ")+`, updated_at)
+		INSERT INTO stickers(file_hash, favorite, favorite_ts, `+strings.Join(stickerMediaColumns, ", ")+`, updated_at)
 		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(file_hash) DO UPDATE SET
 			favorite = CASE WHEN excluded.favorite_ts >= COALESCE(stickers.favorite_ts, 0) THEN excluded.favorite ELSE stickers.favorite END,
 			favorite_ts = MAX(excluded.favorite_ts, COALESCE(stickers.favorite_ts, 0)),
-			`+stickerDescriptorUpdate("excluded.favorite_ts >= COALESCE(stickers.favorite_ts, 0) OR stickers.direct_path IS NULL")+`,
+			`+stickerMediaUpdate("excluded.favorite_ts >= COALESCE(stickers.favorite_ts, 0) OR stickers.direct_path IS NULL")+`,
 			updated_at = excluded.updated_at
 	`, args...)
 	return err
 }
 
-// An applied favoriteSticker mutation takes precedence over the history sync.
-func (d *DB) AddHistoryFavoriteSticker(p StickerParams) error {
+// An applied favoriteSticker mutation outranks the history sync, and so does a
+// removeRecentSticker covering the sticker's last use.
+func (d *DB) UpsertHistorySticker(p UpsertHistoryStickerParams) error {
 	fileHash, err := stickerFileHash(p.FileHash)
 	if err != nil {
 		return err
 	}
-	args := append([]any{fileHash}, p.descriptorValues()...)
-	args = append(args, nowUTC().Unix())
-	_, err = d.sql.Exec(`
-		INSERT INTO stickers(file_hash, favorite, `+strings.Join(stickerDescriptorColumns, ", ")+`, updated_at)
-		VALUES(?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(file_hash) DO UPDATE SET
-			favorite = CASE WHEN stickers.favorite_ts IS NULL THEN 1 ELSE stickers.favorite END,
-			`+stickerDescriptorUpdate("stickers.direct_path IS NULL")+`,
-			updated_at = excluded.updated_at
-	`, args...)
-	return err
-}
-
-func (d *DB) AddHistoryRecentSticker(p StickerParams, weight float32, lastSentAt time.Time) error {
-	fileHash, err := stickerFileHash(p.FileHash)
-	if err != nil {
-		return err
+	var weight, lastSent any
+	if p.Recent {
+		weight, lastSent = float64(p.Weight), stickerMillis(p.LastSentAt)
 	}
-	args := append([]any{fileHash, float64(weight), stickerMillis(lastSentAt)}, p.descriptorValues()...)
+	args := append([]any{fileHash, boolToInt64(p.Favorite), boolToInt64(p.Recent), weight, lastSent}, p.Media.values()...)
 	args = append(args, nowUTC().Unix())
 	_, err = d.sql.Exec(`
-		INSERT INTO stickers(file_hash, recent, recent_weight, last_sent_ts, `+strings.Join(stickerDescriptorColumns, ", ")+`, updated_at)
-		VALUES(?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO stickers(file_hash, favorite, recent, recent_weight, last_sent_ts, `+strings.Join(stickerMediaColumns, ", ")+`, updated_at)
+		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(file_hash) DO UPDATE SET
-			recent = CASE WHEN excluded.last_sent_ts > COALESCE(stickers.recent_removed_ts, -1) THEN 1 ELSE stickers.recent END,
-			recent_weight = excluded.recent_weight,
-			last_sent_ts = MAX(excluded.last_sent_ts, COALESCE(stickers.last_sent_ts, 0)),
-			`+stickerDescriptorUpdate("stickers.direct_path IS NULL")+`,
+			favorite = CASE WHEN excluded.favorite = 1 AND stickers.favorite_ts IS NULL THEN 1 ELSE stickers.favorite END,
+			recent = CASE WHEN excluded.recent = 1 AND excluded.last_sent_ts > COALESCE(stickers.recent_removed_ts, -1) THEN 1 ELSE stickers.recent END,
+			recent_weight = CASE WHEN excluded.recent = 1 THEN excluded.recent_weight ELSE stickers.recent_weight END,
+			last_sent_ts = CASE WHEN excluded.recent = 1 THEN MAX(excluded.last_sent_ts, COALESCE(stickers.last_sent_ts, 0)) ELSE stickers.last_sent_ts END,
+			`+stickerMediaUpdate("stickers.direct_path IS NULL")+`,
 			updated_at = excluded.updated_at
 	`, args...)
 	return err
@@ -213,6 +215,35 @@ func (d *DB) RemoveRecentSticker(fileHash string, lastSentAt time.Time) error {
 }
 
 func (d *DB) ListStickers(p ListStickersParams) ([]Sticker, error) {
+	rows, err := d.queryStickers(p)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Sticker, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r.sticker)
+	}
+	return out, nil
+}
+
+func (d *DB) ListStickerDownloads(p ListStickersParams) ([]StickerDownloadInfo, error) {
+	rows, err := d.queryStickers(p)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]StickerDownloadInfo, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r.download)
+	}
+	return out, nil
+}
+
+type stickerRow struct {
+	sticker  Sticker
+	download StickerDownloadInfo
+}
+
+func (d *DB) queryStickers(p ListStickersParams) ([]stickerRow, error) {
 	// Read-only opens skip schema maintenance, so an older store may lack it.
 	exists, err := d.tableExists("stickers")
 	if err != nil || !exists {
@@ -244,12 +275,13 @@ func (d *DB) ListStickers(p ListStickersParams) ([]Sticker, error) {
 	}
 	defer rows.Close()
 
-	var out []Sticker
+	var out []stickerRow
 	for rows.Next() {
 		var s Sticker
+		var dl StickerDownloadInfo
 		var favoriteTS, lastSentTS, updatedAt, fileLength int64
 		if err := rows.Scan(&s.FileHash, &s.Favorite, &favoriteTS, &s.Recent, &s.RecentWeight,
-			&lastSentTS, &s.Media.DirectPath, &s.Media.MediaKey, &s.Media.FileEncSHA256,
+			&lastSentTS, &dl.DirectPath, &dl.MediaKey, &dl.FileEncSHA256,
 			&fileLength, &s.MimeType, &s.Width, &s.Height, &s.IsLottie, &s.IsAvatar, &updatedAt); err != nil {
 			return nil, err
 		}
@@ -260,14 +292,14 @@ func (d *DB) ListStickers(p ListStickersParams) ([]Sticker, error) {
 		if fileLength > 0 {
 			s.FileLength = uint64(fileLength)
 		}
-		if digest, err := base64.StdEncoding.DecodeString(s.FileHash); err == nil && len(digest) == sha256.Size {
-			s.Media.FileSHA256 = digest
-		}
-		// Without a digest the plaintext cannot be verified, so it is not offered.
-		s.Downloadable = s.Media.DirectPath != "" && len(s.Media.MediaKey) > 0 && len(s.Media.FileEncSHA256) > 0 &&
-			len(s.Media.FileSHA256) == sha256.Size
 		s.UpdatedAt = fromUnix(updatedAt)
-		out = append(out, s)
+		if digest, err := base64.StdEncoding.DecodeString(s.FileHash); err == nil && len(digest) == sha256.Size {
+			dl.FileSHA256 = digest
+		}
+		dl.FileHash, dl.MimeType, dl.IsLottie, dl.FileLength = s.FileHash, s.MimeType, s.IsLottie, s.FileLength
+		// Without a digest the plaintext cannot be verified, so it is not offered.
+		s.Downloadable = dl.DirectPath != "" && len(dl.MediaKey) > 0 && len(dl.FileEncSHA256) > 0 && len(dl.FileSHA256) == sha256.Size
+		out = append(out, stickerRow{sticker: s, download: dl})
 	}
 	return out, rows.Err()
 }
