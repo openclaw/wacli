@@ -32,7 +32,7 @@ Downloads each sticker directly from WhatsApp's media servers and verifies it ag
 
 - Takes no store lock and opens no WhatsApp connection, so it runs next to `sync --follow`.
 - `--output` is required in `--read-only` mode; otherwise files go under the store's `media/stickers` directory.
-- A sticker whose server copy expired reports its error and the run continues. JSON reports `downloaded`, `cached` and `failed` counts, plus each result.
+- A sticker whose server copy expired reports its error and the run continues. JSON reports `downloaded`, `cached` and `failed` counts, plus each result. Each failure is also a `warning` on stderr, a `sticker_download_failed` event with `--events`.
 
 ## refresh
 
@@ -43,7 +43,7 @@ Stores favorites saved before this store recorded them. It replays the full `reg
 - Run it once after upgrading. Like `groups refresh`, it connects with the store lock; with a running `sync --follow`, restart it with `--refresh-stickers` instead, which runs the same replay at sync start.
 - If the replay fails, the request stays recorded and the next `wacli sync` retries it.
 - Prints `Imported N favorite stickers.`; JSON reports `stickers`.
-- On accounts whose full replays are known not to verify, wacli asks the phone for a recovery snapshot instead; favorites arrive when the phone answers.
+- On accounts whose full replays are known not to verify, wacli asks the phone for a recovery snapshot instead and waits for it, up to five minutes. If it does not arrive, the refresh fails and the request stays recorded for the next sync.
 - Not available in `--read-only` mode.
 
 ## Examples

@@ -139,6 +139,60 @@ func TestSyncRefreshStickersReplaysRegularLowAtStart(t *testing.T) {
 	}
 }
 
+func TestRefreshFavoriteStickersWaitsForPhoneSnapshotOnBrokenCollection(t *testing.T) {
+	a, f := degradedTestApp(t, types.JID{User: "15550000030", Server: types.DefaultUserServer})
+	name := appstate.WAPatchRegularLow
+	var fullSyncs atomic.Int32
+	f.fetchEvents = func(_ context.Context, _ string, fullSync, _ bool) ([]any, error) {
+		if fullSync {
+			fullSyncs.Add(1)
+		}
+		return nil, nil
+	}
+	forceBrokenFullSync(t, a, f, name)
+	f.hasLocalAppState = true
+	f.requestAppStateRecovery = func(context.Context, string) (types.MessageID, error) {
+		go func() {
+			f.emit(favoriteStickerAppState("cat", true, time.Now()))
+			f.emit(&events.AppStateSyncComplete{Name: name, Recovery: true})
+		}()
+		return "req", nil
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	if err := a.RefreshFavoriteStickers(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := fullSyncs.Load(); got != 0 {
+		t.Fatalf("full syncs on a known-broken collection = %d, want 0", got)
+	}
+	if got := favoriteStickerHashes(t, a); len(got) != 1 {
+		t.Fatalf("favorites after the phone snapshot = %v, want the snapshot's favorite", got)
+	}
+	if required, err := a.db.AppStateRecoveryRequired(string(name)); err != nil || required {
+		t.Fatalf("completed refresh left replay debt: %v, %v", required, err)
+	}
+}
+
+func TestRefreshFavoriteStickersFailsWhileThePhoneSnapshotIsPending(t *testing.T) {
+	a, f := degradedTestApp(t, types.JID{User: "15550000031", Server: types.DefaultUserServer})
+	name := appstate.WAPatchRegularLow
+	f.fetchEvents = func(context.Context, string, bool, bool) ([]any, error) { return nil, nil }
+	forceBrokenFullSync(t, a, f, name)
+	f.hasLocalAppState = true
+	f.requestAppStateRecovery = func(context.Context, string) (types.MessageID, error) { return "req", nil }
+
+	ctx, cancel := context.WithTimeout(t.Context(), 400*time.Millisecond)
+	defer cancel()
+	if err := a.RefreshFavoriteStickers(ctx); err == nil {
+		t.Fatal("refresh reported success before the phone snapshot arrived")
+	}
+	if required, err := a.db.AppStateRecoveryRequired(string(name)); err != nil || !required {
+		t.Fatalf("pending refresh intent = %v, %v; want kept for the next sync", required, err)
+	}
+}
+
 func TestFailedFavoriteStickerRefreshKeepsDurableReplayIntent(t *testing.T) {
 	a := newTestApp(t)
 	f := &appStateContextWA{fakeWA: newFakeWA()}

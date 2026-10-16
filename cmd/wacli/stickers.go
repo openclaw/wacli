@@ -262,6 +262,14 @@ func writeStickerDownloadResults(flags *rootFlags, results []stickerDownloadResu
 		switch {
 		case r.Error != "":
 			failed++
+			message := fmt.Sprintf("sticker %s: %s", r.FileHash, r.Error)
+			if flags.events {
+				_ = out.NewEventWriter(os.Stderr, true).Emit("warning", map[string]any{
+					"code": "sticker_download_failed", "message": message, "file_hash": r.FileHash, "error": r.Error,
+				})
+			} else {
+				_ = out.WriteError(os.Stderr, false, fmt.Errorf("warning: %s", message))
+			}
 		case r.Source == "cache":
 			cached++
 		default:
@@ -277,11 +285,9 @@ func writeStickerDownloadResults(flags *rootFlags, results []stickerDownloadResu
 		})
 	}
 	for _, r := range results {
-		if r.Error != "" {
-			fmt.Fprintf(os.Stderr, "%s: %s\n", r.FileHash, r.Error)
-			continue
+		if r.Error == "" {
+			fmt.Fprintf(os.Stdout, "%s (%d bytes, %s)\n", r.Path, r.Bytes, r.Source)
 		}
-		fmt.Fprintf(os.Stdout, "%s (%d bytes, %s)\n", r.Path, r.Bytes, r.Source)
 	}
 	fmt.Fprintf(os.Stdout, "Downloaded: %d  Cached: %d  Failed: %d\n", downloaded, cached, failed)
 	return nil

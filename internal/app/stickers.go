@@ -11,17 +11,26 @@ import (
 	"go.mau.fi/whatsmeow/types/events"
 )
 
+// Unlike the pre-write sync, a refresh never settles for an incremental fetch:
+// it waits for a verified full replay or a persisted phone snapshot.
 func (a *App) RefreshFavoriteStickers(ctx context.Context) error {
 	collection := appstate.WAPatchRegularLow
-	if err := a.db.MarkAppStateRecoveryRequired(string(collection)); err != nil {
-		return fmt.Errorf("request favorite sticker replay: %w", err)
-	}
-	release, err := a.beginChatStateWrite(ctx, collection)
+	release, err := a.acquireChatStateSync(ctx)
 	if err != nil {
 		return err
 	}
-	release()
-	return nil
+	defer release()
+	generation, _, err := a.db.BeginAppStateRecovery(string(collection))
+	if err != nil {
+		return fmt.Errorf("request favorite sticker replay: %w", err)
+	}
+	tracker := &appStatePersistenceTracker{}
+	if a.isAppStateFullSyncBroken(collection) {
+		ctx, cancel := context.WithTimeout(ctx, appStateRecoveryMaxWait)
+		defer cancel()
+		return a.recoverMismatchingAppState(ctx, collection, generation, tracker, nil)
+	}
+	return a.replayRequiredAppState(ctx, collection, generation, tracker)
 }
 
 func (a *App) handleStickerAppStateEvent(evt *events.AppState) error {

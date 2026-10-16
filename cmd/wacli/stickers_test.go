@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -73,6 +74,41 @@ func TestDownloadStickersVerifiesCacheAndReportsEachFailure(t *testing.T) {
 		if results[i] != want[i] {
 			t.Fatalf("result %d = %+v, want %+v", i, results[i], want[i])
 		}
+	}
+}
+
+func TestStickerDownloadFailuresFollowTheEventStream(t *testing.T) {
+	results := []stickerDownloadResult{
+		{FileHash: "ok-hash", Path: "/tmp/ok.webp", Bytes: 3, Source: "server"},
+		{FileHash: "expired-hash", Error: "HTTP 410"},
+	}
+	stderr := captureRootStderr(t, func() {
+		if err := writeStickerDownloadResults(&rootFlags{events: true}, results); err != nil {
+			t.Fatal(err)
+		}
+	})
+	lines := strings.Split(strings.TrimSpace(stderr), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("stderr = %q, want one NDJSON warning", stderr)
+	}
+	var evt struct {
+		Event string         `json:"event"`
+		Data  map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &evt); err != nil {
+		t.Fatalf("stderr line is not NDJSON: %q: %v", lines[0], err)
+	}
+	if evt.Event != "warning" || evt.Data["code"] != "sticker_download_failed" || evt.Data["file_hash"] != "expired-hash" || evt.Data["error"] != "HTTP 410" {
+		t.Fatalf("event = %+v", evt)
+	}
+
+	plain := captureRootStderr(t, func() {
+		if err := writeStickerDownloadResults(&rootFlags{asJSON: true}, results); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if strings.TrimSpace(plain) != "warning: sticker expired-hash: HTTP 410" {
+		t.Fatalf("plain stderr = %q", plain)
 	}
 }
 
