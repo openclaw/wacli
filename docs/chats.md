@@ -8,6 +8,8 @@ Read when: listing known chats, filtering chat state, archiving/pinning/muting/m
 
 ```bash
 wacli chats list [--query TEXT] [--limit N] [--archived|--no-archived] [--pinned|--no-pinned] [--muted|--no-muted] [--unread|--no-unread]
+wacli chats list --list ID_OR_NAME [--json]
+wacli lists list [--json]
 wacli chats show --jid JID
 wacli chats archive --chat CHAT [--pick N]
 wacli chats unarchive --chat CHAT [--pick N]
@@ -45,6 +47,61 @@ wacli chats cleanup [--days N] [--jid JID] [--dry-run] [--confirm]
 - `cleanup` only deletes local `wacli.db` rows. It does not delete chats or messages from WhatsApp.
 - `cleanup --days N` skips chats with no known local activity timestamp; use `--jid` for an explicit local row.
 - Use `cleanup --dry-run` before deleting and `--confirm` only for scripts that already reviewed the target list.
+
+## WhatsApp Lists and Business labels
+
+`wacli lists list` (alias: `wacli labels list`) reads definitions observed during
+sync. These are WhatsApp's personal Lists and Business labels (etiquetas), not
+the unrelated local contact tags. Neither read command connects to WhatsApp.
+
+`wacli chats list --list ID_OR_NAME` filters current **observed** chat memberships
+before applying the normal sort and limit. IDs take precedence over exact,
+case-sensitive names. Duplicate names require an ID. Deleted definitions report
+`list "ID_OR_NAME" was deleted on the phone`; unknown IDs/names report
+`list "ID_OR_NAME" is not in the local index; sync first`. Unsupported membership
+types also return an error rather than an empty list. Other chat filters can be
+combined with `--list`.
+
+The list JSON envelope contains `data.lists`, `data.full_sync_events_seen`, and
+`data.completeness`. Definitions include `id`, `name`, `color` (the protocol color
+index), `predefined_id`, numeric `type` (WhatsApp's `ListType`), `order_index`,
+`is_active`, `is_immutable`, and `chat_memberships_supported`. Absent optional
+metadata is `null`; inactive definitions remain visible and deleted definitions
+are hidden. `CUSTOM` (5), Business `PREDEFINED` (4), and legacy Business labels
+with absent/`NONE` (0) type support explicit chat memberships. Other types are
+retained as definitions but report `chat_memberships_supported: false`.
+Favorites and computed/system lists (such as Unread and Groups), message
+memberships, sublists, and label reordering actions are not implemented.
+
+**Completeness is always `"unknown"` in this first version.**
+`full_sync_events_seen: true` means at least one label definition or chat
+association was persisted with `FromFullSync`; it does not prove that an entire
+collection was verified or that every membership arrived. The flag survives
+restarts and does not describe freshness. An empty index, or a filter with no
+results, is **not** proof that the phone's List is empty. This also applies after
+a fresh relink, a failed sync, recovery, or local chat cleanup. JSON chat results
+keep their existing array shape; the filter's completeness warning goes to
+stderr. Inspect `lists list --json` alongside them.
+
+Sync persists live, startup full-sync, and recovery-snapshot events through the
+existing ordered app-state writer. Membership removals and definition deletions
+are retained as tombstones, and older timestamped replay cannot restore them.
+On an equal timestamp, removal/deletion wins conservatively. A newer undelete
+makes the definition and its retained memberships visible again. Snapshots are
+merged, not treated as authoritative replacement sets: absence from a replay
+does not remove a previously observed row. Known LID/phone mappings use the
+existing identity normalization and historical merge, keeping the newest
+membership state across aliases. Unresolved LIDs remain usable until a later
+authenticated startup can resolve them.
+
+The next writable store open adds the list tables at migration 34, after main's
+migration 33 for ordered chat auto-unarchive, without changing existing
+chats/messages. It also recreates missing list tables when the schema version is
+already recorded, for example by a build that used the same migration number.
+`--read-only` can open an older, unmigrated store; it returns an empty
+definitions array with unknown completeness, without migrating it.
+`lists list` and `chats list --list` never create, rename, assign, or remove labels
+on WhatsApp. Run `wacli sync` separately to collect changes made on your phone.
 
 ## Read receipts
 

@@ -44,7 +44,8 @@ func (a *App) AddChatStatePersistenceHandler(ctx context.Context) (func(), error
 	handlerID := waClient.AddEventHandler(func(evt any) {
 		switch v := evt.(type) {
 		case *events.AppState, *events.Star, *events.DeleteForMe,
-			*events.Archive, *events.UnarchiveChatsSetting, *events.Pin, *events.Mute, *events.MarkChatAsRead:
+			*events.Archive, *events.UnarchiveChatsSetting, *events.Pin, *events.Mute, *events.MarkChatAsRead,
+			*events.LabelEdit, *events.LabelAssociationChat:
 			a.handleAppStatePersistenceEvent(ctx, evt, nil)
 		case *wa.AppStateKeyUnavailable:
 			a.warnEmptyAppStateKey(v)

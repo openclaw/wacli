@@ -47,6 +47,10 @@ var schemaMigrations = []migration{
 	{version: 31, name: "content-free message change journal", up: migrateChanges},
 	{version: 32, name: "message receipt retrieval revisions", up: migrateReceiptRetrieval},
 	{version: 33, name: "ordered chat auto-unarchive", up: migrateChatAutoUnarchive},
+	// Lists keep 34 after main assigned 33 to ordered chat auto-unarchive.
+	// The runner skips by version number only, so ensureCurrentSchema re-runs
+	// migrateLists to heal stores where another migration owns this number.
+	{version: 34, name: "WhatsApp lists and chat memberships", up: migrateLists},
 }
 
 func migratePlaceholderChatActivity(d *DB) error {
@@ -510,6 +514,9 @@ func (d *DB) ensureCurrentSchema() error {
 	}
 	if err := migrateChatAutoUnarchive(d); err != nil {
 		return fmt.Errorf("ensure chat auto-unarchive state: %w", err)
+	}
+	if err := migrateLists(d); err != nil {
+		return fmt.Errorf("ensure current lists schema: %w", err)
 	}
 	return nil
 }
