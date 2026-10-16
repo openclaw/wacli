@@ -2,22 +2,24 @@
 
 ## Unreleased
 
-- Send: avoid fresh message retries after ambiguous disconnects while retaining safe lookup and presence retries. Thanks @artemgetmann (#483).
-- Messages: preserve exact raw text, captions, and edits, including surrounding whitespace. Thanks @artemgetmann (#484).
-- Send: retain native quote IDs and canonical sender identities in immediate text and attachment history, and save attachments under the canonical recipient. Thanks @artemgetmann (#485, #486).
-- Sync: count the first decoded group payload after a protocol placeholder once and preserve it across empty protocol replays without discarding explicit empty edits. Thanks @artemgetmann (#487).
-- Media: reuse verified cached downloads and add bounded exact phone recovery through the running sync owner. Thanks @artemgetmann (#482).
-- Chats: add an exact inbound mark-read boundary that preserves newer unread work through receipts, sync echoes, and recovery replay. Thanks @artemgetmann (#488).
-- Dependencies: update Go networking, crypto, terminal, protocol and parser modules, pnpm 12.13.0, and the dead-code checker after the 48-hour cooldown; fix five reachable x/net advisories while retaining Go and Node minimums.
-- Release: expose the shared workflow’s nonpublishing dry run for dependency and toolchain verification.
+## 0.22.0 - 2026-10-16
 
+**Highlights:** bounded message search context and cursor reads, a content-free incremental journal, safer sends and chat recovery, and five networking security fixes.
+
+- Messages: add bounded chronological search context and exact local chat/contact name filters with explicit ambiguity errors.
+- Messages: add bounded cursor reads for list, search, and export, with explicit archive invalidation and shared successful-sync freshness.
+- Messages: add a content-free incremental journal, bounded drains, retention expiry, and identity reconciliation.
+- Dependencies: update Go networking, crypto, terminal, protocol and parser modules, pnpm 12.13.0, and the dead-code checker after the 48-hour cooldown; fix five reachable x/net advisories while retaining Go and Node minimums.
+- Chats: add an exact inbound mark-read boundary that preserves newer unread work through receipts, sync echoes, and recovery replay. Thanks @artemgetmann (#488).
+- Chats: let `mark-read --receipts` clear local unread metadata when no eligible incoming message is stored, report the zero-receipt result as local-only, and preserve arrivals during the clear. Thanks @nicolasbiondic (#491).
+- Media: reuse verified cached downloads and add bounded exact phone recovery through the running sync owner. Thanks @artemgetmann (#482).
+- Send: avoid fresh message retries after ambiguous disconnects while retaining safe lookup and presence retries. Thanks @artemgetmann (#483).
+- Send: retain native quote IDs and canonical sender identities in immediate text and attachment history, and save attachments under the canonical recipient. Thanks @artemgetmann (#485, #486).
+- Messages: preserve exact raw text, captions, and edits, including surrounding whitespace. Thanks @artemgetmann (#484).
+- Sync: count the first decoded group payload after a protocol placeholder once and preserve it across empty protocol replays without discarding explicit empty edits. Thanks @artemgetmann (#487).
 - Chats: finish an app-state recovery the primary answers after the waiter timed out, persisting the late snapshot and clearing that attempt's replay markers. Thanks @nicolasbiondic (#489).
 - Chats: on collections whose full sync is known not to verify, let chat-state writes proceed after an incremental sync instead of a failing full replay and a five-minute wait for the phone; only the pre-write attempt marker is cleared, while older recovery intents and each write's post-send intent are kept until a verified full replay or a primary recovery snapshot covers them. Thanks @nicolasbiondic (#490).
-
-- Chats: let `mark-read --receipts` clear local unread metadata when no eligible incoming message is stored, report the zero-receipt result as local-only, and preserve arrivals during the clear. Thanks @nicolasbiondic (#491).
-- Messages: add bounded chronological search context and exact local chat/contact name filters with explicit ambiguity errors.
-- Messages: add a content-free incremental journal, bounded drains, retention expiry, and identity reconciliation.
-- Messages: add bounded cursor reads for list, search, and export, with explicit archive invalidation and shared successful-sync freshness.
+- Release: expose the shared workflow’s nonpublishing dry run for dependency and toolchain verification.
 
 ## 0.21.0 - 2026-10-11
 
