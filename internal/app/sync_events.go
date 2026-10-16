@@ -403,7 +403,8 @@ func (a *App) persistAppStateEvent(ctx context.Context, evt any, tracker *appSta
 		err = a.handleStarEvent(ctx, v)
 	case *events.DeleteForMe:
 		err = a.handleDeleteForMeEvent(ctx, v)
-	case *events.Archive, *events.UnarchiveChatsSetting, *events.Pin, *events.Mute, *events.MarkChatAsRead:
+	case *events.Archive, *events.UnarchiveChatsSetting, *events.AppStateSyncComplete,
+		*events.Pin, *events.Mute, *events.MarkChatAsRead:
 		err = a.handleChatStateEvent(ctx, v)
 	}
 	if tracker != nil {

@@ -206,6 +206,13 @@ func (t *appStatePersistenceTracker) record(err error) {
 	}
 }
 
+// failed reports whether a mutation of the batch in progress did not persist.
+func (t *appStatePersistenceTracker) failed() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.active && t.err != nil
+}
+
 func (t *appStatePersistenceTracker) end() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()

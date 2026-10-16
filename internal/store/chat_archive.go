@@ -37,6 +37,36 @@ func (d *DB) ChatArchiveRecoveryRequired() (bool, error) {
 	return required, err
 }
 
+// SettleChatArchiveRecovery runs once a complete regular_low snapshot (a
+// verified full replay or a primary recovery) has been persisted. Whatever the
+// snapshot did not supply is absent from the primary, so another replay cannot
+// recover it: an account that never toggled Keep chats archived has no
+// preference mutation, and a locally archived chat without an archive action is
+// not archived there. Record both so the replay is not requested again on every
+// start, without changing what the user sees. The preference stays unknown,
+// stored as keep-archived without a timestamp so any real mutation replaces it,
+// and the chats stay archived behind a boundary at the snapshot time, so only
+// messages newer than the snapshot can unarchive them later. Known values are
+// left alone.
+func (d *DB) SettleChatArchiveRecovery(at time.Time) error {
+	if at.IsZero() {
+		return nil
+	}
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`INSERT INTO chat_archive_setting(id,enabled,timestamp_ms) VALUES(1,0,0)
+ ON CONFLICT(id) DO NOTHING`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE chats SET archive_action_ms=? WHERE archived != 0 AND archive_action_ms=0`, at.UnixMilli()); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (d *DB) SetChatArchiveSetting(enabled bool, timestamp time.Time) error {
 	if timestamp.IsZero() {
 		return nil
