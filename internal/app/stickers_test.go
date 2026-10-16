@@ -1,16 +1,19 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/openclaw/wacli/internal/out"
 	"github.com/openclaw/wacli/internal/store"
 	"go.mau.fi/whatsmeow/appstate"
 	"go.mau.fi/whatsmeow/proto/waHistorySync"
@@ -159,6 +162,9 @@ func TestRefreshFavoriteStickersWaitsForPhoneSnapshotOnBrokenCollection(t *testi
 		return "req", nil
 	}
 
+	var eventLog bytes.Buffer
+	a.opts.Events = out.NewEventWriter(&eventLog, true)
+
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	if err := a.RefreshFavoriteStickers(ctx); err != nil {
@@ -166,6 +172,9 @@ func TestRefreshFavoriteStickersWaitsForPhoneSnapshotOnBrokenCollection(t *testi
 	}
 	if got := fullSyncs.Load(); got != 0 {
 		t.Fatalf("full syncs on a known-broken collection = %d, want 0", got)
+	}
+	if !strings.Contains(eventLog.String(), `"event":"app_state_recovery_requested"`) {
+		t.Fatalf("events = %q, want the phone request reported while the refresh waits", eventLog.String())
 	}
 	if got := favoriteStickerHashes(t, a); len(got) != 1 {
 		t.Fatalf("favorites after the phone snapshot = %v, want the snapshot's favorite", got)

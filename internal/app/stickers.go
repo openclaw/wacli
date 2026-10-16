@@ -8,6 +8,7 @@ import (
 	"github.com/openclaw/wacli/internal/store"
 	"github.com/openclaw/wacli/internal/wa"
 	"go.mau.fi/whatsmeow/appstate"
+	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 )
 
@@ -28,7 +29,9 @@ func (a *App) RefreshFavoriteStickers(ctx context.Context) error {
 	if a.isAppStateFullSyncBroken(collection) {
 		ctx, cancel := context.WithTimeout(ctx, appStateRecoveryMaxWait)
 		defer cancel()
-		return a.recoverMismatchingAppState(ctx, collection, generation, tracker, nil)
+		return a.recoverMismatchingAppState(ctx, collection, generation, tracker, func(id types.MessageID) {
+			a.reportAppStateRecoveryRequested(string(collection), id)
+		})
 	}
 	return a.replayRequiredAppState(ctx, collection, generation, tracker)
 }
