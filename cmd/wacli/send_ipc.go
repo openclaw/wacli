@@ -290,7 +290,7 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDele
 		_ = json.NewEncoder(conn).Encode(resp)
 		return
 	}
-	if req.Kind == chatStateKind || req.Kind == contactsSaveKind {
+	if req.Kind == chatStateKind || req.Kind == contactsSaveKind || req.Kind == stickersRefreshKind {
 		// The app-state coordinator owns these writes; recovery must not hold
 		// the message-send queue (#454).
 		if requestCtx.Err() != nil {
@@ -421,6 +421,8 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 		return executeDelegatedChatState(ctx, a, req)
 	case contactsSaveKind:
 		return executeDelegatedContactsSave(ctx, a, req)
+	case stickersRefreshKind:
+		return executeDelegatedStickersRefresh(ctx, a)
 	default:
 		return sendDelegateResponse{}, fmt.Errorf("unsupported send kind %q", req.Kind)
 	}
