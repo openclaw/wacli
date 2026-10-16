@@ -105,6 +105,7 @@ type WAClient interface {
 	GetProfilePictureInfo(ctx context.Context, jid types.JID, preview bool, existingID string) (*types.ProfilePictureInfo, error)
 	SetStatusMessage(ctx context.Context, msg string) error
 	SetProfileName(ctx context.Context, name string) error
+	SaveContact(ctx context.Context, target, lid types.JID, fullName, firstName string, phonebook bool) error
 	GetBusinessProfile(ctx context.Context, jid types.JID) (*types.BusinessProfile, error)
 }
 

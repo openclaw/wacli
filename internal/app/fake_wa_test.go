@@ -974,6 +974,10 @@ func (f *fakeWA) SetProfileName(ctx context.Context, name string) error {
 	return nil
 }
 
+func (f *fakeWA) SaveContact(ctx context.Context, target, lid types.JID, fullName, firstName string, phonebook bool) error {
+	return nil
+}
+
 func (f *fakeWA) GetBusinessProfile(ctx context.Context, jid types.JID) (*types.BusinessProfile, error) {
 	return &types.BusinessProfile{JID: jid}, nil
 }

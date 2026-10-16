@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Contacts: add `contacts save` to save or rename a contact in the WhatsApp account, synced to the phone and linked devices, with the contact's LID resolved first and an optional `--phonebook` copy to the device address book.
 - Dependencies: update x/exp after the 48-hour cooldown while retaining the Go 1.27.0 source minimum and Go 1.27.2 build toolchain.
 - Sync: unarchive chats on eligible incoming messages when Keep chats archived is off, recover missing preferences on upgrade, and preserve newer unarchives across stale archive replays. Thanks @Luizssauro (#466).
 
