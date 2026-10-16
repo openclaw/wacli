@@ -8,8 +8,10 @@ import (
 	"time"
 )
 
-// A NULL favorite_ts means only the pairing history sync listed the sticker.
-// recent_removed_ts keeps a removal that arrives before that history sync.
+// The *_ts columns hold Unix milliseconds, because favorite mutations ordered
+// newest-wins can land within one second. A NULL favorite_ts means only the
+// pairing history sync listed the sticker. recent_removed_ts keeps a removal
+// that arrives before that history sync.
 const stickersSchema = `
  CREATE TABLE IF NOT EXISTS stickers (
   file_hash TEXT PRIMARY KEY,
@@ -111,6 +113,21 @@ func stickerDescriptorUpdate(when string) string {
 	return strings.Join(assignments, ",\n\t\t\t")
 }
 
+func stickerMillis(t time.Time) int64 {
+	if t.IsZero() {
+		return 0
+	}
+	return t.UTC().UnixMilli()
+}
+
+func stickerTime(ms int64) *time.Time {
+	if ms <= 0 {
+		return nil
+	}
+	t := time.UnixMilli(ms).UTC()
+	return &t
+}
+
 func stickerFileHash(fileHash string) (string, error) {
 	fileHash = strings.TrimSpace(fileHash)
 	if fileHash == "" {
@@ -125,7 +142,7 @@ func (d *DB) SetFavoriteSticker(p StickerParams, favorite bool, changedAt time.T
 	if err != nil {
 		return err
 	}
-	args := append([]any{fileHash, boolToInt64(favorite), unix(changedAt)}, p.descriptorValues()...)
+	args := append([]any{fileHash, boolToInt64(favorite), stickerMillis(changedAt)}, p.descriptorValues()...)
 	args = append(args, nowUTC().Unix())
 	_, err = d.sql.Exec(`
 		INSERT INTO stickers(file_hash, favorite, favorite_ts, `+strings.Join(stickerDescriptorColumns, ", ")+`, updated_at)
@@ -163,7 +180,7 @@ func (d *DB) AddHistoryRecentSticker(p StickerParams, weight float32, lastSentAt
 	if err != nil {
 		return err
 	}
-	args := append([]any{fileHash, float64(weight), unix(lastSentAt)}, p.descriptorValues()...)
+	args := append([]any{fileHash, float64(weight), stickerMillis(lastSentAt)}, p.descriptorValues()...)
 	args = append(args, nowUTC().Unix())
 	_, err = d.sql.Exec(`
 		INSERT INTO stickers(file_hash, recent, recent_weight, last_sent_ts, `+strings.Join(stickerDescriptorColumns, ", ")+`, updated_at)
@@ -191,7 +208,7 @@ func (d *DB) RemoveRecentSticker(fileHash string, lastSentAt time.Time) error {
 			recent = CASE WHEN COALESCE(stickers.last_sent_ts, 0) <= excluded.recent_removed_ts THEN 0 ELSE stickers.recent END,
 			recent_removed_ts = MAX(excluded.recent_removed_ts, COALESCE(stickers.recent_removed_ts, 0)),
 			updated_at = excluded.updated_at
-	`, fileHash, unix(lastSentAt), nowUTC().Unix())
+	`, fileHash, stickerMillis(lastSentAt), nowUTC().Unix())
 	return err
 }
 
@@ -236,21 +253,19 @@ func (d *DB) ListStickers(p ListStickersParams) ([]Sticker, error) {
 			&fileLength, &s.MimeType, &s.Width, &s.Height, &s.IsLottie, &s.IsAvatar, &updatedAt); err != nil {
 			return nil, err
 		}
-		if s.Favorite && favoriteTS > 0 {
-			t := fromUnix(favoriteTS)
-			s.FavoritedAt = &t
+		if s.Favorite {
+			s.FavoritedAt = stickerTime(favoriteTS)
 		}
-		if lastSentTS > 0 {
-			t := fromUnix(lastSentTS)
-			s.LastSentAt = &t
-		}
+		s.LastSentAt = stickerTime(lastSentTS)
 		if fileLength > 0 {
 			s.FileLength = uint64(fileLength)
 		}
 		if digest, err := base64.StdEncoding.DecodeString(s.FileHash); err == nil && len(digest) == sha256.Size {
 			s.Media.FileSHA256 = digest
 		}
-		s.Downloadable = s.Media.DirectPath != "" && len(s.Media.MediaKey) > 0 && len(s.Media.FileEncSHA256) > 0
+		// Without a digest the plaintext cannot be verified, so it is not offered.
+		s.Downloadable = s.Media.DirectPath != "" && len(s.Media.MediaKey) > 0 && len(s.Media.FileEncSHA256) > 0 &&
+			len(s.Media.FileSHA256) == sha256.Size
 		s.UpdatedAt = fromUnix(updatedAt)
 		out = append(out, s)
 	}

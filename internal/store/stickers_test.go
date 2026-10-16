@@ -36,8 +36,9 @@ func listOnlySticker(t *testing.T, db *DB, p ListStickersParams) []Sticker {
 }
 
 func TestFavoriteStickerNewestMutationWinsInEitherOrder(t *testing.T) {
-	older := time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)
-	newer := older.Add(time.Minute)
+	// Within one second, so second-precision ordering would tie.
+	older := time.Date(2026, 10, 1, 10, 0, 0, 100_000_000, time.UTC)
+	newer := older.Add(800 * time.Millisecond)
 	for _, order := range []string{"in order", "replayed out of order"} {
 		t.Run(order, func(t *testing.T) {
 			db := openTestDB(t)
@@ -75,7 +76,26 @@ func TestFavoriteStickerNewestMutationWinsInEitherOrder(t *testing.T) {
 			if len(got) != 1 || got[0].Media.DirectPath != first.DirectPath {
 				t.Fatalf("older mutation replaced the descriptor: %+v", got)
 			}
+			if err := db.SetFavoriteSticker(second, false, newer.Add(time.Minute-time.Millisecond)); err != nil {
+				t.Fatal(err)
+			}
+			if got := listOnlySticker(t, db, ListStickersParams{Favorites: true}); len(got) != 1 {
+				t.Fatalf("an unfavorite one millisecond older removed the favorite: %+v", got)
+			}
 		})
+	}
+}
+
+func TestStickerWithoutDigestIsNotDownloadable(t *testing.T) {
+	db := openTestDB(t)
+	p := testStickerParams("bad-identity", 1)
+	p.FileHash = "not-a-sha256"
+	if err := db.SetFavoriteSticker(p, true, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	got := listOnlySticker(t, db, ListStickersParams{})
+	if len(got) != 1 || got[0].Downloadable || got[0].Media.FileSHA256 != nil {
+		t.Fatalf("sticker without a SHA-256 file hash = %+v, want listed but not downloadable", got)
 	}
 }
 
@@ -148,7 +168,7 @@ func TestRecentStickersHonorRemovalInEitherOrder(t *testing.T) {
 	if err := db.RemoveRecentSticker(sentAgain.FileHash, sent); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AddHistoryRecentSticker(sentAgain, 2, sent.Add(time.Hour)); err != nil {
+	if err := db.AddHistoryRecentSticker(sentAgain, 2, sent.Add(800*time.Millisecond)); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.AddHistoryRecentSticker(kept, 3, sent); err != nil {

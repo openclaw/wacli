@@ -48,6 +48,13 @@ func TestDownloadStickersVerifiesCacheAndReportsEachFailure(t *testing.T) {
 	}
 	expired := testSticker("expired", true)
 	noDescriptor := testSticker("no-descriptor", false)
+	// A verified file needs no descriptor; only a fetch does.
+	cachedNoDescriptor := testSticker("cached-no-descriptor", false)
+	if err := os.WriteFile(filepath.Join(dir, stickerFilename(cachedNoDescriptor)), []byte("cached-no-descriptor"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	unverifiable := testSticker("unverifiable", true)
+	unverifiable.FileHash, unverifiable.Media.FileSHA256 = "not-a-sha256", nil
 
 	var fetched []string
 	download := func(_ context.Context, s store.Sticker, target string) (int64, error) {
@@ -57,7 +64,7 @@ func TestDownloadStickersVerifiesCacheAndReportsEachFailure(t *testing.T) {
 		}
 		return 7, os.WriteFile(target, []byte("fetched"), 0o600)
 	}
-	results := downloadStickers(context.Background(), []store.Sticker{cached, stale, expired, noDescriptor}, dir, download)
+	results := downloadStickers(context.Background(), []store.Sticker{cached, stale, expired, noDescriptor, cachedNoDescriptor, unverifiable}, dir, download)
 
 	if len(fetched) != 2 || fetched[0] != stale.FileHash || fetched[1] != expired.FileHash {
 		t.Fatalf("fetched %v, want only the unverified and expired stickers", fetched)
@@ -67,6 +74,8 @@ func TestDownloadStickersVerifiesCacheAndReportsEachFailure(t *testing.T) {
 		{FileHash: stale.FileHash, Path: filepath.Join(dir, stickerFilename(stale)), Bytes: 7, Source: "server"},
 		{FileHash: expired.FileHash, Error: "HTTP 410"},
 		{FileHash: noDescriptor.FileHash, Error: "no download descriptor stored; run `wacli stickers refresh`"},
+		{FileHash: cachedNoDescriptor.FileHash, Path: filepath.Join(dir, stickerFilename(cachedNoDescriptor)), Bytes: 20, Source: "cache"},
+		{FileHash: unverifiable.FileHash, Error: "file hash is not a base64 SHA-256 digest, so a download could not be verified"},
 	}
 	for i := range want {
 		if results[i] != want[i] {

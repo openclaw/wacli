@@ -194,14 +194,19 @@ func downloadStickers(ctx context.Context, stickers []store.Sticker, dir string,
 	results := make([]stickerDownloadResult, 0, len(stickers))
 	for _, s := range stickers {
 		result := stickerDownloadResult{FileHash: s.FileHash}
-		if !s.Downloadable {
-			result.Error = "no download descriptor stored; run `wacli stickers refresh`"
-			results = append(results, result)
-			continue
-		}
 		target := filepath.Join(dir, stickerFilename(s))
 		if n, ok := stickerFileVerified(target, s.Media.FileSHA256); ok {
 			result.Path, result.Bytes, result.Source = target, n, "cache"
+			results = append(results, result)
+			continue
+		}
+		if len(s.Media.FileSHA256) != sha256.Size {
+			result.Error = "file hash is not a base64 SHA-256 digest, so a download could not be verified"
+			results = append(results, result)
+			continue
+		}
+		if !s.Downloadable {
+			result.Error = "no download descriptor stored; run `wacli stickers refresh`"
 			results = append(results, result)
 			continue
 		}
@@ -238,7 +243,6 @@ func stickerExtension(s store.Sticker) string {
 	return ".webp"
 }
 
-// Without a digest nothing can be verified, so the sticker is fetched again.
 func stickerFileVerified(path string, digest []byte) (int64, bool) {
 	if len(digest) != sha256.Size {
 		return 0, false
