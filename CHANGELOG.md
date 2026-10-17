@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Send: quote `send file`, `send voice`, and `send sticker` replies with the stored message content, as `send text` does, and refuse an unknown or unquotable `--reply-to` message before uploading instead of sending a bare message-ID quote.
 - Dependencies: update x/exp after the 48-hour cooldown while retaining the Go 1.27.0 source minimum and Go 1.27.2 build toolchain.
 - Sync: unarchive chats on eligible incoming messages when Keep chats archived is off, recover missing preferences on upgrade, and preserve newer unarchives across stale archive replays. Thanks @Luizssauro (#466).
 
