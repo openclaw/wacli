@@ -76,6 +76,66 @@ func TestKnownEmptyAppStateKeyEmitsRealSDKSyncError(t *testing.T) {
 	}
 }
 
+// Pins the SDK rule the contact mirror's recovery design relies on: the pinned
+// whatsmeow ignores a recovery snapshot whose version is not newer than the
+// session's cursor, before it applies a mutation or emits any event. A contact
+// batch the session already consumed can therefore never be replayed by a
+// snapshot while the collection has not moved on; the mirror has to be
+// repaired from the session contact store instead. The newer-version control
+// shows the fixture itself is valid. (Probe written by the round-1 reviewers.)
+func TestSDKIgnoresEqualVersionContactRecovery(t *testing.T) {
+	for _, snapshotVersion := range []uint64{80, 81} {
+		t.Run(map[uint64]string{80: "equal version", 81: "newer version"}[snapshotVersion], func(t *testing.T) {
+			c, err := New(Options{StorePath: newPairedSessionStore(t), KeyStateStore: newTestKeyStateStore(t)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer c.Close()
+			ctx := t.Context()
+			id := []byte{1, 2, 3}
+			c.client.DangerousInternals().HandleAppStateSyncKeyShare(ctx, &waE2E.AppStateSyncKeyShare{Keys: []*waE2E.AppStateSyncKey{appStateKeyShare(id, bytes.Repeat([]byte{0xAB}, 32))}})
+			name := appstate.WAPatchCriticalUnblockLow
+			if err := c.client.Store.AppState.PutAppStateVersion(ctx, string(name), 80, [128]byte{}); err != nil {
+				t.Fatal(err)
+			}
+			contact := types.NewJID("15550002222", types.DefaultUserServer)
+			index, err := json.Marshal([]string{"contact", contact.String()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot := &waSyncdSnapshotRecovery.SyncdSnapshotRecovery{
+				CollectionName: proto.String(string(name)), Version: &waSyncdSnapshotRecovery.SyncdVersion{Version: proto.Uint64(snapshotVersion)}, CollectionLthash: make([]byte, 128),
+				MutationRecords: []*waSyncdSnapshotRecovery.SyncdPlainTextRecord{{KeyID: id, Mac: bytes.Repeat([]byte{0xCD}, 32), Value: &waSyncAction.SyncActionData{
+					Index: index, Version: proto.Int32(2), Value: &waSyncAction.SyncActionValue{Timestamp: proto.Int64(time.Now().UnixMilli()), ContactAction: &waSyncAction.ContactAction{FullName: proto.String("Grace Hopper"), FirstName: proto.String("Grace")}},
+				}}},
+			}
+			raw, err := proto.Marshal(snapshot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var named, complete bool
+			c.AddEventHandler(func(evt any) {
+				switch v := evt.(type) {
+				case *events.Contact:
+					named = v.JID == contact && v.Action.GetFullName() == "Grace Hopper"
+				case *events.AppStateSyncComplete:
+					complete = v.Name == name && v.Recovery
+				}
+			})
+			c.client.DangerousInternals().HandleAppStateRecovery(ctx, "consumed-contact-batch", []*waE2E.PeerDataOperationRequestResponseMessage_PeerDataOperationResult{{SyncdSnapshotFatalRecoveryResponse: &waE2E.PeerDataOperationRequestResponseMessage_PeerDataOperationResult_SyncDSnapshotFatalRecoveryResponse{CollectionSnapshot: raw}}})
+			stored, err := c.client.Store.Contacts.GetContact(ctx, contact)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := snapshotVersion > 80
+			if named != want || complete != want || stored.Found != want {
+				t.Fatalf("session cursor 80, snapshot %d: contact event %v, recovery sentinel %v, in session store %v; want all %v",
+					snapshotVersion, named, complete, stored.Found, want)
+			}
+		})
+	}
+}
+
 func TestRealSDKRecoveryRequiresUsableSnapshotKey(t *testing.T) {
 	for _, usable := range []bool{false, true} {
 		t.Run(map[bool]string{false: "unavailable", true: "usable"}[usable], func(t *testing.T) {

@@ -102,6 +102,18 @@ ON CONFLICT(jid) DO UPDATE SET
     business_name=COALESCE(NULLIF(excluded.business_name,''), contacts.business_name),
     updated_at=excluded.updated_at;
 
+-- name: SetContactActionName :exec
+INSERT INTO contacts(jid, phone, full_name, first_name, updated_at)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(jid) DO UPDATE SET
+    phone=COALESCE(NULLIF(excluded.phone,''), contacts.phone),
+    full_name=excluded.full_name,
+    first_name=excluded.first_name,
+    updated_at=excluded.updated_at;
+
+-- name: ClearContactActionName :exec
+UPDATE contacts SET full_name = NULL, first_name = NULL, updated_at = ? WHERE jid = ?;
+
 -- name: SetAlias :exec
 INSERT INTO contact_aliases(jid, alias, notes, updated_at)
 VALUES (?, ?, NULL, ?)

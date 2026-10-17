@@ -144,6 +144,59 @@ func (d *DB) UpsertContact(jid, phone, pushName, fullName, firstName, businessNa
 	})
 }
 
+// SetContactActionName stores the names carried by a WhatsApp `contact`
+// app-state action. Unlike UpsertContact, the action is authoritative for
+// full_name and first_name, so an absent name clears the column, matching
+// whatsmeow's PutContactName for the session store. Push, business, and
+// system names are left alone. An action with no names only clears an
+// existing row; it never creates one.
+func (d *DB) SetContactActionName(jid, phone, fullName, firstName string) error {
+	return setContactActionName(d.q, ContactActionName{JID: jid, Phone: phone, FullName: fullName, FirstName: firstName}, nowUTC().Unix())
+}
+
+// ContactActionName is the pair of names a `contact` app-state action
+// carries for one contact, keyed as wacli.db stores it.
+type ContactActionName struct {
+	JID, Phone, FullName, FirstName string
+}
+
+// SetContactActionNames applies SetContactActionName to every entry in one
+// transaction.
+func (d *DB) SetContactActionNames(names []ContactActionName) error {
+	if len(names) == 0 {
+		return nil
+	}
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	q := d.q.WithTx(tx)
+	now := nowUTC().Unix()
+	for _, name := range names {
+		if err := setContactActionName(q, name, now); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func setContactActionName(q *storedb.Queries, name ContactActionName, now int64) error {
+	if name.FullName == "" && name.FirstName == "" {
+		return q.ClearContactActionName(storeCtx(), storedb.ClearContactActionNameParams{
+			UpdatedAt: now,
+			Jid:       name.JID,
+		})
+	}
+	return q.SetContactActionName(storeCtx(), storedb.SetContactActionNameParams{
+		Jid:       name.JID,
+		Phone:     nullString(name.Phone),
+		FullName:  nullString(name.FullName),
+		FirstName: nullString(name.FirstName),
+		UpdatedAt: now,
+	})
+}
+
 func (d *DB) SetAlias(jids []string, alias string) error {
 	alias = strings.TrimSpace(alias)
 	if alias == "" {

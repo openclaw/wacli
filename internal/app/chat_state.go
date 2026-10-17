@@ -44,7 +44,8 @@ func (a *App) AddChatStatePersistenceHandler(ctx context.Context) (func(), error
 	handlerID := waClient.AddEventHandler(func(evt any) {
 		switch v := evt.(type) {
 		case *events.AppState, *events.Star, *events.DeleteForMe,
-			*events.Archive, *events.UnarchiveChatsSetting, *events.Pin, *events.Mute, *events.MarkChatAsRead:
+			*events.Archive, *events.UnarchiveChatsSetting, *events.Pin, *events.Mute, *events.MarkChatAsRead,
+			*events.Contact:
 			a.handleAppStatePersistenceEvent(ctx, evt, nil)
 		case *wa.AppStateKeyUnavailable:
 			a.warnEmptyAppStateKey(v)
@@ -229,8 +230,13 @@ func (a *App) syncChatStateBeforeWrite(ctx context.Context, collection appstate.
 		return a.replayRequiredAppState(ctx, collection, markerGeneration, tracker)
 	}
 
+	// The fetch, its retries while whatsmeow waits for a missing key, and
+	// the waits between them share one bound; a replay below has its own.
+	keyCtx, cancelKeyWait := context.WithTimeout(ctx, appStateRecoveryMaxWait)
+	defer cancelKeyWait()
+	retryDelay := appStateRetryInitialDelay
 	for {
-		err, persistenceErr := a.fetchAndPersistAppState(ctx, collection, false, tracker)
+		err, persistenceErr := a.fetchAndPersistAppState(keyCtx, collection, false, tracker)
 		if persistenceErr != nil {
 			return fmt.Errorf("persist fetched app state %s: %w", collection, persistenceErr)
 		}
@@ -241,16 +247,33 @@ func (a *App) syncChatStateBeforeWrite(ctx context.Context, collection appstate.
 		if errors.Is(err, appstate.ErrMismatchingLTHash) || errors.Is(err, wa.ErrEmptyAppStateKeyShare) {
 			return a.replayRequiredAppState(ctx, collection, markerGeneration, tracker)
 		} else if errors.Is(err, appstate.ErrKeyNotFound) {
-			return a.replayRequiredAppState(ctx, collection, markerGeneration, tracker)
+			if !a.keepsLocalAppStateOnRecovery(ctx, collection) {
+				return a.replayRequiredAppState(ctx, collection, markerGeneration, tracker)
+			}
+			// An ordinary missing key is not a reason to give up local state
+			// or to wait for a snapshot: retry the incremental fetch until
+			// the key whatsmeow requested arrives.
+			if err := waitForAppStateKeyDelivery(keyCtx, collection, &retryDelay); err != nil {
+				return err
+			}
 		} else {
 			return fmt.Errorf("sync WhatsApp chat state before update: %w", err)
 		}
 	}
 }
 
+// replayRequiredAppState settles a hash mismatch, a known-empty key, or
+// replay debt the degraded path could not handle: with a full replay, retried
+// while whatsmeow waits for a missing key, or from the primary's snapshot on
+// a collection whose local state must not be destroyed. An ordinary missing
+// key on such a collection is retried incrementally by the callers instead,
+// so it never reaches the snapshot wait.
 func (a *App) replayRequiredAppState(ctx context.Context, collection appstate.WAPatchName, markerGeneration int64, tracker *appStatePersistenceTracker) error {
 	ctx, cancel := context.WithTimeout(ctx, appStateRecoveryMaxWait)
 	defer cancel()
+	if a.keepsLocalAppStateOnRecovery(ctx, collection) {
+		return a.recoverMismatchingAppState(ctx, collection, markerGeneration, tracker, nil)
+	}
 	retryDelay := appStateRetryInitialDelay
 	for {
 		fetchErr, persistenceErr := a.fetchAndPersistAppState(ctx, collection, true, tracker)
@@ -272,24 +295,29 @@ func (a *App) replayRequiredAppState(ctx context.Context, collection appstate.WA
 		if !errors.Is(fetchErr, appstate.ErrKeyNotFound) {
 			return fmt.Errorf("replay WhatsApp app state recovery for %s: %w", collection, fetchErr)
 		}
-		// whatsmeow requests the missing keys when patch decoding returns
-		// ErrKeyNotFound. Keep the connection alive for that delivery, bounded
-		// so one absent key cannot hold all chat-state writes forever.
-
-		timer := time.NewTimer(retryDelay)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return fmt.Errorf("wait for missing WhatsApp app state key during %s recovery: %w", collection, ctx.Err())
-		case <-timer.C:
-		}
-		if retryDelay < appStateRetryMaxDelay {
-			retryDelay *= 2
-			if retryDelay > appStateRetryMaxDelay {
-				retryDelay = appStateRetryMaxDelay
-			}
+		if err := waitForAppStateKeyDelivery(ctx, collection, &retryDelay); err != nil {
+			return err
 		}
 	}
+}
+
+// waitForAppStateKeyDelivery waits before the next fetch of a collection
+// whose patches could not be decoded for lack of a key. whatsmeow requests
+// the missing keys when patch decoding returns ErrKeyNotFound; keep the
+// connection alive for that delivery, with backoff and bounded by ctx so one
+// absent key cannot hold all chat-state writes forever.
+func waitForAppStateKeyDelivery(ctx context.Context, collection appstate.WAPatchName, retryDelay *time.Duration) error {
+	timer := time.NewTimer(*retryDelay)
+	select {
+	case <-ctx.Done():
+		timer.Stop()
+		return fmt.Errorf("wait for missing WhatsApp app state key during %s recovery: %w", collection, ctx.Err())
+	case <-timer.C:
+	}
+	if *retryDelay < appStateRetryMaxDelay {
+		*retryDelay = min(*retryDelay*2, appStateRetryMaxDelay)
+	}
+	return nil
 }
 
 // setAppStateFullSyncResult records whether the latest full sync of the
@@ -316,6 +344,44 @@ func (a *App) setAppStateFullSyncResult(collection appstate.WAPatchName, broken 
 	if err := a.db.SetAppStateFullSyncBroken(string(collection), broken); err != nil {
 		a.warnAppStateRecovery(string(collection), fmt.Errorf("persist full sync verification flag: %w", err))
 	}
+}
+
+// avoidsDestructiveFullSync reports whether replay debt of the collection is
+// settled without a full sync (degraded pre-write path, startup): the write
+// proceeds after an incremental fetch and the debt waits for the primary's
+// snapshot. Stock whatsmeow deletes the saved collection version and MAC
+// state before it decodes a full sync (it does not delete the contact store),
+// so a snapshot that does not verify leaves the collection without local
+// state until the primary answers. That applies to collections whose full
+// sync is known not to verify, and always to `critical_unblock_low`: after a
+// contact save the primary can rewrite contact entries this companion never
+// stored (for example rows under a rotated-out key), which breaks the local
+// hash, and stock whatsmeow cannot send the removal that would avoid it.
+// Hash failures themselves are routed by keepsLocalAppStateOnRecovery.
+func (a *App) avoidsDestructiveFullSync(collection appstate.WAPatchName) bool {
+	return collection == appstate.WAPatchCriticalUnblockLow || a.isAppStateFullSyncBroken(collection)
+}
+
+// keepsLocalAppStateOnRecovery reports whether a hash failure of the
+// collection must skip the full sync and wait for the primary's snapshot.
+// Only `critical_unblock_low` with local state to lose: its local hash can
+// stop verifying after a save (see avoidsDestructiveFullSync), and a full
+// sync that then fails would delete the saved version, leaving the collection
+// unreadable until the primary answers. Collections flagged by #497 keep
+// main's behaviour here (a full replay first); changing that belongs to the
+// follow-ups of #497, not to contacts. Without local state a full sync is the
+// only way to get the collection and loses nothing.
+func (a *App) keepsLocalAppStateOnRecovery(ctx context.Context, collection appstate.WAPatchName) bool {
+	if collection != appstate.WAPatchCriticalUnblockLow {
+		return false
+	}
+	hasLocal, err := a.wa.HasLocalAppState(ctx, string(collection))
+	if err != nil {
+		// Unknown: keep whatever is there rather than risk deleting it.
+		a.warnAppStateRecovery(string(collection), fmt.Errorf("check local app state before recovery: %w", err))
+		return true
+	}
+	return hasLocal
 }
 
 func (a *App) isAppStateFullSyncBroken(collection appstate.WAPatchName) bool {
@@ -349,8 +415,9 @@ func (a *App) loadAppStateFullSyncResultsLocked() {
 	}
 }
 
-// degradedAppStateReplay handles pre-write replay debt on collections whose
-// full sync is known not to verify. Replaying there repeats the very full sync
+// degradedAppStateReplay handles pre-write replay debt on collections that
+// avoid destructive full syncs (see avoidsDestructiveFullSync), such as those
+// whose full sync is known not to verify. Replaying there repeats the very full sync
 // that already failed — destroying the local collection version with stock
 // whatsmeow — and then waits up to appStateRecoveryMaxWait for the primary,
 // which is often asleep. Instead, with local state present, an incremental
@@ -361,13 +428,18 @@ func (a *App) loadAppStateFullSyncResultsLocked() {
 // replay of those, so that debt stays durable until a verified full replay or
 // a primary recovery snapshot covers it (both clear through their own, newer
 // generation). One background recovery request per collection per 6h still
-// nudges the primary, since only it can repair the broken full sync.
+// nudges the primary, since only it can repair the broken full sync. The
+// contact collection takes the same path for debt a save left between its
+// send and its mirror: the journal of that process died with it, so only a
+// snapshot (one whatsmeow accepts, i.e. newer than the session's cursor) can
+// replay the consumed batch.
 //
-// Returns handled=false (fall back to today's full replay + phone wait) when
-// the flag is not set, there is no local state, or the incremental fetch
-// fails.
+// Returns handled=false (fall back to replayRequiredAppState, which waits for
+// the primary's snapshot while local state exists and runs a full replay
+// otherwise) when the collection does not avoid full syncs, there is no local
+// state, or the incremental fetch fails.
 func (a *App) degradedAppStateReplay(ctx context.Context, collection appstate.WAPatchName, markerGeneration int64, tracker *appStatePersistenceTracker) (handled bool, err error) {
-	if !a.isAppStateFullSyncBroken(collection) {
+	if !a.avoidsDestructiveFullSync(collection) {
 		return false, nil
 	}
 	hasLocal, err := a.wa.HasLocalAppState(ctx, string(collection))
@@ -378,16 +450,36 @@ func (a *App) degradedAppStateReplay(ctx context.Context, collection appstate.WA
 	if !hasLocal {
 		return false, nil
 	}
-	fetchErr, persistenceErr := a.fetchAndPersistAppState(ctx, collection, false, tracker)
-	if persistenceErr != nil {
-		return true, fmt.Errorf("persist degraded app state replay %s: %w", collection, persistenceErr)
+	keyCtx, cancelKeyWait := context.WithTimeout(ctx, appStateRecoveryMaxWait)
+	defer cancelKeyWait()
+	retryDelay := appStateRetryInitialDelay
+	var fetchErr error
+	for {
+		var persistenceErr error
+		fetchErr, persistenceErr = a.fetchAndPersistAppState(keyCtx, collection, false, tracker)
+		if persistenceErr != nil {
+			return true, fmt.Errorf("persist degraded app state replay %s: %w", collection, persistenceErr)
+		}
+		if !errors.Is(fetchErr, appstate.ErrKeyNotFound) || collection != appstate.WAPatchCriticalUnblockLow {
+			break
+		}
+		// The contact collection is never full-synced while local state
+		// exists, and a snapshot is not how an ordinary missing key arrives:
+		// retry the incremental fetch until whatsmeow receives the key.
+		if err := waitForAppStateKeyDelivery(keyCtx, collection, &retryDelay); err != nil {
+			return true, err
+		}
 	}
 	if fetchErr != nil {
 		// LTHash mismatch (or any other failure): today's behavior.
 		return false, nil
 	}
+	reason := "full sync is known not to verify on this account"
+	if collection == appstate.WAPatchCriticalUnblockLow {
+		reason = "a contact batch was consumed without reaching wacli.db (a save exited between its send and its mirror, or a mirror failed); only the primary's snapshot can replay it"
+	}
 	a.emitWarning("app_state_degraded_replay",
-		fmt.Sprintf("app state %s: full sync is known not to verify on this account; proceeding after an incremental sync and keeping the durable replay debt", collection),
+		fmt.Sprintf("app state %s: %s; proceeding after an incremental sync and keeping the durable replay debt", collection, reason),
 		map[string]any{"name": string(collection), "generation": markerGeneration})
 	a.requestBackgroundAppStateRecovery(ctx, collection, markerGeneration)
 	// Clear only this attempt's own write-ahead marker; see the function
@@ -673,7 +765,15 @@ func (a *App) fetchAndPersistAppState(ctx context.Context, collection appstate.W
 	}
 	result := make(chan error, 1)
 	frontier := a.appStatePersist.complete(ticket, func() {
-		result <- a.persistFetchedAppStateEvents(ctx, eventsToPersist, tracker)
+		persistErr := a.persistFetchedAppStateEvents(ctx, eventsToPersist, tracker)
+		if collection == appstate.WAPatchCriticalUnblockLow {
+			// Contact writes journaled while no handler was listening (before
+			// the handlers were installed, or by a failed earlier drain) are
+			// mirrored with this fetch's own.
+			_, drainErr := a.drainContactJournal(ctx)
+			persistErr = errors.Join(persistErr, drainErr)
+		}
+		result <- persistErr
 	})
 	if waitErr := a.appStatePersist.waitThrough(ctx, frontier); waitErr != nil {
 		return fetchErr, waitErr
@@ -788,7 +888,10 @@ func (a *App) completeLocalAppStateWrite(ctx context.Context, pending *pendingLo
 	// exits before that goroutine runs, and future incremental deltas would
 	// skip the batch forever. On broken collections the degraded pre-write
 	// path keeps later writes fast despite the kept debt; a verified full
-	// replay or primary recovery snapshot clears it.
+	// replay or primary recovery snapshot clears it. A contact save settles
+	// its own intent after projecting the journal of whatsmeow's contact
+	// store writes, which holds the post-send batch before SendAppState
+	// returns (see SaveContact).
 	return <-result
 }
 
@@ -882,6 +985,21 @@ func (a *App) handleChatStateEvent(ctx context.Context, evt any) error {
 		}
 	}
 	return nil
+}
+
+// handleContactEvent mirrors whatsmeow's contact store writes into wacli.db
+// when a `contact` app-state event arrives (the echo of our own `contacts
+// save`, or an edit made on the phone or another linked device), so
+// `contacts show` matches the session without a `contacts refresh`. The event
+// only triggers a drain of the journal (see drainContactJournal); its payload
+// is never applied. whatsmeow writes its store synchronously while it applies
+// a batch and dispatches each batch's events from its own goroutine, so a
+// delayed or duplicated event carries no usable order, while the journal
+// holds the SDK's application order across a contact's phone-number and LID
+// indices, its clears, and the writes whose store update failed.
+func (a *App) handleContactEvent(ctx context.Context, _ *events.Contact) error {
+	_, err := a.drainContactJournal(ctx)
+	return err
 }
 
 func mutedUntilFromAction(action *waSyncAction.MuteAction) int64 {

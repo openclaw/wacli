@@ -147,3 +147,49 @@ func TestContactSystemNamePrecedenceAndSearch(t *testing.T) {
 		t.Fatalf("cleared = %d, want 1", cleared)
 	}
 }
+
+// A `contact` app-state action is authoritative for full_name and first_name,
+// like whatsmeow's PutContactName: a rename without a first name must clear
+// the old one, while push, business, and system names stay untouched.
+func TestSetContactActionNameIsAuthoritativeForActionNames(t *testing.T) {
+	db := openTestDB(t)
+	jid := "111@s.whatsapp.net"
+	if err := db.UpsertContact(jid, "111", "Push", "Old Name", "Old", "Biz"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetContactActionName(jid, "", "New Name", ""); err != nil {
+		t.Fatalf("SetContactActionName: %v", err)
+	}
+	var full, first, push, biz, phone *string
+	row := db.sql.QueryRow(`SELECT full_name, first_name, push_name, business_name, phone FROM contacts WHERE jid = ?`, jid)
+	if err := row.Scan(&full, &first, &push, &biz, &phone); err != nil {
+		t.Fatal(err)
+	}
+	if full == nil || *full != "New Name" || first != nil {
+		t.Fatalf("action names = %v/%v, want renamed full name and cleared first name", full, first)
+	}
+	if push == nil || *push != "Push" || biz == nil || *biz != "Biz" || phone == nil || *phone != "111" {
+		t.Fatalf("other columns changed: push=%v biz=%v phone=%v", push, biz, phone)
+	}
+	if got, err := db.SearchContacts("Old", 10); err != nil || len(got) != 0 {
+		t.Fatalf("search for the replaced first name = %+v, %v; want no match", got, err)
+	}
+
+	// An action without names clears an existing row and never creates one.
+	if err := db.SetContactActionName(jid, "111", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.sql.QueryRow(`SELECT full_name, first_name FROM contacts WHERE jid = ?`, jid).Scan(&full, &first); err != nil {
+		t.Fatal(err)
+	}
+	if full != nil || first != nil {
+		t.Fatalf("empty action left names %v/%v", full, first)
+	}
+	if err := db.SetContactActionName("222@s.whatsapp.net", "222", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := db.sql.QueryRow(`SELECT COUNT(1) FROM contacts WHERE jid = '222@s.whatsapp.net'`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("empty action created %d rows, %v", n, err)
+	}
+}

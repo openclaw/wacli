@@ -71,6 +71,8 @@ type sendDelegateRequest struct {
 	Receipts             bool     `json:"receipts,omitempty"`
 	ThroughMessageID     string   `json:"through_message_id,omitempty"`
 	Phones               []string `json:"phones,omitempty"`
+	FirstName            string   `json:"first_name,omitempty"`
+	Phonebook            bool     `json:"phonebook,omitempty"`
 	ChatStateAction      string   `json:"chat_state_action,omitempty"`
 	MuteDurationMS       int64    `json:"mute_duration_ms,omitempty"`
 	PostSendWaitMS       int64    `json:"post_send_wait_ms,omitempty"`
@@ -98,6 +100,7 @@ type sendDelegateResponse struct {
 	Receipts       *int                 `json:"receipts,omitempty"`
 	ReceiptType    string               `json:"receipt_type,omitempty"`
 	Contacts       []contactCheckResult `json:"contacts,omitempty"`
+	Contact        *contactSaveResult   `json:"contact,omitempty"`
 	Presence       *app.PresenceState   `json:"presence,omitempty"`
 	Media          *mediaDownloadResult `json:"media,omitempty"`
 }
@@ -315,9 +318,11 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDele
 		_ = json.NewEncoder(conn).Encode(resp)
 		return
 	}
-	if req.Kind == chatStateKind {
-		// App-state writes are serialized by the app and can wait minutes on
-		// recovery, so they must not hold the send queue.
+	if req.Kind == chatStateKind || req.Kind == contactsSaveKind {
+		// App-state writes (chat state and contacts save) are serialized by the
+		// app's app-state coordinator, which also owns their pre-write sync and
+		// recovery and can wait minutes on it, so they must not hold the send
+		// queue (#454).
 		if requestCtx.Err() != nil {
 			_ = json.NewEncoder(conn).Encode(sendDelegateResponse{OK: false, Error: "request deadline passed before dispatch; it was not sent"})
 			return
@@ -444,6 +449,8 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 		return executeDelegatedContactsCheck(ctx, a.WA(), req)
 	case chatStateKind:
 		return executeDelegatedChatState(ctx, a, req)
+	case contactsSaveKind:
+		return executeDelegatedContactsSave(ctx, a, req)
 	default:
 		return sendDelegateResponse{}, fmt.Errorf("unsupported send kind %q", req.Kind)
 	}

@@ -47,8 +47,12 @@ func (a *App) handleAppStateSyncError(ctx context.Context, evt *events.AppStateS
 	}
 
 	a.appStateRecoveryWorkers.Go(func() {
+		strategy := "attempting full sync"
+		if a.keepsLocalAppStateOnRecovery(ctx, evt.Name) {
+			strategy = "requesting the primary's recovery snapshot, keeping local state"
+		}
 		a.emitWarning(code,
-			fmt.Sprintf("warning: app state %s %s; attempting full sync", name, reason),
+			fmt.Sprintf("warning: app state %s %s; %s", name, reason, strategy),
 			map[string]any{"name": name})
 		a.recoverAppStateCollection(ctx, name, recoveries, appStateRecoveryStepTimeout)
 	})
@@ -76,6 +80,22 @@ func (a *App) recoverAppStateCollection(ctx context.Context, name string, recove
 	}
 	collection := appstate.WAPatchName(name)
 	tracker := &appStatePersistenceTracker{}
+	onRequested := func(id types.MessageID) {
+		if a.eventsEnabled() {
+			a.emitEvent("app_state_recovery_requested", map[string]any{"name": name, "id": string(id)})
+		} else {
+			fmt.Fprintf(os.Stderr, "\rRequested app state %s recovery (id %s)\n", name, id)
+		}
+	}
+	if a.keepsLocalAppStateOnRecovery(ctx, collection) {
+		// Never delete local state the primary's snapshot can replace.
+		recoveryCtx, cancelRecovery := context.WithTimeout(ctx, timeout)
+		defer cancelRecovery()
+		if err := a.recoverMismatchingAppState(recoveryCtx, collection, generation, tracker, onRequested); err != nil {
+			a.warnAppStateRecovery(name, err)
+		}
+		return
+	}
 	fetchCtx, cancelFetch := context.WithTimeout(ctx, timeout)
 	fetchErr, persistenceErr := a.fetchAndPersistAppState(fetchCtx, collection, true, tracker)
 	cancelFetch()
@@ -102,13 +122,7 @@ func (a *App) recoverAppStateCollection(ctx context.Context, name string, recove
 	// A full-fetch timeout must not consume the primary recovery budget.
 	recoveryCtx, cancelRecovery := context.WithTimeout(ctx, timeout)
 	defer cancelRecovery()
-	err = a.recoverMismatchingAppState(recoveryCtx, collection, generation, tracker, func(id types.MessageID) {
-		if a.eventsEnabled() {
-			a.emitEvent("app_state_recovery_requested", map[string]any{"name": name, "id": string(id)})
-		} else {
-			fmt.Fprintf(os.Stderr, "\rRequested app state %s recovery (id %s)\n", name, id)
-		}
-	})
+	err = a.recoverMismatchingAppState(recoveryCtx, collection, generation, tracker, onRequested)
 	if err != nil {
 		a.warnAppStateRecovery(name, err)
 	}
@@ -143,13 +157,21 @@ func (a *App) syncAppStateDeltas(ctx context.Context, recoveries *sync.Map) {
 	for _, name := range pending {
 		if _, loaded := recoveries.LoadOrStore(name, struct{}{}); !loaded {
 			collection := appstate.WAPatchName(name)
-			if a.isAppStateFullSyncBroken(collection) {
+			if a.avoidsDestructiveFullSync(collection) {
 				// A snapshot must cover replay debt, even when the preference
 				// was already seen. Never destroy a known-broken collection.
 				generation, _, err := a.db.BeginAppStateRecovery(name)
 				if err != nil {
 					a.warnAppStateRecovery(name, err)
 					continue
+				}
+				if collection == appstate.WAPatchCriticalUnblockLow {
+					// Debt a save left between its send and its mirror: the
+					// consumed batch is in the session but its journal died with
+					// that process, so only the primary's snapshot can replay it.
+					a.emitWarning("app_state_contact_debt",
+						fmt.Sprintf("warning: app state %s: a contact batch may have been consumed without reaching wacli.db (a save exited before mirroring it); keeping the durable replay debt and requesting the primary's snapshot, without a full sync", name),
+						map[string]any{"name": name, "generation": generation})
 				}
 				a.requestBackgroundAppStateRecovery(ctx, collection, generation)
 				// Keep catching up new mutations while the primary is asleep.

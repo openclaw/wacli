@@ -97,6 +97,7 @@ type WAClient interface {
 	FetchAppStateEvents(ctx context.Context, name string, fullSync, onlyIfNotSynced bool) ([]any, error)
 	RequestAppStateRecovery(ctx context.Context, name string) (types.MessageID, error)
 	HasLocalAppState(ctx context.Context, name string) (bool, error)
+	ContactJournal() *wa.ContactStoreJournal
 	Logout(ctx context.Context) error
 	LinkedJID() string
 	LinkedLID() string
@@ -105,6 +106,7 @@ type WAClient interface {
 	GetProfilePictureInfo(ctx context.Context, jid types.JID, preview bool, existingID string) (*types.ProfilePictureInfo, error)
 	SetStatusMessage(ctx context.Context, msg string) error
 	SetProfileName(ctx context.Context, name string) error
+	SaveContact(ctx context.Context, target, lid types.JID, fullName, firstName string, phonebook bool, beforeApply func()) ([]any, error)
 	GetBusinessProfile(ctx context.Context, jid types.JID) (*types.BusinessProfile, error)
 }
 

@@ -32,9 +32,18 @@ type Options struct {
 type Client struct {
 	opts Options
 
-	mu        sync.Mutex
-	client    *whatsmeow.Client
-	container *sqlstore.Container
+	mu             sync.Mutex
+	client         *whatsmeow.Client
+	container      *sqlstore.Container
+	contactJournal *ContactStoreJournal
+}
+
+// ContactJournal returns the journal of whatsmeow's contact store writes for
+// the open session, or nil before the session store is opened.
+func (c *Client) ContactJournal() *ContactStoreJournal {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.contactJournal
 }
 
 func New(opts Options) (*Client, error) {
