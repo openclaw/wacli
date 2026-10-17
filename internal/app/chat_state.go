@@ -152,7 +152,7 @@ func (a *App) markChatRead(ctx context.Context, jid types.JID, read bool, throug
 		if err != nil {
 			return err
 		}
-		lastTS, lastKey = m.Timestamp, messageKeyFromStore(m)
+		lastTS, lastKey = m.Timestamp, a.chatStateMessageKey(ctx, m)
 	}
 	release, err := a.beginChatStateWrite(ctx, appstate.WAPatchRegularLow)
 	if err != nil {
@@ -162,7 +162,7 @@ func (a *App) markChatRead(ctx context.Context, jid types.JID, read bool, throug
 	if throughID == "" {
 		// Keep legacy resolution and latest-message capture after recovery.
 		chatJID = canonicalJIDString(a.canonicalStoreJID(ctx, jid))
-		lastTS, lastKey = a.latestMessageRange(chatJID)
+		lastTS, lastKey = a.latestMessageRange(ctx, chatJID)
 	}
 	pending, err := a.beginLocalAppStateWrite(appstate.WAPatchRegularLow)
 	if err != nil {
@@ -800,7 +800,7 @@ func (a *App) persistFetchedAppStateEvents(ctx context.Context, eventsToPersist 
 	return tracker.end()
 }
 
-func (a *App) latestMessageRange(chatJID string) (time.Time, *waCommon.MessageKey) {
+func (a *App) latestMessageRange(ctx context.Context, chatJID string) (time.Time, *waCommon.MessageKey) {
 	info, err := a.db.GetLatestMessageInfo(chatJID)
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
@@ -812,10 +812,25 @@ func (a *App) latestMessageRange(chatJID string) (time.Time, *waCommon.MessageKe
 		}
 		return time.Time{}, nil
 	}
-	return info.Timestamp, messageKeyFromStore(info)
+	return info.Timestamp, a.chatStateMessageKey(ctx, info)
 }
 
-func messageKeyFromStore(info store.MessageInfo) *waCommon.MessageKey {
+// chatStateMessageKey builds the key a chat-state mutation uses to name the
+// chat's latest message, the way whatsmeow's BuildMessageKey would.
+//
+// Own messages carry no participant: BuildMessageKey omits it for the own PN
+// and LID alike, and the primary device drops a markChatAsRead whose key names
+// the own phone number as participant. The store records own messages synced
+// from the phone with the own PN as sender, which is exactly that case; the
+// chat then stays read on the phone although the server accepted the patch.
+//
+// Someone else's message in a group needs the sender as the primary device
+// keys it. The store canonicalises senders to phone numbers, but a
+// LID-addressed group keys its messages by LID, so the PN is resolved back the
+// same way read receipts and poll votes already do. The lookup fails open to
+// the stored sender: a key that may not match is still better than refusing
+// to mark the chat.
+func (a *App) chatStateMessageKey(ctx context.Context, info store.MessageInfo) *waCommon.MessageKey {
 	if strings.TrimSpace(info.ChatJID) == "" || strings.TrimSpace(info.MsgID) == "" {
 		return nil
 	}
@@ -824,9 +839,27 @@ func messageKeyFromStore(info store.MessageInfo) *waCommon.MessageKey {
 		FromMe:    proto.Bool(info.FromMe),
 		ID:        proto.String(info.MsgID),
 	}
-	if sender := strings.TrimSpace(info.SenderJID); sender != "" && sender != info.ChatJID {
-		key.Participant = proto.String(sender)
+	sender := strings.TrimSpace(info.SenderJID)
+	if info.FromMe || sender == "" || sender == info.ChatJID {
+		return key
 	}
+	chat, err := types.ParseJID(info.ChatJID)
+	if err != nil || chat.Server != types.GroupServer {
+		return key
+	}
+	senderJID, err := types.ParseJID(sender)
+	if err != nil {
+		key.Participant = proto.String(sender)
+		return key
+	}
+	if senderJID.Server == types.DefaultUserServer {
+		if group, infoErr := a.wa.GetGroupInfo(ctx, chat); infoErr == nil && group != nil && group.AddressingMode == types.AddressingModeLID {
+			if lid := a.wa.ResolvePNToLID(ctx, senderJID); !lid.IsEmpty() && lid.Server == types.HiddenUserServer {
+				senderJID = lid
+			}
+		}
+	}
+	key.Participant = proto.String(senderJID.ToNonAD().String())
 	return key
 }
 
