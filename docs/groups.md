@@ -33,6 +33,7 @@ wacli groups prune [--days N] [--left-only=false|--include-active] [--dry-run] [
 
 ## Notes
 
+- While a same-store `sync --follow` process owns the store lock, `participants add`, `remove`, `promote`, and `demote` are delegated to its connection (see [sync](sync.md)).
 - Group JIDs use the `...@g.us` server.
 - `list` reads local rows and hides groups marked left. Human output includes the group type (`group`, `community`, or `subgroup`) and parent community JID when known.
 - `list --json` includes `IsParent` for communities and `LinkedParentJID` for subgroups.

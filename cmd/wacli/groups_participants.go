@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 
+	"github.com/openclaw/wacli/internal/lock"
 	"github.com/openclaw/wacli/internal/out"
 	"github.com/openclaw/wacli/internal/wa"
 	"github.com/spf13/cobra"
@@ -91,6 +93,36 @@ func newGroupsParticipantsActionCmd(flags *rootFlags, action string) *cobra.Comm
 
 			a, lk, err := newApp(ctx, flags, true, false)
 			if err != nil {
+				// Store locked by a running `sync --follow`: reuse its connection.
+				if !lock.IsLocked(err) {
+					return err
+				}
+				if _, _, perr := parseParticipantsRequest(group, action, users); perr != nil {
+					return perr
+				}
+				resp, delegated, delegateErr := tryDelegateSend(ctx, flags, err, sendDelegateRequest{
+					Kind:              participantsDelegateKind,
+					To:                group,
+					Users:             users,
+					ParticipantAction: action,
+				})
+				if delegated {
+					if delegateErr != nil {
+						return delegateErr
+					}
+					warnDelegatedModeration(os.Stderr, resp)
+					if flags.asJSON {
+						var updated any = []any{}
+						if len(resp.Participants) > 0 {
+							if err := json.Unmarshal(resp.Participants, &updated); err != nil {
+								return err
+							}
+						}
+						return out.WriteJSON(os.Stdout, updated)
+					}
+					fmt.Fprintln(os.Stdout, "OK (via running sync)")
+					return nil
+				}
 				return err
 			}
 			defer closeApp(a, lk)

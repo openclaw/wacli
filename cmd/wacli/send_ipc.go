@@ -79,6 +79,8 @@ type sendDelegateRequest struct {
 	TimeoutMS            int64    `json:"timeout_ms,omitempty"`
 	DeadlineUnixMS       int64    `json:"deadline_unix_ms,omitempty"`
 	RetryOnPhone         bool     `json:"retry_on_phone,omitempty"`
+	Users                []string `json:"users,omitempty"`
+	ParticipantAction    string   `json:"participant_action,omitempty"`
 }
 
 type sendDelegateResponse struct {
@@ -97,6 +99,7 @@ type sendDelegateResponse struct {
 	StoreWarning   string               `json:"store_warning,omitempty"`
 	PreviewWarning string               `json:"preview_warning,omitempty"`
 	ThumbWarning   string               `json:"thumbnail_warning,omitempty"`
+	SendWarning    string               `json:"send_warning,omitempty"`
 	Chat           string               `json:"chat,omitempty"`
 	Action         string               `json:"action,omitempty"`
 	Receipts       *int                 `json:"receipts,omitempty"`
@@ -105,6 +108,7 @@ type sendDelegateResponse struct {
 	Contact        *contactSaveResult   `json:"contact,omitempty"`
 	Presence       *app.PresenceState   `json:"presence,omitempty"`
 	Media          *mediaDownloadResult `json:"media,omitempty"`
+	Participants   json.RawMessage      `json:"participants,omitempty"`
 }
 
 type sendDelegateExecutor func(context.Context, sendDelegateRequest) (sendDelegateResponse, error)
@@ -405,6 +409,10 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 		return executeDelegatedPresenceSubscribe(ctx, a, req)
 	case "edit":
 		return executeDelegatedEdit(ctx, a, req)
+	case deleteDelegateKind:
+		return executeDelegatedDelete(ctx, a, req)
+	case participantsDelegateKind:
+		return executeDelegatedGroupParticipants(ctx, a, req)
 	case markReadKind:
 		return executeDelegatedMarkRead(ctx, a, req)
 	case markReadThroughKind:

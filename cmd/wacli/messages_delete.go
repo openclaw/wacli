@@ -42,6 +42,38 @@ func newMessagesDeleteCmd(flags *rootFlags) *cobra.Command {
 
 			a, lk, err := newApp(ctx, flags, true, false)
 			if err != nil {
+				if forMe {
+					return err
+				}
+				// Store locked by a running `sync --follow`: reuse its connection.
+				resp, delegated, delegateErr := tryDelegateSend(ctx, flags, err, sendDelegateRequest{
+					Kind:           deleteDelegateKind,
+					To:             chat,
+					ID:             id,
+					Sender:         sender,
+					PostSendWaitMS: durationMillis(postSendWait),
+				})
+				if delegated {
+					if delegateErr != nil {
+						return delegateErr
+					}
+					warnDelegatedModeration(os.Stderr, resp)
+					if flags.asJSON {
+						body := map[string]any{
+							"revoked":   true,
+							"to":        resp.To,
+							"id":        resp.ID,
+							"target":    resp.Target,
+							"delegated": true,
+						}
+						if resp.StoreWarning != "" {
+							body["store_warning"] = resp.StoreWarning
+						}
+						return out.WriteJSON(os.Stdout, body)
+					}
+					fmt.Fprintf(os.Stdout, "Deleted message %s in %s (id %s, via running sync)\n", sanitize(resp.Target), sanitize(resp.To), sanitize(resp.ID))
+					return nil
+				}
 				return err
 			}
 			defer closeApp(a, lk)
