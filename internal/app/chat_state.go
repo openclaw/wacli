@@ -815,21 +815,9 @@ func (a *App) latestMessageRange(ctx context.Context, chatJID string) (time.Time
 	return info.Timestamp, a.chatStateMessageKey(ctx, info)
 }
 
-// chatStateMessageKey builds the key a chat-state mutation uses to name the
-// chat's latest message, the way whatsmeow's BuildMessageKey would.
-//
-// Own messages carry no participant: BuildMessageKey omits it for the own PN
-// and LID alike, and the primary device drops a markChatAsRead whose key names
-// the own phone number as participant. The store records own messages synced
-// from the phone with the own PN as sender, which is exactly that case; the
-// chat then stays read on the phone although the server accepted the patch.
-//
-// Someone else's message in a group needs the sender as the primary device
-// keys it. The store canonicalises senders to phone numbers, but a
-// LID-addressed group keys its messages by LID, so the PN is resolved back the
-// same way read receipts and poll votes already do. The lookup fails open to
-// the stored sender: a key that may not match is still better than refusing
-// to mark the chat.
+// Match the primary device: own messages omit Participant; incoming group
+// messages use the group's PN/LID addressing mode. Preserve the stored sender
+// if group information or its verified LID mapping is unavailable.
 func (a *App) chatStateMessageKey(ctx context.Context, info store.MessageInfo) *waCommon.MessageKey {
 	if strings.TrimSpace(info.ChatJID) == "" || strings.TrimSpace(info.MsgID) == "" {
 		return nil
