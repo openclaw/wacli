@@ -152,7 +152,7 @@ func (a *App) markChatRead(ctx context.Context, jid types.JID, read bool, throug
 		if err != nil {
 			return err
 		}
-		lastTS, lastKey = m.Timestamp, messageKeyFromStore(m)
+		lastTS, lastKey = m.Timestamp, a.chatStateMessageKey(ctx, m)
 	}
 	release, err := a.beginChatStateWrite(ctx, appstate.WAPatchRegularLow)
 	if err != nil {
@@ -162,7 +162,7 @@ func (a *App) markChatRead(ctx context.Context, jid types.JID, read bool, throug
 	if throughID == "" {
 		// Keep legacy resolution and latest-message capture after recovery.
 		chatJID = canonicalJIDString(a.canonicalStoreJID(ctx, jid))
-		lastTS, lastKey = a.latestMessageRange(chatJID)
+		lastTS, lastKey = a.latestMessageRange(ctx, chatJID)
 	}
 	pending, err := a.beginLocalAppStateWrite(appstate.WAPatchRegularLow)
 	if err != nil {
@@ -800,7 +800,7 @@ func (a *App) persistFetchedAppStateEvents(ctx context.Context, eventsToPersist 
 	return tracker.end()
 }
 
-func (a *App) latestMessageRange(chatJID string) (time.Time, *waCommon.MessageKey) {
+func (a *App) latestMessageRange(ctx context.Context, chatJID string) (time.Time, *waCommon.MessageKey) {
 	info, err := a.db.GetLatestMessageInfo(chatJID)
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
@@ -812,10 +812,13 @@ func (a *App) latestMessageRange(chatJID string) (time.Time, *waCommon.MessageKe
 		}
 		return time.Time{}, nil
 	}
-	return info.Timestamp, messageKeyFromStore(info)
+	return info.Timestamp, a.chatStateMessageKey(ctx, info)
 }
 
-func messageKeyFromStore(info store.MessageInfo) *waCommon.MessageKey {
+// Match the primary device: own messages omit Participant; incoming group
+// messages use the group's PN/LID addressing mode. Preserve the stored sender
+// if group information or its verified LID mapping is unavailable.
+func (a *App) chatStateMessageKey(ctx context.Context, info store.MessageInfo) *waCommon.MessageKey {
 	if strings.TrimSpace(info.ChatJID) == "" || strings.TrimSpace(info.MsgID) == "" {
 		return nil
 	}
@@ -824,9 +827,27 @@ func messageKeyFromStore(info store.MessageInfo) *waCommon.MessageKey {
 		FromMe:    proto.Bool(info.FromMe),
 		ID:        proto.String(info.MsgID),
 	}
-	if sender := strings.TrimSpace(info.SenderJID); sender != "" && sender != info.ChatJID {
-		key.Participant = proto.String(sender)
+	sender := strings.TrimSpace(info.SenderJID)
+	if info.FromMe || sender == "" || sender == info.ChatJID {
+		return key
 	}
+	chat, err := types.ParseJID(info.ChatJID)
+	if err != nil || chat.Server != types.GroupServer {
+		return key
+	}
+	senderJID, err := types.ParseJID(sender)
+	if err != nil {
+		key.Participant = proto.String(sender)
+		return key
+	}
+	if senderJID.Server == types.DefaultUserServer {
+		if group, infoErr := a.wa.GetGroupInfo(ctx, chat); infoErr == nil && group != nil && group.AddressingMode == types.AddressingModeLID {
+			if lid := a.wa.ResolvePNToLID(ctx, senderJID); !lid.IsEmpty() && lid.Server == types.HiddenUserServer {
+				senderJID = lid
+			}
+		}
+	}
+	key.Participant = proto.String(senderJID.ToNonAD().String())
 	return key
 }
 

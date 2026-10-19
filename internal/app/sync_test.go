@@ -3765,3 +3765,99 @@ func TestSyncDoesNotRetryNonTransientAuthConnectFailure(t *testing.T) {
 		t.Fatalf("connect calls = %d, want 1", f.connectCalls)
 	}
 }
+
+func lastMarkReadKey(t *testing.T, f *fakeWA) *waCommon.MessageKey {
+	t.Helper()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.markReadCalls) != 1 {
+		t.Fatalf("mark-read calls = %d, want 1", len(f.markReadCalls))
+	}
+	return f.markReadCalls[0].lastMsgKey
+}
+
+// The store records own messages synced from the primary device with the own
+// phone number as sender. whatsmeow's BuildMessageKey never puts the own PN or
+// LID in Participant, and the primary device drops a markChatAsRead whose key
+// does: the chat stayed read on the phone every time. Own message, no participant.
+func TestMarkChatReadOwnGroupMessageKeyHasNoParticipant(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+	group := types.JID{User: "120363000000000001", Server: types.GroupServer}
+	own := types.JID{User: "5511900000001", Server: types.DefaultUserServer}
+	when := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+	if err := a.db.UpsertChat(group.String(), "group", "Test", when); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	if err := a.db.UpsertMessage(store.UpsertMessageParams{
+		ChatJID: group.String(), MsgID: "own", SenderJID: own.String(), Timestamp: when, FromMe: true, Text: "hi",
+	}); err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+	if err := a.MarkChatRead(context.Background(), group, false); err != nil {
+		t.Fatalf("MarkChatRead: %v", err)
+	}
+	key := lastMarkReadKey(t, f)
+	if key.GetID() != "own" || !key.GetFromMe() || key.Participant != nil {
+		t.Fatalf("lastMsgKey = %+v, want own message with no participant", key)
+	}
+}
+
+// In a LID-addressed group the primary device keys messages by the sender's
+// LID, while the store keeps the canonical phone number. The key has to carry
+// the LID, or the phone cannot match the message and ignores the mutation.
+func TestMarkChatReadLIDGroupKeyUsesSenderLID(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+	group := types.JID{User: "120363000000000002", Server: types.GroupServer}
+	pn := types.JID{User: "5511900000002", Server: types.DefaultUserServer}
+	lid := types.JID{User: "61660000000000002", Server: types.HiddenUserServer}
+	f.groups[group] = &types.GroupInfo{JID: group, AddressingMode: types.AddressingModeLID}
+	f.lids[lid] = pn
+	when := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+	if err := a.db.UpsertChat(group.String(), "group", "Test", when); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	if err := a.db.UpsertMessage(store.UpsertMessageParams{
+		ChatJID: group.String(), MsgID: "theirs", SenderJID: pn.String(), Timestamp: when, FromMe: false, Text: "hi",
+	}); err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+	if err := a.MarkChatRead(context.Background(), group, false); err != nil {
+		t.Fatalf("MarkChatRead: %v", err)
+	}
+	key := lastMarkReadKey(t, f)
+	if key.GetID() != "theirs" || key.GetFromMe() || key.GetParticipant() != lid.String() {
+		t.Fatalf("lastMsgKey = %+v, want participant %s", key, lid)
+	}
+}
+
+// A phone-number-addressed group keeps the sender as stored.
+func TestMarkChatReadPNGroupKeyKeepsSenderPN(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+	group := types.JID{User: "120363000000000003", Server: types.GroupServer}
+	pn := types.JID{User: "5511900000003", Server: types.DefaultUserServer}
+	lid := types.JID{User: "61660000000000003", Server: types.HiddenUserServer}
+	f.groups[group] = &types.GroupInfo{JID: group, AddressingMode: types.AddressingModePN}
+	f.lids[lid] = pn
+	when := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+	if err := a.db.UpsertChat(group.String(), "group", "Test", when); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	if err := a.db.UpsertMessage(store.UpsertMessageParams{
+		ChatJID: group.String(), MsgID: "theirs", SenderJID: pn.String(), Timestamp: when, FromMe: false, Text: "hi",
+	}); err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+	if err := a.MarkChatRead(context.Background(), group, false); err != nil {
+		t.Fatalf("MarkChatRead: %v", err)
+	}
+	key := lastMarkReadKey(t, f)
+	if key.GetParticipant() != pn.String() {
+		t.Fatalf("lastMsgKey = %+v, want participant %s", key, pn)
+	}
+}

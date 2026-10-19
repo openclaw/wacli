@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Chats: use primary-device message keys for read/unread updates, omitting own-message participants and resolving incoming LID-group senders. Thanks @PedroPCardoso (#504).
+
 - Dependencies: update x/exp after the 48-hour cooldown while retaining the Go 1.27.0 source minimum and Go 1.27.2 build toolchain.
 - Sync: unarchive chats on eligible incoming messages when Keep chats archived is off, recover missing preferences on upgrade, and preserve newer unarchives across stale archive replays. Thanks @Luizssauro (#466).
 
