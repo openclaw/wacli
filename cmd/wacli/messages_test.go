@@ -764,3 +764,47 @@ func messageIDs(msgs []store.Message) string {
 	}
 	return strings.Join(ids, ",")
 }
+
+func TestResolveRevokeSender(t *testing.T) {
+	group := types.JID{User: "123", Server: types.GroupServer}
+	dm := types.JID{User: "4915", Server: types.DefaultUserServer}
+
+	own := store.Message{MsgID: "mid", FromMe: true}
+	if s, err := resolveRevokeSender(own, true, group, ""); err != nil || !s.IsEmpty() {
+		t.Fatalf("own group message = %v, %v", s, err)
+	}
+	other := store.Message{MsgID: "mid", SenderJID: "4917@s.whatsapp.net"}
+	if _, err := resolveRevokeSender(other, true, dm, ""); err == nil || !strings.Contains(err.Error(), "not sent by me") {
+		t.Fatalf("dm from-them error = %v", err)
+	}
+	if s, err := resolveRevokeSender(other, true, group, ""); err != nil || s.String() != "4917@s.whatsapp.net" {
+		t.Fatalf("group stored sender = %v, %v", s, err)
+	}
+	if s, err := resolveRevokeSender(other, true, group, "999@lid"); err != nil || s.String() != "999@lid" {
+		t.Fatalf("group override sender = %v, %v", s, err)
+	}
+	if _, err := resolveRevokeSender(store.Message{MsgID: "mid"}, true, group, ""); err == nil || !strings.Contains(err.Error(), "--sender") {
+		t.Fatalf("missing sender error = %v", err)
+	}
+	if s, err := resolveRevokeSender(store.Message{}, false, group, "+49 170 1234567"); err != nil || s.String() != "491701234567@s.whatsapp.net" {
+		t.Fatalf("not-found override = %v, %v", s, err)
+	}
+	if s, err := resolveRevokeSender(store.Message{}, false, group, ""); err != nil || !s.IsEmpty() {
+		t.Fatalf("not-found own = %v, %v", s, err)
+	}
+	if _, err := resolveRevokeSender(store.Message{}, false, dm, "491701234567"); err == nil {
+		t.Fatal("expected --sender to be rejected for non-group chat")
+	}
+	for _, bad := range []string{"123-456@g.us", "status@broadcast", "@s.whatsapp.net", "abc"} {
+		if _, err := resolveRevokeSender(other, true, group, bad); err == nil {
+			t.Fatalf("expected invalid sender %q to be rejected", bad)
+		}
+	}
+	if s, err := resolveRevokeSender(other, true, group, "4917:3@s.whatsapp.net"); err != nil || s.String() != "4917@s.whatsapp.net" {
+		t.Fatalf("device sender = %v, %v", s, err)
+	}
+	other.Revoked = true
+	if _, err := resolveRevokeSender(other, true, group, ""); err == nil || !strings.Contains(err.Error(), "already deleted") {
+		t.Fatalf("revoked error = %v", err)
+	}
+}

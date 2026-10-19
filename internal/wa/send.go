@@ -68,14 +68,17 @@ func (c *Client) SendReaction(ctx context.Context, chat, sender types.JID, targe
 	return resp.ID, nil
 }
 
-func (c *Client) RevokeMessage(ctx context.Context, chat types.JID, targetID types.MessageID) (types.MessageID, error) {
+// RevokeMessage deletes a message for everyone. Pass types.EmptyJID as sender
+// for own messages; pass the original sender's JID to perform a group admin
+// revoke of another member's message.
+func (c *Client) RevokeMessage(ctx context.Context, chat, sender types.JID, targetID types.MessageID) (types.MessageID, error) {
 	c.mu.Lock()
 	cli := c.client
 	c.mu.Unlock()
 	if cli == nil || !cli.IsConnected() {
 		return "", fmt.Errorf("not connected")
 	}
-	resp, err := cli.SendMessage(ctx, chat, cli.BuildRevoke(chat, types.EmptyJID, targetID))
+	resp, err := cli.SendMessage(ctx, chat, cli.BuildRevoke(chat, sender, targetID))
 	if err != nil {
 		return "", err
 	}

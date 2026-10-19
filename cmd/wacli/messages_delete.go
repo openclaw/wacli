@@ -20,6 +20,7 @@ func newMessagesDeleteCmd(flags *rootFlags) *cobra.Command {
 	var id string
 	var forMe bool
 	var deleteMedia bool
+	var sender string
 	postSendWait := postSendRetryReceiptWait
 
 	cmd := &cobra.Command{
@@ -52,8 +53,9 @@ func newMessagesDeleteCmd(flags *rootFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			revokeSender := types.EmptyJID
 			if !forMe {
-				if err := validateMessageCanRevoke(msg); err != nil {
+				if revokeSender, err = resolveRevokeSender(msg, true, chatJID, sender); err != nil {
 					return err
 				}
 			} else if err := validateMessageCanDeleteForMe(msg); err != nil {
@@ -110,7 +112,7 @@ func newMessagesDeleteCmd(flags *rootFlags) *cobra.Command {
 				return nil
 			}
 			sentID, err := runSendOperation(ctx, reconnectForSend(a), func(ctx context.Context) (types.MessageID, error) {
-				return a.WA().RevokeMessage(ctx, chatJID, types.MessageID(msg.MsgID))
+				return a.WA().RevokeMessage(ctx, chatJID, revokeSender, types.MessageID(msg.MsgID))
 			})
 			if err != nil {
 				return err
@@ -137,6 +139,7 @@ func newMessagesDeleteCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().StringVar(&id, "id", "", "message ID to delete")
 	cmd.Flags().BoolVar(&forMe, "for-me", false, "delete the message only for this WhatsApp account")
 	cmd.Flags().BoolVar(&deleteMedia, "delete-media", false, "also remove local media when used with --for-me")
+	cmd.Flags().StringVar(&sender, "sender", "", "original sender JID for a group admin delete (overrides the stored sender)")
 	cmd.Flags().DurationVar(&postSendWait, "post-send-wait", postSendRetryReceiptWait, "keep the connection alive after delete so retry receipts can be handled (0 disables)")
 	return cmd
 }
@@ -144,6 +147,7 @@ func newMessagesDeleteCmd(flags *rootFlags) *cobra.Command {
 func newMessagesRevokeCmd(flags *rootFlags) *cobra.Command {
 	var chat string
 	var id string
+	var sender string
 	postSendWait := postSendRetryReceiptWait
 
 	cmd := &cobra.Command{
@@ -173,10 +177,9 @@ func newMessagesRevokeCmd(flags *rootFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if found {
-				if err := validateMessageCanRevoke(msg); err != nil {
-					return err
-				}
+			revokeSender, err := resolveRevokeSender(msg, found, chatJID, sender)
+			if err != nil {
+				return err
 			}
 			if err := a.Connect(ctx, false, nil); err != nil {
 				return err
@@ -189,7 +192,7 @@ func newMessagesRevokeCmd(flags *rootFlags) *cobra.Command {
 				targetID = msg.MsgID
 			}
 			sentID, err := runSendOperation(ctx, reconnectForSend(a), func(ctx context.Context) (types.MessageID, error) {
-				return a.WA().RevokeMessage(ctx, chatJID, types.MessageID(targetID))
+				return a.WA().RevokeMessage(ctx, chatJID, revokeSender, types.MessageID(targetID))
 			})
 			if err != nil {
 				return err
@@ -216,6 +219,7 @@ func newMessagesRevokeCmd(flags *rootFlags) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&chat, "chat", "", "chat JID or phone number")
 	cmd.Flags().StringVar(&id, "id", "", "message ID to revoke")
+	cmd.Flags().StringVar(&sender, "sender", "", "original sender JID for a group admin revoke (needed when the message is not in the local DB)")
 	cmd.Flags().DurationVar(&postSendWait, "post-send-wait", postSendRetryReceiptWait, "keep the connection alive after revoke so retry receipts can be handled (0 disables)")
 	return cmd
 }
@@ -266,6 +270,44 @@ func validateMessageCanRevoke(msg store.Message) error {
 		return fmt.Errorf("message %s was not sent by me", msg.MsgID)
 	}
 	return nil
+}
+
+// resolveRevokeSender returns the sender JID to put in the revoke key. Own
+// messages (and non-group chats) use an empty JID and keep the own-message
+// check. For another member's message in a group, the override or the stored
+// sender is used so whatsmeow sends an admin revoke.
+func resolveRevokeSender(msg store.Message, found bool, chat types.JID, override string) (types.JID, error) {
+	override = strings.TrimSpace(override)
+	isGroup := chat.Server == types.GroupServer
+	if override != "" && !isGroup {
+		return types.EmptyJID, fmt.Errorf("--sender is only valid for group chats (%s is not a group); omit --sender to delete your own message", sanitize(chat.String()))
+	}
+	if found && (msg.FromMe || !isGroup) {
+		return types.EmptyJID, validateMessageCanRevoke(msg)
+	}
+	if found {
+		if err := validateMessageCanDeleteForMe(msg); err != nil {
+			return types.EmptyJID, err
+		}
+	}
+	senderStr := override
+	if senderStr == "" && found {
+		senderStr = strings.TrimSpace(msg.SenderJID)
+	}
+	if senderStr == "" {
+		if !found {
+			return types.EmptyJID, nil
+		}
+		return types.EmptyJID, fmt.Errorf("message %s has no stored sender; pass --sender with the original sender's phone number or JID", sanitize(msg.MsgID))
+	}
+	sender, err := wa.ParseUserOrJID(senderStr)
+	if err != nil {
+		return types.EmptyJID, fmt.Errorf("invalid sender %q: %v; pass a phone number, @s.whatsapp.net or @lid JID", sanitize(senderStr), err)
+	}
+	if sender.User == "" || (sender.Server != types.DefaultUserServer && sender.Server != types.HiddenUserServer) {
+		return types.EmptyJID, fmt.Errorf("invalid sender %q: must be a user (@s.whatsapp.net or @lid), not a group or broadcast JID", sanitize(senderStr))
+	}
+	return sender.ToNonAD(), nil
 }
 
 func validateMessageCanDeleteForMe(msg store.Message) error {

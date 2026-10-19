@@ -675,7 +675,7 @@ func (f *fakeWA) DecryptSecretEncryptedMessage(ctx context.Context, evt *events.
 	return nil, fmt.Errorf("not supported")
 }
 
-func (f *fakeWA) RevokeMessage(ctx context.Context, chat types.JID, targetID types.MessageID) (types.MessageID, error) {
+func (f *fakeWA) RevokeMessage(ctx context.Context, chat, sender types.JID, targetID types.MessageID) (types.MessageID, error) {
 	return types.MessageID("revokeid"), nil
 }
 
