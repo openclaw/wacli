@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Dependencies: refresh WhatsApp protocol handling, utility and parser modules, SQLite WASM tooling, and pnpm 12.14.0 after the 48-hour cooldown, retaining Go 1.27.0 and Node 24 minimums.
+
 - Dependencies: update x/exp after the 48-hour cooldown while retaining the Go 1.27.0 source minimum and Go 1.27.2 build toolchain.
 - Sync: unarchive chats on eligible incoming messages when Keep chats archived is off, recover missing preferences on upgrade, and preserve newer unarchives across stale archive replays. Thanks @Luizssauro (#466).
 

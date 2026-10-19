@@ -9,7 +9,7 @@ require (
 	github.com/mdp/qrterminal/v3 v3.2.1
 	github.com/spf13/cobra v1.10.2
 	go.mau.fi/libsignal v0.2.2
-	go.mau.fi/whatsmeow v0.0.0-20261007111105-c386243a72ba
+	go.mau.fi/whatsmeow v0.0.0-20261017175727-b2b1e71d45e2
 	golang.org/x/net v0.61.0
 	golang.org/x/sys v0.49.0
 	golang.org/x/term v0.47.0
@@ -41,7 +41,7 @@ require (
 	github.com/mattn/go-colorable v0.1.16 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/ncruces/go-sqlite3 v0.35.6 // indirect
-	github.com/ncruces/go-sqlite3-wasm/v6 v6.3.35304 // indirect
+	github.com/ncruces/go-sqlite3-wasm/v6 v6.3.35401 // indirect
 	github.com/ncruces/julianday v1.0.0 // indirect
 	github.com/petermattis/goid v0.0.0-20260918085751-abfca077860b // indirect
 	github.com/pganalyze/pg_query_go/v6 v6.2.5 // indirect
@@ -56,10 +56,10 @@ require (
 	github.com/sqlc-dev/doubleclick v1.0.0 // indirect
 	github.com/sqlc-dev/sqlc v1.31.1 // indirect
 	github.com/tetratelabs/wazero v1.12.0 // indirect
-	github.com/vektah/gqlparser/v2 v2.5.61 // indirect
+	github.com/vektah/gqlparser/v2 v2.5.63 // indirect
 	github.com/wasilibs/go-pgquery v0.0.0-20261013080023-1d929f320679 // indirect
 	github.com/wasilibs/wazero-helpers v0.0.0-20250123031827-cd30c44769bb // indirect
-	go.mau.fi/util v0.10.1 // indirect
+	go.mau.fi/util v0.11.0 // indirect
 	go.uber.org/atomic v1.12.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.28.0 // indirect
