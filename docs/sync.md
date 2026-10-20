@@ -34,7 +34,7 @@ wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--stale-t
 - Webhook delivery is best-effort: failures, request timeouts, and full-queue drops are logged as warnings and do not stop sync. Retries/backoff are intentionally out of scope for this flag.
 - If neither storage cap is configured, sync prints one warning because WhatsApp history can grow the local database substantially.
 - `WACLI_SYNC_MAX_MESSAGES` and `WACLI_SYNC_MAX_DB_SIZE` apply the same caps to `auth` bootstrap sync and `sync`.
-- After `sync --follow` finishes startup and opens its local delegate socket, these commands for the same store are delegated to it so they do not fail on the store lock:
+- After `sync --follow` finishes startup and opens its local delegate transport, these commands for the same store are delegated to it so they do not fail on the store lock:
   - `send text`, `send file`, `send sticker`, `send voice`, `send react`, `send location`, `send poll`, and `send select`.
   - `poll vote`, `presence typing`, `presence paused`, and `messages edit`.
   - `chats mark-read`, `chats mark-unread`, `chats archive`, `chats unarchive`, `chats pin`, `chats unpin`, `chats mute`, and `chats unmute`.
@@ -61,6 +61,8 @@ wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--stale-t
 - With `--events`, typing and presence are reported too, under the JIDs the store uses for chats (a LID is mapped to the phone number when the mapping is known). Neither keeps an idle `--once` sync alive, and neither is printed without `--events`.
   - `chat_presence` has `chat_jid`, `sender_jid`, `state` (`composing` or `paused`) and `media` (`audio` while a voice note is being recorded, otherwise empty). WhatsApp sends these only while sync shows as available (`--presence-mode normal`).
   - `presence` has `jid`, `online` and, when WhatsApp shares it, `last_seen` (RFC 3339, UTC). It arrives only for contacts watched with [`presence subscribe`](presence.md), which the running sync keeps watching across reconnects (it asks again after each one); a `--presence-mode quiet` sync refuses the subscription.
+
+On Windows, delegation uses a named pipe restricted to the current Windows user. It does not read, change, or remove legacy `.send.sock` files, including ones left inaccessible by older versions. Upgrade and restart the sync process and CLI together; both must use the new transport. On macOS and Linux the existing private Unix socket is unchanged.
 
 ## Webhook payloads
 

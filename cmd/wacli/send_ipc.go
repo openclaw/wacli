@@ -8,11 +8,11 @@ import (
 	"io"
 	"net"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/openclaw/wacli/internal/app"
+	"github.com/openclaw/wacli/internal/delegate"
 	"github.com/openclaw/wacli/internal/lock"
 	"github.com/openclaw/wacli/internal/out"
 	"github.com/openclaw/wacli/internal/wa"
@@ -21,7 +21,6 @@ import (
 
 const (
 	sendDelegateVersion       = 1
-	sendDelegateSocketName    = ".send.sock"
 	sendDelegateResponseGrace = 5 * time.Second
 	// sendDelegateReplyMargin is reserved before the caller's deadline so a
 	// refusal can reach the caller before it gives up on the connection. An
@@ -104,10 +103,6 @@ type sendDelegateResponse struct {
 
 type sendDelegateExecutor func(context.Context, sendDelegateRequest) (sendDelegateResponse, error)
 
-func sendDelegateSocketPath(storeDir string) string {
-	return filepath.Join(storeDir, sendDelegateSocketName)
-}
-
 func delegateSend(ctx context.Context, flags *rootFlags, req sendDelegateRequest) (sendDelegateResponse, error) {
 	req.Version = sendDelegateVersion
 	req.TimeoutMS = durationMillis(flags.timeout)
@@ -115,10 +110,7 @@ func delegateSend(ctx context.Context, flags *rootFlags, req sendDelegateRequest
 	if err != nil {
 		return sendDelegateResponse{}, err
 	}
-	path := sendDelegateSocketPath(storeDir)
-
-	var d net.Dialer
-	conn, err := d.DialContext(ctx, "unix", path)
+	conn, err := delegate.Dial(ctx, storeDir)
 	if err != nil {
 		return sendDelegateResponse{}, fmt.Errorf("%w: %v", errSendDelegateUnavailable, err)
 	}
@@ -184,17 +176,8 @@ func startSendDelegateServer(ctx context.Context, a *app.App, spacing sendSpacin
 }
 
 func startSendDelegateServerForStore(ctx context.Context, storeDir string, spacing sendSpacing, execute sendDelegateExecutor) (func(), error) {
-	path := sendDelegateSocketPath(storeDir)
-	if err := removeStaleSendDelegateSocket(path); err != nil {
-		return nil, err
-	}
-	ln, err := net.Listen("unix", path)
+	ln, err := delegate.Listen(storeDir)
 	if err != nil {
-		return nil, err
-	}
-	if err := os.Chmod(path, 0o600); err != nil {
-		_ = ln.Close()
-		_ = os.Remove(path)
 		return nil, err
 	}
 
@@ -226,23 +209,8 @@ func startSendDelegateServerForStore(ctx context.Context, storeDir string, spaci
 	stop := func() {
 		_ = ln.Close()
 		<-done
-		_ = os.Remove(path)
 	}
 	return stop, nil
-}
-
-func removeStaleSendDelegateSocket(path string) error {
-	info, err := os.Lstat(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if info.Mode()&os.ModeSocket == 0 {
-		return fmt.Errorf("%s exists and is not a socket", path)
-	}
-	return os.Remove(path)
 }
 
 func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDelegateExecutor, sendSlot chan struct{}, pacer *sendPacer, mediaSlots ...chan struct{}) {

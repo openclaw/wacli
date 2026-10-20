@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/openclaw/wacli/internal/app"
+	"github.com/openclaw/wacli/internal/delegate"
 	"github.com/openclaw/wacli/internal/lock"
 	"go.mau.fi/whatsmeow/types"
 )
@@ -431,13 +432,9 @@ type presenceDelegateTestRequest struct {
 
 func startPresenceDelegateTestSocket(t *testing.T, storeDir string, respond func(sendDelegateRequest) sendDelegateResponse) *presenceDelegateTestServer {
 	t.Helper()
-	ln, err := net.Listen("unix", sendDelegateSocketPath(storeDir))
+	ln, err := delegate.Listen(storeDir)
 	if err != nil {
 		t.Fatalf("listen delegate socket: %v", err)
-	}
-	if err := os.Chmod(sendDelegateSocketPath(storeDir), 0o600); err != nil {
-		_ = ln.Close()
-		t.Fatalf("chmod delegate socket: %v", err)
 	}
 	requests := make(chan presenceDelegateTestRequest, 1)
 	done := make(chan struct{})
@@ -464,7 +461,6 @@ func startPresenceDelegateTestSocket(t *testing.T, storeDir string, respond func
 		stop: func() {
 			_ = ln.Close()
 			<-done
-			_ = os.Remove(sendDelegateSocketPath(storeDir))
 		},
 	}
 }
