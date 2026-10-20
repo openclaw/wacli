@@ -5,9 +5,9 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -74,7 +74,12 @@ func TestPipeSecurityAndDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(sd.String(), ";;;"+user.User.Sid.String()+")") {
+	var ace *windows.ACCESS_ALLOWED_ACE
+	if err := windows.GetAce(dacl, 0, &ace); err != nil {
+		t.Fatal(err)
+	}
+	// SDDL renders well-known users as aliases (for example Administrator as LA).
+	if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE || !(*windows.SID)(unsafe.Pointer(&ace.SidStart)).Equals(user.User.Sid) {
 		t.Fatalf("pipe DACL is not for the current user: %s", sd.String())
 	}
 	if err := client.SetReadDeadline(time.Now().Add(30 * time.Millisecond)); err != nil {
