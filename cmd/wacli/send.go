@@ -277,18 +277,11 @@ func sendTextMessageWithSender(ctx context.Context, sender textMessageSender, db
 			return "", err
 		}
 	}
-	var aliasTo types.JID
-	if strings.TrimSpace(replyTo) != "" {
-		aliasTo = replyLookupAlias(ctx, sender, to)
-	}
-	selfJID, err := textReplySelfJID(ctx, sender, db, to, aliasTo, replyTo, replyToSender)
+	reply, err := buildReplyContextInfo(ctx, sender, db, to, replyTo, replyToSender)
 	if err != nil {
 		return "", err
 	}
-	msg, plainText, err := buildTextMessageWithSelf(db, to, aliasTo, text, replyTo, replyToSender, selfJID, preview, mentionedJIDs)
-	if err != nil {
-		return "", err
-	}
+	msg, plainText := buildTextMessage(text, reply, preview, mentionedJIDs)
 	resolved, err := resolveTextEphemeral(ctx, sender, to, ephemeral)
 	if err != nil {
 		return "", err
@@ -503,13 +496,16 @@ func decodeMessageEscapes(s string) (string, error) {
 	return b.String(), nil
 }
 
-func buildTextMessageWithSelf(db *store.DB, to, aliasTo types.JID, text, replyTo, replyToSender, selfJID string, preview *linkpreview.Preview, mentionedJIDs []string) (*waProto.Message, bool, error) {
-	info, err := buildTextContextInfo(db, to, aliasTo, replyTo, replyToSender, selfJID, mentionedJIDs)
-	if err != nil {
-		return nil, false, err
+func buildTextMessage(text string, reply *waProto.ContextInfo, preview *linkpreview.Preview, mentionedJIDs []string) (*waProto.Message, bool) {
+	info := reply
+	if len(mentionedJIDs) > 0 {
+		if info == nil {
+			info = &waProto.ContextInfo{}
+		}
+		info.MentionedJID = append([]string(nil), mentionedJIDs...)
 	}
 	if info == nil && preview == nil {
-		return nil, true, nil
+		return nil, true
 	}
 
 	ext := &waProto.ExtendedTextMessage{
@@ -517,7 +513,7 @@ func buildTextMessageWithSelf(db *store.DB, to, aliasTo types.JID, text, replyTo
 		ContextInfo: info,
 	}
 	attachLinkPreview(ext, preview)
-	return &waProto.Message{ExtendedTextMessage: ext}, false, nil
+	return &waProto.Message{ExtendedTextMessage: ext}, false
 }
 
 func attachLinkPreview(msg *waProto.ExtendedTextMessage, preview *linkpreview.Preview) {
@@ -560,19 +556,20 @@ func replyLookupAlias(ctx context.Context, sender textMessageSender, to types.JI
 	}
 }
 
-func buildTextContextInfo(db *store.DB, chat, aliasChat types.JID, replyTo, replyToSender, selfJID string, mentionedJIDs []string) (*waProto.ContextInfo, error) {
-	info, err := buildTextReplyContextInfo(db, chat, aliasChat, replyTo, replyToSender, selfJID)
+// buildReplyContextInfo builds the native quote for every send that takes
+// --reply-to (text, file, voice, sticker). The stored message is looked up under
+// the chat or its phone/LID alias and its content is quoted; an unknown message
+// is refused unless --reply-to-sender names its author in a group.
+func buildReplyContextInfo(ctx context.Context, sender textMessageSender, db *store.DB, chat types.JID, replyTo, replyToSender string) (*waProto.ContextInfo, error) {
+	if strings.TrimSpace(replyTo) == "" {
+		return nil, nil
+	}
+	aliasChat := replyLookupAlias(ctx, sender, chat)
+	selfJID, err := textReplySelfJID(ctx, sender, db, chat, aliasChat, replyTo, replyToSender)
 	if err != nil {
 		return nil, err
 	}
-	if len(mentionedJIDs) == 0 {
-		return info, nil
-	}
-	if info == nil {
-		info = &waProto.ContextInfo{}
-	}
-	info.MentionedJID = append([]string(nil), mentionedJIDs...)
-	return info, nil
+	return buildTextReplyContextInfo(db, chat, aliasChat, replyTo, replyToSender, selfJID)
 }
 
 func buildTextReplyContextInfo(db *store.DB, chat, aliasChat types.JID, replyTo, replyToSender, selfJID string) (*waProto.ContextInfo, error) {
@@ -619,7 +616,7 @@ func storedQuotedMessage(db *store.DB, msg store.Message) (*waProto.Message, err
 		return nil, fmt.Errorf("stored message was deleted")
 	}
 	if msg.ReactionToID != "" || len(msg.Buttons) > 0 {
-		return nil, fmt.Errorf("stored message content is not supported for quoted text replies")
+		return nil, fmt.Errorf("stored message content is not supported for quoted replies")
 	}
 	if mediaType := strings.ToLower(strings.TrimSpace(msg.MediaType)); mediaType != "" {
 		if !isStoredMediaType(mediaType) {
@@ -666,53 +663,6 @@ func resolveTextReplyParticipant(chat types.JID, msg store.Message, override, se
 		return chat, nil
 	}
 	return types.JID{}, fmt.Errorf("--reply-to-sender is required because the stored group message has no sender")
-}
-
-func buildReplyContextInfo(db *store.DB, chat types.JID, replyTo, replyToSender string) (*waProto.ContextInfo, error) {
-	replyTo = strings.TrimSpace(replyTo)
-	if replyTo == "" {
-		return nil, nil
-	}
-
-	sender, err := resolveReplySender(db, chat, replyTo, replyToSender)
-	if err != nil {
-		return nil, err
-	}
-
-	stanzaID := replyTo
-	info := &waProto.ContextInfo{StanzaID: proto.String(stanzaID)}
-	if !sender.IsEmpty() {
-		participant := sender.String()
-		info.Participant = proto.String(participant)
-	}
-	return info, nil
-}
-
-func resolveReplySender(db *store.DB, chat types.JID, replyTo, override string) (types.JID, error) {
-	if strings.TrimSpace(override) != "" {
-		jid, err := wa.ParseUserOrJID(override)
-		if err != nil {
-			return types.JID{}, fmt.Errorf("invalid --reply-to-sender: %w", err)
-		}
-		return jid, nil
-	}
-
-	msg, err := db.GetMessage(chat.String(), replyTo)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return types.JID{}, fmt.Errorf("lookup quoted message: %w", err)
-	}
-	if err == nil && strings.TrimSpace(msg.SenderJID) != "" {
-		jid, err := types.ParseJID(msg.SenderJID)
-		if err != nil {
-			return types.JID{}, fmt.Errorf("stored quoted sender is invalid: %w", err)
-		}
-		return jid, nil
-	}
-
-	if chat.Server == types.GroupServer {
-		return types.JID{}, fmt.Errorf("--reply-to-sender is required for unsynced group replies")
-	}
-	return types.JID{}, nil
 }
 
 func parseMentionedJIDs(values []string) ([]string, error) {

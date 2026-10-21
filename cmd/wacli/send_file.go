@@ -103,6 +103,15 @@ func sendFile(ctx context.Context, a interface {
 	if isNewsletter && (strings.TrimSpace(opts.replyTo) != "" || strings.TrimSpace(opts.replyToSender) != "") {
 		return sendFileOutcome{}, fmt.Errorf("quoted file replies are not supported for channels")
 	}
+	// Quote before uploading, so a message that cannot be quoted is refused
+	// without spending an upload.
+	var replyContext *waProto.ContextInfo
+	if !isNewsletter {
+		replyContext, err = buildReplyContextInfo(ctx, a.WA(), a.DB(), to, opts.replyTo, opts.replyToSender)
+		if err != nil {
+			return sendFileOutcome{}, err
+		}
+	}
 
 	var up whatsmeow.UploadResponse
 	if isNewsletter {
@@ -116,13 +125,6 @@ func sendFile(ctx context.Context, a interface {
 
 	now := time.Now().UTC()
 	msg := &waProto.Message{}
-	var replyContext *waProto.ContextInfo
-	if !isNewsletter {
-		replyContext, err = buildReplyContextInfo(a.DB(), to, opts.replyTo, opts.replyToSender)
-		if err != nil {
-			return sendFileOutcome{}, err
-		}
-	}
 	voiceMeta := voiceNoteMetadata{}
 	if opts.ptt {
 		voiceMeta = loadVoiceNoteMetadata(ctx, filePath)
