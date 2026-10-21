@@ -1,6 +1,7 @@
 package linkpreview
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net"
@@ -270,5 +271,22 @@ func TestPreviewAllowCIDRsRejectsEntireInvalidConfiguration(t *testing.T) {
 				t.Fatal("strict client unavailable")
 			}
 		})
+	}
+}
+
+func TestThumbnailFetchRestoresSmallCap(t *testing.T) {
+	payload := bytes.Repeat([]byte("x"), 301<<10)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write(payload)
+	}))
+	defer srv.Close()
+	t.Setenv("WACLI_LINKPREVIEW_SMALL", "")
+	if got := fetchThumbnail(context.Background(), srv.Client(), srv.URL); !bytes.Equal(got, payload) {
+		t.Fatal("default did not accept image above legacy cap")
+	}
+	t.Setenv("WACLI_LINKPREVIEW_SMALL", "true")
+	if got := fetchThumbnail(context.Background(), srv.Client(), srv.URL); len(got) != 0 {
+		t.Fatal("small mode accepted image above legacy cap")
 	}
 }

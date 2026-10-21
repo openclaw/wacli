@@ -17,8 +17,9 @@ import (
 )
 
 const (
-	maxHTMLBytes      = 1 << 20
-	maxThumbnailBytes = 300 << 10
+	maxHTMLBytes        = 1 << 20
+	maxThumbnailBytes   = 5 << 20
+	smallThumbnailBytes = 300 << 10
 )
 
 var httpURLPattern = regexp.MustCompile(`https?://[^\s<>"']+`)
@@ -328,8 +329,8 @@ func fetchThumbnail(ctx context.Context, client *http.Client, rawURL string) []b
 		return nil
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxThumbnailBytes+1))
-	if err != nil || len(body) > maxThumbnailBytes {
+	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(thumbnailByteLimit())+1))
+	if err != nil || len(body) > thumbnailByteLimit() {
 		return nil
 	}
 	return body
@@ -419,4 +420,22 @@ func pick(current, next string) string {
 		return current
 	}
 	return next
+}
+
+// SmallThumbnails restores inline-only previews and the legacy download cap.
+// The sync owner's environment controls delegated sends.
+func SmallThumbnails() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("WACLI_LINKPREVIEW_SMALL"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func thumbnailByteLimit() int {
+	if SmallThumbnails() {
+		return smallThumbnailBytes
+	}
+	return maxThumbnailBytes
 }

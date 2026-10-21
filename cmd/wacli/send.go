@@ -135,7 +135,7 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 			}
 
 			preview, previewWarning := fetchLinkPreview(ctx, message, noPreview)
-			msgID, storeErr, err := sendTextWithHistory(ctx, a, reconnectForSend(a), toJID, message, replyTo, replyToSender, preview, mentionedJIDs, ephemeralOpts, textSendOptions{allowSelf: allowSelf})
+			msgID, storeErr, err := sendTextWithHistory(ctx, a, reconnectForSend(a), toJID, message, replyTo, replyToSender, preview, mentionedJIDs, ephemeralOpts, textSendOptions{allowSelf: allowSelf, warn: func(msg string) { warnLinkPreviewThumbnail(os.Stderr, msg) }})
 			if err != nil {
 				return err
 			}
@@ -273,6 +273,10 @@ type textSendOptions struct {
 	// Capture the context constructed for the accepted native message. History
 	// must not reconstruct its participant from flags or a second store lookup.
 	replyContext **waProto.ContextInfo
+	// warn receives non-fatal send warnings (such as a failed HQ link preview
+	// thumbnail upload) so the output-owning caller can render them. Nil drops
+	// them.
+	warn func(string)
 }
 
 type resolvedTextEphemeral struct {
@@ -300,6 +304,12 @@ func sendTextMessageWithSender(ctx context.Context, sender textMessageSender, db
 		return "", err
 	}
 	msg, plainText := buildTextMessage(text, reply, preview, mentionedJIDs)
+	if preview != nil && len(preview.Thumbnail) > 0 && !plainText {
+		up, _ := sender.(linkPreviewUploader)
+		if warning := applyLinkPreviewImage(ctx, up, msg.GetExtendedTextMessage(), preview.Thumbnail); warning != "" && options.warn != nil {
+			options.warn(warning)
+		}
+	}
 	resolved, err := resolveTextEphemeral(ctx, sender, to, ephemeral)
 	if err != nil {
 		return "", err

@@ -38,6 +38,8 @@ wacli polls list [--chat RECIPIENT] [--limit N] [--json]
 ## Replies and reactions
 
 - `send text` fetches Open Graph metadata for the first `http://` or `https://` URL and sends it as a WhatsApp link preview.
+- Preview images (`og:image`, up to 5 MB and 16 megapixels; JPEG, PNG, or GIF) are re-encoded as JPEG: a small inline thumbnail is always embedded, and an image at least 300 px wide is also uploaded as a high-resolution link thumbnail (up to 1200 px) so WhatsApp shows the wide banner preview instead of the small square. If the upload fails, the small preview is sent and a warning is printed to stderr by the sending command; for sends delegated to a running `sync --follow`, the warning is returned to the sender, so it never enters the sync process's `--events` stream.
+- Set `WACLI_LINKPREVIEW_SMALL=1` to restore inline-only thumbnails and the 300 KiB image download cap. For delegated sends set it in the `sync --follow` environment and restart the daemon.
 - Preview metadata fetches time out after 10 seconds and fall back to plain text.
 - Pass `--no-preview` to disable link-preview fetching.
 - When a preview cannot be fetched, the message is still sent as plain text and a `warning: link preview skipped for URL: reason (message text was still sent without a preview; pass --no-preview to send without fetching one)` line is printed to stderr after the send succeeds. Pass `--no-preview` when a skipped preview is expected. For sends delegated to a running `sync --follow`, the warning is returned to the sending command and printed there, so it never enters the sync process's `--events` stream.
