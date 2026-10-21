@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Security: build source, CI, Docker, and release artifacts with Go 1.27.3 to fix GO-2026-6809 while retaining the Go 1.27.0 source minimum.
+
 - Windows: use a current-user-only named pipe for sync delegation, avoiding crashes and restart loops caused by inaccessible AF_UNIX socket files (#511).
 
 - Dependencies: refresh WhatsApp protocol handling, utility and parser modules, SQLite WASM tooling, and pnpm 12.14.0 after the 48-hour cooldown, retaining Go 1.27.0 and Node 24 minimums.

@@ -49,7 +49,7 @@ jobs:
         run: pnpm lint
 
       - name: Verify exact Go build toolchain
-        run: test "$(go env GOVERSION)" = "go1.27.2"
+        run: test "$(go env GOVERSION)" = "go1.27.3"
 
       - name: govulncheck source
         run: pnpm govulncheck:source
