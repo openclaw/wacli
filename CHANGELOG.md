@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Messages: let group admins delete other members' messages for everyone with `messages delete`/`revoke`, using the stored sender or a strictly validated group-only `--sender`. Thanks @samuba.
+- Sync: delegate `messages delete` (including group admin deletes with `--sender`) and `groups participants add|remove|promote|demote` to a running `sync --follow` process instead of failing on the store lock. Thanks @samuba.
+
 ## 0.24.0 - 2026-10-21
 
 - Send: quote file, voice, and sticker replies with stored text or media content, resolve phone/LID identities, and reject missing or unusable direct-chat quote targets before upload. Thanks @larskluge (#506).

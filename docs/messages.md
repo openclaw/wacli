@@ -15,9 +15,9 @@ wacli messages export [--chat JID] [--limit N] [--after DATE] [--before DATE] [-
 wacli messages show --chat JID --id MSG_ID
 wacli messages context --chat JID --id MSG_ID [--before N] [--after N]
 wacli messages edit --chat JID --id MSG_ID --message TEXT [--post-send-wait 2s]
-wacli messages delete --chat JID --id MSG_ID [--for-me] [--delete-media] [--post-send-wait 2s]
+wacli messages delete --chat JID --id MSG_ID [--sender JID] [--for-me] [--delete-media] [--post-send-wait 2s]
 wacli messages purge --chat JID --id MSG_ID [--dry-run] [--confirm]
-wacli messages revoke --chat JID --id MSG_ID [--post-send-wait 2s]
+wacli messages revoke --chat JID --id MSG_ID [--sender JID] [--post-send-wait 2s]
 wacli messages forward --chat JID --id MSG_ID --to RECIPIENT [--pick N] [--post-send-wait 2s]
 ```
 
@@ -165,9 +165,11 @@ Plain audio messages have an empty `MediaCaption`. Their `Text` keeps the `[Audi
 
 - `messages edit` updates one of your own recent sent text messages. WhatsApp only accepts edits inside its current edit window.
 - `messages delete` revokes one of your own sent messages for everyone. `messages revoke` is the explicit form of the same delete-for-everyone operation.
+- In groups where you are an admin, `delete` and `revoke` can also remove another member's message for everyone. The stored sender JID is used; pass `--sender JID` (phone number, `@s.whatsapp.net`, or `@lid`) to override it, or with `revoke` when the message is not in the local store. `--sender` is rejected for non-group chats, and WhatsApp refuses the revoke if you are not an admin.
+- While a same-store `sync --follow` process owns the store lock, `delete` (including admin deletes with `--sender`) is delegated to it; warnings are returned to the calling command rather than printed by the sync process. `delete --for-me` still needs the direct store lock.
 - `messages delete --for-me` removes a stored message only for your WhatsApp account using WhatsApp's `deleteMessageForMe` app-state patch; it can target messages sent by you or by others. `--delete-media` is only valid with `--for-me`.
 - `messages forward` forwards a stored text, image, video, GIF, audio, sticker, or document message to another recipient and marks the outgoing copy as forwarded. Media forwards require synced media metadata; reaction forwarding is not supported.
-- These commands look up the target in the local store first and honor `--read-only`/`WACLI_READONLY`. Delete-for-everyone and edit require a message sent by you.
+- These commands look up the target in the local store first and honor `--read-only`/`WACLI_READONLY`. Edit requires a message sent by you; delete-for-everyone does too, except for the group admin case above.
 - Deleted messages and WhatsApp delete-for-me events are kept as local tombstones with `deleted_at` and `deletion_reason`. Their original text, reply, interactive, and media metadata remains available to direct `messages show`, but tombstones stay hidden from normal list/search/starred/export results and FTS.
 - Sync, history, and backfill ingestion merge messages by chat JID and message ID. A message missing from any partial import is left unchanged, and a later live copy does not resurrect an existing tombstone.
 - `messages purge` is the deliberate payload-erasure path. It only accepts an already tombstoned row, removes downloaded local media, clears its retained `wacli.db` payload, and requires confirmation unless `--confirm` is passed. A minimal tombstone with `payload_purged_at` and a non-cascading purge-ledger key remain so later sync or history imports cannot restore the payload after chat cleanup.
@@ -192,6 +194,7 @@ wacli messages delete --chat 1234567890@s.whatsapp.net --id ABC123
 wacli messages delete --chat 1234567890@s.whatsapp.net --id ABC123 --for-me
 wacli messages purge --chat 1234567890@s.whatsapp.net --id ABC123 --dry-run
 wacli messages revoke --chat 1234567890@s.whatsapp.net --id ABC123
+wacli messages delete --chat 123456789-123345@g.us --id ABC123 --sender 1234567890@s.whatsapp.net
 wacli messages forward --chat 1234567890@s.whatsapp.net --id ABC123 --to "Family"
 ```
 

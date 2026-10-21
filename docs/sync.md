@@ -39,6 +39,7 @@ wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--stale-t
   - `poll vote`, `presence typing`, `presence paused`, and `messages edit`.
   - `chats mark-read`, `chats mark-unread`, `chats archive`, `chats unarchive`, `chats pin`, `chats unpin`, `chats mute`, and `chats unmute`.
   - `contacts check` and `contacts save`.
+  - `messages delete` (delete for everyone; `--for-me` still needs the direct store lock) and `groups participants add`, `remove`, `promote`, and `demote`. Restart an older `sync --follow` process after upgrading; older daemons return an unsupported `delete` or `group_participants` kind error.
 - `send status` is not delegated and still requires the direct store lock.
 - After connecting, sync fetches WhatsApp chat app-state deltas (`regular_high` and `regular_low`) so starred, delete-for-me, mute, archive, pin, and mark-read changes made while `wacli` was offline are caught up instead of relying only on live push notifications.
 - Sync also retains WhatsApp's **Keep chats archived** preference and orders automatic unarchives against archive actions. Upgraded stores recover missing preferences and archive timestamps through a full `regular_low` replay or phone recovery snapshot; until those are known, archived chats stay archived.
