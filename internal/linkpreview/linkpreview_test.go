@@ -205,3 +205,70 @@ func (d *fakeDialer) DialContext(_ context.Context, _ string, address string) (n
 	_ = c2.Close()
 	return c1, nil
 }
+
+func TestPreviewAllowCIDRsIsOptIn(t *testing.T) {
+	fakeIP := net.ParseIP("198.18.0.42")
+	t.Setenv("WACLI_LINKPREVIEW_ALLOW_CIDRS", "")
+	allow, err := allowedPreviewPrefixes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if safePreviewIP(fakeIP) || allowedByPrefixes(fakeIP, allow) {
+		t.Fatalf("fake-IP range must be rejected by default")
+	}
+	t.Setenv("WACLI_LINKPREVIEW_ALLOW_CIDRS", " 198.18.0.0/15 ")
+	allow, err = allowedPreviewPrefixes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !allowedByPrefixes(fakeIP, allow) {
+		t.Fatalf("expected allowlisted fake-IP range to be allowed")
+	}
+	if allowedByPrefixes(net.ParseIP("10.0.0.1"), allow) || allowedByPrefixes(net.ParseIP("127.0.0.1"), allow) {
+		t.Fatalf("allowlist must not open other private ranges")
+	}
+	if safePreviewIP(fakeIP) {
+		t.Fatalf("safePreviewIP must not read the preview allowlist")
+	}
+}
+
+func TestSafeDialerAllowListOnlyAppliesWhenGiven(t *testing.T) {
+	resolver := fakeResolver{ips: []net.IPAddr{{IP: net.ParseIP("198.18.0.42")}}}
+	t.Setenv("WACLI_LINKPREVIEW_ALLOW_CIDRS", "198.18.0.0/15")
+
+	strict := &safeDialer{resolver: resolver, dialer: &fakeDialer{}}
+	if conn, err := strict.DialContext(context.Background(), "tcp", "example.com:443"); err == nil {
+		_ = conn.Close()
+		t.Fatalf("dialer without an allow list must ignore WACLI_LINKPREVIEW_ALLOW_CIDRS")
+	}
+
+	allow, err := allowedPreviewPrefixes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview := &safeDialer{resolver: resolver, dialer: &fakeDialer{}, allow: allow}
+	conn, err := preview.DialContext(context.Background(), "tcp", "example.com:443")
+	if err != nil {
+		t.Fatalf("preview dialer with allow list: %v", err)
+	}
+	_ = conn.Close()
+}
+
+func TestPreviewAllowCIDRsRejectsEntireInvalidConfiguration(t *testing.T) {
+	for _, value := range []string{"invalid", "198.18.0.0/15,invalid", "127.0.0.1", "198.18.1.1/15", "198.18.0.0/15,", ",198.18.0.0/15", "::ffff:127.0.0.0/104"} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv("WACLI_LINKPREVIEW_ALLOW_CIDRS", value)
+			allow, err := allowedPreviewPrefixes()
+			if err == nil || len(allow) != 0 {
+				t.Fatalf("prefixes=%v err=%v", allow, err)
+			}
+			if client, err := NewPreviewHTTPClient(); err == nil || client != nil {
+				t.Fatalf("client=%v err=%v", client, err)
+			}
+			// An explicitly supplied client must remain usable by non-preview consumers.
+			if NewSafeHTTPClient() == nil {
+				t.Fatal("strict client unavailable")
+			}
+		})
+	}
+}

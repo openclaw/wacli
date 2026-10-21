@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -133,11 +134,12 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 
-			preview := fetchLinkPreview(ctx, message, noPreview)
+			preview, previewWarning := fetchLinkPreview(ctx, message, noPreview)
 			msgID, storeErr, err := sendTextWithHistory(ctx, a, reconnectForSend(a), toJID, message, replyTo, replyToSender, preview, mentionedJIDs, ephemeralOpts, textSendOptions{allowSelf: allowSelf})
 			if err != nil {
 				return err
 			}
+			warnLinkPreviewSkipped(os.Stderr, previewWarning)
 			chat := toJID
 			warnSendStoreFailure(os.Stderr, string(msgID), storeErr)
 
@@ -449,21 +451,38 @@ func applyEphemeralContext(msg *waProto.Message, expiration uint32) {
 	}
 }
 
-func fetchLinkPreview(ctx context.Context, text string, disabled bool) *linkpreview.Preview {
+// fetchLinkPreview never writes output itself: delegated sends run it inside
+// the sync process, whose stderr may be an NDJSON event stream. A skipped
+// preview is returned as a warning for the output-owning caller to render.
+func fetchLinkPreview(ctx context.Context, text string, disabled bool) (*linkpreview.Preview, string) {
 	if disabled {
-		return nil
+		return nil, ""
 	}
 	rawURL := linkpreview.FindFirstHTTPURL(text)
 	if rawURL == "" {
-		return nil
+		return nil, ""
 	}
 	previewCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	preview, err := linkpreview.Fetch(previewCtx, nil, rawURL)
 	if err != nil {
-		return nil
+		return nil, fmt.Sprintf("link preview skipped for %s: %v", rawURL, err)
 	}
-	return preview
+	return preview, ""
+}
+
+// linkPreviewSkippedHint tells the user the send went through and how to opt
+// out of preview fetching when the skip is expected.
+const linkPreviewSkippedHint = "message text was still sent without a preview; pass --no-preview to send without fetching one"
+
+// warnLinkPreviewSkipped prints a skipped-preview warning after a successful
+// send. The text carries remote, server-controlled error detail, so it is
+// sanitized for terminals.
+func warnLinkPreviewSkipped(w io.Writer, msg string) {
+	if msg == "" {
+		return
+	}
+	fmt.Fprintf(w, "warning: %s (%s)\n", out.SanitizeHuman(msg), linkPreviewSkippedHint)
 }
 
 func decodeMessageEscapes(s string) (string, error) {

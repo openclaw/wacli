@@ -92,6 +92,7 @@ type sendDelegateResponse struct {
 	SelectedOption *selectOption        `json:"selected_option,omitempty"`
 	File           map[string]string    `json:"file,omitempty"`
 	StoreWarning   string               `json:"store_warning,omitempty"`
+	PreviewWarning string               `json:"preview_warning,omitempty"`
 	Chat           string               `json:"chat,omitempty"`
 	Action         string               `json:"action,omitempty"`
 	Receipts       *int                 `json:"receipts,omitempty"`
@@ -594,13 +595,13 @@ func executeDelegatedText(ctx context.Context, a *app.App, req sendDelegateReque
 	if err := warnRapidSendIfNeeded(a.StoreDir(), time.Now().UTC(), os.Stderr); err != nil {
 		return sendDelegateResponse{}, err
 	}
-	preview := fetchLinkPreview(ctx, req.Message, req.NoPreview)
+	preview, previewWarning := fetchLinkPreview(ctx, req.Message, req.NoPreview)
 	msgID, storeErr, err := sendTextWithHistory(ctx, a, reconnectForSend(a), toJID, req.Message, req.ReplyTo, req.ReplyToSender, preview, mentionedJIDs, ephemeral, textSendOptions{allowSelf: req.AllowSelf})
 	if err != nil {
 		return sendDelegateResponse{}, err
 	}
 	waitForPostSendRetryReceipts(ctx, millisDuration(req.PostSendWaitMS, 0))
-	resp := sendDelegateResponse{OK: true, Sent: true, To: toJID.String(), ID: string(msgID)}
+	resp := sendDelegateResponse{OK: true, Sent: true, To: toJID.String(), ID: string(msgID), PreviewWarning: previewWarning}
 	if storeErr != nil {
 		resp.StoreWarning = storeErr.Error()
 	}
@@ -703,6 +704,7 @@ func executeDelegatedReact(ctx context.Context, a *app.App, req sendDelegateRequ
 }
 
 func writeDelegatedSendOutput(flags *rootFlags, kind string, resp sendDelegateResponse) error {
+	warnLinkPreviewSkipped(os.Stderr, resp.PreviewWarning)
 	warnSendStoreFailureMsg(os.Stderr, resp.ID, resp.StoreWarning)
 	if flags.asJSON {
 		body := map[string]any{"sent": resp.Sent, "to": resp.To, "id": resp.ID}

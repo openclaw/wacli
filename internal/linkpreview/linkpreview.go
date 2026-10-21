@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -46,7 +47,11 @@ func Fetch(ctx context.Context, client *http.Client, rawURL string) (*Preview, e
 		return nil, fmt.Errorf("invalid preview URL")
 	}
 	if client == nil {
-		client = NewSafeHTTPClient()
+		var err error
+		client, err = NewPreviewHTTPClient()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	doc, finalURL, err := fetchHTML(ctx, client, u.String())
@@ -72,11 +77,30 @@ func Fetch(ctx context.Context, client *http.Client, rawURL string) (*Preview, e
 	return preview, nil
 }
 
+// NewSafeHTTPClient returns a client that refuses every non-public
+// destination. It ignores WACLI_LINKPREVIEW_ALLOW_CIDRS, so other consumers
+// (sync webhooks) keep their own authorization independent of preview policy.
 func NewSafeHTTPClient() *http.Client {
+	return newSafeHTTPClient(nil)
+}
+
+// NewPreviewHTTPClient is NewSafeHTTPClient plus the opt-in
+// WACLI_LINKPREVIEW_ALLOW_CIDRS exceptions. Use it only for link preview
+// fetches (page and image).
+func NewPreviewHTTPClient() (*http.Client, error) {
+	allow, err := allowedPreviewPrefixes()
+	if err != nil {
+		return nil, err
+	}
+	return newSafeHTTPClient(allow), nil
+}
+
+func newSafeHTTPClient(allow []netip.Prefix) *http.Client {
 	transport := &http.Transport{
 		DialContext: (&safeDialer{
 			resolver: net.DefaultResolver,
 			dialer:   &net.Dialer{Timeout: 5 * time.Second},
+			allow:    allow,
 		}).DialContext,
 	}
 	return &http.Client{
@@ -97,6 +121,8 @@ func NewSafeHTTPClient() *http.Client {
 type safeDialer struct {
 	resolver ipResolver
 	dialer   contextDialer
+	// allow lists CIDRs exempt from the non-public address check.
+	allow []netip.Prefix
 }
 
 type ipResolver interface {
@@ -119,7 +145,7 @@ func (d *safeDialer) DialContext(ctx context.Context, network, address string) (
 	var lastErr error
 	sawPublic := false
 	for _, ip := range ips {
-		if !safePreviewIP(ip.IP) {
+		if !safePreviewIP(ip.IP) && !allowedByPrefixes(ip.IP, d.allow) {
 			continue
 		}
 		sawPublic = true
@@ -154,6 +180,43 @@ func safePreviewIP(ip net.IP) bool {
 		!addr.IsMulticast() &&
 		!addr.IsUnspecified() &&
 		!reservedPreviewIP(addr)
+}
+
+// allowedPreviewPrefixes reads WACLI_LINKPREVIEW_ALLOW_CIDRS, a comma-separated
+// list of CIDRs that bypass the private/reserved address check. This is needed
+// behind fake-IP DNS proxies (e.g. 198.18.0.0/15) where every host resolves to
+// a reserved range.
+func allowedPreviewPrefixes() ([]netip.Prefix, error) {
+	rawList := strings.TrimSpace(os.Getenv("WACLI_LINKPREVIEW_ALLOW_CIDRS"))
+	if rawList == "" {
+		return nil, nil
+	}
+	var out []netip.Prefix
+	for i, raw := range strings.Split(rawList, ",") {
+		p, err := netip.ParsePrefix(strings.TrimSpace(raw))
+		if err != nil || p.Addr().Is4In6() || p != p.Masked() {
+			return nil, fmt.Errorf("invalid WACLI_LINKPREVIEW_ALLOW_CIDRS entry %d: use a canonical IPv4 or IPv6 network CIDR", i+1)
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+func allowedByPrefixes(ip net.IP, allow []netip.Prefix) bool {
+	if len(allow) == 0 {
+		return false
+	}
+	addr, ok := netip.AddrFromSlice(ip)
+	if !ok {
+		return false
+	}
+	addr = addr.Unmap()
+	for _, prefix := range allow {
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+	return false
 }
 
 func reservedPreviewIP(addr netip.Addr) bool {
