@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.24.0 - 2026-10-21
+
+- Send: quote file, voice, and sticker replies with stored text or media content, resolve phone/LID identities, and reject missing or unusable direct-chat quote targets before upload. Thanks @larskluge (#506).
+- Send: use bounded high-resolution link-preview thumbnails by default; set `WACLI_LINKPREVIEW_SMALL=1` to restore inline-only thumbnails and the 300 KiB download cap. Thanks @samuba (#510).
+- Send: report skipped previews and support explicit, strictly validated `WACLI_LINKPREVIEW_ALLOW_CIDRS` exceptions for trusted networks, preserving default SSRF denial and independent webhook permissions. Thanks @samuba (#509).
+- Contacts: add delegated account contact saves and renames with required `--account-wide` consent and separate default-off `--phonebook` permission; mirror applied contact edits in order and retain recovery debt for incomplete batches. Thanks @nicolasbiondic and @muriloprataviera (#505, #500).
+- Send: retain sync-compatible quoted display text and canonical reaction history for direct and delegated sends. Thanks @goutamadwant (#507, #503).
+
 ## 0.23.0 - 2026-10-20
 
 - Security: build source, CI, Docker, and release artifacts with Go 1.27.3 to fix GO-2026-6809 while retaining the Go 1.27.0 source minimum.
