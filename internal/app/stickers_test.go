@@ -130,6 +130,10 @@ func TestSyncRefreshStickersReplaysRegularLowAtStart(t *testing.T) {
 		return "", nil
 	}
 	a.wa = f
+	// Without a stored archive setting, sync start replays regular_low itself.
+	if err := a.db.SetChatArchiveSetting(true, time.Now()); err != nil {
+		t.Fatal(err)
+	}
 
 	if _, err := a.Sync(t.Context(), SyncOptions{Mode: SyncModeOnce, IdleExit: time.Millisecond, RefreshStickers: true}); err != nil {
 		t.Fatal(err)
@@ -139,6 +143,30 @@ func TestSyncRefreshStickersReplaysRegularLowAtStart(t *testing.T) {
 	}
 	if got := favoriteStickerHashes(t, a); len(got) != 1 {
 		t.Fatalf("favorites after sync --refresh-stickers = %v", got)
+	}
+}
+
+func TestFirstSyncAfterUpgradeBackfillsFavoriteStickers(t *testing.T) {
+	a := newTestApp(t)
+	f := &appStateContextWA{fakeWA: newFakeWA()}
+	f.fetchEvents = func(_ context.Context, name string, fullSync, _ bool) ([]any, error) {
+		if fullSync && name == string(appstate.WAPatchRegularLow) {
+			return []any{favoriteStickerAppState("cat", true, time.Now())}, nil
+		}
+		return nil, nil
+	}
+	f.fetchAppState = func(context.Context, string, bool, bool) error { return nil }
+	f.requestAppStateRecovery = func(context.Context, string) (types.MessageID, error) {
+		t.Error("a verified full replay must not ask the phone for a snapshot")
+		return "", nil
+	}
+	a.wa = f
+
+	if _, err := a.Sync(t.Context(), SyncOptions{Mode: SyncModeOnce, IdleExit: time.Millisecond}); err != nil {
+		t.Fatal(err)
+	}
+	if got := favoriteStickerHashes(t, a); len(got) != 1 {
+		t.Fatalf("favorites after the first sync of an upgraded store = %v, want the replayed favorite", got)
 	}
 }
 

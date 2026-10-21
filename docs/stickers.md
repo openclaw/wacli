@@ -40,7 +40,8 @@ Stores favorites saved before this store recorded them. It replays the full `reg
 
 ### Notes
 
-- Run it once after upgrading. Like `groups refresh`, it connects with the store lock; with a running `sync --follow`, restart it with `--refresh-stickers` instead, which runs the same replay at sync start.
+- Upgrading from 0.22 or earlier needs no refresh: the first sync replays `regular_low` in full to recover the archive setting, and stores existing favorites on the way. Stores already on 0.23 or later before this version need it once.
+- Like `groups refresh`, it connects with the store lock; with a running `sync --follow`, restart it with `--refresh-stickers` instead, which runs the same replay at sync start.
 - If the replay fails, the request stays recorded and the next `wacli sync` retries it.
 - Prints `Imported N favorite stickers.`; JSON reports `stickers`.
 - On accounts whose full replays are known not to verify, wacli asks the phone for a recovery snapshot instead and waits for it, up to five minutes. If it does not arrive, the refresh fails and the request stays recorded for the next sync.
