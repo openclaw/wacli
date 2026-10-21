@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.23.0 - 2026-10-20
+
 - Security: build source, CI, Docker, and release artifacts with Go 1.27.3 to fix GO-2026-6809 while retaining the Go 1.27.0 source minimum.
 
 - Windows: use a current-user-only named pipe for sync delegation, avoiding crashes and restart loops caused by inaccessible AF_UNIX socket files (#511).
@@ -10,6 +12,8 @@
 
 - Dependencies: update x/exp after the 48-hour cooldown while retaining the Go 1.27.0 source minimum and Go 1.27.2 build toolchain.
 - Sync: unarchive chats on eligible incoming messages when Keep chats archived is off, recover missing preferences on upgrade, and preserve newer unarchives across stale archive replays. Thanks @Luizssauro (#466).
+
+- Known issues: back up your archive before upgrading; upgraded stores can repeat archive-state recovery on every sync start, and a failed full replay can discard saved app state (#501).
 
 ## 0.22.0 - 2026-10-16
 
