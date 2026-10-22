@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Sync: keep valid delivery/read receipts after malformed entries in the same batch, report invalid input separately from storage failures, and keep incomplete syncs from advancing freshness. Thanks @jesusvillota (#537).
+- Sync: keep an incoming 1:1 revoke or edit in the sender's chat and direction instead of filing it under your own chat as a sent message, so the original message is tombstoned or updated.
 
 ## 0.25.1 - 2026-10-26
 

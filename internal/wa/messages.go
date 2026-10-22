@@ -318,6 +318,21 @@ func extractProtocolMutation(m *waProto.Message, pm *ParsedMessage) (*waProto.Me
 	}
 }
 
+// applyProtocolKey retargets pm at the message a protocol revoke or edit
+// refers to. The key is written from the point of view of whoever sent the
+// revoke or edit, so its remoteJid and fromMe cannot be taken at face value for
+// incoming events: in an incoming 1:1 revoke the key names the owner's own JID
+// with fromMe=true ("the sender's own message"). The carrier message already
+// knows the right conversation (Chat from the event, or from the history
+// entry), so that is kept and the key's remoteJid is only a fallback. The id is
+// always taken from the key.
+//
+// Direction follows whose view the key is written from. When the owner sent
+// the revoke or edit, the key is the owner's own, so its fromMe, when set, is exact: an
+// admin revoke of another member's message carries fromMe=false whatever form
+// (phone or LID) the JIDs are in. An incoming revoke or edit is about the
+// sender's own message or, in a group, another member's, so it stays incoming.
+// A group participant names the author of the target.
 func applyProtocolKey(key *waProto.MessageKey, pm *ParsedMessage) {
 	if key == nil || pm == nil {
 		return
@@ -325,16 +340,18 @@ func applyProtocolKey(key *waProto.MessageKey, pm *ParsedMessage) {
 	if id := strings.TrimSpace(key.GetID()); id != "" {
 		pm.ID = id
 	}
-	if remote := strings.TrimSpace(key.GetRemoteJID()); remote != "" {
-		if chat, err := types.ParseJID(remote); err == nil {
-			pm.Chat = chat
+	if pm.Chat.IsEmpty() {
+		if remote := strings.TrimSpace(key.GetRemoteJID()); remote != "" {
+			if chat, err := types.ParseJID(remote); err == nil {
+				pm.Chat = chat
+			}
 		}
+	}
+	if pm.FromMe && key.FromMe != nil {
+		pm.FromMe = key.GetFromMe()
 	}
 	if participant := strings.TrimSpace(key.GetParticipant()); participant != "" {
 		pm.SenderJID = participant
-	}
-	if key.FromMe != nil {
-		pm.FromMe = key.GetFromMe()
 	}
 }
 
