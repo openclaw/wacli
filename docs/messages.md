@@ -130,7 +130,7 @@ wacli --read-only --json messages list --sender "Ada" --limit 100
 - Uses SQLite FTS5 when the binary was built with `-tags sqlite_fts5`.
 - Falls back to `LIKE` if FTS5 is not available.
 - `--type` accepts `text`, `image`, `video`, `audio`, or `document`.
-- Shared WhatsApp contact cards are stored as searchable text with contact names and phone numbers when WhatsApp includes a vCard payload.
+- Shared WhatsApp contact cards are stored as searchable text with contact names and phone numbers when WhatsApp includes a vCard payload, including iPhone cards that group properties as `item1.TEL` and `item1.FN`.
 - Associated-child and group-status-mention wrappers retain their inner text, media, and reply context. Group invitations expose their caption, with the group name as a fallback. These parser fixes apply on re-ingestion; they cannot recover absent payloads or missing decryption keys.
 - History sync unwraps disappearing-message, view-once, and document-with-caption envelopes the same way live messages are unwrapped, so their text, media, and reply context are stored instead of `(message)`.
 - Comment payloads retain their inner text or media and their envelope's reply target. Album headers show expected image/video counts; those summaries do not recover missing child captions or undecryptable history.
