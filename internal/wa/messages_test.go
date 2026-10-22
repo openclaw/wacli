@@ -1310,3 +1310,111 @@ func equalStrings(a, b []string) bool {
 	}
 	return true
 }
+
+func protocolLiveEvent(chat, sender types.JID, fromMe bool, proto_ *waProto.ProtocolMessage) *events.Message {
+	return &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{Chat: chat, Sender: sender, IsFromMe: fromMe, IsGroup: chat.Server == types.GroupServer},
+			ID:            "carrier",
+			Timestamp:     time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC),
+		},
+		Message: &waProto.Message{ProtocolMessage: proto_},
+	}
+}
+
+func TestProtocolMutationPerspective(t *testing.T) {
+	owner := types.NewJID("15550100001", types.DefaultUserServer)
+	contact := types.NewJID("15550100002", types.DefaultUserServer)
+	contactLID := types.NewJID("123456789012", types.HiddenUserServer)
+	group := types.NewJID("120363001234567890", types.GroupServer)
+	admin := types.NewJID("905000000001", types.DefaultUserServer)
+
+	revoke := func(key *waProto.MessageKey) *waProto.ProtocolMessage {
+		return &waProto.ProtocolMessage{Type: waProto.ProtocolMessage_REVOKE.Enum(), Key: key}
+	}
+	edit := func(key *waProto.MessageKey) *waProto.ProtocolMessage {
+		return &waProto.ProtocolMessage{
+			Type: waProto.ProtocolMessage_MESSAGE_EDIT.Enum(), Key: key,
+			EditedMessage: &waProto.Message{Conversation: proto.String("new text")},
+		}
+	}
+
+	tests := []struct {
+		name        string
+		ev          *events.Message
+		wantChat    types.JID
+		wantFromMe  bool
+		wantSender  string
+		wantRevoked bool
+		wantEdited  bool
+	}{
+		{
+			name: "incoming 1:1 revoke (key is from sender perspective)",
+			ev: protocolLiveEvent(contact, contact, false, revoke(&waProto.MessageKey{
+				ID: proto.String("orig"), FromMe: proto.Bool(true), RemoteJID: proto.String(owner.String()),
+			})),
+			wantChat: contact, wantFromMe: false, wantSender: contact.String(), wantRevoked: true,
+		},
+		{
+			name: "owner's own 1:1 revoke",
+			ev: protocolLiveEvent(contact, owner, true, revoke(&waProto.MessageKey{
+				ID: proto.String("orig"), FromMe: proto.Bool(true), RemoteJID: proto.String(contact.String()),
+			})),
+			wantChat: contact, wantFromMe: true, wantSender: owner.String(), wantRevoked: true,
+		},
+		{
+			name: "incoming 1:1 revoke in LID form",
+			ev: protocolLiveEvent(contactLID, contactLID, false, revoke(&waProto.MessageKey{
+				ID: proto.String("orig"), FromMe: proto.Bool(true), RemoteJID: proto.String(owner.String()),
+			})),
+			wantChat: contactLID, wantFromMe: false, wantSender: contactLID.String(), wantRevoked: true,
+		},
+		{
+			name: "group revoke by sender",
+			ev: protocolLiveEvent(group, contact, false, revoke(&waProto.MessageKey{
+				ID: proto.String("orig"), FromMe: proto.Bool(false), RemoteJID: proto.String(group.String()), Participant: proto.String(contact.String()),
+			})),
+			wantChat: group, wantFromMe: false, wantSender: contact.String(), wantRevoked: true,
+		},
+		{
+			name: "group revoke by admin",
+			ev: protocolLiveEvent(group, admin, false, revoke(&waProto.MessageKey{
+				ID: proto.String("orig"), FromMe: proto.Bool(false), RemoteJID: proto.String(group.String()), Participant: proto.String(contact.String()),
+			})),
+			wantChat: group, wantFromMe: false, wantSender: contact.String(), wantRevoked: true,
+		},
+		{
+			name: "owner revokes someone else's group message as admin",
+			ev: protocolLiveEvent(group, owner, true, revoke(&waProto.MessageKey{
+				ID: proto.String("orig"), FromMe: proto.Bool(false), RemoteJID: proto.String(group.String()), Participant: proto.String(contact.String()),
+			})),
+			wantChat: group, wantFromMe: false, wantSender: contact.String(), wantRevoked: true,
+		},
+		{
+			name: "incoming 1:1 edit",
+			ev: protocolLiveEvent(contact, contact, false, edit(&waProto.MessageKey{
+				ID: proto.String("orig"), FromMe: proto.Bool(true), RemoteJID: proto.String(owner.String()),
+			})),
+			wantChat: contact, wantFromMe: false, wantSender: contact.String(), wantEdited: true,
+		},
+		{
+			name: "owner's own 1:1 edit",
+			ev: protocolLiveEvent(contact, owner, true, edit(&waProto.MessageKey{
+				ID: proto.String("orig"), FromMe: proto.Bool(true), RemoteJID: proto.String(contact.String()),
+			})),
+			wantChat: contact, wantFromMe: true, wantSender: owner.String(), wantEdited: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			pm := ParseLiveMessage(tc.ev)
+			if pm.ID != "orig" || pm.Chat != tc.wantChat || pm.FromMe != tc.wantFromMe ||
+				pm.SenderJID != tc.wantSender || pm.Revoked != tc.wantRevoked || pm.Edited != tc.wantEdited {
+				t.Fatalf("got ID=%q chat=%v fromMe=%v sender=%q revoked=%v edited=%v", pm.ID, pm.Chat, pm.FromMe, pm.SenderJID, pm.Revoked, pm.Edited)
+			}
+			if tc.wantEdited && pm.Text != "new text" {
+				t.Fatalf("text = %q", pm.Text)
+			}
+		})
+	}
+}

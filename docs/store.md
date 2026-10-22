@@ -9,6 +9,7 @@ Read when: inspecting local SQLite size/counts or pruning old local chat/group r
 ```bash
 wacli store stats
 wacli store cleanup [--days N] [--dry-run] [--confirm]
+wacli store repair-revokes [--dry-run=false]
 ```
 
 Related cleanup commands:
@@ -17,6 +18,15 @@ Related cleanup commands:
 wacli chats cleanup [--days N] [--jid JID] [--dry-run] [--confirm]
 wacli groups prune [--days N] [--left-only=false|--include-active] [--dry-run] [--confirm]
 ```
+
+## Repairing misfiled revokes
+
+Older versions filed a revoke or edit sent by the other party in a 1:1 chat as a new outgoing row in your own chat instead of updating the original message. `store repair-revokes` finds those revoke rows (an original exists in the chat named by the row's sender, and the row is outgoing in a different 1:1 chat), marks each original as a WhatsApp revoke with its text and media kept, and removes the misfiled row, all in one transaction.
+
+- It only changes the local store; nothing is sent to WhatsApp.
+- It is a dry run by default and lists `misfiled chat -> original chat  message id`. Pass `--dry-run=false` to apply; that needs a writable store, so `--read-only` is refused.
+- Rows whose original was purged or is not in the store are left alone. Group revokes are never touched.
+- Running it again after a repair finds nothing.
 
 ## Notes
 

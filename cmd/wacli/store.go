@@ -9,5 +9,6 @@ func newStoreCmd(flags *rootFlags) *cobra.Command {
 	}
 	cmd.AddCommand(newStoreCleanupCmd(flags))
 	cmd.AddCommand(newStoreStatsCmd(flags))
+	cmd.AddCommand(newStoreRepairRevokesCmd(flags))
 	return cmd
 }

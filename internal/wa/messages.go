@@ -306,6 +306,17 @@ func extractProtocolMutation(m *waProto.Message, pm *ParsedMessage) (*waProto.Me
 	}
 }
 
+// applyProtocolKey retargets pm at the message a protocol revoke or edit
+// refers to. The key is written from the sender's point of view, so its
+// remoteJid and fromMe cannot be taken at face value: in an incoming 1:1
+// revoke the key names the owner's own JID with fromMe=true ("the sender's own
+// message"). The carrier message already knows the right conversation and
+// direction (Chat and FromMe from the event, or from the history entry), and a
+// revoke or edit is by default about a message from the same author, so those
+// are kept. Only the id is always taken from the key; the remote JID is a
+// fallback when the carrier has no chat. A group participant that differs from
+// the carrier's sender (an admin revoking someone else's message) names the
+// author of the target, who is then not the sender of this event.
 func applyProtocolKey(key *waProto.MessageKey, pm *ParsedMessage) {
 	if key == nil || pm == nil {
 		return
@@ -313,17 +324,34 @@ func applyProtocolKey(key *waProto.MessageKey, pm *ParsedMessage) {
 	if id := strings.TrimSpace(key.GetID()); id != "" {
 		pm.ID = id
 	}
-	if remote := strings.TrimSpace(key.GetRemoteJID()); remote != "" {
-		if chat, err := types.ParseJID(remote); err == nil {
-			pm.Chat = chat
+	if pm.Chat.IsEmpty() {
+		if remote := strings.TrimSpace(key.GetRemoteJID()); remote != "" {
+			if chat, err := types.ParseJID(remote); err == nil {
+				pm.Chat = chat
+			}
 		}
 	}
 	if participant := strings.TrimSpace(key.GetParticipant()); participant != "" {
+		if differentUser(participant, pm.SenderJID) {
+			pm.FromMe = false
+		}
 		pm.SenderJID = participant
 	}
-	if key.FromMe != nil {
-		pm.FromMe = key.GetFromMe()
+}
+
+// differentUser reports whether two JID strings are known to name different
+// users. JIDs on different servers (phone vs LID) cannot be compared, so they
+// are treated as the same.
+func differentUser(a, b string) bool {
+	ja, err := types.ParseJID(strings.TrimSpace(a))
+	if err != nil {
+		return false
 	}
+	jb, err := types.ParseJID(strings.TrimSpace(b))
+	if err != nil {
+		return false
+	}
+	return ja.Server == jb.Server && ja.User != jb.User
 }
 
 func extractReaction(m *waProto.Message, pm *ParsedMessage) {
