@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Media: close the read-only cache database before opening a writer so uncached downloads work with WAL sidecars and no running sync. Thanks @stijnhoste (#524).
+
 ## 0.24.0 - 2026-10-21
 
 - Send: quote file, voice, and sticker replies with stored text or media content, resolve phone/LID identities, and reject missing or unusable direct-chat quote targets before upload. Thanks @larskluge (#506).
