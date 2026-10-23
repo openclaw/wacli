@@ -790,7 +790,7 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 				pm = normalized
 				pollEvt = evt
 			}
-			if pm.ReactionToID != "" && pm.ReactionEmoji == "" && m.Message.GetMessage().GetEncReactionMessage() != nil {
+			if pm.ReactionToID != "" && pm.ReactionEmoji == "" && unwrapped.Message.GetEncReactionMessage() != nil {
 				evt, err := a.wa.ParseWebMessage(pm.Chat, m.Message)
 				if err != nil {
 					a.emitWarning(

@@ -150,8 +150,20 @@ func ParseHistoryMessage(chatJID string, hist *waProto.WebMessageInfo) ParsedMes
 	}
 	pm.SenderJID = sender
 
-	if hist.GetMessage() != nil {
-		markUnhandledPayload(extractWAProto(hist.GetMessage(), &pm), &pm)
+	if raw := hist.GetMessage(); raw != nil {
+		// whatsmeow unwraps live events before dispatch but not history
+		// messages, so content inside ephemeral, view-once or
+		// document-with-caption envelopes would otherwise be stored as
+		// "(message)". Apply the same unwrapping, then carry over what the
+		// envelopes said about the message.
+		evt := (&events.Message{RawMessage: raw}).UnwrapRaw()
+		if evt.Info.DeviceSentMeta != nil {
+			applyDeviceSentDestination(evt.Info.DeviceSentMeta.DestinationJID, &pm)
+		}
+		if evt.IsEdit {
+			pm.Edited = true
+		}
+		markUnhandledPayload(extractWAProto(evt.Message, &pm), &pm)
 	}
 	return pm
 }
