@@ -64,7 +64,7 @@ Commands that accept `PHONE_OR_JID` accept a WhatsApp JID like `1234567890@s.wha
 
 `send text`, `send file`, `send sticker`, and `send voice` also accept synced contact, group, or chat names through `RECIPIENT`. If a name is ambiguous, interactive terminals prompt; scripts can use `--pick N`.
 
-`chats archive`, `chats pin`, `chats mute`, and `chats mark-read` use the same synced contact/group/chat resolver through `--chat`. Pass a raw JID when you need an exact target.
+`chats archive`, `chats pin`, `chats mute`, and `chats mark-read` use the same synced contact/group/chat resolver through `--chat`. Pass a raw JID when you need an exact target. `chats delete` takes only a JID or a phone number.
 
 ## History limits
 

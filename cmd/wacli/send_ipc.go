@@ -69,6 +69,7 @@ type sendDelegateRequest struct {
 	Read                 *bool    `json:"read,omitempty"`
 	Receipts             bool     `json:"receipts,omitempty"`
 	ThroughMessageID     string   `json:"through_message_id,omitempty"`
+	Through              string   `json:"through,omitempty"`
 	Phones               []string `json:"phones,omitempty"`
 	FirstName            string   `json:"first_name,omitempty"`
 	AccountWide          bool     `json:"account_wide,omitempty"`
@@ -105,6 +106,10 @@ type sendDelegateResponse struct {
 	Contact        *contactSaveResult   `json:"contact,omitempty"`
 	Presence       *app.PresenceState   `json:"presence,omitempty"`
 	Media          *mediaDownloadResult `json:"media,omitempty"`
+	// Code says how a chat delete went: deleted, or the refusal's code.
+	Code           string `json:"code,omitempty"`
+	LastMessageID  string `json:"last_message_id,omitempty"`
+	DeletedThrough string `json:"deleted_through,omitempty"`
 }
 
 type sendDelegateExecutor func(context.Context, sendDelegateRequest) (sendDelegateResponse, error)
@@ -289,7 +294,7 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDele
 		_ = json.NewEncoder(conn).Encode(resp)
 		return
 	}
-	if req.Kind == chatStateKind || req.Kind == contactsSaveKind {
+	if req.Kind == chatStateKind || req.Kind == contactsSaveKind || req.Kind == deleteChatKind {
 		// The app-state coordinator owns these writes; recovery must not hold
 		// the message-send queue (#454).
 		if requestCtx.Err() != nil {
@@ -360,6 +365,13 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDele
 }
 
 func writeDelegateResult(conn net.Conn, requestCtx context.Context, req sendDelegateRequest, resp sendDelegateResponse, err error) {
+	// A refusal is an answer, not a failure: nothing was sent, whatever the
+	// deadline did meanwhile, and its code tells the caller why.
+	var refusal interface{ RefusalCode() string }
+	if errors.As(err, &refusal) {
+		_ = json.NewEncoder(conn).Encode(sendDelegateResponse{OK: false, Error: err.Error(), Code: refusal.RefusalCode()})
+		return
+	}
 	if err != nil {
 		if requestCtx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 			err = fmt.Errorf("delegated %s failed after dispatch and may still have gone through; check before retrying: %w", req.Kind, err)
@@ -420,6 +432,8 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 		return executeDelegatedChatState(ctx, a, req)
 	case contactsSaveKind:
 		return executeDelegatedContactsSave(ctx, a, req)
+	case deleteChatKind:
+		return executeDelegatedDeleteChat(ctx, a, req)
 	default:
 		return sendDelegateResponse{}, fmt.Errorf("unsupported send kind %q", req.Kind)
 	}
