@@ -47,6 +47,7 @@ var schemaMigrations = []migration{
 	{version: 31, name: "content-free message change journal", up: migrateChanges},
 	{version: 32, name: "message receipt retrieval revisions", up: migrateReceiptRetrieval},
 	{version: 33, name: "ordered chat auto-unarchive", up: migrateChatAutoUnarchive},
+	{version: 34, name: "stickers", up: ensureStickersTable},
 }
 
 func migratePlaceholderChatActivity(d *DB) error {
@@ -510,6 +511,9 @@ func (d *DB) ensureCurrentSchema() error {
 	}
 	if err := migrateChatAutoUnarchive(d); err != nil {
 		return fmt.Errorf("ensure chat auto-unarchive state: %w", err)
+	}
+	if err := ensureStickersTable(d); err != nil {
+		return fmt.Errorf("ensure current stickers schema: %w", err)
 	}
 	return nil
 }
