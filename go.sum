@@ -118,8 +118,8 @@ github.com/tetratelabs/wazero v1.12.0 h1:DuWcpNu/FzgEXgGBDp8J1Spc+CWOvvtvVyjKlaZ
 github.com/tetratelabs/wazero v1.12.0/go.mod h1:LvKtzl2RqO4gyF27BiXU+nKAjcV8f38U+kP/q2vgxh0=
 github.com/vektah/gqlparser/v2 v2.5.63 h1:vzHg/+/z7kZA3N4FhbGtF1pRo99KUpPzwXahk1bQtYk=
 github.com/vektah/gqlparser/v2 v2.5.63/go.mod h1:JNK+plRwKdXLsF/qPFPe5tE0z4s1WeroD9S5LR8um/Q=
-github.com/wasilibs/go-pgquery v0.0.0-20261013080023-1d929f320679 h1:xyIDOgWESioE8p7jpFyRmW3fbVU7RhC+Syg1sh5VUnc=
-github.com/wasilibs/go-pgquery v0.0.0-20261013080023-1d929f320679/go.mod h1:HQrmSEL6Ds3tzmX3jqVpKUzdZnFt3OZPtTfQ4HObOik=
+github.com/wasilibs/go-pgquery v0.0.0-20261020014038-c50e9f18754b h1:PvGOsvVnm8mTRI56z6ByFz8uEsBgw20JGnFJckiP4HY=
+github.com/wasilibs/go-pgquery v0.0.0-20261020014038-c50e9f18754b/go.mod h1:HQrmSEL6Ds3tzmX3jqVpKUzdZnFt3OZPtTfQ4HObOik=
 github.com/wasilibs/wazero-helpers v0.0.0-20250123031827-cd30c44769bb h1:gQ+ZV4wJke/EBKYciZ2MshEouEHFuinB85dY3f5s1q8=
 github.com/wasilibs/wazero-helpers v0.0.0-20250123031827-cd30c44769bb/go.mod h1:jMeV4Vpbi8osrE/pKUxRZkVaA0EX7NZN0A9/oRzgpgY=
 go.mau.fi/libsignal v0.2.2 h1:QV+XdzQkm3x3aSG7FcqfGSZuFXz83pRZPBFaPygHbOU=
@@ -173,10 +173,10 @@ golang.org/x/tools v0.0.0-20191108193012-7d206e10da11/go.mod h1:b+2E5dAYhXwXZwtn
 golang.org/x/xerrors v0.0.0-20190717185122-a985d3407aa7/go.mod h1:I/5z698sn9Ka8TeJc9MKroUUfqBBauWjQqLJ2OPfmY0=
 gonum.org/v1/gonum v0.17.0 h1:VbpOemQlsSMrYmn7T2OUvQ4dqxQXU+ouZFQsZOx50z4=
 gonum.org/v1/gonum v0.17.0/go.mod h1:El3tOrEuMpv2UdMrbNlKEh9vd86bmQ6vqIcDwxEOc1E=
-google.golang.org/genproto/googleapis/api v0.0.0-20261012220534-4341edf3f941 h1:DS/w3N8rsfrwxwgGSj6WhMsPo7aNQGmDx74J81zd0NQ=
-google.golang.org/genproto/googleapis/api v0.0.0-20261012220534-4341edf3f941/go.mod h1:AuGAdi9KnXss7xbLxIKhCvk+Ro/SxpET/iS45DNYN+M=
-google.golang.org/genproto/googleapis/rpc v0.0.0-20261012220534-4341edf3f941 h1:QG6hS4zFplRZvOQedzei4t2pT/zkQc3VR1u+S9/rcAw=
-google.golang.org/genproto/googleapis/rpc v0.0.0-20261012220534-4341edf3f941/go.mod h1:OaIUM3+LpYcK2GXM4FTmhWoIq371Owdr+Cc7/BsYHHc=
+google.golang.org/genproto/googleapis/api v0.0.0-20261019180522-ce908d29299b h1:nB3spRIaSPtxJpxb0k41yljROvm2Jrwfs2pSNdKS5y8=
+google.golang.org/genproto/googleapis/api v0.0.0-20261019180522-ce908d29299b/go.mod h1:9N4vtjEwvgQKEdlFVQO0M44ErhecQ9DCSQfGoZ51M6w=
+google.golang.org/genproto/googleapis/rpc v0.0.0-20261019180522-ce908d29299b h1:6WNWHZk91dp4gZ25642OALkuG1UVNZbwENJD19DnB8k=
+google.golang.org/genproto/googleapis/rpc v0.0.0-20261019180522-ce908d29299b/go.mod h1:OaIUM3+LpYcK2GXM4FTmhWoIq371Owdr+Cc7/BsYHHc=
 google.golang.org/grpc v1.84.0 h1:soMyaPJ8pAak5PIQ0DGBUir0XRo2fRoMqhNWMLlLxO0=
 google.golang.org/grpc v1.84.0/go.mod h1:ljCht0DrxQrXBDRTZp52Qxh3Ffk8CdYm2sj4O2QN2C0=
 google.golang.org/protobuf v1.36.12 h1:pJOKDDOyeXErUroCihFAd5LQuwXBSpVnKGrj5o/fwxc=

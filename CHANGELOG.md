@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Dependencies: refresh SQL parser and Google API/RPC modules after the 48-hour cooldown, retaining Go 1.27.0 and Node 24 minimums.
+
 - Polls: retain timestamped vote retractions so older live/history replay, restarts, and phone/LID reconciliation cannot restore withdrawn selections. Thanks @shaun0927 (#516).
 
 - Media: close the read-only cache database before opening a writer so uncached downloads work with WAL sidecars and no running sync. Thanks @stijnhoste (#524).
