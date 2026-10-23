@@ -315,17 +315,7 @@ func (a *App) handlePollVote(ctx context.Context, pm wa.ParsedMessage, evt *even
 	}
 
 	votedAt := pollVoteTimestamp(pm)
-	if len(selectedHashes) == 0 {
-		if err := a.db.DeletePollVote(chatJID, pollMsgID, voterJID, votedAt); err != nil {
-			a.emitWarning(
-				"poll_vote_delete_failed",
-				fmt.Sprintf("warning: failed to delete poll vote %s: %v", pm.ID, err),
-				map[string]any{"message_id": pm.ID, "error": err.Error()},
-			)
-		}
-		return
-	}
-
+	// Retain empty selections so older replay cannot undo a retraction.
 	if err := a.db.UpsertPollVote(store.PollVote{
 		ChatJID:       chatJID,
 		PollMsgID:     pollMsgID,

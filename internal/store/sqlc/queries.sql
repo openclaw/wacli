@@ -489,10 +489,6 @@ ON CONFLICT(chat_jid, poll_msg_id, voter_jid) DO UPDATE SET
     ts = excluded.ts
 WHERE excluded.ts >= poll_votes.ts;
 
--- name: DeletePollVote :exec
-DELETE FROM poll_votes
-WHERE chat_jid = ? AND poll_msg_id = ? AND voter_jid = ? AND ts <= ?;
-
 -- name: ListPollVotes :many
 SELECT pv.chat_jid, pv.poll_msg_id, pv.voter_jid, pv.vote_msg_id, pv.selected_options_json, pv.ts
 FROM poll_votes pv

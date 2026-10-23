@@ -65,7 +65,7 @@ wacli polls list [--chat RECIPIENT] [--limit N] [--json]
 - Incoming polls and poll votes are stored during sync in the local poll tables.
 - `poll vote` validates selected options when the original poll is present in the local store.
 - For unsynced group polls, pass `--sender` with the poll author's JID.
-- `poll show` prints current aggregates and per-voter selections from the local store. JSON output includes `unknown_hashes` for vote hashes that could not be matched to a stored option.
+- `poll show` prints current aggregates and per-voter selections from the local store. JSON output includes `unknown_hashes` for vote hashes that could not be matched to a stored option. Retracted votes are omitted, while their timestamps remain in the store so older replay cannot restore a withdrawn selection.
 - `polls list` shows recently synced or sent polls, optionally filtered with `--chat`.
 
 ## Buttons and lists

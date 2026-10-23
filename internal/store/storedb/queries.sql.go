@@ -226,28 +226,6 @@ func (q *Queries) DeletePoll(ctx context.Context, arg DeletePollParams) error {
 	return err
 }
 
-const deletePollVote = `-- name: DeletePollVote :exec
-DELETE FROM poll_votes
-WHERE chat_jid = ? AND poll_msg_id = ? AND voter_jid = ? AND ts <= ?
-`
-
-type DeletePollVoteParams struct {
-	ChatJid   string
-	PollMsgID string
-	VoterJid  string
-	Ts        int64
-}
-
-func (q *Queries) DeletePollVote(ctx context.Context, arg DeletePollVoteParams) error {
-	_, err := q.db.ExecContext(ctx, deletePollVote,
-		arg.ChatJid,
-		arg.PollMsgID,
-		arg.VoterJid,
-		arg.Ts,
-	)
-	return err
-}
-
 const deletePollVotesForChat = `-- name: DeletePollVotesForChat :exec
 DELETE FROM poll_votes WHERE chat_jid = ?
 `
