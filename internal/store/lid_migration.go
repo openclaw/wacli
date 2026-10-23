@@ -427,6 +427,7 @@ func migrateLIDMessagesToPN(tx *sql.Tx, lidJID, pnJID string) error {
 			reaction_to_id = NULL,
 			reaction_emoji = NULL,
 			media_type = NULL,
+			kind = NULL,
 			media_caption = NULL,
 			filename = NULL,
 			mime_type = NULL,
