@@ -8,6 +8,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/openclaw/wacli/internal/app"
@@ -24,6 +26,7 @@ type fakeSendFileWA struct {
 	sentID     types.MessageID
 	mappedChat types.JID
 	wireTarget types.JID
+	sent       *waProto.Message
 }
 
 func (f *fakeSendFileWA) Upload(_ context.Context, data []byte, _ whatsmeow.MediaType) (whatsmeow.UploadResponse, error) {
@@ -32,8 +35,9 @@ func (f *fakeSendFileWA) Upload(_ context.Context, data []byte, _ whatsmeow.Medi
 	return whatsmeow.UploadResponse{FileSHA256: hash[:], FileLength: uint64(len(data))}, nil
 }
 
-func (f *fakeSendFileWA) SendProtoMessage(_ context.Context, to types.JID, _ *waProto.Message) (types.MessageID, error) {
+func (f *fakeSendFileWA) SendProtoMessage(_ context.Context, to types.JID, msg *waProto.Message) (types.MessageID, error) {
 	f.wireTarget = to
+	f.sent = msg
 	return f.sentID, nil
 }
 
@@ -199,5 +203,146 @@ func TestSendFileStatusPersistsHistory(t *testing.T) {
 	}
 	if _, err := db.GetStatusMessage("MSG1"); err != nil {
 		t.Fatalf("status message not persisted: %v", err)
+	}
+}
+
+// testVoiceWaveform is a caller-measured waveform: 64 levels rising 0..100.
+func testVoiceWaveform() []int {
+	levels := make([]int, voiceWaveformSamples)
+	for i := range levels {
+		levels[i] = i * voiceWaveformMax / (voiceWaveformSamples - 1)
+	}
+	return levels
+}
+
+// installRecordingProbes puts an ffprobe and an ffmpeg that fail on PATH, and
+// nothing else, so a test sees which of them a send ran. The returned function
+// lists the tools run, in order.
+func installRecordingProbes(t *testing.T) func() []string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("probe stand-ins are shell scripts")
+	}
+	dir := t.TempDir()
+	marker := filepath.Join(t.TempDir(), "probes")
+	for _, tool := range []string{"ffprobe", "ffmpeg"} {
+		script := "#!/bin/sh\necho " + tool + " >> \"$PROBE_MARKER\"\necho 'no audio here' >&2\nexit 1\n"
+		if err := os.WriteFile(filepath.Join(dir, tool), []byte(script), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", dir)
+	t.Setenv("PROBE_MARKER", marker)
+	return func() []string {
+		data, err := os.ReadFile(marker)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			t.Fatalf("read probe marker: %v", err)
+		}
+		return strings.Fields(string(data))
+	}
+}
+
+func newVoiceNoteFixture(t *testing.T) (*fakeSendFileApp, string) {
+	t.Helper()
+	a, _, _ := newSendFileFixture(t)
+	filePath := filepath.Join(t.TempDir(), "note.ogg")
+	if err := os.WriteFile(filePath, []byte("OggS stand-in"), 0o600); err != nil {
+		t.Fatalf("write voice note: %v", err)
+	}
+	return a, filePath
+}
+
+func TestSendFileUsesGivenVoiceMetadataWithoutProbing(t *testing.T) {
+	probes := installRecordingProbes(t)
+	a, filePath := newVoiceNoteFixture(t)
+	seconds := int64(24)
+	voice, err := parseVoiceNoteMetadata(&seconds, testVoiceWaveform(), true)
+	if err != nil {
+		t.Fatalf("parseVoiceNoteMetadata: %v", err)
+	}
+
+	res, err := sendFile(context.Background(), a, types.NewJID("15550000001", types.DefaultUserServer), filePath, sendFileOptions{ptt: true, voice: voice})
+	if err != nil {
+		t.Fatalf("sendFile: %v", err)
+	}
+	if ran := probes(); len(ran) != 0 {
+		t.Fatalf("probes ran %v, want none", ran)
+	}
+	if res.voiceWarning != "" {
+		t.Fatalf("voice warning = %q, want none", res.voiceWarning)
+	}
+	audio := a.wa.(*fakeSendFileWA).sent.GetAudioMessage()
+	if audio == nil || !audio.GetPTT() {
+		t.Fatalf("sent %v, want a voice note", a.wa.(*fakeSendFileWA).sent)
+	}
+	if audio.GetSeconds() != 24 {
+		t.Fatalf("seconds = %d, want 24", audio.GetSeconds())
+	}
+	want := make([]byte, voiceWaveformSamples)
+	for i, level := range testVoiceWaveform() {
+		want[i] = byte(level)
+	}
+	if !bytes.Equal(audio.GetWaveform(), want) {
+		t.Fatalf("waveform = %v, want %v", audio.GetWaveform(), want)
+	}
+}
+
+func TestSendFileProbesOnlyTheVoiceMetadataLeftOut(t *testing.T) {
+	probes := installRecordingProbes(t)
+	a, filePath := newVoiceNoteFixture(t)
+	seconds := int64(5)
+	voice, err := parseVoiceNoteMetadata(&seconds, nil, true)
+	if err != nil {
+		t.Fatalf("parseVoiceNoteMetadata: %v", err)
+	}
+
+	res, err := sendFile(context.Background(), a, types.NewJID("15550000001", types.DefaultUserServer), filePath, sendFileOptions{ptt: true, voice: voice})
+	if err != nil {
+		t.Fatalf("sendFile: %v", err)
+	}
+	if ran := strings.Join(probes(), " "); ran != "ffmpeg" {
+		t.Fatalf("probes ran %q, want ffmpeg alone", ran)
+	}
+	audio := a.wa.(*fakeSendFileWA).sent.GetAudioMessage()
+	if audio.GetSeconds() != 5 || audio.Waveform != nil {
+		t.Fatalf("seconds %d waveform %v, want 5 and none", audio.GetSeconds(), audio.GetWaveform())
+	}
+	if want := "voice note waveform not measured: ffmpeg: exit status 1: no audio here"; res.voiceWarning != want {
+		t.Fatalf("voice warning = %q, want %q", res.voiceWarning, want)
+	}
+}
+
+func TestSendFileWithoutFFmpegSendsTheVoiceNoteBareAndSaysSo(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PATH without probes is set up for Unix")
+	}
+	t.Setenv("PATH", t.TempDir())
+	a, filePath := newVoiceNoteFixture(t)
+
+	res, err := sendFile(context.Background(), a, types.NewJID("15550000001", types.DefaultUserServer), filePath, sendFileOptions{ptt: true})
+	if err != nil {
+		t.Fatalf("sendFile: %v", err)
+	}
+	audio := a.wa.(*fakeSendFileWA).sent.GetAudioMessage()
+	if audio == nil || !audio.GetPTT() || audio.Seconds != nil || audio.Waveform != nil {
+		t.Fatalf("sent %v, want a bare voice note", audio)
+	}
+	want := "voice note length not measured: ffprobe is not installed; voice note waveform not measured: ffmpeg is not installed"
+	if res.voiceWarning != want {
+		t.Fatalf("voice warning = %q, want %q", res.voiceWarning, want)
+	}
+}
+
+func TestSendFileRefusesVoiceMetadataOutsideVoiceNoteMode(t *testing.T) {
+	a, filePath := newVoiceNoteFixture(t)
+	_, err := sendFile(context.Background(), a, types.NewJID("15550000001", types.DefaultUserServer), filePath, sendFileOptions{voice: voiceNoteMetadata{seconds: 3}})
+	if err == nil || !strings.Contains(err.Error(), "voice-note mode") {
+		t.Fatalf("error = %v, want a refusal", err)
+	}
+	if a.wa.(*fakeSendFileWA).sent != nil {
+		t.Fatal("a refused send went out")
 	}
 }
