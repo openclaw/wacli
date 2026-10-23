@@ -2,14 +2,14 @@
 
 ## Unreleased
 
+## 0.25.0 - 2026-10-23
+
+**Highlights:** opt-in file uploads up to 2048 MiB, durable poll vote retractions, and reliable uncached media downloads.
+
 - Send: add `send file --max-size-mb` to raise the 100 MiB upload cap per send, up to 2048 MiB, with bounded validation and forwarding to a running `sync` delegate. Thanks @aleixrodriala (#525).
-
-- Dependencies: refresh SQL parser and Google API/RPC modules after the 48-hour cooldown, retaining Go 1.27.0 and Node 24 minimums.
-
 - Polls: retain timestamped vote retractions so older live/history replay, restarts, and phone/LID reconciliation cannot restore withdrawn selections. Thanks @shaun0927 (#516).
-
 - Media: close the read-only cache database before opening a writer so uncached downloads work with WAL sidecars and no running sync. Thanks @stijnhoste (#524).
-
+- Dependencies: refresh SQL parser and Google API/RPC modules after the 48-hour cooldown, retaining Go 1.27.0 and Node 24 minimums.
 
 ## 0.24.0 - 2026-10-21
 
