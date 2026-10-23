@@ -47,6 +47,10 @@ func TestLiveSyncStoresPollCreation(t *testing.T) {
 	if messagesStored.Load() != 1 {
 		t.Fatalf("messagesStored = %d", messagesStored.Load())
 	}
+	message, err := a.db.GetMessage(chat.String(), "POLL-1")
+	if err != nil || message.Kind != "poll" || message.MediaType != "" {
+		t.Fatalf("semantic poll projection: %+v, %v", message, err)
+	}
 	poll, err := a.db.GetPoll(chat.String(), "POLL-1")
 	if err != nil {
 		t.Fatalf("GetPoll: %v", err)

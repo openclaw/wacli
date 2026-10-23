@@ -23,7 +23,11 @@ type DB struct {
 	// open cannot create one, so message queries ask for the counts only when
 	// the table is there.
 	receiptsEnabled bool
-	readRows        queryRows
+	// A store written by an older build has no messages.kind column, and a
+	// read-only open cannot add one, so message queries select it only when
+	// it is there.
+	kindEnabled bool
+	readRows    queryRows
 }
 
 func Open(path string) (*DB, error) {
@@ -63,6 +67,7 @@ func open(path string, readOnly bool) (*DB, error) {
 		}
 		s.ftsEnabled = s.detectMessagesFTS()
 		s.receiptsEnabled = s.hasTable("message_receipts")
+		s.kindEnabled = s.hasMessagesColumn("kind")
 		return s, nil
 	}
 	if err := s.init(); err != nil {
@@ -70,6 +75,7 @@ func open(path string, readOnly bool) (*DB, error) {
 		return nil, err
 	}
 	s.receiptsEnabled = s.hasTable("message_receipts")
+	s.kindEnabled = s.hasMessagesColumn("kind")
 	if err := sqliteutil.ChmodFiles(path, 0o600); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -80,6 +86,11 @@ func open(path string, readOnly bool) (*DB, error) {
 func (d *DB) validateReadable() error {
 	var n int
 	return d.sql.QueryRow("SELECT count(*) FROM sqlite_master").Scan(&n)
+}
+
+func (d *DB) hasMessagesColumn(name string) bool {
+	ok, err := d.tableHasColumn("messages", name)
+	return err == nil && ok
 }
 
 func (d *DB) hasTable(name string) bool {

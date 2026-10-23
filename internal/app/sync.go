@@ -522,6 +522,7 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage, optio
 		Timestamp:                pm.Timestamp,
 		FromMe:                   pm.FromMe,
 		Text:                     pm.Text,
+		Kind:                     pm.Kind,
 		DisplayText:              displayText,
 		QuotedMsgID:              pm.ReplyToID,
 		QuotedSenderJID:          a.canonicalStoreJIDString(ctx, pm.ReplyToSenderJID),

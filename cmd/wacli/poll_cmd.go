@@ -349,6 +349,7 @@ func persistOutboundVote(ctx context.Context, a *app.App, chat types.JID, chatJI
 		Timestamp:  now,
 		FromMe:     true,
 		Text:       "Voted: " + strings.Join(options, ", "),
+		Kind:       "poll_vote",
 	}); err != nil {
 		storeErr = errors.Join(storeErr, fmt.Errorf("message update: %w", err))
 	}
