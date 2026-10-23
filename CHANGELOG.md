@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Profile: `profile picture-info` asks a running `sync --follow` process over its delegation socket when the store is locked, on the live connection and outside the send queue, and integrations can send the same `profile_picture_info` request with stable error codes (`not_set`, `hidden`, `invalid_jid`, `timeout`, `unavailable`, `lookup_failed`). Thanks @nicolasbiondic.
+
 - Dependencies: refresh SQL parser and Google API/RPC modules after the 48-hour cooldown, retaining Go 1.27.0 and Node 24 minimums.
 
 - Polls: retain timestamped vote retractions so older live/history replay, restarts, and phone/LID reconciliation cannot restore withdrawn selections. Thanks @shaun0927 (#516).
