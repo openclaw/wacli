@@ -197,7 +197,9 @@ func newProfilePictureInfoCmd(flags *rootFlags) *cobra.Command {
 			}
 			ctx, cancel, a, lk, err := openLiveProfileApp(flags, true)
 			if err != nil {
-				return err
+				// A running `sync --follow` holds the store lock: ask it, on
+				// its live connection, instead of failing.
+				return delegateProfilePictureInfo(flags, err, target, preview, existingID)
 			}
 			defer cancel()
 			defer closeApp(a, lk)
@@ -205,16 +207,7 @@ func newProfilePictureInfoCmd(flags *rootFlags) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("get profile picture info: %w", err)
 			}
-			output := formatProfilePictureInfo(target, info)
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, output)
-			}
-			if info == nil {
-				fmt.Fprintf(os.Stdout, "%s profile picture is unchanged.\n", sanitize(target.String()))
-				return nil
-			}
-			fmt.Fprintf(os.Stdout, "JID: %s\nID: %s\nType: %s\nURL: %s\nDirect path: %s\n", sanitize(output.JID), sanitize(output.ID), sanitize(output.Type), sanitize(output.URL), sanitize(output.DirectPath))
-			return nil
+			return writeProfilePictureInfo(flags, formatProfilePictureInfo(target, info))
 		},
 	}
 	cmd.Flags().StringVar(&targetRaw, "jid", "", "target JID or phone number")
@@ -329,6 +322,55 @@ type profilePictureInfoOutput struct {
 	DirectPath string `json:"direct_path,omitempty"`
 	Hash       string `json:"hash,omitempty"`
 	Unchanged  bool   `json:"unchanged,omitempty"`
+}
+
+func writeProfilePictureInfo(flags *rootFlags, output profilePictureInfoOutput) error {
+	if flags.asJSON {
+		return out.WriteJSON(os.Stdout, output)
+	}
+	if output.Unchanged {
+		fmt.Fprintf(os.Stdout, "%s profile picture is unchanged.\n", sanitize(output.JID))
+		return nil
+	}
+	fmt.Fprintf(os.Stdout, "JID: %s\nID: %s\nType: %s\nURL: %s\nDirect path: %s\n", sanitize(output.JID), sanitize(output.ID), sanitize(output.Type), sanitize(output.URL), sanitize(output.DirectPath))
+	return nil
+}
+
+func delegateProfilePictureInfo(flags *rootFlags, lockErr error, target types.JID, preview bool, existingID string) error {
+	ctx, cancel := withTimeout(context.Background(), flags)
+	defer cancel()
+	resp, delegated, err := tryDelegateSend(ctx, flags, lockErr, sendDelegateRequest{
+		Kind:       profilePictureInfoKind,
+		JID:        target.String(),
+		Preview:    preview,
+		ExistingID: existingID,
+	})
+	if !delegated {
+		return err
+	}
+	if err != nil {
+		return explainProfilePictureDelegateError(err)
+	}
+	return writeProfilePictureInfo(flags, delegatedProfilePictureOutput(target, resp.ProfilePicture))
+}
+
+// explainProfilePictureDelegateError turns an older daemon's rejection into the action to take.
+func explainProfilePictureDelegateError(err error) error {
+	if err == nil || !strings.Contains(err.Error(), "unsupported send kind") || !strings.Contains(err.Error(), profilePictureInfoKind) {
+		return fmt.Errorf("get profile picture info: %w", err)
+	}
+	return fmt.Errorf("the running sync process does not support profile picture-info; restart `wacli sync` after upgrading, then run this again: %w", err)
+}
+
+func delegatedProfilePictureOutput(target types.JID, info *profilePictureInfo) profilePictureInfoOutput {
+	if info == nil || info.Unchanged {
+		return profilePictureInfoOutput{JID: target.String(), Unchanged: true}
+	}
+	output := profilePictureInfoOutput{JID: info.JID, ID: info.ID, URL: info.URL, Type: info.Type, DirectPath: info.DirectPath}
+	if len(info.Hash) > 0 {
+		output.Hash = base64.StdEncoding.EncodeToString(info.Hash)
+	}
+	return output
 }
 
 func formatProfilePictureInfo(jid types.JID, info *types.ProfilePictureInfo) profilePictureInfoOutput {

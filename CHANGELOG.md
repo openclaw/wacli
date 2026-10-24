@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Profile: `profile picture-info` asks a running `sync --follow` process over its delegation socket when the store is locked, on the live connection and outside the send queue, and integrations can send the same `profile_picture_info` request with stable error codes (`not_set`, `hidden`, `invalid_jid`, `timeout`, `unavailable`, `lookup_failed`). Thanks @nicolasbiondic.
+
 ## 0.25.0 - 2026-10-23
 
 **Highlights:** opt-in file uploads up to 2048 MiB, durable poll vote retractions, and reliable uncached media downloads.
