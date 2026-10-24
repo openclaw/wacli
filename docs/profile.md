@@ -28,7 +28,7 @@ wacli profile business --jid <jid-or-phone>
 - `picture-info` fetches metadata and a CDN URL for the target's profile picture. Pass `--preview` for preview metadata or `--existing-id` to let WhatsApp report unchanged pictures.
 - `get-about` fetches a target user's current About text.
 - `business` fetches a target WhatsApp Business profile when available.
-- Live fetch commands do not mutate WhatsApp profile settings, but they still open the WhatsApp session store and therefore cannot run with `--read-only`.
+- Live fetch commands do not mutate WhatsApp profile settings, but they still open the WhatsApp session store and therefore cannot run with `--read-only`, with one exception: with `--read-only`, `picture-info` for a person asks a running `wacli sync --follow --profile-picture-budget N` on the same store and never opens the session store itself. It fails closed when no such process runs, and the follow process enforces the daily budget. A hidden or missing picture is reported as `"none": true`.
 
 ## Examples
 

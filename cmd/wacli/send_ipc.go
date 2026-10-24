@@ -75,6 +75,8 @@ type sendDelegateRequest struct {
 	AccountWide          bool     `json:"account_wide,omitempty"`
 	Phonebook            bool     `json:"phonebook,omitempty"`
 	ChatStateAction      string   `json:"chat_state_action,omitempty"`
+	Preview              bool     `json:"preview,omitempty"`
+	ExistingID           string   `json:"existing_id,omitempty"`
 	MuteDurationMS       int64    `json:"mute_duration_ms,omitempty"`
 	PostSendWaitMS       int64    `json:"post_send_wait_ms,omitempty"`
 	TimeoutMS            int64    `json:"timeout_ms,omitempty"`
@@ -83,29 +85,30 @@ type sendDelegateRequest struct {
 }
 
 type sendDelegateResponse struct {
-	OK             bool                 `json:"ok"`
-	Error          string               `json:"error,omitempty"`
-	Sent           bool                 `json:"sent,omitempty"`
-	To             string               `json:"to,omitempty"`
-	ID             string               `json:"id,omitempty"`
-	Target         string               `json:"target,omitempty"`
-	Reaction       string               `json:"reaction,omitempty"`
-	Question       string               `json:"question,omitempty"`
-	Options        []string             `json:"options,omitempty"`
-	Selected       []string             `json:"selected,omitempty"`
-	SelectedOption *selectOption        `json:"selected_option,omitempty"`
-	File           map[string]string    `json:"file,omitempty"`
-	StoreWarning   string               `json:"store_warning,omitempty"`
-	PreviewWarning string               `json:"preview_warning,omitempty"`
-	ThumbWarning   string               `json:"thumbnail_warning,omitempty"`
-	Chat           string               `json:"chat,omitempty"`
-	Action         string               `json:"action,omitempty"`
-	Receipts       *int                 `json:"receipts,omitempty"`
-	ReceiptType    string               `json:"receipt_type,omitempty"`
-	Contacts       []contactCheckResult `json:"contacts,omitempty"`
-	Contact        *contactSaveResult   `json:"contact,omitempty"`
-	Presence       *app.PresenceState   `json:"presence,omitempty"`
-	Media          *mediaDownloadResult `json:"media,omitempty"`
+	OK             bool                      `json:"ok"`
+	Error          string                    `json:"error,omitempty"`
+	Sent           bool                      `json:"sent,omitempty"`
+	To             string                    `json:"to,omitempty"`
+	ID             string                    `json:"id,omitempty"`
+	Target         string                    `json:"target,omitempty"`
+	Reaction       string                    `json:"reaction,omitempty"`
+	Question       string                    `json:"question,omitempty"`
+	Options        []string                  `json:"options,omitempty"`
+	Selected       []string                  `json:"selected,omitempty"`
+	SelectedOption *selectOption             `json:"selected_option,omitempty"`
+	File           map[string]string         `json:"file,omitempty"`
+	StoreWarning   string                    `json:"store_warning,omitempty"`
+	PreviewWarning string                    `json:"preview_warning,omitempty"`
+	ThumbWarning   string                    `json:"thumbnail_warning,omitempty"`
+	Chat           string                    `json:"chat,omitempty"`
+	Action         string                    `json:"action,omitempty"`
+	Receipts       *int                      `json:"receipts,omitempty"`
+	ReceiptType    string                    `json:"receipt_type,omitempty"`
+	Contacts       []contactCheckResult      `json:"contacts,omitempty"`
+	Contact        *contactSaveResult        `json:"contact,omitempty"`
+	Presence       *app.PresenceState        `json:"presence,omitempty"`
+	Media          *mediaDownloadResult      `json:"media,omitempty"`
+	Picture        *profilePictureInfoOutput `json:"picture,omitempty"`
 }
 
 type sendDelegateExecutor func(context.Context, sendDelegateRequest) (sendDelegateResponse, error)
@@ -176,8 +179,11 @@ func tryDelegateSend(ctx context.Context, flags *rootFlags, lockErr error, req s
 	return resp, true, nil
 }
 
-func startSendDelegateServer(ctx context.Context, a *app.App, spacing sendSpacing) (func(), error) {
+func startSendDelegateServer(ctx context.Context, a *app.App, spacing sendSpacing, pictures *pictureBudget) (func(), error) {
 	return startSendDelegateServerForStore(ctx, a.StoreDir(), spacing, func(ctx context.Context, req sendDelegateRequest) (sendDelegateResponse, error) {
+		if req.Kind == profilePictureKind {
+			return executeDelegatedProfilePicture(ctx, a.WA(), pictures, req)
+		}
 		return executeDelegatedSend(ctx, a, req)
 	})
 }
@@ -290,9 +296,10 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDele
 		_ = json.NewEncoder(conn).Encode(resp)
 		return
 	}
-	if req.Kind == chatStateKind || req.Kind == contactsSaveKind {
+	if req.Kind == chatStateKind || req.Kind == contactsSaveKind || req.Kind == profilePictureKind {
 		// The app-state coordinator owns these writes; recovery must not hold
-		// the message-send queue (#454).
+		// the message-send queue (#454). Picture lookups send nothing, so they
+		// do not wait behind sends either.
 		if requestCtx.Err() != nil {
 			_ = json.NewEncoder(conn).Encode(sendDelegateResponse{OK: false, Error: "request deadline passed before dispatch; it was not sent"})
 			return

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Profile: add `sync --follow --profile-picture-budget N` so read-only `profile picture-info` can look up people's profile pictures through the running sync process, at most N per UTC day (default off). Read-only callers never open the session store; groups, channels, and broadcasts are refused.
+
 ## 0.25.0 - 2026-10-23
 
 **Highlights:** opt-in file uploads up to 2048 MiB, durable poll vote retractions, and reliable uncached media downloads.

@@ -188,8 +188,14 @@ func newProfilePictureInfoCmd(flags *rootFlags) *cobra.Command {
 		Short: "Fetch WhatsApp profile picture metadata",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := flags.requireWritable(); err != nil {
-				return err
+			if flags.isReadOnly() {
+				// The one narrow exception to read-only mode: a person's picture,
+				// asked through the running sync process (see profile_picture_delegate.go).
+				target, err := parsePictureTarget(targetRaw)
+				if err != nil {
+					return err
+				}
+				return runReadOnlyPictureInfo(flags, target, preview, existingID)
 			}
 			target, err := parseProfileTarget(targetRaw)
 			if err != nil {
@@ -329,6 +335,7 @@ type profilePictureInfoOutput struct {
 	DirectPath string `json:"direct_path,omitempty"`
 	Hash       string `json:"hash,omitempty"`
 	Unchanged  bool   `json:"unchanged,omitempty"`
+	None       bool   `json:"none,omitempty"`
 }
 
 func formatProfilePictureInfo(jid types.JID, info *types.ProfilePictureInfo) profilePictureInfoOutput {

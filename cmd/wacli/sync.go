@@ -27,6 +27,7 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 	var webhookAllowPrivate bool
 	var webhookEventsFlag string
 	var sendSpacingFlag string
+	var profilePictureBudget int
 	var storage syncStorageLimitFlags
 
 	cmd := &cobra.Command{
@@ -53,6 +54,9 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 			}
 			if staleThreshold != 0 && staleThreshold < time.Second {
 				return fmt.Errorf("--stale-threshold must be at least 1s, got %s", staleThreshold)
+			}
+			if profilePictureBudget < 0 {
+				return fmt.Errorf("--profile-picture-budget must be 0 or more, got %d", profilePictureBudget)
 			}
 			sendSpacing, err := parseSendSpacing(sendSpacingFlag)
 			if err != nil {
@@ -96,7 +100,7 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 			var afterConnect func(context.Context) error
 			if mode == appPkg.SyncModeFollow {
 				afterConnect = func(ctx context.Context) error {
-					stop, err := startSendDelegateServer(ctx, a, sendSpacing)
+					stop, err := startSendDelegateServer(ctx, a, sendSpacing, newPictureBudget(a.StoreDir(), profilePictureBudget))
 					if err != nil {
 						return err
 					}
@@ -147,6 +151,7 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().DurationVar(&staleThreshold, "stale-threshold", 0, "force reconnect when keepalive failures last this long in follow mode (1s-<2m20s, 0 = disabled)")
 	cmd.Flags().StringVar(&presenceModeFlag, "presence-mode", string(appPkg.SyncPresenceModeNormal), "global sync presence behavior: normal or quiet")
 	cmd.Flags().StringVar(&sendSpacingFlag, "send-spacing", "", "pace delegated sends in follow mode by a fixed duration or random min-max range (e.g. 2s or 500ms-5s; default: disabled)")
+	cmd.Flags().IntVar(&profilePictureBudget, "profile-picture-budget", 0, "answer read-only profile picture-info for people through this follow process, at most `N` per UTC day (0 = off)")
 	cmd.Flags().BoolVar(&downloadMedia, "download-media", false, "download media in the background during sync")
 	cmd.Flags().BoolVar(&refreshContacts, "refresh-contacts", false, "refresh contacts from session store into local DB")
 	cmd.Flags().BoolVar(&refreshGroups, "refresh-groups", false, "refresh joined groups and participant snapshots (live)")

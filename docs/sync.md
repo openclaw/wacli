@@ -11,7 +11,7 @@ Remote logout stops sync and emits `logged_out`; it retains the existing success
 ## Command
 
 ```bash
-wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--stale-threshold DURATION] [--presence-mode normal|quiet] [--send-spacing DURATION|MIN-MAX] [--max-messages N] [--max-db-size SIZE] [--download-media] [--refresh-contacts] [--refresh-groups] [--refresh-channels] [--events] [--webhook URL] [--webhook-secret SECRET] [--webhook-events LIST]
+wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--stale-threshold DURATION] [--presence-mode normal|quiet] [--send-spacing DURATION|MIN-MAX] [--profile-picture-budget N] [--max-messages N] [--max-db-size SIZE] [--download-media] [--refresh-contacts] [--refresh-groups] [--refresh-channels] [--events] [--webhook URL] [--webhook-secret SECRET] [--webhook-events LIST]
 ```
 
 ## Modes
@@ -25,6 +25,7 @@ wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--stale-t
 - `--max-db-size SIZE` stops when `wacli.db` plus SQLite sidecars reaches `SIZE` (`500MB`, `2GB`, etc.).
 - `--download-media` runs a bounded media downloader for sync events. Clean one-shot and bootstrap runs finish queued downloads before exiting; cancellation, errors, and storage-limit exits stop immediately.
 - `--send-spacing DURATION|MIN-MAX` paces serialized operations delegated to a running follow process. A single duration such as `2s` sets a fixed minimum gap; a range such as `500ms-5s` chooses a fresh random gap for each operation. It is disabled by default. With or without pacing, the caller's command timeout includes time queued behind earlier operations, pacing, and the operation itself; a request that is still queued when its caller's deadline is reached is refused with an explicit "it was not sent" error and is never dispatched later (#446). If the caller times out waiting for a reply after dispatch, the error says the operation may still have gone through, so check before retrying. Delegated `chats mark-read`, `chats mark-unread`, and `contacts check` share this queue and timeout budget; delegated archive, pin, mute, and `contacts save` changes skip the queue and pacing but keep the same timeout budget. Those are app-state writes: the app serializes them with its own app-state coordinator, which also owns their pre-write sync and recovery and can wait minutes on it, so they must not hold the send queue (#454).
+- `--profile-picture-budget N` lets read-only `profile picture-info` calls for the same store ask this follow process, at most `N` lookups per UTC day (default `0`, off). Only people (phone or LID JIDs) are looked up; groups, channels, and broadcasts are refused. The count is kept in the store directory, so restarts do not reset it. Lookups skip the send queue and pacing but keep the caller's timeout budget. Nothing is sent to the person: no message, receipt, or presence.
 - `--refresh-contacts` imports contacts from the session store.
 - `--refresh-groups` fetches joined groups live and updates local group metadata and participant snapshots.
 - `--refresh-channels` fetches subscribed WhatsApp Channels live and updates local chat rows.
@@ -39,6 +40,7 @@ wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--stale-t
   - `poll vote`, `presence typing`, `presence paused`, and `messages edit`.
   - `chats mark-read`, `chats mark-unread`, `chats archive`, `chats unarchive`, `chats pin`, `chats unpin`, `chats mute`, and `chats unmute`.
   - `contacts check` and `contacts save`.
+  - `profile picture-info` in read-only mode, only when the follow process runs with `--profile-picture-budget N`.
 - `send status` is not delegated and still requires the direct store lock.
 - After connecting, sync fetches WhatsApp chat app-state deltas (`regular_high` and `regular_low`) so starred, delete-for-me, mute, archive, pin, and mark-read changes made while `wacli` was offline are caught up instead of relying only on live push notifications.
 - Sync also retains WhatsApp's **Keep chats archived** preference and orders automatic unarchives against archive actions. Upgraded stores recover missing preferences and archive timestamps through a full `regular_low` replay or phone recovery snapshot; until those are known, archived chats stay archived.
