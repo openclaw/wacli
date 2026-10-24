@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Chats: mark a chat read when this account sends a message in it from any device or `wacli send`, clearing the unread count and manual marker unless a newer incoming message exists; reactions, edits, revocations, poll votes, calls, protocol rows, and replays are ignored.
+
 ## 0.25.0 - 2026-10-23
 
 **Highlights:** opt-in file uploads up to 2048 MiB, durable poll vote retractions, and reliable uncached media downloads.

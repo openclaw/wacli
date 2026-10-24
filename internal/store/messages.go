@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -47,6 +48,9 @@ type UpsertMessageParams struct {
 	DeletedForMe             bool
 	DeletedAt                time.Time
 	DeletionReason           string
+	// SkipOwnReadMark keeps a FromMe row from marking the chat read. Set it for
+	// rows that are not a fresh reply: history replay, calls and poll votes.
+	SkipOwnReadMark bool
 }
 
 func (d *DB) messageSelectColumns(snippet string) string {
@@ -138,7 +142,8 @@ func (d *DB) UpsertMessage(p UpsertMessageParams) error {
 		ChatJid_2:       strings.TrimSpace(p.ChatJID),
 		MsgID_2:         strings.TrimSpace(p.MsgID),
 	}
-	if !p.ArchiveIncoming {
+	markRead := p.marksChatRead() && !d.ownReplyStored(p.ChatJID, p.MsgID)
+	if !p.ArchiveIncoming && !markRead {
 		return d.q.UpsertMessage(storeCtx(), params)
 	}
 	tx, err := d.sql.Begin()
@@ -148,13 +153,60 @@ func (d *DB) UpsertMessage(p UpsertMessageParams) error {
 	defer tx.Rollback()
 	// Decide and write under the writer lock before reading message state.
 	// A deferred read-then-write transaction can fail with SQLITE_BUSY_SNAPSHOT.
-	if err := recordChatArchiveIncoming(tx, p.ChatJID, p.MsgID, p.Timestamp, p.ArchiveObservedMS, p.ArchiveSettingObservedMS, false); err != nil {
-		return err
+	if p.ArchiveIncoming {
+		if err := recordChatArchiveIncoming(tx, p.ChatJID, p.MsgID, p.Timestamp, p.ArchiveObservedMS, p.ArchiveSettingObservedMS, false); err != nil {
+			return err
+		}
 	}
 	if err := d.q.WithTx(tx).UpsertMessage(storeCtx(), params); err != nil {
 		return err
 	}
+	if markRead {
+		if err := clearChatUnreadByOwnMessage(tx, p.ChatJID, p.Timestamp); err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
+}
+
+// marksChatRead reports whether storing this row means the account answered the
+// chat. Only a real, live message from this account counts: reactions, edits,
+// deletions and contentless protocol rows do not, mirroring which incoming rows
+// are readable. SkipOwnReadMark opts a row out (history replay, calls, votes).
+func (p UpsertMessageParams) marksChatRead() bool {
+	return p.FromMe && !p.SkipOwnReadMark && !p.Timestamp.IsZero() &&
+		strings.TrimSpace(p.ChatJID) != "" &&
+		!p.Edited && !p.Revoked && !p.DeletedForMe && p.DeletedAt.IsZero() &&
+		strings.TrimSpace(p.ReactionToID) == "" && strings.TrimSpace(p.ReactionEmoji) == "" &&
+		(p.DisplayText != "(message)" || strings.TrimSpace(p.Text) != "")
+}
+
+// ownReplyStored reports whether this message ID is already stored as a reply.
+// Re-storing it (replay, retry, backfill) must not clear an unread marker or
+// count that was set after the original reply.
+func (d *DB) ownReplyStored(chatJID, msgID string) bool {
+	var one int
+	err := d.sql.QueryRowContext(storeCtx(), `SELECT 1 FROM messages WHERE chat_jid = ? AND msg_id = ? AND from_me = 1 AND revoked = 0 AND deleted_for_me = 0 AND deleted_at IS NULL AND COALESCE(reaction_to_id,'') = '' AND COALESCE(reaction_emoji,'') = '' AND (COALESCE(display_text,'') != '(message)' OR TRIM(COALESCE(text,'')) != '')`, strings.TrimSpace(chatJID), strings.TrimSpace(msgID)).Scan(&one)
+	return err == nil
+}
+
+// ClearChatUnreadByOwnMessage marks a chat read because this account sent a
+// message at ts, as WhatsApp does when you answer. It leaves the chat alone when
+// a readable incoming message is newer than ts, so a historical own message
+// cannot swallow later unread messages. Calling it again changes nothing.
+func (d *DB) ClearChatUnreadByOwnMessage(jid string, ts time.Time) error {
+	return clearChatUnreadByOwnMessage(d.sql, jid, ts)
+}
+
+func clearChatUnreadByOwnMessage(db interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, jid string, ts time.Time) error {
+	jid = strings.TrimSpace(jid)
+	if jid == "" || ts.IsZero() {
+		return nil
+	}
+	_, err := db.ExecContext(storeCtx(), "UPDATE chats SET unread = 0, unread_count = 0 WHERE jid = ? AND (COALESCE(unread,0) != 0 OR COALESCE(unread_count,0) != 0) AND NOT EXISTS (SELECT 1 FROM messages WHERE "+receiptEligible+" AND ts > ?)", jid, jid, unix(ts))
+	return err
 }
 
 func (d *DB) MarkMessageRevoked(chatJID, msgID string) error {

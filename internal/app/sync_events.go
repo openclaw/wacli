@@ -759,6 +759,7 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 		}
 		a.storeHistoryUnreadCount(ctx, chatID, conv)
 		var pendingPolls []historyPollSideEffect
+		var lastOwnReply time.Time
 		for _, m := range conv.Messages {
 			lastEvent.Store(nowUTC().UnixNano())
 			if m.Message == nil {
@@ -804,7 +805,10 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 			}
 			storedPM := pm
 			storedPM.UnhandledPayload = ""
-			if err := a.storeParsedMessageForSync(ctx, storedPM, messageStoreOptions{}, limits...); err == nil {
+			if err := a.storeParsedMessageForSync(ctx, storedPM, messageStoreOptions{skipOwnReadMark: true}, limits...); err == nil {
+				if ownMessageIsReply(pm) && pm.Timestamp.After(lastOwnReply) {
+					lastOwnReply = pm.Timestamp
+				}
 				unhandledWarnings.observe(a, pm)
 				a.emitSyncProgress(messagesStored.Add(1))
 				if pm.Poll != nil || pm.PollAdd != nil || pm.PollVote != nil {
@@ -818,6 +822,7 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 				enqueueMedia(canonicalJIDString(a.canonicalStoreJID(ctx, pm.Chat)), pm.ID)
 			}
 		}
+		a.storeHistoryOwnReply(ctx, chatID, conv, lastOwnReply)
 		flushCtx := ctx
 		if ctx.Err() != nil {
 			flushCtx = context.WithoutCancel(ctx)
@@ -916,6 +921,28 @@ func (a *App) storeHistoryUnreadCount(ctx context.Context, chatID string, conv *
 			"history_unread_store_failed",
 			fmt.Sprintf("warning: failed to store unread count for chat %s: %v", chat, storeErr),
 			map[string]any{"chat_jid": chat.String(), "unread_count": count, "error": storeErr.Error()},
+		)
+	}
+}
+
+// storeHistoryOwnReply marks a chat read when the newest own reply in a history
+// conversation has no newer incoming message. It runs after the whole
+// conversation is stored, so batch order cannot hide a later unread message. A
+// conversation that reports its own unread state is trusted as is.
+func (a *App) storeHistoryOwnReply(ctx context.Context, chatID string, conv *waHistorySync.Conversation, lastOwnReply time.Time) {
+	if lastOwnReply.IsZero() || conv.UnreadCount != nil || conv.MarkedAsUnread != nil {
+		return
+	}
+	chat, err := types.ParseJID(chatID)
+	if err != nil || chat.IsEmpty() || chat == types.StatusBroadcastJID {
+		return
+	}
+	chat = a.canonicalStoreJID(ctx, chat)
+	if err := a.db.ClearChatUnreadByOwnMessage(canonicalJIDString(chat), lastOwnReply); err != nil {
+		a.emitWarning(
+			"history_own_reply_read_failed",
+			fmt.Sprintf("warning: failed to mark chat %s read after own reply: %v", chat, err),
+			map[string]any{"chat_jid": chat.String(), "error": err.Error()},
 		)
 	}
 }
