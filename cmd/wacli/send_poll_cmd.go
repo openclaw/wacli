@@ -183,6 +183,7 @@ func persistOutboundPoll(ctx context.Context, a *app.App, chat types.JID, msgID,
 		Timestamp:  now,
 		FromMe:     true,
 		Text:       "Poll: " + question,
+		Kind:       "poll",
 	}); err != nil {
 		storeErr = errors.Join(storeErr, fmt.Errorf("message update: %w", err))
 	}

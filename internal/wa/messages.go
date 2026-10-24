@@ -78,6 +78,7 @@ type ParsedMessage struct {
 	Timestamp        time.Time
 	FromMe           bool
 	Text             string
+	Kind             string `json:",omitempty"`
 	Buttons          []Button
 	Media            *Media
 	Location         *Location
@@ -161,6 +162,7 @@ func ParseHistoryMessage(chatJID string, hist *waProto.WebMessageInfo) ParsedMes
 // indistinguishable from a message that genuinely carried nothing.
 func (pm ParsedMessage) HasContent() bool {
 	return strings.TrimSpace(pm.Text) != "" ||
+		pm.Kind != "" ||
 		pm.Media != nil ||
 		pm.Poll != nil ||
 		pm.PollVote != nil ||
@@ -254,6 +256,22 @@ func extractWAProto(m *waProto.Message, pm *ParsedMessage) *waProto.Message {
 	extractPollUpdate(m, pm)
 	extractCallLog(m, pm)
 	extractAlbum(m, pm)
+	// Semantic kinds are separate from downloadable media. Older consumers
+	// must not attempt a media download for a poll or a contact card.
+	switch {
+	case pm.Poll != nil:
+		pm.Kind = "poll"
+	case pm.PollVote != nil:
+		pm.Kind = "poll_vote"
+	case pm.PollAdd != nil:
+		pm.Kind = "poll_update"
+	case m.GetContactMessage() != nil:
+		pm.Kind = "contact"
+	case m.GetContactsArrayMessage() != nil:
+		pm.Kind = "contacts"
+	case m.GetEventMessage() != nil:
+		pm.Kind = "event"
+	}
 
 	if ctx := contextInfoForMessage(m); ctx != nil {
 		if id := strings.TrimSpace(ctx.GetStanzaID()); id != "" {
@@ -300,6 +318,7 @@ func extractProtocolMutation(m *waProto.Message, pm *ParsedMessage) (*waProto.Me
 		pm.Text = ""
 		pm.Media = nil
 		pm.Revoked = true
+		pm.Kind = "revoked"
 		return nil, true
 	default:
 		return nil, false

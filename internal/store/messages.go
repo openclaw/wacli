@@ -15,6 +15,7 @@ var ErrMessageNotTombstoned = errors.New("message is not tombstoned")
 
 type UpsertMessageParams struct {
 	ArchiveIncoming          bool
+	Kind                     string
 	ArchiveObservedMS        int64
 	ArchiveSettingObservedMS int64
 	ChatJID                  string
@@ -50,7 +51,16 @@ type UpsertMessageParams struct {
 }
 
 func (d *DB) messageSelectColumns(snippet string) string {
-	return fmt.Sprintf(`m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.quoted_msg_id,''), COALESCE(m.quoted_sender_jid,''), m.is_forwarded, m.forwarding_score, COALESCE(m.reaction_to_id,''), COALESCE(m.reaction_emoji,''), COALESCE(m.media_type,''), COALESCE(m.media_caption,''), COALESCE(m.filename,''), COALESCE(m.mime_type,''), COALESCE(m.direct_path,''), COALESCE(m.local_path,''), COALESCE(m.downloaded_at,0), CASE WHEN s.msg_id IS NULL THEN 0 ELSE 1 END, COALESCE(s.starred_at,0), m.revoked, m.deleted_for_me, COALESCE(m.deleted_at,0), COALESCE(m.deletion_reason,''), COALESCE(m.payload_purged_at,0), m.edited, COALESCE(m.buttons,''), %s, %s`, d.receiptColumns(), snippetSQL(snippet))
+	return fmt.Sprintf(`m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.quoted_msg_id,''), COALESCE(m.quoted_sender_jid,''), m.is_forwarded, m.forwarding_score, COALESCE(m.reaction_to_id,''), COALESCE(m.reaction_emoji,''), COALESCE(m.media_type,''), COALESCE(m.media_caption,''), COALESCE(m.filename,''), COALESCE(m.mime_type,''), COALESCE(m.direct_path,''), COALESCE(m.local_path,''), COALESCE(m.downloaded_at,0), CASE WHEN s.msg_id IS NULL THEN 0 ELSE 1 END, COALESCE(s.starred_at,0), m.revoked, m.deleted_for_me, COALESCE(m.deleted_at,0), COALESCE(m.deletion_reason,''), COALESCE(m.payload_purged_at,0), m.edited, COALESCE(m.buttons,''), %s, %s, %s`, d.receiptColumns(), snippetSQL(snippet), d.kindColumn())
+}
+
+// kindColumn selects the semantic message kind. A store from before the
+// column answers an empty kind.
+func (d *DB) kindColumn() string {
+	if !d.kindEnabled {
+		return "''"
+	}
+	return "COALESCE(m.kind,'')"
 }
 
 // receiptColumns counts, per message, how many recipients have it and how many
@@ -135,6 +145,7 @@ func (d *DB) UpsertMessage(p UpsertMessageParams) error {
 		Edited:          boolToInt64(p.Edited),
 		EditedTs:        editedTS,
 		Buttons:         buttonsJSON,
+		Kind:            nullString(p.Kind),
 		ChatJid_2:       strings.TrimSpace(p.ChatJID),
 		MsgID_2:         strings.TrimSpace(p.MsgID),
 	}
@@ -377,6 +388,7 @@ func (d *DB) PurgeMessage(chatJID, msgID string) error {
 			edited = 0,
 			edited_ts = 0,
 			buttons = NULL,
+			kind = NULL,
 			payload_purged_at = COALESCE(payload_purged_at, ?)
 		WHERE chat_jid = ? AND msg_id = ?
 	`, purgedAt, chatJID, msgID); err != nil {
@@ -516,7 +528,25 @@ func (d *DB) GetMessage(chatJID, msgID string) (Message, error) {
 	if err != nil {
 		return Message{}, err
 	}
-	return messageFromGetRow(row), nil
+	m := messageFromGetRow(row)
+	if err := d.fillKind(&m); err != nil {
+		return Message{}, err
+	}
+	return m, nil
+}
+
+// fillKind reads the semantic kind of a message loaded through a generated
+// query, which cannot name a column older stores lack. A revoked message
+// reads as "revoked" whatever it was.
+func (d *DB) fillKind(m *Message) error {
+	if m.Revoked {
+		m.Kind = "revoked"
+		return nil
+	}
+	if !d.kindEnabled {
+		return nil
+	}
+	return d.readQuery().QueryRow(`SELECT COALESCE(kind,'') FROM messages WHERE chat_jid = ? AND msg_id = ?`, m.ChatJID, m.MsgID).Scan(&m.Kind)
 }
 
 func (d *DB) CountMessages() (int64, error) {
@@ -601,11 +631,19 @@ func (d *DB) MessageContext(chatJID, msgID string, before, after int) ([]Message
 	}
 	beforeMessages := make([]Message, 0, len(beforeRows))
 	for _, row := range beforeRows {
-		beforeMessages = append(beforeMessages, messageFromBeforeRow(row))
+		m := messageFromBeforeRow(row)
+		if err := d.fillKind(&m); err != nil {
+			return nil, err
+		}
+		beforeMessages = append(beforeMessages, m)
 	}
 	afterMessages := make([]Message, 0, len(afterRows))
 	for _, row := range afterRows {
-		afterMessages = append(afterMessages, messageFromAfterRow(row))
+		m := messageFromAfterRow(row)
+		if err := d.fillKind(&m); err != nil {
+			return nil, err
+		}
+		afterMessages = append(afterMessages, m)
 	}
 
 	// Reverse before rows back to chronological order.
@@ -647,7 +685,7 @@ func scanMessagesFrom(db queryRows, ranked bool, query string, args ...any) ([]M
 		var payloadPurgedAt int64
 		var buttonsJSON string
 		var edited int
-		dest := []any{&m.rowID, &m.ChatJID, &m.ChatName, &m.MsgID, &m.SenderJID, &m.SenderName, &ts, &fromMe, &m.Text, &m.DisplayText, &m.QuotedMsgID, &m.QuotedSenderJID, &forwarded, &forwardingScore, &m.ReactionToID, &m.ReactionEmoji, &m.MediaType, &m.MediaCaption, &m.Filename, &m.MimeType, &m.DirectPath, &m.LocalPath, &downloadedAt, &starred, &starredAt, &revoked, &deletedForMe, &deletedAt, &deletionReason, &payloadPurgedAt, &edited, &buttonsJSON, &m.DeliveredTo, &m.ReadBy, &m.Snippet}
+		dest := []any{&m.rowID, &m.ChatJID, &m.ChatName, &m.MsgID, &m.SenderJID, &m.SenderName, &ts, &fromMe, &m.Text, &m.DisplayText, &m.QuotedMsgID, &m.QuotedSenderJID, &forwarded, &forwardingScore, &m.ReactionToID, &m.ReactionEmoji, &m.MediaType, &m.MediaCaption, &m.Filename, &m.MimeType, &m.DirectPath, &m.LocalPath, &downloadedAt, &starred, &starredAt, &revoked, &deletedForMe, &deletedAt, &deletionReason, &payloadPurgedAt, &edited, &buttonsJSON, &m.DeliveredTo, &m.ReadBy, &m.Snippet, &m.Kind}
 		if ranked {
 			dest = append(dest, &m.rank)
 		}
@@ -662,6 +700,9 @@ func scanMessagesFrom(db queryRows, ranked bool, query string, args ...any) ([]M
 		m.Starred = starred != 0
 		m.StarredAt = fromUnix(starredAt)
 		m.Revoked = revoked != 0
+		if m.Revoked {
+			m.Kind = "revoked"
+		}
 		m.DeletedForMe = deletedForMe != 0
 		m.DeletedAt = timePointerFromUnix(deletedAt)
 		m.DeletionReason = deletionReason

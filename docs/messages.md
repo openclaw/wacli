@@ -170,7 +170,7 @@ Plain audio messages have an empty `MediaCaption`. Their `Text` keeps the `[Audi
 - These commands look up the target in the local store first and honor `--read-only`/`WACLI_READONLY`. Delete-for-everyone and edit require a message sent by you.
 - Deleted messages and WhatsApp delete-for-me events are kept as local tombstones with `deleted_at` and `deletion_reason`. Their original text, reply, interactive, and media metadata remains available to direct `messages show`, but tombstones stay hidden from normal list/search/starred/export results and FTS.
 - Sync, history, and backfill ingestion merge messages by chat JID and message ID. A message missing from any partial import is left unchanged, and a later live copy does not resurrect an existing tombstone.
-- `messages purge` is the deliberate payload-erasure path. It only accepts an already tombstoned row, removes downloaded local media, clears its retained `wacli.db` payload, and requires confirmation unless `--confirm` is passed. A minimal tombstone with `payload_purged_at` and a non-cascading purge-ledger key remain so later sync or history imports cannot restore the payload after chat cleanup.
+- `messages purge` is the deliberate payload-erasure path. It only accepts an already tombstoned row, removes downloaded local media, clears its retained `wacli.db` payload (including the semantic `kind`, which reveals what the message was), and requires confirmation unless `--confirm` is passed. A minimal tombstone with `payload_purged_at` and a non-cascading purge-ledger key remain so later sync or history imports cannot restore the payload after chat cleanup.
 
 ## LID mapping
 

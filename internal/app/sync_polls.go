@@ -125,7 +125,9 @@ func (a *App) normalizeHistoryPollMessage(pm wa.ParsedMessage, hist *waProto.Web
 		return pm, nil, false
 	}
 	normalized := wa.ParseLiveMessage(parsed)
-	if normalized.Poll == nil && normalized.PollAdd == nil && normalized.PollVote == nil {
+	// Contact cards and events in an ephemeral or view-once envelope need the
+	// same unwrapping as polls, or they lose their kind and text.
+	if normalized.Poll == nil && normalized.PollAdd == nil && normalized.PollVote == nil && !wrappedSemanticKind(normalized.Kind) {
 		return pm, parsed, false
 	}
 	if pm.StarredKnown {
@@ -435,4 +437,8 @@ func matchPollOptions(stored []string, hashes [][]byte) pollOptionMatches {
 		}
 	}
 	return out
+}
+
+func wrappedSemanticKind(kind string) bool {
+	return kind == "contact" || kind == "contacts" || kind == "event"
 }
