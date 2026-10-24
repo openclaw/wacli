@@ -92,6 +92,7 @@ type ParsedMessage struct {
 	ReactionEmoji    string
 	IsForwarded      bool
 	ForwardingScore  uint32
+	AdReferral       *AdReferral `json:",omitempty"`
 	StarredKnown     bool
 	Starred          bool
 	Edited           bool
@@ -267,6 +268,7 @@ func extractWAProto(m *waProto.Message, pm *ParsedMessage) *waProto.Message {
 		}
 		pm.ForwardingScore = ctx.GetForwardingScore()
 		pm.IsForwarded = ctx.GetIsForwarded() || pm.ForwardingScore > 0
+		pm.AdReferral = adReferralFromContext(ctx)
 	}
 	return m
 }
