@@ -285,6 +285,21 @@ func TestAppStateRecoveryMarkersAreCollectionScoped(t *testing.T) {
 	}
 }
 
+func TestMarkAppStateRecoveryRequiredDeduplicates(t *testing.T) {
+	db := openTestDB(t)
+	for range 2 {
+		if err := db.MarkAppStateRecoveryRequired(" regular_low "); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := countRows(t, db.sql, `SELECT COUNT(*) FROM app_state_recovery_intents WHERE collection='regular_low'`); got != 1 {
+		t.Fatalf("recovery intents = %d, want 1", got)
+	}
+	if err := db.MarkAppStateRecoveryRequired(" "); err == nil {
+		t.Fatal("accepted an empty collection")
+	}
+}
+
 func TestAppStateRecoveryGenerationDoesNotClearNewFailure(t *testing.T) {
 	db := openTestDB(t)
 	generation, alreadyRequired, err := db.BeginAppStateRecovery("regular_low")
@@ -294,8 +309,8 @@ func TestAppStateRecoveryGenerationDoesNotClearNewFailure(t *testing.T) {
 	if alreadyRequired || generation != 1 {
 		t.Fatalf("initial marker = (%d, %t), want (1, false)", generation, alreadyRequired)
 	}
-	if err := db.MarkAppStateRecoveryRequired("regular_low"); err != nil {
-		t.Fatalf("MarkAppStateRecoveryRequired: %v", err)
+	if _, _, err := db.BeginAppStateRecovery("regular_low"); err != nil {
+		t.Fatalf("BeginAppStateRecovery new failure: %v", err)
 	}
 	cleared, err := db.ClearAppStateRecoveryGeneration("regular_low", generation)
 	if err != nil {

@@ -6,8 +6,19 @@ import (
 )
 
 func (d *DB) MarkAppStateRecoveryRequired(collection string) error {
-	_, err := d.MarkAppStateRecoveryGeneration(collection)
-	return err
+	collection = strings.TrimSpace(collection)
+	if collection == "" {
+		return fmt.Errorf("app state collection is required")
+	}
+	if _, err := d.sql.Exec(`
+		INSERT INTO app_state_recovery_intents(collection)
+		SELECT ? WHERE NOT EXISTS (
+			SELECT 1 FROM app_state_recovery_intents WHERE collection = ?
+		)
+	`, collection, collection); err != nil {
+		return fmt.Errorf("mark app state recovery required: %w", err)
+	}
+	return nil
 }
 
 func (d *DB) MarkAppStateRecoveryGeneration(collection string) (int64, error) {
