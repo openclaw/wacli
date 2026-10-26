@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Dependencies: update the GraphQL parser after the 48-hour cooldown, preserving Go 1.27.0 and Node 24 minimums.
+
 ## 0.25.0 - 2026-10-23
 
 **Highlights:** opt-in file uploads up to 2048 MiB, durable poll vote retractions, and reliable uncached media downloads.
