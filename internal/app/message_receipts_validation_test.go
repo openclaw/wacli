@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -206,12 +205,16 @@ func TestOutgoingReceiptSyncMarkers(t *testing.T) {
 // Exercise persisted receipt counts and freshness through the shipped CLI.
 func TestOutgoingReceiptMixedBatchCLI(t *testing.T) {
 	dir := t.TempDir()
-	if baseline := os.Getenv("WACLI_RECEIPT_BASELINE_BINARY"); baseline != "" {
-		cmd := exec.Command(baseline, "--store", dir, "--json", "messages", "list")
-		if output, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("initialize baseline store: %v: %s", err, output)
+	baseline := os.Getenv("WACLI_RECEIPT_BASELINE_DB")
+	if baseline != "" {
+		data, err := os.ReadFile(baseline)
+		if err != nil {
+			t.Fatal(err)
 		}
-		t.Log("opened store created by baseline CLI")
+		if err := os.WriteFile(filepath.Join(dir, "wacli.db"), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		t.Log("opened populated baseline store")
 	}
 	a, err := New(Options{StoreDir: dir})
 	if err != nil {
@@ -220,12 +223,14 @@ func TestOutgoingReceiptMixedBatchCLI(t *testing.T) {
 	t.Cleanup(func() { a.Close() })
 	chat := types.NewJID("123", types.DefaultUserServer)
 	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	if err := a.db.UpsertChat(chat.String(), "dm", "Synthetic receipt proof", at); err != nil {
-		t.Fatal(err)
-	}
-	for _, id := range []string{"before", "after"} {
-		if err := a.db.UpsertMessage(store.UpsertMessageParams{ChatJID: chat.String(), MsgID: id, Timestamp: at, FromMe: true, Text: "synthetic receipt proof"}); err != nil {
+	if baseline == "" {
+		if err := a.db.UpsertChat(chat.String(), "dm", "Synthetic receipt proof", at); err != nil {
 			t.Fatal(err)
+		}
+		for _, id := range []string{"before", "after"} {
+			if err := a.db.UpsertMessage(store.UpsertMessageParams{ChatJID: chat.String(), MsgID: id, Timestamp: at, FromMe: true, Text: "synthetic receipt proof"}); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	h := newRetrievalCLI(t, a)
