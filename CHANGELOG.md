@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.25.1 - 2026-10-26
+
+**Highlights:** reliable slow file and voice uploads, plus complete decoding of wrapped history and video notes.
+
 - Send: extend the `send file` and `send voice` attempt timeout by one second per 64 KiB, so uploads slower than 45 seconds no longer fail with `send timed out after 45s`. Thanks @ViaxCo (#535, #534).
 
 - Messages: read wrapped history payloads, grouped iPhone contact-card fields, and round video notes with their media and reply context. Thanks @emanuma03-alt (#529).
