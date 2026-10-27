@@ -2,8 +2,10 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"unicode"
 
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -48,7 +50,7 @@ func (a *App) chatWithOurself(chat types.JID) bool {
 // one row per recipient, so a group where one member has read is not mistaken
 // for one where everybody has.
 func (a *App) handleOutgoingReceiptEvent(ctx context.Context, evt *events.Receipt) error {
-	if evt == nil || evt.Chat.IsEmpty() || len(evt.MessageIDs) == 0 {
+	if evt == nil {
 		return nil
 	}
 	// A receipt we sent ourselves usually reports what we read on another
@@ -61,26 +63,66 @@ func (a *App) handleOutgoingReceiptEvent(ctx context.Context, evt *events.Receip
 	if !ok {
 		return nil
 	}
-	chat := canonicalJIDString(a.canonicalStoreJID(ctx, evt.Chat))
+	invalid := func(reason string) error {
+		err := fmt.Errorf("invalid outgoing receipt: %s", reason)
+		a.emitWarning("message_receipt_invalid", "warning: "+err.Error()+"; skipped invalid receipt input and sync remains incomplete. Retry sync and report repeated invalid-receipt warnings.", map[string]any{"reason": reason})
+		return err
+	}
+	if !validReceiptJID(evt.Chat) {
+		return invalid("malformed chat JID")
+	}
+	if len(evt.MessageIDs) == 0 {
+		return invalid("missing message IDs")
+	}
+	chatJID := a.canonicalStoreJID(ctx, evt.Chat)
+	if !validReceiptJID(chatJID) {
+		return invalid("malformed canonical chat JID")
+	}
+	chat := canonicalJIDString(chatJID)
 	recipient := evt.Sender
-	if recipient.IsEmpty() {
+	if recipient == types.EmptyJID && (evt.Chat.Server == types.DefaultUserServer || evt.Chat.Server == types.HiddenUserServer) {
 		// A direct chat names no participant: the recipient is the chat itself.
 		recipient = evt.Chat
 	}
-	recipientJID := canonicalJIDString(a.canonicalStoreJID(ctx, recipient))
+	if !validReceiptJID(recipient) {
+		return invalid("malformed recipient JID")
+	}
+	recipient = a.canonicalStoreJID(ctx, recipient)
+	if !validReceiptJID(recipient) {
+		return invalid("malformed canonical recipient JID")
+	}
+	recipientJID := canonicalJIDString(recipient)
 	when := evt.Timestamp
 	if when.IsZero() {
 		when = nowUTC()
 	}
+	var inputErr error
 	for _, id := range evt.MessageIDs {
+		if strings.TrimSpace(string(id)) == "" {
+			inputErr = invalid("blank message ID")
+			continue
+		}
 		if err := a.db.UpsertMessageReceipt(chat, string(id), recipientJID, status, when); err != nil {
 			a.emitWarning(
 				"message_receipt_store_failed",
 				fmt.Sprintf("warning: failed to store a %s receipt for chat %s: %v", status, chat, err),
 				map[string]any{"chat_jid": chat, "status": status, "error": err.Error()},
 			)
-			return err
+			return errors.Join(inputErr, err)
 		}
 	}
-	return nil
+	return inputErr
+}
+
+// Require both JID components before and after canonicalization. IsEmpty only
+// checks the server, so it also accepts a server with no recipient user.
+func validReceiptJID(jid types.JID) bool {
+	for _, part := range []string{jid.User, jid.Server} {
+		if part == "" || strings.IndexFunc(part, func(r rune) bool {
+			return unicode.IsSpace(r) || r == '@' || r == '/'
+		}) >= 0 {
+			return false
+		}
+	}
+	return true
 }
