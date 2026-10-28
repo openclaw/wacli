@@ -5,11 +5,6 @@ import (
 	"strings"
 )
 
-func (d *DB) MarkAppStateRecoveryRequired(collection string) error {
-	_, err := d.MarkAppStateRecoveryGeneration(collection)
-	return err
-}
-
 func (d *DB) MarkAppStateRecoveryGeneration(collection string) (int64, error) {
 	generations, err := d.MarkAppStateRecoveryGenerations([]string{collection})
 	if err != nil {

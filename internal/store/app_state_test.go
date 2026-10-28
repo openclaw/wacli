@@ -235,8 +235,8 @@ func TestAppStateRecoveryMarkerPersistsAcrossReopen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	if err := db.MarkAppStateRecoveryRequired("regular_low"); err != nil {
-		t.Fatalf("MarkAppStateRecoveryRequired: %v", err)
+	if _, err := db.MarkAppStateRecoveryGeneration("regular_low"); err != nil {
+		t.Fatalf("MarkAppStateRecoveryGeneration: %v", err)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
@@ -268,8 +268,8 @@ func TestAppStateRecoveryMarkerPersistsAcrossReopen(t *testing.T) {
 
 func TestAppStateRecoveryMarkersAreCollectionScoped(t *testing.T) {
 	db := openTestDB(t)
-	if err := db.MarkAppStateRecoveryRequired("regular_high"); err != nil {
-		t.Fatalf("MarkAppStateRecoveryRequired: %v", err)
+	if _, err := db.MarkAppStateRecoveryGeneration("regular_high"); err != nil {
+		t.Fatalf("MarkAppStateRecoveryGeneration: %v", err)
 	}
 	for collection, want := range map[string]bool{
 		"regular_high": true,
@@ -294,8 +294,8 @@ func TestAppStateRecoveryGenerationDoesNotClearNewFailure(t *testing.T) {
 	if alreadyRequired || generation != 1 {
 		t.Fatalf("initial marker = (%d, %t), want (1, false)", generation, alreadyRequired)
 	}
-	if err := db.MarkAppStateRecoveryRequired("regular_low"); err != nil {
-		t.Fatalf("MarkAppStateRecoveryRequired: %v", err)
+	if _, _, err := db.BeginAppStateRecovery("regular_low"); err != nil {
+		t.Fatalf("BeginAppStateRecovery new failure: %v", err)
 	}
 	cleared, err := db.ClearAppStateRecoveryGeneration("regular_low", generation)
 	if err != nil {
@@ -369,7 +369,7 @@ func TestAppStateRecoveryIntentBatchIsAtomic(t *testing.T) {
 func TestAppStateRecoveryCollectionsAreUniqueAndSorted(t *testing.T) {
 	db := openTestDB(t)
 	for _, name := range []string{"regular_low", "regular_high", "regular_low"} {
-		if err := db.MarkAppStateRecoveryRequired(name); err != nil {
+		if _, err := db.MarkAppStateRecoveryGeneration(name); err != nil {
 			t.Fatal(err)
 		}
 	}

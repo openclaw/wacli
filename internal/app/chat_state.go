@@ -505,8 +505,10 @@ func (c *appStateRecoveryCapture) handle(evt any) {
 			// Reserve the snapshot's ordered write position here, at the
 			// dispatch boundary. reserve only increments a counter under a
 			// mutex, so whatsmeow's dispatch never blocks on persistence.
+			// The sentinel travels last so the snapshot settles after its
+			// mutations are persisted.
 			c.completed <- appStateRecoveryCompletion{
-				events: append([]any(nil), c.captured...),
+				events: append(append([]any(nil), c.captured...), evt),
 				ticket: c.app.appStatePersist.reserve(),
 			}
 		}
@@ -718,6 +720,12 @@ func (a *App) ownsManualAppStateFetch(collection appstate.WAPatchName) bool {
 }
 
 func (a *App) clearCompletedAppStateRecovery(collection appstate.WAPatchName, markerGeneration int64) error {
+	if markerGeneration == 0 {
+		// Intent ids start at 1: generation 0 is a recovery that recorded no
+		// intent (the archive metadata snapshot request). It has nothing to
+		// clear, and intents written while it was pending are not its debt.
+		return nil
+	}
 	cleared, err := a.db.ClearAppStateRecoveryGeneration(string(collection), markerGeneration)
 	if err != nil {
 		return fmt.Errorf("clear WhatsApp app state recovery for %s: %w", collection, err)
@@ -809,6 +817,13 @@ func (a *App) completeLocalAppStateWrite(ctx context.Context, pending *pendingLo
 func (a *App) persistFetchedAppStateEvents(ctx context.Context, eventsToPersist []any, tracker *appStatePersistenceTracker) error {
 	tracker.begin()
 	for _, evt := range eventsToPersist {
+		if _, completion := evt.(*events.AppStateSyncComplete); completion && tracker.failed() {
+			// The snapshot settles only once every mutation it carried is in
+			// the store. After a failed write the replay debt and the archive
+			// recovery stay armed, so the retried snapshot applies the
+			// original action instead of meeting a boundary stamped here.
+			continue
+		}
 		a.persistAppStateEvent(ctx, evt, tracker)
 	}
 	return tracker.end()
@@ -860,6 +875,8 @@ func (a *App) handleChatStateEvent(ctx context.Context, evt any) error {
 			return nil
 		}
 		return a.db.SetChatArchiveSetting(v.Action.GetUnarchiveChats(), v.Timestamp)
+	case *events.AppStateSyncComplete:
+		return a.settleChatArchiveRecovery(v)
 	case *events.Pin:
 		if v == nil || v.JID.IsEmpty() || v.Action == nil {
 			return nil
@@ -903,6 +920,21 @@ func (a *App) handleChatStateEvent(ctx context.Context, evt any) error {
 func (a *App) handleContactEvent(ctx context.Context, _ *events.Contact) error {
 	_, err := a.drainContactJournal(ctx)
 	return err
+}
+
+// settleChatArchiveRecovery runs at the ordered persistence position of a
+// complete regular_low snapshot: the completion sentinel whatsmeow appends to a
+// verified full replay or a primary recovery, persisted after every mutation
+// that snapshot carried and skipped by persistFetchedAppStateEvents when one
+// of them failed. Whatever is still missing cannot be recovered by another
+// replay, so the store stops requesting one. Live sentinels from
+// whatsmeow's own dispatch are not routed here: their persistence position is
+// not ordered against the captured snapshot they close.
+func (a *App) settleChatArchiveRecovery(evt *events.AppStateSyncComplete) error {
+	if evt == nil || evt.Name != appstate.WAPatchRegularLow {
+		return nil
+	}
+	return a.db.SettleChatArchiveRecovery(nowUTC())
 }
 
 func mutedUntilFromAction(action *waSyncAction.MuteAction) int64 {
