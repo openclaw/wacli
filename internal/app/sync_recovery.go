@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +17,45 @@ import (
 )
 
 const appStateRecoveryStepTimeout = 30 * time.Second
+
+type AppStateResyncResult struct {
+	Collection   string `json:"collection"`
+	Completeness string `json:"completeness"`
+	QuickReplies int    `json:"quick_replies"`
+}
+
+// ResyncAppState forces the existing replay/recovery path, without a write.
+// Stock whatsmeow drops the saved collection version before verifying a full
+// sync; known-broken collections must be repaired by primary recovery instead.
+func (a *App) ResyncAppState(ctx context.Context, name string) (AppStateResyncResult, error) {
+	if name != string(appstate.WAPatchRegular) {
+		return AppStateResyncResult{}, fmt.Errorf("app-state resync supports only regular")
+	}
+	release, err := a.acquireChatStateSync(ctx)
+	if err != nil {
+		return AppStateResyncResult{}, err
+	}
+	defer release()
+	broken, err := a.db.AppStateFullSyncBrokenCollections()
+	if err != nil {
+		return AppStateResyncResult{}, err
+	}
+	if slices.Contains(broken, name) || a.isAppStateFullSyncBroken(appstate.WAPatchRegular) {
+		return AppStateResyncResult{}, fmt.Errorf("app state %s is flagged app_state_full_sync_broken; refusing a full sync that can discard usable local state before verification; use `wacli sync --follow` for primary recovery instead", name)
+	}
+	generation, _, err := a.db.BeginAppStateRecovery(name)
+	if err != nil {
+		return AppStateResyncResult{}, err
+	}
+	if err := a.replayRequiredAppState(ctx, appstate.WAPatchRegular, generation, &appStatePersistenceTracker{}); err != nil {
+		return AppStateResyncResult{}, err
+	}
+	replies, err := a.db.QuickReplies()
+	if err != nil {
+		return AppStateResyncResult{}, err
+	}
+	return AppStateResyncResult{Collection: name, Completeness: replies.Completeness, QuickReplies: len(replies.QuickReplies)}, nil
+}
 
 func (a *App) handleAppStateSyncError(ctx context.Context, evt *events.AppStateSyncError, recoveries *sync.Map) {
 	if evt == nil {

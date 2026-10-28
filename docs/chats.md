@@ -46,6 +46,63 @@ wacli chats cleanup [--days N] [--jid JID] [--dry-run] [--confirm]
 - `cleanup --days N` skips chats with no known local activity timestamp; use `--jid` for an explicit local row.
 - Use `cleanup --dry-run` before deleting and `--confirm` only for scripts that already reviewed the target list.
 
+## WhatsApp Business quick replies
+
+```bash
+wacli --json quick-replies list
+wacli quick-replies create --shortcut hello --message "Hello" --keyword greeting
+wacli quick-replies edit ID_OR_SHORTCUT --message "Updated" [--keyword K]...
+wacli quick-replies edit ID_OR_SHORTCUT --clear-keywords
+wacli quick-replies delete ID_OR_SHORTCUT
+wacli --json app-state resync regular
+```
+
+These commands are independent of WhatsApp Lists and label management. Quick
+replies are text-only app-state values; images on phone replies are not mirrored.
+Writes use `regular`, with the existing pre-write sync, shared persistence owner,
+apply boundary and durable recovery-debt handling. Omitted edit fields retain the
+stored shortcut, message, keywords, count and associated label IDs. Matching
+accepts shortcuts with or without `/`; ambiguity and database errors fail closed.
+Unix-seconds IDs follow Baileys and skip known IDs, including tombstones; unseen
+same-second IDs may still collide. Only Business accounts display quick replies.
+
+The action version is **3**, observed on two of three accounts; the third sent 2.
+whatsmeow's `events.AppState` omits action-version metadata, so account-specific
+version following is unavailable. The dependency is unchanged.
+
+The regular send boundary uses the pinned SDK's encode/apply/fetch primitives,
+returning send-result and single-409-retry batches synchronously to the owner.
+It does not use the SDK's detached send-echo dispatch. The owner persists the
+whole batch before releasing the writer, so an earlier echo cannot overwrite
+a following edit or undo a deletion. Device timestamps remain data, not clocks
+for arbitration. Existing replay-debt retention remains conservative: the next
+write or follow-mode recovery normally replays `regular` to settle that debt.
+
+When `sync --follow` owns the store, writes use the `app_state_write` delegate;
+resync uses the separate `app_state_resync` kind. Neither holds the paced send
+queue. Old owners reject unsupported kinds; upgrade and restart `wacli sync`.
+Read-only mode refuses writes and resync but permits offline listing.
+
+Listing returns `data = {quick_replies: [...], completeness: "complete"|"incomplete"}`.
+Independent reply coverage starts incomplete on upgrade, including stores with
+historical Lists full-sync metadata. Missing tables on read-only opens also mean
+incomplete; text output warns. Only a successfully persisted reply-aware full
+`regular` replay marks coverage complete. Snapshots merge rather than prune;
+generic REMOVE mutations are not dispatched by the pinned SDK, so completeness
+is not proof that every phone-side deletion or feature was captured.
+
+`app-state resync regular` reuses existing recovery and returns
+`data = {collection: "regular", completeness, quick_replies: N}`. There is no
+Lists count or force override. Known `app_state_full_sync_broken` collections
+always refuse and point to `sync --follow` primary recovery: stock whatsmeow
+discards saved collection state before a full sync verifies. Keep the primary
+online for recovery; resync does not bypass verification or guarantee repair.
+
+The next writable open adds migration **38**; 34-37 are claimed by open PRs
+(stickers, ad referrals, lists, message kinds). The schema guard also handles occupied migration rows from other
+builds/open PRs without overwriting their data or version entries. This feature
+does not depend on the Lists prerequisite or implement any label commands.
+
 ## Read receipts
 
 Read events carrying message IDs are applied as bounded ranges, including live echoes and later recovery replay. If newer readable messages remain, an existing marker-only unread state is preserved even when the event came from another device or a plain mark-read. Events containing only a timestamp keep their existing clearing behavior. Replaying an older range never restores a marker that has already been cleared.
