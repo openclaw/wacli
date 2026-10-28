@@ -43,9 +43,9 @@ func (a *App) AddChatStatePersistenceHandler(ctx context.Context) (func(), error
 	waClient := a.WA()
 	handlerID := waClient.AddEventHandler(func(evt any) {
 		switch v := evt.(type) {
-		case *events.AppState, *events.Star, *events.DeleteForMe,
+		case *events.AppState, *events.AppStateSyncComplete, *events.Star, *events.DeleteForMe,
 			*events.Archive, *events.UnarchiveChatsSetting, *events.Pin, *events.Mute, *events.MarkChatAsRead,
-			*events.Contact:
+			*events.Contact, *events.LabelEdit, *events.LabelAssociationChat:
 			a.handleAppStatePersistenceEvent(ctx, evt, nil)
 		case *wa.AppStateKeyUnavailable:
 			a.warnEmptyAppStateKey(v)
@@ -457,6 +457,11 @@ func (a *App) recoverMismatchingAppState(ctx context.Context, collection appstat
 	if recoveryErr != nil {
 		return recoveryErr
 	}
+	if collection == appstate.WAPatchRegular {
+		if err := a.db.MarkRegularFullSyncEventsSeen(); err != nil {
+			return err
+		}
+	}
 	return a.clearCompletedAppStateRecovery(collection, markerGeneration)
 }
 
@@ -637,6 +642,12 @@ func (a *App) runLateAppStateRecovery(collection appstate.WAPatchName, cont *lat
 		a.warnAppStateRecovery(string(collection), fmt.Errorf("persist late recovered app state %s: %w", collection, persistenceErr))
 		return
 	}
+	if collection == appstate.WAPatchRegular {
+		if err := a.db.MarkRegularFullSyncEventsSeen(); err != nil {
+			a.warnAppStateRecovery(string(collection), err)
+			return
+		}
+	}
 	if err := a.clearCompletedAppStateRecovery(collection, cont.generation); err != nil {
 		a.warnAppStateRecovery(string(collection), err)
 		return
@@ -679,6 +690,9 @@ func (a *App) fetchAndPersistAppState(ctx context.Context, collection appstate.W
 			persistCtx = context.WithoutCancel(ctx)
 		}
 		persistErr := a.persistFetchedAppStateEvents(persistCtx, eventsToPersist, tracker)
+		if persistErr == nil && fetchErr == nil && fullSync && collection == appstate.WAPatchRegular {
+			persistErr = a.db.MarkRegularFullSyncEventsSeen()
+		}
 		if collection == appstate.WAPatchCriticalUnblockLow {
 			// Drain even without events or after fetch cancellation: SDK store
 			// writes precede event delivery and must retain their canonical JID.
@@ -791,6 +805,9 @@ func (a *App) completeLocalAppStateWrite(ctx context.Context, pending *pendingLo
 	if err := a.appStatePersist.waitThrough(persistCtx, frontier); err != nil {
 		return err
 	}
+	// Regular sends now return captured result batches synchronously; retain
+	// the existing conservative debt policy for them as well. Other canonical
+	// SDK sends still have the asynchronous delivery limitation below.
 	// Keep this write's intent durable even though persistErr == nil: pinned
 	// whatsmeow's SendAppState advances the collection cursor and dispatches
 	// the post-send fetched mutations in a goroutine after returning, so a nil

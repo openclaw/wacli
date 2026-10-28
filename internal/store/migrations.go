@@ -47,6 +47,13 @@ var schemaMigrations = []migration{
 	{version: 31, name: "content-free message change journal", up: migrateChanges},
 	{version: 32, name: "message receipt retrieval revisions", up: migrateReceiptRetrieval},
 	{version: 33, name: "ordered chat auto-unarchive", up: migrateChatAutoUnarchive},
+	// Stickers use 34 and ad referrals use 35. The schema guard repairs stores whose
+	// version rows collide with older list or referral builds.
+	{version: 36, name: "WhatsApp lists and chat memberships", up: migrateLists},
+	// 37 is claimed by message kinds (#528). Like lists, the table is also ensured
+	// by ensureCurrentSchema, so a store whose row 38 belongs to another
+	// migration still gets it.
+	{version: 38, name: "WhatsApp Business quick replies", up: migrateQuickReplies},
 }
 
 func migratePlaceholderChatActivity(d *DB) error {
@@ -510,6 +517,12 @@ func (d *DB) ensureCurrentSchema() error {
 	}
 	if err := migrateChatAutoUnarchive(d); err != nil {
 		return fmt.Errorf("ensure chat auto-unarchive state: %w", err)
+	}
+	if err := migrateLists(d); err != nil {
+		return fmt.Errorf("ensure current lists schema: %w", err)
+	}
+	if err := migrateQuickReplies(d); err != nil {
+		return fmt.Errorf("ensure current quick replies schema: %w", err)
 	}
 	return nil
 }
@@ -1065,6 +1078,10 @@ func tableInfoPragma(table string) (string, error) {
 		return `PRAGMA table_info("messages_fts")`, nil
 	case "status_messages":
 		return `PRAGMA table_info("status_messages")`, nil
+	case "lists":
+		return `PRAGMA table_info("lists")`, nil
+	case "chat_lists":
+		return `PRAGMA table_info("chat_lists")`, nil
 	default:
 		return "", fmt.Errorf("unsupported table %q", table)
 	}

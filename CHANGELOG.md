@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- App state: capture regular send-result and 409-conflict batches synchronously through the existing SDK primitives, so detached echoes cannot overwrite a later quick reply, list edit, deletion or membership removal.
+
+- Lists: persist WhatsApp List/Business label definitions and chat membership events; add read-only `lists list` (`labels list`) and `chats list --list ID_OR_NAME`, with explicit unknown completeness and LID/phone membership reconciliation. Message memberships and favorites/system-list filtering remain out of scope.
+- Labels and quick replies: add `lists create|edit|delete` (`labels ...`), `chats label add|remove` and `quick-replies list|create|edit|delete`, sent as `regular` app-state patches after a pre-write sync and delegated to a running `sync --follow` like archiving. Quick replies seen during sync are now stored (migration 38). New label IDs are only guessed after a full sync was observed (otherwise pass `--id`); LID-only chats cannot be labeled yet.
+- Quick replies: send action version 3, track reply-aware full-sync coverage independently of older Lists stores, and add delegated `app-state resync regular` using existing recovery debt. Known-broken full syncs always refuse and point to primary recovery; there is no force override. Label writes reject retired/non-numeric IDs and duplicate renames, preserve absent colors and mute-until values, and report the patched phone JID; shortcut conflicts fail closed. Definitions, memberships and replies follow ordered app-state persistence rather than device clocks.
 - Sync: keep valid delivery/read receipts after malformed entries in the same batch, report invalid input separately from storage failures, and keep incomplete syncs from advancing freshness. Thanks @jesusvillota (#537).
 
 ## 0.25.1 - 2026-10-26
