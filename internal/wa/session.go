@@ -82,8 +82,19 @@ func (c *Client) init() (err error) {
 	// Let whatsmeow own bounded primary-device retries and cancellation for
 	// eligible decryption failures.
 	c.client.AutomaticMessageRerequestFromPhone = true
+	applyDeliveryGuarantees(c.client)
 	c.container = container
 	return nil
+}
+
+// applyDeliveryGuarantees makes a refused event recoverable. The sync handler
+// refuses (returns false) a message it could not store; whatsmeow then sends no
+// receipt for it. Without the decrypted-event buffer a redelivery fails (the
+// Signal counter already moved: ErrOldCounter) and the message is dropped; with
+// it, whatsmeow replays the stored plaintext. The same buffer covers a crash
+// between decrypt and store.
+func applyDeliveryGuarantees(cli *whatsmeow.Client) {
+	cli.EnableDecryptedEventBuffer = true
 }
 
 // journalContactStore wraps the device's contact store in a

@@ -32,6 +32,7 @@ type WAClient interface {
 	Connect(ctx context.Context, opts wa.ConnectOptions) error
 
 	AddEventHandler(handler func(any)) uint32
+	AddEventHandlerWithSuccessStatus(handler func(any) bool) uint32
 	RemoveEventHandler(id uint32)
 	ReconnectWithBackoff(ctx context.Context, minDelay, maxDelay time.Duration, opts wa.ConnectOptions) error
 

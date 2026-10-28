@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Sync: acknowledge a received message to WhatsApp only after it is stored, so a failed store is reported as `store_failed` and left for redelivery instead of being lost; enable whatsmeow's decrypted-event buffer so a redelivered message can be read again, and keep a history chunk on the server until every message in it is stored. Messages dropped by `--max-messages` or `--max-db-size` are still acknowledged.
 - Sync: keep valid delivery/read receipts after malformed entries in the same batch, report invalid input separately from storage failures, and keep incomplete syncs from advancing freshness. Thanks @jesusvillota (#537).
 
 ## 0.25.1 - 2026-10-26

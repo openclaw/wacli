@@ -34,7 +34,9 @@ type fakeWA struct {
 	linkedLID     string
 
 	nextHandlerID uint32
-	handlers      map[uint32]func(any)
+	// handlers holds plain and success-status handlers in one map, so handler
+	// counts (leak checks) cover both. A plain handler always reports true.
+	handlers map[uint32]func(any) bool
 
 	connectEvents  []any
 	connectErrs    []error
@@ -67,6 +69,7 @@ type fakeWA struct {
 	getSubscribedNewslettersErr error
 	decryptedReaction           *waProto.ReactionMessage
 	decryptReactionErr          error
+	decryptReactionPanic        string
 	sendPollCalls               []fakeSendPollCall
 	sendPollVoteCalls           []fakeSendPollVoteCall
 	decryptPollVoteFunc         func(evt *events.Message) (*waE2E.PollVoteMessage, error)
@@ -175,7 +178,7 @@ func newFakeWA() *fakeWA {
 	f := &fakeWA{
 		authed:          true,
 		autoReconnect:   true,
-		handlers:        map[uint32]func(any){},
+		handlers:        map[uint32]func(any) bool{},
 		contacts:        map[types.JID]types.ContactInfo{},
 		contactStoreErr: map[types.JID]error{},
 		groups:          map[types.JID]*types.GroupInfo{},
@@ -239,20 +242,30 @@ func (s *fakeContactStore) GetAllContacts(ctx context.Context) (map[types.JID]ty
 }
 
 func (f *fakeWA) emit(evt any) {
+	f.emitForAck(evt)
+}
+
+// emitForAck dispatches like whatsmeow: handlers run in registration order,
+// and the first one that returns false stops the dispatch and reports false,
+// which is when whatsmeow withholds the receipt.
+func (f *fakeWA) emitForAck(evt any) bool {
 	f.mu.Lock()
 	ids := make([]uint32, 0, len(f.handlers))
 	for id := range f.handlers {
 		ids = append(ids, id)
 	}
 	slices.Sort(ids)
-	handlers := make([]func(any), 0, len(ids))
+	handlers := make([]func(any) bool, 0, len(ids))
 	for _, id := range ids {
 		handlers = append(handlers, f.handlers[id])
 	}
 	f.mu.Unlock()
 	for _, h := range handlers {
-		h(evt)
+		if !h(evt) {
+			return false
+		}
 	}
+	return true
 }
 
 func (f *fakeWA) Close()      { f.Disconnect() }
@@ -329,6 +342,13 @@ func (f *fakeWA) Connect(ctx context.Context, opts wa.ConnectOptions) error {
 }
 
 func (f *fakeWA) AddEventHandler(handler func(any)) uint32 {
+	return f.AddEventHandlerWithSuccessStatus(func(evt any) bool {
+		handler(evt)
+		return true
+	})
+}
+
+func (f *fakeWA) AddEventHandlerWithSuccessStatus(handler func(any) bool) uint32 {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	id := f.nextHandlerID
@@ -730,6 +750,9 @@ func (f *fakeWA) SubscribePresence(ctx context.Context, jid types.JID) error {
 }
 
 func (f *fakeWA) DecryptReaction(ctx context.Context, reaction *events.Message) (*waProto.ReactionMessage, error) {
+	if f.decryptReactionPanic != "" {
+		panic(f.decryptReactionPanic)
+	}
 	if f.decryptReactionErr != nil {
 		return nil, f.decryptReactionErr
 	}

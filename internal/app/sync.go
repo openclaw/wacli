@@ -374,8 +374,12 @@ func (a *App) dbDiskSize() (int64, error) {
 	return total, nil
 }
 
+// errSyncStorageLimitReached marks the user's own --max-messages /
+// --max-db-size cap, as distinct from a failure to check it.
+var errSyncStorageLimitReached = errors.New("sync storage limit reached")
+
 func syncStorageLimitError(kind string, got, limit int64) error {
-	return fmt.Errorf("sync storage limit reached: %s is %d, limit is %d", kind, got, limit)
+	return fmt.Errorf("%w: %s is %d, limit is %d", errSyncStorageLimitReached, kind, got, limit)
 }
 
 func chatKind(chat types.JID) string {
