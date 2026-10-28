@@ -399,7 +399,7 @@ func (a *App) persistAppStateEvent(ctx context.Context, evt any, tracker *appSta
 	var err error
 	switch v := evt.(type) {
 	case *events.AppState:
-		err = a.handleLiveCallEvent(ctx, v)
+		err = errors.Join(a.handleStickerAppStateEvent(v), a.handleLiveCallEvent(ctx, v))
 	case *events.Star:
 		err = a.handleStarEvent(ctx, v)
 	case *events.DeleteForMe:
@@ -427,7 +427,13 @@ func appStateCollectionsForEvent(evt any) []appstate.WAPatchName {
 	case *events.Contact:
 		return []appstate.WAPatchName{appstate.WAPatchCriticalUnblockLow}
 	case *events.AppState:
-		if v == nil || v.SyncActionValue == nil || (v.GetCallLogAction() == nil && v.GetDeleteIndividualCallLog() == nil) {
+		if v == nil || v.SyncActionValue == nil {
+			return nil
+		}
+		if v.GetStickerAction() != nil || v.GetRemoveRecentStickerAction() != nil {
+			return []appstate.WAPatchName{appstate.WAPatchRegularLow}
+		}
+		if v.GetCallLogAction() == nil && v.GetDeleteIndividualCallLog() == nil {
 			return nil
 		}
 		return appstate.AllPatchNames[:]
@@ -751,6 +757,7 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 	defer unhandledWarnings.flush(a)
 	a.emitOrPrint("history_sync", map[string]any{"conversations": len(v.Data.Conversations)}, "\nProcessing history sync (%d conversations)...\n", len(v.Data.Conversations))
 	a.storeHistoryCallLogRecords(ctx, v, lastEvent)
+	a.storeHistoryStickers(v, lastEvent)
 	for _, conv := range v.Data.Conversations {
 		lastEvent.Store(nowUTC().UnixNano())
 		chatID := strings.TrimSpace(conv.GetID())
