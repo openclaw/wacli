@@ -96,6 +96,8 @@ type fakeWA struct {
 	markReadCalls           []fakeMarkReadCall
 	markReadBeforeApply     func()
 	markReadAfterApply      func()
+	deleteChatCalls         []fakeDeleteChatCall
+	deleteChatErr           error
 	readReceiptCalls        []fakeReadReceiptCall
 	onReadReceipt           func(int) (types.ReceiptType, error)
 	readReceiptErr          error
@@ -140,6 +142,12 @@ type fakeMuteCall struct {
 type fakeMarkReadCall struct {
 	target     types.JID
 	read       bool
+	lastMsgTS  time.Time
+	lastMsgKey *waCommon.MessageKey
+}
+
+type fakeDeleteChatCall struct {
+	target     types.JID
 	lastMsgTS  time.Time
 	lastMsgKey *waCommon.MessageKey
 }
@@ -961,6 +969,15 @@ func (f *fakeWA) MarkChatAsRead(ctx context.Context, target types.JID, read bool
 		afterApply()
 	}
 	return nil, nil
+}
+
+func (f *fakeWA) DeleteChat(ctx context.Context, target types.JID, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey, beforeApply func()) ([]any, error) {
+	f.mu.Lock()
+	f.deleteChatCalls = append(f.deleteChatCalls, fakeDeleteChatCall{target: target, lastMsgTS: lastMsgTS, lastMsgKey: lastMsgKey})
+	err := f.deleteChatErr
+	f.mu.Unlock()
+	beforeApply()
+	return nil, err
 }
 
 func (f *fakeWA) FetchAppState(ctx context.Context, name string, fullSync, onlyIfNotSynced bool) error {
