@@ -97,6 +97,7 @@ type sendDelegateResponse struct {
 	SelectedOption *selectOption        `json:"selected_option,omitempty"`
 	File           map[string]string    `json:"file,omitempty"`
 	StoreWarning   string               `json:"store_warning,omitempty"`
+	RapidWarning   string               `json:"rapid_send_warning,omitempty"`
 	PreviewWarning string               `json:"preview_warning,omitempty"`
 	ThumbWarning   string               `json:"thumbnail_warning,omitempty"`
 	Chat           string               `json:"chat,omitempty"`
@@ -125,12 +126,15 @@ func delegateSend(ctx context.Context, flags *rootFlags, req sendDelegateRequest
 	defer conn.Close()
 
 	deadline := time.Now().Add(commandTimeout(flags))
-	if req.Kind == mediaDownloadKind {
-		// Cache inspection and lock waits already consumed this command's
-		// budget. Never grant recovery a new full timeout after those stages.
+	if req.Kind == mediaDownloadKind || req.Kind == deleteKind {
+		// Cache inspection, lock waits and target binding already consumed this
+		// command's budget. Never grant recovery or a delete a new full timeout
+		// after those stages.
 		if parentDeadline, ok := ctx.Deadline(); ok && parentDeadline.Before(deadline) {
 			deadline = parentDeadline
 		}
+	}
+	if req.Kind == mediaDownloadKind {
 		// DialContext alone does not cancel an established socket. Closing it
 		// wakes a blocked read and tells the owner to cancel this media request.
 		stopCancel := context.AfterFunc(ctx, func() { _ = conn.Close() })

@@ -173,6 +173,9 @@ func deleteOutcomeUnknown(err error) error {
 }
 
 func writeDelegatedDeleteOutput(flags *rootFlags, resp sendDelegateResponse) error {
+	if resp.RapidWarning != "" {
+		fmt.Fprintln(os.Stderr, out.SanitizeHuman(resp.RapidWarning))
+	}
 	if resp.StoreWarning != "" {
 		fmt.Fprintf(os.Stderr, "warning: WhatsApp accepted the delete of message %s (id %s) but the local store update failed: %s; do not retry the delete\n", resp.Target, resp.ID, resp.StoreWarning)
 	}
@@ -232,7 +235,10 @@ func executeDelegatedDelete(ctx context.Context, d delegatedDelete, req sendDele
 	if !d.connected() {
 		return sendDelegateResponse{}, fmt.Errorf("WhatsApp is not connected; message %s was not deleted", msg.MsgID)
 	}
-	if err := warnRapidSendIfNeeded(d.storeDir, time.Now().UTC(), os.Stderr); err != nil {
+	// This process's stderr can be an NDJSON event stream, so the rapid-send
+	// warning goes back to the calling command instead.
+	var rapid strings.Builder
+	if err := warnRapidSendIfNeeded(d.storeDir, time.Now().UTC(), &rapid); err != nil {
 		return sendDelegateResponse{}, fmt.Errorf("%w; message %s was not deleted", err, msg.MsgID)
 	}
 	// One native call, with no reconnect or retry: after a timeout or a lost
@@ -245,7 +251,7 @@ func executeDelegatedDelete(ctx context.Context, d delegatedDelete, req sendDele
 	if err != nil {
 		return sendDelegateResponse{}, deleteOutcomeUnknown(err)
 	}
-	resp := sendDelegateResponse{OK: true, Sent: true, To: msg.ChatJID, ID: string(sentID), Target: msg.MsgID}
+	resp := sendDelegateResponse{OK: true, Sent: true, To: msg.ChatJID, ID: string(sentID), Target: msg.MsgID, RapidWarning: strings.TrimSpace(rapid.String())}
 	if err := d.db.MarkMessageRevoked(msg.ChatJID, msg.MsgID); err != nil {
 		resp.StoreWarning = fmt.Sprintf("store deleted message state: %v", err)
 	}

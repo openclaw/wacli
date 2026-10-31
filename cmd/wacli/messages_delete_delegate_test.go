@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -17,6 +18,7 @@ import (
 	"github.com/openclaw/wacli/internal/app"
 	"github.com/openclaw/wacli/internal/delegate"
 	"github.com/openclaw/wacli/internal/lock"
+	"github.com/openclaw/wacli/internal/out"
 	"github.com/openclaw/wacli/internal/store"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/types"
@@ -690,6 +692,65 @@ func TestDelegatedDeleteThroughTheSendQueue(t *testing.T) {
 	}
 }
 
+// With --events, the follow process's stderr is an NDJSON stream, so a rapid
+// delete warns the command that asked for it instead.
+func TestDelegatedRapidDeleteWarnsTheCallerNotTheEventStream(t *testing.T) {
+	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
+	storeDir := shortPresenceDelegateStoreDir(t)
+	db := openDeleteStore(t, storeDir)
+	putDeleteRow(t, db, delPN, delID, nil)
+	putDeleteRow(t, db, delPN, delNext, nil)
+	d := testDelegatedDelete(storeDir, db, deleteNoAlias, &revokeRecorder{})
+	flags := &rootFlags{storeDir: storeDir, timeout: 2 * time.Second}
+
+	var first, rapid sendDelegateResponse
+	syncStderr := captureRootStderr(t, func() {
+		events := out.NewEventWriter(os.Stderr, true)
+		_ = events.Emit("connected", nil)
+		stop, err := startSendDelegateServerForStore(context.Background(), storeDir, sendSpacing{}, func(ctx context.Context, req sendDelegateRequest) (sendDelegateResponse, error) {
+			return executeDelegatedDelete(ctx, d, req)
+		})
+		if err != nil {
+			t.Errorf("start delegate server: %v", err)
+			return
+		}
+		defer stop()
+		var err1, err2 error
+		first, _, err1 = tryDelegateDelete(context.Background(), flags, heldLockErr(), delPN, delID, 0)
+		rapid, _, err2 = tryDelegateDelete(context.Background(), flags, heldLockErr(), delPN, delNext, 0)
+		if err1 != nil || err2 != nil {
+			t.Errorf("deletes failed: %v, %v", err1, err2)
+		}
+		_ = events.Emit("signal", map[string]any{"signal": "interrupt", "action": "shutdown"})
+	})
+	for _, line := range strings.Split(strings.TrimSpace(syncStderr), "\n") {
+		if !json.Valid([]byte(line)) {
+			t.Fatalf("sync stderr is not NDJSON: %q", syncStderr)
+		}
+	}
+	if first.RapidWarning != "" {
+		t.Fatalf("first delete warned: %q", first.RapidWarning)
+	}
+	if !strings.Contains(rapid.RapidWarning, "after the previous send") {
+		t.Fatalf("rapid delete warning = %q", rapid.RapidWarning)
+	}
+
+	var stdout string
+	stderr := captureRootStderr(t, func() {
+		stdout = captureRootStdout(t, func() {
+			if err := writeDelegatedDeleteOutput(&rootFlags{asJSON: true}, rapid); err != nil {
+				t.Errorf("writeDelegatedDeleteOutput: %v", err)
+			}
+		})
+	})
+	if !strings.Contains(stderr, "warning: send command was invoked") || !strings.Contains(stderr, "rapid automated sends") {
+		t.Fatalf("caller stderr = %q, want the rapid-send warning", stderr)
+	}
+	if !json.Valid([]byte(stdout)) || strings.Contains(stdout, "rapid") {
+		t.Fatalf("caller stdout = %q, want the unchanged JSON result", stdout)
+	}
+}
+
 func TestDelegatedDeleteHeldPastItsDeadline(t *testing.T) {
 	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
 	storeDir := shortPresenceDelegateStoreDir(t)
@@ -841,6 +902,55 @@ func TestDelegatedDeleteRequestWriteFailureIsUnknown(t *testing.T) {
 	assertDeleteUnknown(t, err)
 	if !strings.Contains(err.Error(), "write") {
 		t.Fatalf("error = %v, want the failed request write", err)
+	}
+}
+
+// Lock waits and target binding spend part of --timeout before the request
+// is handed over; the delete must not get a fresh full budget after them.
+func TestDelegatedDeleteKeepsTheCommandDeadline(t *testing.T) {
+	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
+	storeDir := newLockedDeleteStore(t)
+	ln, err := delegate.Listen(storeDir)
+	if err != nil {
+		t.Fatalf("listen delegate socket: %v", err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	requests := make(chan sendDelegateRequest, 1)
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		var req sendDelegateRequest
+		if err := json.NewDecoder(conn).Decode(&req); err != nil {
+			return
+		}
+		requests <- req
+		// Never answer: the caller has to stop at its own deadline.
+		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		_, _ = io.Copy(io.Discard, conn)
+	}()
+
+	// Earlier stages left 500ms of a 10s --timeout.
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	callerDeadline, _ := ctx.Deadline()
+	_, delegated, err := tryDelegateDelete(ctx, &rootFlags{storeDir: storeDir, timeout: 10 * time.Second}, heldLockErr(), delPN, delID, 0)
+	if !delegated {
+		t.Fatalf("delete was not delegated: %v", err)
+	}
+	assertDeleteUnknown(t, err)
+	if late := time.Since(callerDeadline); late > 2*time.Second {
+		t.Fatalf("caller waited %v past the command deadline", late)
+	}
+	select {
+	case req := <-requests:
+		if req.DeadlineUnixMS == 0 || req.DeadlineUnixMS > callerDeadline.UnixMilli() {
+			t.Fatalf("delegate deadline = %v, want no later than the command deadline %v", time.UnixMilli(req.DeadlineUnixMS), callerDeadline)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("delegate request never arrived")
 	}
 }
 
