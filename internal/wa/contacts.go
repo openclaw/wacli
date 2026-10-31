@@ -104,6 +104,34 @@ func (c *Client) ResolvePNToLID(ctx context.Context, jid types.JID) types.JID {
 	return resolvePNToLID(ctx, cli, jid)
 }
 
+// LocalChatAlias returns the stored phone-number/LID counterpart of a user
+// chat JID without a network lookup: the empty JID when none is stored, and
+// an error when the mapping cannot be read, so a caller can refuse instead of
+// mistaking a failed read for no mapping.
+func (c *Client) LocalChatAlias(ctx context.Context, jid types.JID) (types.JID, error) {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || cli.Store == nil || cli.Store.LIDs == nil {
+		return types.EmptyJID, fmt.Errorf("local LID mapping is not available")
+	}
+	user := jid.ToNonAD()
+	// As in resolvePNToLID, the account's own identities come from the device.
+	if ownPN, ownLID := cli.Store.GetJID().ToNonAD(), cli.Store.GetLID().ToNonAD(); !ownPN.IsEmpty() && !ownLID.IsEmpty() {
+		switch user {
+		case ownPN:
+			return ownLID, nil
+		case ownLID:
+			return ownPN, nil
+		}
+	}
+	alias, err := cli.Store.GetAltJID(ctx, user)
+	if err != nil {
+		return types.EmptyJID, err
+	}
+	return alias.ToNonAD(), nil
+}
+
 func BestContactName(info types.ContactInfo) string {
 	if !info.Found {
 		return ""
