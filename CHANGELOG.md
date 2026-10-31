@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Sync: delegate `messages delete` of one of your own messages to a running `sync --follow` process instead of failing on the store lock. The exact stored target is bound before queueing and checked again before a single revoke call that wacli does not retry; a lost reply reports an unknown outcome instead of "not sent".
 - Sync: keep valid delivery/read receipts after malformed entries in the same batch, report invalid input separately from storage failures, and keep incomplete syncs from advancing freshness. Thanks @jesusvillota (#537).
 
 ## 0.25.1 - 2026-10-26

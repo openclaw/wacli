@@ -52,6 +52,7 @@ type sendDelegateRequest struct {
 	PTT                  bool     `json:"ptt,omitempty"`
 	MaxSizeBytes         int64    `json:"max_size_bytes,omitempty"`
 	ID                   string   `json:"id,omitempty"`
+	TargetChat           string   `json:"target_chat,omitempty"`
 	Reaction             string   `json:"reaction,omitempty"`
 	Sender               string   `json:"sender,omitempty"`
 	Label                string   `json:"label,omitempty"`
@@ -96,6 +97,7 @@ type sendDelegateResponse struct {
 	SelectedOption *selectOption        `json:"selected_option,omitempty"`
 	File           map[string]string    `json:"file,omitempty"`
 	StoreWarning   string               `json:"store_warning,omitempty"`
+	RapidWarning   string               `json:"rapid_send_warning,omitempty"`
 	PreviewWarning string               `json:"preview_warning,omitempty"`
 	ThumbWarning   string               `json:"thumbnail_warning,omitempty"`
 	Chat           string               `json:"chat,omitempty"`
@@ -124,12 +126,15 @@ func delegateSend(ctx context.Context, flags *rootFlags, req sendDelegateRequest
 	defer conn.Close()
 
 	deadline := time.Now().Add(commandTimeout(flags))
-	if req.Kind == mediaDownloadKind {
-		// Cache inspection and lock waits already consumed this command's
-		// budget. Never grant recovery a new full timeout after those stages.
+	if req.Kind == mediaDownloadKind || req.Kind == deleteKind {
+		// Cache inspection, lock waits and target binding already consumed this
+		// command's budget. Never grant recovery or a delete a new full timeout
+		// after those stages.
 		if parentDeadline, ok := ctx.Deadline(); ok && parentDeadline.Before(deadline) {
 			deadline = parentDeadline
 		}
+	}
+	if req.Kind == mediaDownloadKind {
 		// DialContext alone does not cancel an established socket. Closing it
 		// wakes a blocked read and tells the owner to cancel this media request.
 		stopCancel := context.AfterFunc(ctx, func() { _ = conn.Close() })
@@ -138,10 +143,17 @@ func delegateSend(ctx context.Context, flags *rootFlags, req sendDelegateRequest
 	req.DeadlineUnixMS = deadline.UnixMilli()
 	_ = conn.SetDeadline(deadline)
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
+		if req.Kind == deleteKind {
+			// Part of the request may have reached the daemon.
+			return sendDelegateResponse{}, deleteOutcomeUnknown(err)
+		}
 		return sendDelegateResponse{}, err
 	}
 	var resp sendDelegateResponse
 	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
+		if req.Kind == deleteKind {
+			return sendDelegateResponse{}, deleteOutcomeUnknown(err)
+		}
 		if req.Kind == mediaDownloadKind && ctx.Err() != nil {
 			return sendDelegateResponse{}, fmt.Errorf("media caller stopped waiting; recovery may have completed, check the exact local file before retrying: %w", ctx.Err())
 		}
@@ -157,6 +169,9 @@ func delegateSend(ctx context.Context, flags *rootFlags, req sendDelegateRequest
 		return sendDelegateResponse{}, err
 	}
 	if !resp.OK {
+		if req.Kind == deleteKind && resp.Error == "" {
+			return sendDelegateResponse{}, deleteOutcomeUnknown(errors.New("malformed reply from the running sync process"))
+		}
 		return sendDelegateResponse{}, errors.New(resp.Error)
 	}
 	return resp, nil
@@ -362,7 +377,9 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDele
 
 func writeDelegateResult(conn net.Conn, requestCtx context.Context, req sendDelegateRequest, resp sendDelegateResponse, err error) {
 	if err != nil {
-		if requestCtx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		// A delegated delete states its own dispatch outcome; do not reword a
+		// refusal before dispatch as possibly sent.
+		if req.Kind != deleteKind && (requestCtx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)) {
 			err = fmt.Errorf("delegated %s failed after dispatch and may still have gone through; check before retrying: %w", req.Kind, err)
 		}
 		resp = sendDelegateResponse{OK: false, Error: err.Error()}
@@ -406,6 +423,8 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 		return executeDelegatedPresenceSubscribe(ctx, a, req)
 	case "edit":
 		return executeDelegatedEdit(ctx, a, req)
+	case deleteKind:
+		return executeDelegatedDelete(ctx, delegatedDeleteFor(a), req)
 	case markReadKind:
 		return executeDelegatedMarkRead(ctx, a, req)
 	case markReadThroughKind:

@@ -41,6 +41,16 @@ func newMessagesDeleteCmd(flags *rootFlags) *cobra.Command {
 
 			a, lk, err := newApp(ctx, flags, true, false)
 			if err != nil {
+				if forMe {
+					return err
+				}
+				resp, delegated, delegateErr := tryDelegateDelete(ctx, flags, err, chat, id, postSendWait)
+				if delegated {
+					if delegateErr != nil {
+						return delegateErr
+					}
+					return writeDelegatedDeleteOutput(flags, resp)
+				}
 				return err
 			}
 			defer closeApp(a, lk)
