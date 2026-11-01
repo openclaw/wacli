@@ -198,6 +198,14 @@ func markUnhandledPayload(m *waProto.Message, pm *ParsedMessage) {
 		switch fd.Name() {
 		case "messageContextInfo":
 			return true
+		case "protocolMessage":
+			// The type is what tells an internal control (key share, peer data
+			// operation, history notification) from a mutation the parser missed;
+			// the bare field name reported them all alike (#546).
+			if protocol := m.GetProtocolMessage(); protocol != nil && protocol.Type != nil {
+				names = append(names, "protocolMessage:"+protocol.GetType().String())
+				return true
+			}
 		}
 		names = append(names, string(fd.Name()))
 		return true
