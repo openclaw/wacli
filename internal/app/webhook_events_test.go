@@ -238,6 +238,28 @@ func TestMessageWebhookPayloadMatchesLegacyBody(t *testing.T) {
 	if !reflect.DeepEqual(gotFields, legacyFields) {
 		t.Fatalf("message payload changed\ngot:  %s\nwant: %s", got, legacy)
 	}
+	if _, ok := gotFields["AssociationType"]; ok {
+		t.Fatalf("ordinary message includes empty AssociationType: %s", got)
+	}
+	if _, ok := gotFields["AssociatedParentID"]; ok {
+		t.Fatalf("ordinary message includes empty AssociatedParentID: %s", got)
+	}
+
+	message.AssociationType = "HD_IMAGE_DUAL_UPLOAD"
+	message.AssociatedParentID = "m-parent"
+	got, err = json.Marshal(a.newSyncWebhookEventPayload(context.Background(), syncWebhookEvent{
+		Kind:    SyncWebhookEventMessage,
+		Message: message,
+	}))
+	if err != nil {
+		t.Fatalf("marshal associated message event: %v", err)
+	}
+	if err := json.Unmarshal(got, &gotFields); err != nil {
+		t.Fatalf("unmarshal associated message event: %v", err)
+	}
+	if gotFields["AssociationType"] != "HD_IMAGE_DUAL_UPLOAD" || gotFields["AssociatedParentID"] != "m-parent" {
+		t.Fatalf("association metadata missing from message payload: %s", got)
+	}
 }
 
 func TestSyncWebhookPayloadNormalizesResolvableLIDs(t *testing.T) {

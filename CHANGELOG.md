@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Webhooks: include WhatsApp association type and parent message ID for associated messages, while preserving the payload shape for ordinary messages.
 - Sync: keep valid delivery/read receipts after malformed entries in the same batch, report invalid input separately from storage failures, and keep incomplete syncs from advancing freshness. Thanks @jesusvillota (#537).
 
 ## 0.25.1 - 2026-10-26

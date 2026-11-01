@@ -80,6 +80,11 @@ Messages use the stored live message payload documented above:
 {"Chat":"15551234567@s.whatsapp.net","ID":"3EB0…","SenderJID":"15551234567@s.whatsapp.net","Timestamp":"2026-07-25T10:00:00Z","FromMe":false,"Text":"hi","ChatName":"Alice"}
 ```
 
+Messages with WhatsApp association metadata also include `AssociationType` and
+`AssociatedParentID`. The type is WhatsApp's association enum, such as
+`HD_IMAGE_DUAL_UPLOAD`, and the parent ID identifies the related earlier
+message. Both fields are omitted when the message has no association.
+
 Media messages include a `Media` object containing only `Type`, `Caption`, `Filename`, `MimeType`, and `FileLength`; messages without media retain `Media: null`. Attachment retrieval fields (`MediaKey`, `DirectPath`, `FileSHA256`, and `FileEncSHA256`) are not exported. Older releases exposed these fields unintentionally: consumers that downloaded from them should use `--download-media` or `media download` instead. Local download and retry data remains available in the store. Review retained webhook logs and queues from older releases for attachment keys.
 
 `EventType: "receipt"` reports delivery and read state for messages you sent. Only

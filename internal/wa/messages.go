@@ -72,31 +72,35 @@ type PollAddOptionRef struct {
 }
 
 type ParsedMessage struct {
-	Chat             types.JID
-	ID               string
-	SenderJID        string
-	Timestamp        time.Time
-	FromMe           bool
-	Text             string
-	Buttons          []Button
-	Media            *Media
-	Location         *Location
-	Poll             *Poll
-	PollVote         *PollVoteRef
-	PollAdd          *PollAddOptionRef
-	PushName         string
-	ReplyToID        string
-	ReplyToSenderJID string
-	ReplyToDisplay   string
-	ReactionToID     string
-	ReactionEmoji    string
-	IsForwarded      bool
-	ForwardingScore  uint32
-	StarredKnown     bool
-	Starred          bool
-	Edited           bool
-	Revoked          bool
-	Call             *ParsedCallEvent
+	Chat types.JID
+	ID   string
+	// AssociationType identifies a WhatsApp association attached to this message.
+	AssociationType string `json:"AssociationType,omitempty"`
+	// AssociatedParentID is the WhatsApp message ID this message is associated with.
+	AssociatedParentID string `json:"AssociatedParentID,omitempty"`
+	SenderJID          string
+	Timestamp          time.Time
+	FromMe             bool
+	Text               string
+	Buttons            []Button
+	Media              *Media
+	Location           *Location
+	Poll               *Poll
+	PollVote           *PollVoteRef
+	PollAdd            *PollAddOptionRef
+	PushName           string
+	ReplyToID          string
+	ReplyToSenderJID   string
+	ReplyToDisplay     string
+	ReactionToID       string
+	ReactionEmoji      string
+	IsForwarded        bool
+	ForwardingScore    uint32
+	StarredKnown       bool
+	Starred            bool
+	Edited             bool
+	Revoked            bool
+	Call               *ParsedCallEvent
 	// UnhandledPayload names the populated waE2E.Message field when parsing
 	// extracted no content at all. Empty when the message was understood.
 	UnhandledPayload string
@@ -218,6 +222,7 @@ func extractWAProto(m *waProto.Message, pm *ParsedMessage) *waProto.Message {
 	if m == nil || pm == nil {
 		return nil
 	}
+	applyAssociation(m.GetMessageContextInfo(), pm)
 
 	if deviceSent := m.GetDeviceSentMessage(); deviceSent.GetMessage() != nil {
 		applyDeviceSentDestination(deviceSent.GetDestinationJID(), pm)
@@ -281,6 +286,18 @@ func extractWAProto(m *waProto.Message, pm *ParsedMessage) *waProto.Message {
 		pm.IsForwarded = ctx.GetIsForwarded() || pm.ForwardingScore > 0
 	}
 	return m
+}
+
+func applyAssociation(ctx *waE2E.MessageContextInfo, pm *ParsedMessage) {
+	if ctx == nil || pm == nil || pm.AssociationType != "" {
+		return
+	}
+	association := ctx.GetMessageAssociation()
+	if association == nil {
+		return
+	}
+	pm.AssociationType = association.GetAssociationType().String()
+	pm.AssociatedParentID = strings.TrimSpace(association.GetParentMessageKey().GetID())
 }
 
 func applyDeviceSentDestination(destination string, pm *ParsedMessage) {

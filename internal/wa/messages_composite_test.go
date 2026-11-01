@@ -106,6 +106,48 @@ func TestAssociatedAndGroupStatusContent(t *testing.T) {
 	}
 }
 
+func TestAssociatedChildPreservesMessageAssociation(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		onInner bool
+	}{{"wrapper", false}, {"inner", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, history := range []bool{false, true} {
+				name := "live"
+				if history {
+					name = "history"
+				}
+				t.Run(name, func(t *testing.T) {
+					associationType := waE2E.MessageAssociation_HD_IMAGE_DUAL_UPLOAD
+					association := &waE2E.MessageAssociation{
+						AssociationType:  &associationType,
+						ParentMessageKey: &waCommon.MessageKey{ID: proto.String("parent-id")},
+					}
+					inner := &waProto.Message{ImageMessage: &waProto.ImageMessage{Caption: proto.String("HD copy")}}
+					wrapped := &waProto.Message{AssociatedChildMessage: &waE2E.FutureProofMessage{Message: inner}}
+					contextInfo := &waProto.MessageContextInfo{MessageAssociation: association}
+					if tc.onInner {
+						inner.MessageContextInfo = contextInfo
+					} else {
+						wrapped.MessageContextInfo = contextInfo
+					}
+
+					pm := ParseLiveMessage(liveEvent(wrapped))
+					if history {
+						pm = ParseHistoryMessage("15555550123@s.whatsapp.net", &waProto.WebMessageInfo{Message: wrapped})
+					}
+					if pm.AssociationType != "HD_IMAGE_DUAL_UPLOAD" || pm.AssociatedParentID != "parent-id" {
+						t.Fatalf("association type=%q parent=%q", pm.AssociationType, pm.AssociatedParentID)
+					}
+					if pm.Text != "HD copy" {
+						t.Fatalf("text=%q, want HD copy", pm.Text)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestGroupInviteContentAndContext(t *testing.T) {
 	for _, tc := range []struct{ caption, name, want string }{{"join this discussion", "Readers", "join this discussion"}, {"", "Readers", "Group invite: Readers"}, {"", "", "[Group invite]"}} {
 		m := &waProto.Message{GroupInviteMessage: &waE2E.GroupInviteMessage{Caption: proto.String(tc.caption), GroupName: proto.String(tc.name), GroupJID: proto.String("120363000001@g.us"), InviteCode: proto.String("synthetic-invite-code"), ContextInfo: &waProto.ContextInfo{StanzaID: proto.String("invite-parent")}}}
