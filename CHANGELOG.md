@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- CI: schedule weekly CodeQL main scans while retaining PR and manual analysis.
+
 - Sync: keep valid delivery/read receipts after malformed entries in the same batch, report invalid input separately from storage failures, and keep incomplete syncs from advancing freshness. Thanks @jesusvillota (#537).
 
 ## 0.25.1 - 2026-10-26
