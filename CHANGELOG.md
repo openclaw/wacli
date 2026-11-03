@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Groups: add `groups set-picture` / `groups remove-picture` to set or clear a group's picture, and `groups link` / `groups unlink` to add an existing group to a community or take it out (whatsmeow `SetGroupPhoto`, `LinkGroup`, `UnlinkGroup`).
+
 ## 0.25.1 - 2026-10-26
 
 **Highlights:** reliable slow file and voice uploads, plus complete decoding of wrapped history and video notes.

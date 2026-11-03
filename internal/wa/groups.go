@@ -197,3 +197,36 @@ func (c *Client) LeaveGroup(ctx context.Context, group types.JID) error {
 	}
 	return cli.LeaveGroup(ctx, group)
 }
+
+// SetGroupPhoto sets (or, with nil avatar, removes) a group's picture. avatar must be JPEG bytes.
+func (c *Client) SetGroupPhoto(ctx context.Context, jid types.JID, avatar []byte) (string, error) {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || !cli.IsConnected() {
+		return "", fmt.Errorf("not connected")
+	}
+	return cli.SetGroupPhoto(ctx, jid, avatar)
+}
+
+// LinkGroup adds an existing group to a community (parent group).
+func (c *Client) LinkGroup(ctx context.Context, parent, child types.JID) error {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || !cli.IsConnected() {
+		return fmt.Errorf("not connected")
+	}
+	return cli.LinkGroup(ctx, parent, child)
+}
+
+// UnlinkGroup removes a group from a community (parent group).
+func (c *Client) UnlinkGroup(ctx context.Context, parent, child types.JID) error {
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || !cli.IsConnected() {
+		return fmt.Errorf("not connected")
+	}
+	return cli.UnlinkGroup(ctx, parent, child)
+}
