@@ -1143,7 +1143,11 @@ func (f *fakeWA) SetGroupPhoto(ctx context.Context, jid types.JID, avatar []byte
 	return "fake-picture-id", nil
 }
 
-func (f *fakeWA) LinkGroup(ctx context.Context, parent, child types.JID) error {
+func (f *fakeWA) GroupHidden(ctx context.Context, jid types.JID) (bool, error) {
+	return false, nil
+}
+
+func (f *fakeWA) LinkGroup(ctx context.Context, parent, child types.JID, hidden bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	g := f.groups[child]

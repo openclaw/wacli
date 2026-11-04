@@ -96,6 +96,7 @@ func runGroupPicture(flags *rootFlags, jidStr string, imgBytes []byte) error {
 // add an existing group to a community, or take it out.
 func newGroupsLinkCmd(flags *rootFlags, link bool) *cobra.Command {
 	var jidStr, parentStr string
+	var hidden bool
 	use, short := "link", "Add an existing group to a community"
 	if !link {
 		use, short = "unlink", "Remove a group from its community"
@@ -136,7 +137,7 @@ func newGroupsLinkCmd(flags *rootFlags, link bool) *cobra.Command {
 			}
 
 			if link {
-				err = a.WA().LinkGroup(ctx, parent, child)
+				err = a.WA().LinkGroup(ctx, parent, child, hidden)
 			} else {
 				err = a.WA().UnlinkGroup(ctx, parent, child)
 			}
@@ -147,7 +148,11 @@ func newGroupsLinkCmd(flags *rootFlags, link bool) *cobra.Command {
 				_ = persistGroupInfo(ctx, a.DB(), a.WA(), info)
 			}
 			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{"jid": child.String(), "parent": parent.String(), "linked": link})
+				res := map[string]any{"jid": child.String(), "parent": parent.String(), "linked": link}
+				if link {
+					res["hidden"] = hidden
+				}
+				return out.WriteJSON(os.Stdout, res)
 			}
 			fmt.Fprintln(os.Stdout, "OK")
 			return nil
@@ -155,5 +160,8 @@ func newGroupsLinkCmd(flags *rootFlags, link bool) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&jidStr, "jid", "", "group JID (…@g.us)")
 	cmd.Flags().StringVar(&parentStr, "parent", "", "community parent group JID (…@g.us)")
+	if link {
+		cmd.Flags().BoolVar(&hidden, "hidden", false, "hide the group from the community's group list (fixed at link time)")
+	}
 	return cmd
 }

@@ -20,7 +20,7 @@ wacli groups locked --jid GROUP_JID (--on|--off)
 wacli groups leave --jid GROUP_JID
 wacli groups set-picture --jid GROUP_JID IMAGE
 wacli groups remove-picture --jid GROUP_JID
-wacli groups link --jid GROUP_JID --parent COMMUNITY_JID
+wacli groups link --jid GROUP_JID --parent COMMUNITY_JID [--hidden]
 wacli groups unlink --jid GROUP_JID --parent COMMUNITY_JID
 wacli groups participants add --jid GROUP_JID --user PHONE_OR_JID [--user ...]
 wacli groups participants remove --jid GROUP_JID --user PHONE_OR_JID [--user ...]
@@ -53,7 +53,7 @@ wacli groups prune [--days N] [--left-only=false|--include-active] [--dry-run] [
 - `requests` lists, approves, or rejects pending join requests for groups with join approval enabled.
 - `leave` marks the group left locally after WhatsApp confirms.
 - `set-picture` accepts JPEG or PNG and auto-resizes to at most 640 px, like `profile set-picture`. `remove-picture` clears it. Both need admin rights in the group.
-- `link` adds an existing group to a community as a subgroup; `unlink` takes it out. `--parent` is the community parent JID (`IsParent` in `list --json`). The group's local row is refreshed after WhatsApp confirms.
+- `link` adds an existing group to a community as a subgroup; `unlink` takes it out. `--parent` is the community parent JID (`IsParent` in `list --json`). The group's local row is refreshed after WhatsApp confirms. `--hidden` leaves the group out of the community's group list (only its members see it); WhatsApp fixes visibility at link time, so to change it unlink and link again. `info` prints `Hidden:` for subgroups.
 - `prune` only deletes local group/chat/message rows from `wacli.db`. It does not leave WhatsApp groups or delete anything from WhatsApp servers.
 - `prune` defaults to groups marked left locally. `--days N` limits left-group pruning to groups left more than `N` days ago.
 - `prune --include-active --days N` also targets active groups whose last known local message is older than `N` days. Groups with no known local activity timestamp are skipped.

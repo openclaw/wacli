@@ -6,7 +6,7 @@
 
 - Sync: keep valid delivery/read receipts after malformed entries in the same batch, report invalid input separately from storage failures, and keep incomplete syncs from advancing freshness. Thanks @jesusvillota (#537).
 
-- Groups: add `groups set-picture` / `groups remove-picture` to set or clear a group's picture, and `groups link` / `groups unlink` to add an existing group to a community or take it out (whatsmeow `SetGroupPhoto`, `LinkGroup`, `UnlinkGroup`).
+- Groups: add `groups set-picture` / `groups remove-picture` to set or clear a group's picture, and `groups link` / `groups unlink` to add an existing group to a community (optionally `--hidden` from the community's group list; `groups info` shows `Hidden:`) or take it out (whatsmeow `SetGroupPhoto`, `LinkGroup`, `UnlinkGroup`).
 
 ## 0.25.1 - 2026-10-26
 
