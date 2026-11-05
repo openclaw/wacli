@@ -6,6 +6,16 @@ import (
 	"time"
 )
 
+// Semantic content can have neither text nor media. Keep bounded recounts and
+// receipt selection aligned, without naming kind on an older read-only store.
+func (d *DB) unreadContentPredicate() string {
+	content := "COALESCE(display_text, '') != '(message)' OR TRIM(COALESCE(text, '')) != ''"
+	if d.kindEnabled {
+		content += " OR COALESCE(kind, '') != ''"
+	}
+	return "(" + content + ")"
+}
+
 // ClearChatUnreadThrough reduces the count without resurrecting messages that
 // a later read already cleared. The update and recount share one SQLite snapshot.
 func (d *DB) ClearChatUnreadThrough(jid string, through time.Time, ids []string) error {
@@ -46,7 +56,7 @@ func (d *DB) clearChatUnreadThrough(jid string, through time.Time, ids []string,
     AND COALESCE(reaction_to_id, '') = ''
     AND COALESCE(reaction_emoji, '') = ''
     AND revoked = 0 AND deleted_for_me = 0
-    AND (COALESCE(display_text, '') != '(message)' OR TRIM(COALESCE(text, '')) != '')
+    AND `+d.unreadContentPredicate()+`
     AND (messages.ts > position.ts OR (messages.ts = position.ts AND messages.rowid > position.row_id))
   )
   UPDATE chats SET unread_count = MIN(unread_count, remaining.count),
