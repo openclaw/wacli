@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Chats: mark a chat read through a fresh reply from this account or `wacli send`, preserving later arrivals; history imports, duplicate replies, reactions, edits, calls, and poll votes leave unread state intact. Thanks @nicolasbiondic (#533).
 - Messages: preserve document, image, and video header attachments from business templates, interactive messages, and button messages during live and history sync, keeping their body text and enabling normal media downloads. Thanks @daghreri (#543).
 
 - Dependencies: fix reachable HTML parsing vulnerabilities with x/net 0.62.0 and refresh eligible WhatsApp, SQL tooling, gRPC, YAML, and pnpm dependencies after the 48-hour cooldown, retaining Go 1.27.0 and Node 24 minimums.
