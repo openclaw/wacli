@@ -67,6 +67,9 @@ func newGroupsInfoCmd(flags *rootFlags) *cobra.Command {
 			)
 			if !info.LinkedParentJID.IsEmpty() {
 				fmt.Fprintf(os.Stdout, "Parent: %s\n", info.LinkedParentJID.String())
+				if hidden, err := a.WA().GroupHidden(ctx, gjid); err == nil {
+					fmt.Fprintf(os.Stdout, "Hidden: %t\n", hidden)
+				}
 			}
 			fmt.Fprintf(os.Stdout, "Created: %s\nParticipants: %d\n",
 				info.GroupCreated.Local().Format(time.RFC3339),
