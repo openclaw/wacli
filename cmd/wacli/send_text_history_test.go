@@ -68,14 +68,15 @@ func TestSendTextImmediateHistoryMatchesNativeQuote(t *testing.T) {
 		own, noQuote, missing bool
 		override, wantSender  string
 		wantWireSender        string
+		wantDisplay           string
 	}{
-		{name: "incoming inferred", to: pn, storedChat: pn, sender: pn.String(), wantSender: pn.String()},
-		{name: "incoming missing sender", to: pn, storedChat: pn, wantSender: pn.String()},
-		{name: "own empty stored sender", to: pn, storedChat: pn, own: true, wantSender: self.String()},
-		{name: "own alias uses linked LID", to: lid, storedChat: pn, own: true, wantSender: self.String(), wantWireSender: selfLID.String()},
-		{name: "incoming alias retains sender", to: lid, storedChat: pn, sender: pn.String(), wantSender: pn.String()},
-		{name: "unsynced group normalizes explicit sender", to: group, missing: true, override: "15550000001", wantSender: pn.String()},
-		{name: "no quote", to: pn, noQuote: true},
+		{name: "incoming inferred", to: pn, storedChat: pn, sender: pn.String(), wantSender: pn.String(), wantDisplay: "> Original\nreply"},
+		{name: "incoming missing sender", to: pn, storedChat: pn, wantSender: pn.String(), wantDisplay: "> Original\nreply"},
+		{name: "own empty stored sender", to: pn, storedChat: pn, own: true, wantSender: self.String(), wantDisplay: "> Original\nreply"},
+		{name: "own alias uses linked LID", to: lid, storedChat: pn, own: true, wantSender: self.String(), wantWireSender: selfLID.String(), wantDisplay: "> Original\nreply"},
+		{name: "incoming alias retains sender", to: lid, storedChat: pn, sender: pn.String(), wantSender: pn.String(), wantDisplay: "> Original\nreply"},
+		{name: "unsynced group normalizes explicit sender", to: group, missing: true, override: "15550000001", wantSender: pn.String(), wantDisplay: "> message\nreply"},
+		{name: "no quote", to: pn, noQuote: true, wantDisplay: "reply"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db := openSendTestDB(t)
@@ -121,6 +122,9 @@ func TestSendTextImmediateHistoryMatchesNativeQuote(t *testing.T) {
 			}
 			if !tc.noQuote && got.QuotedMsgID != "ORIGINAL" {
 				t.Fatalf("quote ID=%q", got.QuotedMsgID)
+			}
+			if got.DisplayText != tc.wantDisplay {
+				t.Fatalf("display text=%q want %q", got.DisplayText, tc.wantDisplay)
 			}
 		})
 	}

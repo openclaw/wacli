@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
+	"github.com/openclaw/wacli/internal/delegate"
 	"strings"
 	"testing"
 	"time"
@@ -62,7 +62,7 @@ func TestContactsCheckQueuedBehindSendHonorsCallerDeadline(t *testing.T) {
 				t.Fatal("send did not acquire the slot")
 			}
 
-			conn, err := net.Dial("unix", sendDelegateSocketPath(storeDir))
+			conn, err := delegate.Dial(ctx, storeDir)
 			if err != nil {
 				t.Fatalf("dial delegate socket: %v", err)
 			}

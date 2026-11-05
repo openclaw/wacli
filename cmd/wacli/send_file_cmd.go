@@ -22,6 +22,7 @@ func newSendFileCmd(flags *rootFlags) *cobra.Command {
 	var replyTo string
 	var replyToSender string
 	var ptt bool
+	maxSizeMB := int64(maxSendFileSize / (1024 * 1024))
 	postSendWait := postSendRetryReceiptWait
 
 	cmd := &cobra.Command{
@@ -32,6 +33,10 @@ func newSendFileCmd(flags *rootFlags) *cobra.Command {
 				return fmt.Errorf("--to and --file are required")
 			}
 			mediaAs, err := validateSendFileMediaOptions(mediaAs, ptt)
+			if err != nil {
+				return err
+			}
+			maxSize, err := sendFileMaxSizeFromMB(maxSizeMB)
 			if err != nil {
 				return err
 			}
@@ -63,6 +68,7 @@ func newSendFileCmd(flags *rootFlags) *cobra.Command {
 					ReplyTo:        replyTo,
 					ReplyToSender:  replyToSender,
 					PTT:            ptt,
+					MaxSizeBytes:   maxSize,
 					PostSendWaitMS: durationMillis(postSendWait),
 				})
 				if delegated {
@@ -100,6 +106,7 @@ func newSendFileCmd(flags *rootFlags) *cobra.Command {
 					replyTo:       replyTo,
 					replyToSender: replyToSender,
 					ptt:           ptt,
+					maxSize:       maxSize,
 				})
 			})
 			if err != nil {
@@ -132,6 +139,7 @@ func newSendFileCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().StringVar(&replyTo, "reply-to", "", "message ID to quote/reply to")
 	cmd.Flags().StringVar(&replyToSender, "reply-to-sender", "", "sender JID of the quoted message (required for unsynced group replies)")
 	cmd.Flags().BoolVar(&ptt, "ptt", false, "send OGG/Opus audio as a WhatsApp voice note")
+	cmd.Flags().Int64Var(&maxSizeMB, "max-size-mb", maxSizeMB, "largest file to send, in MiB; the file is read into memory (max 2048, WhatsApp's document limit)")
 	cmd.Flags().DurationVar(&postSendWait, "post-send-wait", postSendRetryReceiptWait, "keep the connection alive after send so retry receipts can be handled (0 disables)")
 	return cmd
 }

@@ -20,6 +20,7 @@ import (
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/proto/waWeb"
+	waStore "go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 )
@@ -47,9 +48,15 @@ type fakeWA struct {
 	mediaRetryReceipts []string
 
 	contacts map[types.JID]types.ContactInfo
-	groups   map[types.JID]*types.GroupInfo
-	news     map[types.JID]*types.NewsletterMetadata
-	lids     map[types.JID]types.JID
+	// journal is the real wa.ContactStoreJournal over the fake contact store,
+	// as session.go installs it over whatsmeow's; applyContactBatch writes
+	// through it the way dispatchAppState does. contactStoreErr makes the
+	// inner store fail for a JID while the write is still journaled.
+	journal         *wa.ContactStoreJournal
+	contactStoreErr map[types.JID]error
+	groups          map[types.JID]*types.GroupInfo
+	news            map[types.JID]*types.NewsletterMetadata
+	lids            map[types.JID]types.JID
 
 	groupInfoCalls int
 	groupInfoErr   error
@@ -70,26 +77,33 @@ type fakeWA struct {
 	downloadHistory             func(notif *waE2E.HistorySyncNotification) (*waHistorySync.HistorySync, error)
 	deleteHistoryCalls          []*waE2E.HistorySyncNotification
 	appStateRecoveryErr         error
-	onAppStateRecovery          func(name string)
-	appStateFetchErr            error
-	appStateFetchErrs           []error
-	appStateFetchEvent          func(name string, fullSync, onlyIfNotSynced bool) any
-	archiveEvent                func() any
-	archiveErr                  error
-	archiveCalls                []fakeArchiveCall
-	pinCalls                    []fakePinCall
-	muteCalls                   []fakeMuteCall
-	markReadCalls               []fakeMarkReadCall
-	markReadBeforeApply         func()
-	markReadAfterApply          func()
-	readReceiptCalls            []fakeReadReceiptCall
-	onReadReceipt               func(int) (types.ReceiptType, error)
-	readReceiptErr              error
-	readReceiptType             types.ReceiptType
-	manualHistorySyncCalls      []bool
-	appStateRecoveries          []string
-	appStateFetches             []fakeAppStateFetch
-	hasLocalAppState            bool
+	saveContactCalls            []fakeSaveContactCall
+	saveContactErr              error
+	saveContactAfterSend        func(call fakeSaveContactCall)
+	// saveContactErrAfterSend fails the send after saveContactAfterSend ran,
+	// like a 409 retry or a post-send fetch that fails after whatsmeow
+	// already applied (and journaled) a batch.
+	saveContactErrAfterSend error
+	onAppStateRecovery      func(name string)
+	appStateFetchErr        error
+	appStateFetchErrs       []error
+	appStateFetchEvent      func(name string, fullSync, onlyIfNotSynced bool) any
+	archiveEvent            func() any
+	archiveErr              error
+	archiveCalls            []fakeArchiveCall
+	pinCalls                []fakePinCall
+	muteCalls               []fakeMuteCall
+	markReadCalls           []fakeMarkReadCall
+	markReadBeforeApply     func()
+	markReadAfterApply      func()
+	readReceiptCalls        []fakeReadReceiptCall
+	onReadReceipt           func(int) (types.ReceiptType, error)
+	readReceiptErr          error
+	readReceiptType         types.ReceiptType
+	manualHistorySyncCalls  []bool
+	appStateRecoveries      []string
+	appStateFetches         []fakeAppStateFetch
+	hasLocalAppState        bool
 
 	presenceCalls   []types.Presence
 	sendPresenceErr error
@@ -158,16 +172,70 @@ type fakeAppStateFetch struct {
 }
 
 func newFakeWA() *fakeWA {
-	return &fakeWA{
-		authed:        true,
-		autoReconnect: true,
-		handlers:      map[uint32]func(any){},
-		contacts:      map[types.JID]types.ContactInfo{},
-		groups:        map[types.JID]*types.GroupInfo{},
-		news:          map[types.JID]*types.NewsletterMetadata{},
-		lids:          map[types.JID]types.JID{},
-		nextHandlerID: 1,
+	f := &fakeWA{
+		authed:          true,
+		autoReconnect:   true,
+		handlers:        map[uint32]func(any){},
+		contacts:        map[types.JID]types.ContactInfo{},
+		contactStoreErr: map[types.JID]error{},
+		groups:          map[types.JID]*types.GroupInfo{},
+		news:            map[types.JID]*types.NewsletterMetadata{},
+		lids:            map[types.JID]types.JID{},
+		nextHandlerID:   1,
 	}
+	f.journal = wa.NewContactStoreJournal(&fakeContactStore{f: f})
+	return f
+}
+
+func (f *fakeWA) ContactJournal() *wa.ContactStoreJournal { return f.journal }
+
+// fakeContactStore is the whatsmeow contact store of the fake: independent
+// rows per raw JID (phone number or LID), names overwritten as a unit, like
+// sqlstore.PutContactName. Argument order follows the sqlstore implementation
+// and the SDK caller: (firstName, fullName).
+type fakeContactStore struct{ f *fakeWA }
+
+func (s *fakeContactStore) PutContactName(ctx context.Context, user types.JID, firstName, fullName string) error {
+	s.f.mu.Lock()
+	defer s.f.mu.Unlock()
+	if err := s.f.contactStoreErr[user]; err != nil {
+		return err
+	}
+	info := s.f.contacts[user]
+	info.Found = true
+	info.FirstName = firstName
+	info.FullName = fullName
+	s.f.contacts[user] = info
+	return nil
+}
+
+func (s *fakeContactStore) PutAllContactNames(ctx context.Context, contacts []waStore.ContactEntry) error {
+	for _, c := range contacts {
+		if err := s.PutContactName(ctx, c.JID, c.FirstName, c.FullName); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *fakeContactStore) PutPushName(ctx context.Context, user types.JID, pushName string) (bool, string, error) {
+	return false, "", nil
+}
+
+func (s *fakeContactStore) PutBusinessName(ctx context.Context, user types.JID, businessName string) (bool, string, error) {
+	return false, "", nil
+}
+
+func (s *fakeContactStore) PutManyRedactedPhones(ctx context.Context, entries []waStore.RedactedPhoneEntry) error {
+	return nil
+}
+
+func (s *fakeContactStore) GetContact(ctx context.Context, user types.JID) (types.ContactInfo, error) {
+	return s.f.GetContact(ctx, user)
+}
+
+func (s *fakeContactStore) GetAllContacts(ctx context.Context) (map[types.JID]types.ContactInfo, error) {
+	return s.f.GetAllContacts(ctx)
 }
 
 func (f *fakeWA) emit(evt any) {
@@ -972,6 +1040,76 @@ func (f *fakeWA) SetStatusMessage(ctx context.Context, msg string) error {
 
 func (f *fakeWA) SetProfileName(ctx context.Context, name string) error {
 	return nil
+}
+
+type fakeSaveContactCall struct {
+	target, lid         types.JID
+	fullName, firstName string
+	phonebook           bool
+}
+
+// SendAppStatePatch models whatsmeow's SendAppState: the persistence boundary runs
+// before the send, then afterSend models the post-send fetch, whose events
+// whatsmeow dispatches from a goroutine before returning. Without afterSend,
+// a successful send models the plain post-send fetch: whatsmeow fetches the
+// collection from the version the patch was built on, so the batch holds our
+// own mutation (indexed by the phone number, as BuildSaveContact emits it),
+// which it writes to its contact store before SendAppState returns.
+func (f *fakeWA) SendAppStatePatch(ctx context.Context, patch appstate.PatchInfo, beforeApply func()) ([]any, error) {
+	action := patch.Mutations[0].Value.GetContactAction()
+	target, _ := types.ParseJID(action.GetPnJID())
+	lid, _ := types.ParseJID(action.GetLidJID())
+	call := fakeSaveContactCall{target: target, lid: lid, fullName: action.GetFullName(), firstName: action.GetFirstName(), phonebook: action.GetSaveOnPrimaryAddressbook()}
+	f.mu.Lock()
+	f.saveContactCalls = append(f.saveContactCalls, call)
+	err := f.saveContactErr
+	errAfterSend := f.saveContactErrAfterSend
+	afterSend := f.saveContactAfterSend
+	f.mu.Unlock()
+	beforeApply()
+	if err != nil {
+		return nil, err
+	}
+	if afterSend != nil {
+		afterSend(call)
+	} else {
+		f.applyContactBatch(contactEvent(call.target, call.fullName, call.firstName))()
+	}
+	return nil, errAfterSend
+}
+
+// applyContactBatch models whatsmeow applying one fetched batch of contact
+// mutations: dispatchAppState writes every name to the session contact store
+// synchronously, inside fetchAppState (so before SendAppState returns), with
+// PutContactName(ctx, jid, act.GetFirstName(), act.GetFullName()), and only
+// the events are handed to a goroutine. The store is written now, through
+// the real journal; the returned func dispatches the batch's events,
+// whenever that goroutine runs.
+func (f *fakeWA) applyContactBatch(evts ...*events.Contact) func() {
+	// Each mutation is its own patch: DecodePatches stores every patch's
+	// version before any name of the batch is applied.
+	for range evts {
+		f.journal.NoteCursorWrite(string(appstate.WAPatchCriticalUnblockLow))
+	}
+	batch := make([]any, 0, len(evts))
+	for _, evt := range evts {
+		_ = f.journal.PutContactName(context.Background(), evt.JID, evt.Action.GetFirstName(), evt.Action.GetFullName())
+		batch = append(batch, evt)
+	}
+	return func() { f.dispatchAsync(batch...) }
+}
+
+// dispatchAsync delivers events from a goroutine, like whatsmeow's post-send
+// dispatch, and returns once every handler has been called.
+func (f *fakeWA) dispatchAsync(evts ...any) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for _, evt := range evts {
+			f.emit(evt)
+		}
+	}()
+	<-done
 }
 
 func (f *fakeWA) GetBusinessProfile(ctx context.Context, jid types.JID) (*types.BusinessProfile, error) {

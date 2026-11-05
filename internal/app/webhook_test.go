@@ -232,3 +232,36 @@ func TestPostSyncWebhookUsesRequestTimeout(t *testing.T) {
 		t.Fatal("transport did not observe request context cancellation")
 	}
 }
+
+// WACLI_LINKPREVIEW_ALLOW_CIDRS only widens link preview fetches; sync
+// webhooks still need --webhook-allow-private for the same destinations.
+func TestSyncWebhookIgnoresLinkPreviewAllowCIDRs(t *testing.T) {
+	t.Setenv("WACLI_LINKPREVIEW_ALLOW_CIDRS", "127.0.0.0/8,198.18.0.0/15")
+	a := newTestApp(t)
+	a.wa = newFakeWA()
+
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	chat := types.JID{User: "15551234567", Server: types.DefaultUserServer}
+	evt := syncWebhookEvent{Message: wa.ParsedMessage{Chat: chat, ID: "m-private", Text: "hello", Timestamp: time.Now()}}
+
+	err := a.postSyncWebhookEvent(context.Background(), SyncOptions{WebhookURL: srv.URL}, evt)
+	if err == nil {
+		t.Fatal("webhook to a preview-allowlisted private address succeeded without --webhook-allow-private")
+	}
+	if hits.Load() != 0 {
+		t.Fatalf("webhook server received %d requests, want 0", hits.Load())
+	}
+
+	if err := a.postSyncWebhookEvent(context.Background(), SyncOptions{WebhookURL: srv.URL, WebhookAllowPrivate: true}, evt); err != nil {
+		t.Fatalf("explicit --webhook-allow-private: %v", err)
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("webhook server received %d requests, want 1", hits.Load())
+	}
+}

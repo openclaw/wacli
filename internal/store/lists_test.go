@@ -219,7 +219,10 @@ func TestListsMigrationSurvivesForeignVersionRows(t *testing.T) {
 	}{
 		{"main auto-unarchive at 33", 33, "ordered chat auto-unarchive"},
 		{"legacy ad-referral 33 from PR 480", 33, "messages ad_referral column"},
+		{"stickers at 34", 34, "stickers"},
+		{"ad referrals at 35", 35, "messages ad_referral column"},
 		{"foreign row at the lists version", version, "messages ad_referral column"},
+		{"recorded lists version without tables", version, "WhatsApp lists and chat memberships"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "wacli.db")

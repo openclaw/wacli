@@ -317,69 +317,6 @@ func TestResolveRecipientPickSelectsCandidate(t *testing.T) {
 	}
 }
 
-func TestResolveReplySenderFromStore(t *testing.T) {
-	db := openSendTestDB(t)
-	chat := types.JID{User: "12345", Server: types.GroupServer}
-	sender := "15551234567@s.whatsapp.net"
-
-	if err := db.UpsertChat(chat.String(), "group", "Group", time.Now()); err != nil {
-		t.Fatalf("UpsertChat: %v", err)
-	}
-	if err := db.UpsertMessage(store.UpsertMessageParams{
-		ChatJID:   chat.String(),
-		MsgID:     "quoted",
-		SenderJID: sender,
-		Timestamp: time.Now(),
-		Text:      "hello",
-	}); err != nil {
-		t.Fatalf("UpsertMessage: %v", err)
-	}
-
-	got, err := resolveReplySender(db, chat, "quoted", "")
-	if err != nil {
-		t.Fatalf("resolveReplySender: %v", err)
-	}
-	if got.String() != sender {
-		t.Fatalf("sender = %q, want %q", got.String(), sender)
-	}
-}
-
-func TestResolveReplySenderOverride(t *testing.T) {
-	db := openSendTestDB(t)
-	chat := types.JID{User: "12345", Server: types.GroupServer}
-
-	got, err := resolveReplySender(db, chat, "missing", "+15551234567")
-	if err != nil {
-		t.Fatalf("resolveReplySender: %v", err)
-	}
-	if got.String() != "15551234567@s.whatsapp.net" {
-		t.Fatalf("sender = %q", got.String())
-	}
-}
-
-func TestResolveReplySenderRequiresGroupSenderWhenMissing(t *testing.T) {
-	db := openSendTestDB(t)
-	chat := types.JID{User: "12345", Server: types.GroupServer}
-
-	_, err := resolveReplySender(db, chat, "missing", "")
-	if err == nil || !strings.Contains(err.Error(), "--reply-to-sender is required") {
-		t.Fatalf("expected group sender error, got %v", err)
-	}
-}
-
-func TestResolveReplySenderAllowsDirectMessageWithoutSender(t *testing.T) {
-	db := openSendTestDB(t)
-	chat := types.JID{User: "15551234567", Server: types.DefaultUserServer}
-
-	got, err := resolveReplySender(db, chat, "missing", "")
-	if err != nil {
-		t.Fatalf("resolveReplySender: %v", err)
-	}
-	if !got.IsEmpty() {
-		t.Fatalf("expected empty sender for direct reply, got %q", got.String())
-	}
-}
-
 func TestUpsertSentReactionStoresDisplayText(t *testing.T) {
 	db := openSendTestDB(t)
 	chat := types.JID{User: "15551234567", Server: types.DefaultUserServer}
@@ -398,7 +335,8 @@ func TestUpsertSentReactionStoresDisplayText(t *testing.T) {
 		t.Fatalf("UpsertMessage target: %v", err)
 	}
 
-	upsertSentReaction(db, chat, "Alice", "react1", "target", "👍", now)
+	resolver := fakeTextResolver{}
+	upsertSentReaction(context.Background(), db, resolver, chat, "react1", "target", "👍", now)
 
 	msg, err := db.GetMessage(chat.String(), "react1")
 	if err != nil {
@@ -415,27 +353,38 @@ func TestUpsertSentReactionStoresDisplayText(t *testing.T) {
 	}
 }
 
-func TestBuildReplyContextInfo(t *testing.T) {
+func TestUpsertSentReactionCanonicalizesLIDChat(t *testing.T) {
 	db := openSendTestDB(t)
-	chat := types.JID{User: "12345", Server: types.GroupServer}
+	pn := types.NewJID("15551234567", types.DefaultUserServer)
+	lid := types.NewJID("20001", types.HiddenUserServer)
+	now := time.Date(2026, 5, 5, 6, 30, 0, 0, time.UTC)
+	resolver := outboundTextResolverStub{lid: lid, pn: pn}
 
-	got, err := buildReplyContextInfo(db, chat, "quoted", "+15551234567")
-	if err != nil {
-		t.Fatalf("buildReplyContextInfo: %v", err)
+	if err := db.UpsertChat(pn.String(), "dm", "Me", now); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
 	}
-	if got.GetStanzaID() != "quoted" {
-		t.Fatalf("stanza ID = %q, want quoted", got.GetStanzaID())
-	}
-	if got.GetParticipant() != "15551234567@s.whatsapp.net" {
-		t.Fatalf("participant = %q", got.GetParticipant())
+	if err := db.UpsertMessage(store.UpsertMessageParams{
+		ChatJID:   pn.String(),
+		MsgID:     "target",
+		Timestamp: now.Add(-time.Second),
+		FromMe:    true,
+		Text:      "self target",
+	}); err != nil {
+		t.Fatalf("UpsertMessage target: %v", err)
 	}
 
-	got, err = buildReplyContextInfo(db, chat, "", "+15551234567")
-	if err != nil {
-		t.Fatalf("empty buildReplyContextInfo: %v", err)
+	if err := upsertSentReaction(context.Background(), db, resolver, lid, "react1", "target", "🌺", now); err != nil {
+		t.Fatalf("upsertSentReaction: %v", err)
 	}
-	if got != nil {
-		t.Fatalf("empty reply context = %v, want nil", got)
+	msg, err := db.GetMessage(pn.String(), "react1")
+	if err != nil {
+		t.Fatalf("GetMessage canonical reaction: %v", err)
+	}
+	if msg.ChatJID != pn.String() || msg.DisplayText != "Reacted 🌺 to self target" {
+		t.Fatalf("reaction chat/display = %q/%q", msg.ChatJID, msg.DisplayText)
+	}
+	if _, err := db.GetMessage(lid.String(), "react1"); err == nil {
+		t.Fatal("reaction was also stored under the LID chat")
 	}
 }
 
@@ -878,13 +827,7 @@ func TestDecodeMessageEscapesRejectsUnknownEscape(t *testing.T) {
 }
 
 func TestBuildTextMessageUsesPlainConversationWithoutReplyOrPreview(t *testing.T) {
-	db := openSendTestDB(t)
-	chat := types.JID{User: "15551234567", Server: types.DefaultUserServer}
-
-	msg, plain, err := buildTextMessageWithSelf(db, chat, types.EmptyJID, "hello", "", "", "", nil, nil)
-	if err != nil {
-		t.Fatalf("buildTextMessage: %v", err)
-	}
+	msg, plain := buildTextMessage("hello", nil, nil, nil)
 	if !plain {
 		t.Fatalf("plain = false, want true")
 	}
@@ -894,14 +837,9 @@ func TestBuildTextMessageUsesPlainConversationWithoutReplyOrPreview(t *testing.T
 }
 
 func TestBuildTextMessageAttachesMentions(t *testing.T) {
-	db := openSendTestDB(t)
-	chat := types.JID{User: "12345", Server: types.GroupServer}
 	mentions := []string{"15551234567@s.whatsapp.net", "15557654321@s.whatsapp.net"}
 
-	msg, plain, err := buildTextMessageWithSelf(db, chat, types.EmptyJID, "hey @15551234567", "", "", "", nil, mentions)
-	if err != nil {
-		t.Fatalf("buildTextMessage: %v", err)
-	}
+	msg, plain := buildTextMessage("hey @15551234567", nil, nil, mentions)
 	if plain {
 		t.Fatalf("plain = true, want false")
 	}
@@ -1171,10 +1109,11 @@ func TestBuildTextMessageCombinesReplyAndMentions(t *testing.T) {
 		t.Fatalf("UpsertMessage: %v", err)
 	}
 
-	msg, plain, err := buildTextMessageWithSelf(db, chat, types.EmptyJID, "replying @15551234567", "quoted", "+15557654321", "", nil, []string{"15551234567@s.whatsapp.net"})
+	reply, err := buildReplyContextInfo(context.Background(), &recordingTextSender{}, db, chat, "quoted", "+15557654321")
 	if err != nil {
-		t.Fatalf("buildTextMessage: %v", err)
+		t.Fatalf("buildReplyContextInfo: %v", err)
 	}
+	msg, plain := buildTextMessage("replying @15551234567", reply, nil, []string{"15551234567@s.whatsapp.net"})
 	if plain {
 		t.Fatalf("plain = true, want false")
 	}
@@ -1194,8 +1133,6 @@ func TestBuildTextMessageCombinesReplyAndMentions(t *testing.T) {
 }
 
 func TestBuildTextMessageAttachesLinkPreview(t *testing.T) {
-	db := openSendTestDB(t)
-	chat := types.JID{User: "15551234567", Server: types.DefaultUserServer}
 	preview := &linkpreview.Preview{
 		URL:         "https://example.com/post",
 		Title:       "Example",
@@ -1203,10 +1140,7 @@ func TestBuildTextMessageAttachesLinkPreview(t *testing.T) {
 		Thumbnail:   []byte("jpeg"),
 	}
 
-	msg, plain, err := buildTextMessageWithSelf(db, chat, types.EmptyJID, "see https://example.com/post", "", "", "", preview, nil)
-	if err != nil {
-		t.Fatalf("buildTextMessage: %v", err)
-	}
+	msg, plain := buildTextMessage("see https://example.com/post", nil, preview, nil)
 	if plain {
 		t.Fatalf("plain = true, want false")
 	}

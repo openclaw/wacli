@@ -111,7 +111,7 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 			a.handleLiveCallEvent(ctx, v)
 		case *events.AppState, *events.Star, *events.DeleteForMe,
 			*events.Archive, *events.UnarchiveChatsSetting, *events.Pin, *events.Mute, *events.MarkChatAsRead,
-			*events.LabelEdit, *events.LabelAssociationChat:
+			*events.Contact, *events.LabelEdit, *events.LabelAssociationChat:
 			lastEvent.Store(nowUTC().UnixNano())
 			if limits != nil {
 				limits.appStatePending.Add(1)
@@ -406,6 +406,8 @@ func (a *App) persistAppStateEvent(ctx context.Context, evt any, tracker *appSta
 		err = a.handleDeleteForMeEvent(ctx, v)
 	case *events.Archive, *events.UnarchiveChatsSetting, *events.Pin, *events.Mute, *events.MarkChatAsRead:
 		err = a.handleChatStateEvent(ctx, v)
+	case *events.Contact:
+		err = a.handleContactEvent(ctx, v)
 	case *events.LabelEdit, *events.LabelAssociationChat:
 		err = a.handleListEvent(ctx, v)
 	}
@@ -426,6 +428,8 @@ func appStateCollectionsForEvent(evt any) []appstate.WAPatchName {
 		return []appstate.WAPatchName{appstate.WAPatchRegularLow}
 	case *events.Mute, *events.Star, *events.DeleteForMe:
 		return []appstate.WAPatchName{appstate.WAPatchRegularHigh}
+	case *events.Contact:
+		return []appstate.WAPatchName{appstate.WAPatchCriticalUnblockLow}
 	case *events.AppState:
 		if v == nil || v.SyncActionValue == nil || (v.GetCallLogAction() == nil && v.GetDeleteIndividualCallLog() == nil) {
 			return nil

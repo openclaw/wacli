@@ -47,10 +47,9 @@ var schemaMigrations = []migration{
 	{version: 31, name: "content-free message change journal", up: migrateChanges},
 	{version: 32, name: "message receipt retrieval revisions", up: migrateReceiptRetrieval},
 	{version: 33, name: "ordered chat auto-unarchive", up: migrateChatAutoUnarchive},
-	// Lists keep 34 after main assigned 33 to ordered chat auto-unarchive.
-	// The runner skips by version number only, so ensureCurrentSchema re-runs
-	// migrateLists to heal stores where another migration owns this number.
-	{version: 34, name: "WhatsApp lists and chat memberships", up: migrateLists},
+	// Stickers use 34 and ad referrals use 35. The schema guard repairs stores whose
+	// version rows collide with older list or referral builds.
+	{version: 36, name: "WhatsApp lists and chat memberships", up: migrateLists},
 }
 
 func migratePlaceholderChatActivity(d *DB) error {

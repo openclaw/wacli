@@ -622,6 +622,39 @@ func TestLiveSyncDeletesRetractedPollVote(t *testing.T) {
 	if len(votes) != 0 {
 		t.Fatalf("votes after retraction = %+v", votes)
 	}
+
+	a.handleLiveSyncMessage(context.Background(), SyncOptions{}, makeVote("VOTE-YES", base.Add(time.Minute)), &messagesStored, func(string, string) {}, nil)
+	votes, err = a.db.ListPollVotes(chat.String(), pollMsgID)
+	if err != nil {
+		t.Fatalf("ListPollVotes after replay: %v", err)
+	}
+	if len(votes) != 0 {
+		t.Fatalf("replayed vote revived a retracted selection: %+v", votes)
+	}
+	oldVote := makeVote("VOTE-YES", base.Add(time.Minute))
+	history := &events.HistorySync{Data: &waHistorySync.HistorySync{
+		SyncType: waHistorySync.HistorySync_ON_DEMAND.Enum(),
+		Conversations: []*waHistorySync.Conversation{{
+			ID: proto.String(chat.String()),
+			Messages: []*waHistorySync.HistorySyncMsg{{Message: &waWeb.WebMessageInfo{
+				Key: &waCommon.MessageKey{
+					RemoteJID: proto.String(chat.String()), ID: proto.String(oldVote.Info.ID), FromMe: proto.Bool(false),
+				},
+				Participant: proto.String(voter.String()), MessageTimestamp: proto.Uint64(uint64(oldVote.Info.Timestamp.Unix())),
+				Message: oldVote.Message,
+			}}},
+		}},
+	}}
+	var lastEvent atomic.Int64
+	a.handleHistorySync(context.Background(), SyncOptions{}, history, &messagesStored, &lastEvent, func(string, string) {})
+	h := newRetrievalCLI(t, a)
+	result := h.run(a.StoreDir(), "", "poll", "show", "--to", chat.String(), "--id", pollMsgID)
+	if voters, ok := result["voters"].([]any); !ok || len(voters) != 0 {
+		t.Fatalf("CLI voters after replay = %v", result["voters"])
+	}
+	if aggregates, ok := result["aggregates"].(map[string]any); !ok || aggregates["Yes"] != float64(0) || aggregates["No"] != float64(0) {
+		t.Fatalf("CLI aggregates after replay = %v", result["aggregates"])
+	}
 }
 
 func TestLiveSyncWarnsWhenPollVoteRefersToUnknownPoll(t *testing.T) {

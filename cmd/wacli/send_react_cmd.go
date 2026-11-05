@@ -79,8 +79,7 @@ func newSendReactCmd(flags *rootFlags) *cobra.Command {
 			}
 
 			now := time.Now().UTC()
-			chatName := a.WA().ResolveChatName(ctx, chat, "")
-			storeErr := upsertSentReaction(a.DB(), chat, chatName, sentID, msgID, emoji, now)
+			storeErr := upsertSentReaction(ctx, a.DB(), a.WA(), chat, sentID, msgID, emoji, now)
 			warnSendStoreFailure(os.Stderr, string(sentID), storeErr)
 
 			waitForPostSendRetryReceipts(ctx, postSendWait)
@@ -129,10 +128,12 @@ func reactionTarget(to, sender string) (types.JID, types.JID, error) {
 	return chat, senderJID, nil
 }
 
-func upsertSentReaction(db *store.DB, chat types.JID, chatName string, sentID types.MessageID, targetID, emoji string, now time.Time) error {
+func upsertSentReaction(ctx context.Context, db *store.DB, resolver outboundTextResolver, chat types.JID, sentID types.MessageID, targetID, emoji string, now time.Time) error {
 	if db == nil || chat.IsEmpty() || sentID == "" {
 		return nil
 	}
+	chat = canonicalOutboundChat(ctx, resolver, chat)
+	chatName := resolver.ResolveChatName(ctx, chat, "")
 	var storeErr error
 	if err := db.UpsertChat(chat.String(), chatKindFromJID(chat), chatName, now); err != nil {
 		storeErr = fmt.Errorf("chat update: %w", err)

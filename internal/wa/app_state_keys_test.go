@@ -24,7 +24,11 @@ import (
 
 func newPairedSessionStore(t *testing.T) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "session.db")
+	return newPairedSessionStoreAt(t, filepath.Join(t.TempDir(), "session.db"))
+}
+
+func newPairedSessionStoreAt(t *testing.T, path string) string {
+	t.Helper()
 	ctx := context.Background()
 	container, err := sqlstore.New(ctx, "sqlite3", sqliteutil.FileURI(path, "_foreign_keys=on"), nil)
 	if err != nil {

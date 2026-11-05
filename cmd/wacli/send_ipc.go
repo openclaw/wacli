@@ -8,11 +8,11 @@ import (
 	"io"
 	"net"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/openclaw/wacli/internal/app"
+	"github.com/openclaw/wacli/internal/delegate"
 	"github.com/openclaw/wacli/internal/lock"
 	"github.com/openclaw/wacli/internal/out"
 	"github.com/openclaw/wacli/internal/wa"
@@ -21,7 +21,6 @@ import (
 
 const (
 	sendDelegateVersion       = 1
-	sendDelegateSocketName    = ".send.sock"
 	sendDelegateResponseGrace = 5 * time.Second
 	// sendDelegateReplyMargin is reserved before the caller's deadline so a
 	// refusal can reach the caller before it gives up on the connection. An
@@ -51,6 +50,7 @@ type sendDelegateRequest struct {
 	MIME                 string   `json:"mime,omitempty"`
 	As                   string   `json:"as,omitempty"`
 	PTT                  bool     `json:"ptt,omitempty"`
+	MaxSizeBytes         int64    `json:"max_size_bytes,omitempty"`
 	ID                   string   `json:"id,omitempty"`
 	Reaction             string   `json:"reaction,omitempty"`
 	Sender               string   `json:"sender,omitempty"`
@@ -71,6 +71,9 @@ type sendDelegateRequest struct {
 	Receipts             bool     `json:"receipts,omitempty"`
 	ThroughMessageID     string   `json:"through_message_id,omitempty"`
 	Phones               []string `json:"phones,omitempty"`
+	FirstName            string   `json:"first_name,omitempty"`
+	AccountWide          bool     `json:"account_wide,omitempty"`
+	Phonebook            bool     `json:"phonebook,omitempty"`
 	ChatStateAction      string   `json:"chat_state_action,omitempty"`
 	MuteDurationMS       int64    `json:"mute_duration_ms,omitempty"`
 	PostSendWaitMS       int64    `json:"post_send_wait_ms,omitempty"`
@@ -93,20 +96,19 @@ type sendDelegateResponse struct {
 	SelectedOption *selectOption        `json:"selected_option,omitempty"`
 	File           map[string]string    `json:"file,omitempty"`
 	StoreWarning   string               `json:"store_warning,omitempty"`
+	PreviewWarning string               `json:"preview_warning,omitempty"`
+	ThumbWarning   string               `json:"thumbnail_warning,omitempty"`
 	Chat           string               `json:"chat,omitempty"`
 	Action         string               `json:"action,omitempty"`
 	Receipts       *int                 `json:"receipts,omitempty"`
 	ReceiptType    string               `json:"receipt_type,omitempty"`
 	Contacts       []contactCheckResult `json:"contacts,omitempty"`
+	Contact        *contactSaveResult   `json:"contact,omitempty"`
 	Presence       *app.PresenceState   `json:"presence,omitempty"`
 	Media          *mediaDownloadResult `json:"media,omitempty"`
 }
 
 type sendDelegateExecutor func(context.Context, sendDelegateRequest) (sendDelegateResponse, error)
-
-func sendDelegateSocketPath(storeDir string) string {
-	return filepath.Join(storeDir, sendDelegateSocketName)
-}
 
 func delegateSend(ctx context.Context, flags *rootFlags, req sendDelegateRequest) (sendDelegateResponse, error) {
 	req.Version = sendDelegateVersion
@@ -115,10 +117,7 @@ func delegateSend(ctx context.Context, flags *rootFlags, req sendDelegateRequest
 	if err != nil {
 		return sendDelegateResponse{}, err
 	}
-	path := sendDelegateSocketPath(storeDir)
-
-	var d net.Dialer
-	conn, err := d.DialContext(ctx, "unix", path)
+	conn, err := delegate.Dial(ctx, storeDir)
 	if err != nil {
 		return sendDelegateResponse{}, fmt.Errorf("%w: %v", errSendDelegateUnavailable, err)
 	}
@@ -184,17 +183,8 @@ func startSendDelegateServer(ctx context.Context, a *app.App, spacing sendSpacin
 }
 
 func startSendDelegateServerForStore(ctx context.Context, storeDir string, spacing sendSpacing, execute sendDelegateExecutor) (func(), error) {
-	path := sendDelegateSocketPath(storeDir)
-	if err := removeStaleSendDelegateSocket(path); err != nil {
-		return nil, err
-	}
-	ln, err := net.Listen("unix", path)
+	ln, err := delegate.Listen(storeDir)
 	if err != nil {
-		return nil, err
-	}
-	if err := os.Chmod(path, 0o600); err != nil {
-		_ = ln.Close()
-		_ = os.Remove(path)
 		return nil, err
 	}
 
@@ -226,23 +216,8 @@ func startSendDelegateServerForStore(ctx context.Context, storeDir string, spaci
 	stop := func() {
 		_ = ln.Close()
 		<-done
-		_ = os.Remove(path)
 	}
 	return stop, nil
-}
-
-func removeStaleSendDelegateSocket(path string) error {
-	info, err := os.Lstat(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if info.Mode()&os.ModeSocket == 0 {
-		return fmt.Errorf("%s exists and is not a socket", path)
-	}
-	return os.Remove(path)
 }
 
 func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDelegateExecutor, sendSlot chan struct{}, pacer *sendPacer, mediaSlots ...chan struct{}) {
@@ -315,9 +290,9 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDele
 		_ = json.NewEncoder(conn).Encode(resp)
 		return
 	}
-	if req.Kind == chatStateKind {
-		// App-state writes are serialized by the app and can wait minutes on
-		// recovery, so they must not hold the send queue.
+	if req.Kind == chatStateKind || req.Kind == contactsSaveKind {
+		// The app-state coordinator owns these writes; recovery must not hold
+		// the message-send queue (#454).
 		if requestCtx.Err() != nil {
 			_ = json.NewEncoder(conn).Encode(sendDelegateResponse{OK: false, Error: "request deadline passed before dispatch; it was not sent"})
 			return
@@ -444,6 +419,8 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 		return executeDelegatedContactsCheck(ctx, a.WA(), req)
 	case chatStateKind:
 		return executeDelegatedChatState(ctx, a, req)
+	case contactsSaveKind:
+		return executeDelegatedContactsSave(ctx, a, req)
 	default:
 		return sendDelegateResponse{}, fmt.Errorf("unsupported send kind %q", req.Kind)
 	}
@@ -626,13 +603,14 @@ func executeDelegatedText(ctx context.Context, a *app.App, req sendDelegateReque
 	if err := warnRapidSendIfNeeded(a.StoreDir(), time.Now().UTC(), os.Stderr); err != nil {
 		return sendDelegateResponse{}, err
 	}
-	preview := fetchLinkPreview(ctx, req.Message, req.NoPreview)
-	msgID, storeErr, err := sendTextWithHistory(ctx, a, reconnectForSend(a), toJID, req.Message, req.ReplyTo, req.ReplyToSender, preview, mentionedJIDs, ephemeral, textSendOptions{allowSelf: req.AllowSelf})
+	preview, previewWarning := fetchLinkPreview(ctx, req.Message, req.NoPreview)
+	var thumbnailWarning string
+	msgID, storeErr, err := sendTextWithHistory(ctx, a, reconnectForSend(a), toJID, req.Message, req.ReplyTo, req.ReplyToSender, preview, mentionedJIDs, ephemeral, textSendOptions{allowSelf: req.AllowSelf, warn: func(msg string) { thumbnailWarning = msg }})
 	if err != nil {
 		return sendDelegateResponse{}, err
 	}
 	waitForPostSendRetryReceipts(ctx, millisDuration(req.PostSendWaitMS, 0))
-	resp := sendDelegateResponse{OK: true, Sent: true, To: toJID.String(), ID: string(msgID)}
+	resp := sendDelegateResponse{OK: true, Sent: true, To: toJID.String(), ID: string(msgID), PreviewWarning: previewWarning, ThumbWarning: thumbnailWarning}
 	if storeErr != nil {
 		resp.StoreWarning = storeErr.Error()
 	}
@@ -640,6 +618,10 @@ func executeDelegatedText(ctx context.Context, a *app.App, req sendDelegateReque
 }
 
 func executeDelegatedFile(ctx context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {
+	maxSize, err := resolveSendFileMaxSize(req.MaxSizeBytes)
+	if err != nil {
+		return sendDelegateResponse{}, err
+	}
 	mediaAs, err := validateSendFileMediaOptions(req.As, req.PTT || req.Kind == "voice")
 	if err != nil {
 		return sendDelegateResponse{}, err
@@ -661,6 +643,7 @@ func executeDelegatedFile(ctx context.Context, a *app.App, req sendDelegateReque
 			replyTo:       req.ReplyTo,
 			replyToSender: req.ReplyToSender,
 			ptt:           req.PTT || req.Kind == "voice",
+			maxSize:       maxSize,
 		})
 		if err != nil {
 			return sendDelegateResponse{}, err
@@ -724,8 +707,7 @@ func executeDelegatedReact(ctx context.Context, a *app.App, req sendDelegateRequ
 		return sendDelegateResponse{}, err
 	}
 	now := time.Now().UTC()
-	chatName := a.WA().ResolveChatName(ctx, chat, "")
-	storeErr := upsertSentReaction(a.DB(), chat, chatName, sentID, req.ID, req.Reaction, now)
+	storeErr := upsertSentReaction(ctx, a.DB(), a.WA(), chat, sentID, req.ID, req.Reaction, now)
 	waitForPostSendRetryReceipts(ctx, millisDuration(req.PostSendWaitMS, 0))
 	resp := sendDelegateResponse{OK: true, Sent: true, To: chat.String(), ID: string(sentID), Target: req.ID, Reaction: req.Reaction}
 	if storeErr != nil {
@@ -735,6 +717,8 @@ func executeDelegatedReact(ctx context.Context, a *app.App, req sendDelegateRequ
 }
 
 func writeDelegatedSendOutput(flags *rootFlags, kind string, resp sendDelegateResponse) error {
+	warnLinkPreviewSkipped(os.Stderr, resp.PreviewWarning)
+	warnLinkPreviewThumbnail(os.Stderr, resp.ThumbWarning)
 	warnSendStoreFailureMsg(os.Stderr, resp.ID, resp.StoreWarning)
 	if flags.asJSON {
 		body := map[string]any{"sent": resp.Sent, "to": resp.To, "id": resp.ID}

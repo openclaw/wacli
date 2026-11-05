@@ -74,7 +74,7 @@ wacli --read-only --json messages search "invoice"
 WACLI_READONLY=1 wacli --json doctor
 ```
 
-Write commands take a per-store lock. After a `sync --follow` process finishes startup, supported send commands, the `chats` state commands (`mark-read`, `archive`, `pin`, `mute`, and their inverses), and `contacts check` are delegated to it while it owns that lock. See [companion integrations](docs/integrations.md) for webhooks and safe read-only SQLite access.
+Write commands take a per-store lock. After a `sync --follow` process finishes startup, supported send commands, the `chats` state commands (`mark-read`, `archive`, `pin`, `mute`, and their inverses), `contacts check`, and `contacts save` are delegated to it while it owns that lock. See [companion integrations](docs/integrations.md) for webhooks and safe read-only SQLite access.
 
 ## Commands
 
@@ -104,7 +104,7 @@ See [accounts](docs/accounts.md) for store selection and [sync](docs/sync.md) fo
 
 ## Development
 
-Development uses the Go 1.27.2 toolchain selected by `go.mod`, Node.js 24 or newer, pnpm, cgo, and a C compiler. The source minimum remains Go 1.27.0.
+Development uses the Go 1.27.3 toolchain selected by `go.mod`, Node.js 24 or newer, pnpm, cgo, and a C compiler. The source minimum remains Go 1.27.0.
 
 ```sh
 pnpm install --frozen-lockfile

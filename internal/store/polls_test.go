@@ -244,7 +244,7 @@ func TestUpsertPollVoteKeepsNewerSameSecondVote(t *testing.T) {
 	}
 }
 
-func TestDeletePollVoteRemovesOnlyOlderRows(t *testing.T) {
+func TestPollRetractionReplacesOnlyOlderSelections(t *testing.T) {
 	db := openTestDB(t)
 
 	base := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
@@ -259,7 +259,11 @@ func TestDeletePollVoteRemovesOnlyOlderRows(t *testing.T) {
 	if err := db.UpsertPollVote(vote); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.DeletePollVote(vote.ChatJID, vote.PollMsgID, vote.VoterJID, base.Add(-time.Millisecond)); err != nil {
+	retraction := vote
+	retraction.Selected = nil
+	retraction.VoteMsgID = "RETRACT"
+	retraction.VotedAt = base.Add(-time.Millisecond)
+	if err := db.UpsertPollVote(retraction); err != nil {
 		t.Fatal(err)
 	}
 	votes, err := db.ListPollVotes(vote.ChatJID, vote.PollMsgID)
@@ -269,7 +273,8 @@ func TestDeletePollVoteRemovesOnlyOlderRows(t *testing.T) {
 	if len(votes) != 1 {
 		t.Fatalf("vote count after old delete = %d", len(votes))
 	}
-	if err := db.DeletePollVote(vote.ChatJID, vote.PollMsgID, vote.VoterJID, base.Add(time.Millisecond)); err != nil {
+	retraction.VotedAt = base.Add(time.Millisecond)
+	if err := db.UpsertPollVote(retraction); err != nil {
 		t.Fatal(err)
 	}
 	votes, err = db.ListPollVotes(vote.ChatJID, vote.PollMsgID)

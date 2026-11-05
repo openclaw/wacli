@@ -94,8 +94,7 @@ existing identity normalization and historical merge, keeping the newest
 membership state across aliases. Unresolved LIDs remain usable until a later
 authenticated startup can resolve them.
 
-The next writable store open adds the list tables at migration 34, after main's
-migration 33 for ordered chat auto-unarchive, without changing existing
+The next writable store open adds the list tables without changing existing
 chats/messages. It also recreates missing list tables when the schema version is
 already recorded, for example by a build that used the same migration number.
 `--read-only` can open an older, unmigrated store; it returns an empty
