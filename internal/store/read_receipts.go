@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-const receiptEligible = "chat_jid = ? AND from_me = 0 AND revoked = 0 AND deleted_for_me = 0 AND deleted_at IS NULL AND COALESCE(reaction_to_id,'') = '' AND COALESCE(reaction_emoji,'') = '' AND (COALESCE(display_text,'') != '(message)' OR TRIM(COALESCE(text,'')) != '')"
+const receiptEligible = "chat_jid = ? AND from_me = 0 AND revoked = 0 AND deleted_for_me = 0 AND deleted_at IS NULL AND " + notReaction + " AND " + notPlaceholder
 
 // ReadBoundary resolves an exact inbound anchor before app-state recovery can
 // start. The chat predicate prevents an ID from another chat becoming a cutoff.

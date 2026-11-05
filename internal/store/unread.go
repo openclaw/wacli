@@ -43,10 +43,9 @@ func (d *DB) clearChatUnreadThrough(jid string, through time.Time, ids []string,
   remaining AS (
    SELECT COUNT(*) AS count FROM messages, position
    WHERE chat_jid = ? AND from_me = 0
-    AND COALESCE(reaction_to_id, '') = ''
-    AND COALESCE(reaction_emoji, '') = ''
+    AND `+notReaction+`
     AND revoked = 0 AND deleted_for_me = 0
-    AND (COALESCE(display_text, '') != '(message)' OR TRIM(COALESCE(text, '')) != '')
+    AND `+notPlaceholder+`
     AND (messages.ts > position.ts OR (messages.ts = position.ts AND messages.rowid > position.row_id))
   )
   UPDATE chats SET unread_count = MIN(unread_count, remaining.count),

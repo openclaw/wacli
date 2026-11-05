@@ -66,3 +66,13 @@ func (c *Client) MuteChat(ctx context.Context, target types.JID, mute bool, dura
 func (c *Client) MarkChatAsRead(ctx context.Context, target types.JID, read bool, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey, beforeApply func()) ([]any, error) {
 	return c.sendAppStateWithBoundary(ctx, appstate.BuildMarkChatAsRead(target, read, lastMsgTS, lastMsgKey), beforeApply)
 }
+
+// DeleteChat deletes a chat for this account through the given last message,
+// keeping media already saved on the phone. lastMsgTS must be set: whatsmeow
+// reads a zero time as now, which would reach past the caller's last message.
+func (c *Client) DeleteChat(ctx context.Context, target types.JID, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey, beforeApply func()) ([]any, error) {
+	if lastMsgTS.IsZero() {
+		return nil, fmt.Errorf("delete chat %s: the last message's time is required", target)
+	}
+	return c.sendAppStateWithBoundary(ctx, appstate.BuildDeleteChat(target, lastMsgTS, lastMsgKey, false), beforeApply)
+}

@@ -1,6 +1,6 @@
 # chats
 
-Read when: listing known chats, filtering chat state, archiving/pinning/muting/marking chats, or pruning stale local chat rows.
+Read when: listing known chats, filtering chat state, archiving/pinning/muting/marking chats, deleting a one-to-one chat from WhatsApp, or pruning stale local chat rows.
 
 `wacli chats` reads chat rows from `wacli.db`. It can use session-backed PN/LID mappings to make historical `@lid` chat rows display as phone-number chats when possible. State commands normally send WhatsApp app-state patches through the authenticated session and update the local index after WhatsApp accepts the change. Explicit receipt mode uses the independent network receipt path described below.
 
@@ -17,6 +17,7 @@ wacli chats mute --chat CHAT [--duration DURATION] [--pick N]
 wacli chats unmute --chat CHAT [--pick N]
 wacli chats mark-read --chat CHAT [--pick N] [--through-message-id ID] [--receipts]
 wacli chats mark-unread --chat CHAT [--pick N]
+wacli chats delete --chat JID --through TIME
 wacli chats cleanup [--days N] [--jid JID] [--dry-run] [--confirm]
 ```
 
@@ -43,6 +44,17 @@ wacli chats cleanup [--days N] [--jid JID] [--dry-run] [--confirm]
 - `mute --duration 0` or omitting `--duration` mutes forever. Use `unmute` to clear it.
 - Run `wacli sync` to catch up chat-state changes made on other devices; run `wacli contacts refresh` to improve chat names.
 - `cleanup` only deletes local `wacli.db` rows. It does not delete chats or messages from WhatsApp.
+
+## Deleting a chat
+
+`wacli chats delete --chat JID --through TIME` deletes a one-to-one chat from WhatsApp for your account, on every linked device, the way WhatsApp's own **Delete chat** does. It never deletes for the other person, and media already saved on the phone stays.
+
+- `--chat` takes a JID (`@s.whatsapp.net` or `@lid`) or a phone number, never a name: a fuzzy match must not pick the chat a delete reaches. Groups, broadcast lists, status, channels, and bots are refused with `not_one_to_one`.
+- `--through` is an RFC 3339 time, such as `2026-10-22T09:30:00Z`. The delete names the newest stored message at or before it (reactions aside) as the chat's last message, so WhatsApp keeps every message after that one. Stored times are whole seconds, so a message in `--through`'s second counts as at or before it. With no stored message at or before it, the delete reaches through `--through` itself.
+- It is refused with `newer_messages` when `wacli.db` holds a message later than `--through`, anybody's, your own from the phone included: whoever chose the time has not seen it. Reactions and content-free `(message)` system rows do not count. Nothing is sent.
+- It is refused with `not_found` when `wacli.db` holds no row for the chat under its phone-number or LID form. That says what this store knows, not that WhatsApp has no such chat.
+- The local store keeps the chat and its messages, as it does when a chat is deleted on the phone, and sync emits no event for the delete.
+- Through a same-store `sync --follow` process the command is delegated as the `delete_chat` kind and runs outside the send queue, like the other app-state writes. JSON output on success is `{"ok":true,"action":"delete","code":"deleted","chat":JID,"last_message_id":ID,"deleted_through":TIME}`, `last_message_id` left out when no message was named; a refusal fails the command with an error that begins with its code.
 - `cleanup --days N` skips chats with no known local activity timestamp; use `--jid` for an explicit local row.
 - Use `cleanup --dry-run` before deleting and `--confirm` only for scripts that already reviewed the target list.
 
@@ -78,6 +90,7 @@ wacli chats mute --chat "+1 555 123 4567" --duration 8h
 wacli chats mark-read --chat family --pick 1
 wacli chats mark-read --chat family --pick 1 --receipts --json
 wacli chats mark-read --chat family --pick 1 --through-message-id HANDLED_MESSAGE_ID
+wacli chats delete --chat 1234567890@s.whatsapp.net --through 2026-10-22T09:30:00Z --json
 wacli chats cleanup --days 365 --dry-run
 ```
 
