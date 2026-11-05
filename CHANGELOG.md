@@ -4,7 +4,16 @@
 
 - Quick replies: add standalone WhatsApp Business `quick-replies list|create|edit|delete`, independent full-sync coverage and guarded `app-state resync regular` (migration 38, with a collision guard). Writes and resync delegate outside the send queue; known-broken full syncs always refuse. Capture regular send-result/409 batches synchronously through the SDK primitives so delayed echoes cannot undo newer edits/deletions; device clocks never arbitrate state. No Lists or chat-label management is included.
 
+- Messages: preserve document, image, and video header attachments from business templates, interactive messages, and button messages during live and history sync, keeping their body text and enabling normal media downloads. Thanks @daghreri (#543).
+
+- Dependencies: fix reachable HTML parsing vulnerabilities with x/net 0.62.0 and refresh eligible WhatsApp, SQL tooling, gRPC, YAML, and pnpm dependencies after the 48-hour cooldown, retaining Go 1.27.0 and Node 24 minimums.
+
+- CI: schedule weekly CodeQL main scans while retaining PR and manual analysis.
+
+- Send: send `.m4a` files as `audio/mp4` instead of the system MIME table's `audio/mp4a-latm`, which WhatsApp clients hide. Thanks @ViaxCo (#549).
+- Sync: name broadcast-list chats from local contacts instead of a group query that WhatsApp never answers, so each broadcast message no longer blocks event handling for 75 seconds and stalls `sync --once`. Thanks @ViaxCo (#550).
 - Sync: keep valid delivery/read receipts after malformed entries in the same batch, report invalid input separately from storage failures, and keep incomplete syncs from advancing freshness. Thanks @jesusvillota (#537).
+- Sync: name the protocol message type in unhandled-payload warnings (`protocolMessage:APP_STATE_SYNC_KEY_SHARE` instead of `protocolMessage`), so a `(message)` placeholder from an internal control can be told apart from a missed mutation. Thanks @3li7alaki (#547, #546).
 
 ## 0.25.1 - 2026-10-26
 
