@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Dependencies: fix reachable HTML parsing vulnerabilities with x/net 0.62.0 and refresh eligible WhatsApp, SQL tooling, gRPC, YAML, and pnpm dependencies after the 48-hour cooldown, retaining Go 1.27.0 and Node 24 minimums.
+
 - CI: schedule weekly CodeQL main scans while retaining PR and manual analysis.
 
 - Send: send `.m4a` files as `audio/mp4` instead of the system MIME table's `audio/mp4a-latm`, which WhatsApp clients hide. Thanks @ViaxCo (#549).
