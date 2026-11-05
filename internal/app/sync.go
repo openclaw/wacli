@@ -407,9 +407,8 @@ type messageStoreOptions struct {
 	archiveIncoming          bool
 	archiveObservedMS        int64
 	archiveSettingObservedMS int64
-	// History defers acknowledgement and receives freshness from the same
-	// transaction that stores the message, including placeholder decoding.
-	freshHistoryOwnReply *bool
+	// Historical imports are not evidence of a new read action.
+	skipOwnReadMark bool
 }
 
 // ownMessageIsReply reports whether pm, sent by this account, answers the chat.
@@ -522,15 +521,7 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage, optio
 		displayText = store.DeletedMessageDisplayText
 	}
 
-	upsert := func(p store.UpsertMessageParams) error {
-		if options.freshHistoryOwnReply != nil {
-			fresh, err := a.db.UpsertHistoryMessage(p)
-			*options.freshHistoryOwnReply = fresh
-			return err
-		}
-		return a.db.UpsertMessage(p)
-	}
-	if err := upsert(store.UpsertMessageParams{
+	if err := a.db.UpsertMessage(store.UpsertMessageParams{
 		ArchiveIncoming:          options.archiveIncoming,
 		ArchiveObservedMS:        options.archiveObservedMS,
 		ArchiveSettingObservedMS: options.archiveSettingObservedMS,
@@ -561,7 +552,7 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage, optio
 		FileLength:               fileLen,
 		Edited:                   pm.Edited,
 		Revoked:                  pm.Revoked,
-		SkipOwnReadMark:          !ownMessageIsReply(pm),
+		SkipOwnReadMark:          options.skipOwnReadMark || !ownMessageIsReply(pm),
 	}); err != nil {
 		return err
 	}

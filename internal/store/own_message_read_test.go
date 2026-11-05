@@ -157,13 +157,3 @@ func TestOwnPlaceholderLaterDecodedCountsOnce(t *testing.T) {
 	storeMsg(t, db, UpsertMessageParams{MsgID: "own-1", Timestamp: ownReadBase.Add(time.Minute), FromMe: true, Text: "decoded"})
 	assertUnread(t, db, ownReadChat, false, 0)
 }
-
-func TestClearChatUnreadByOwnMessageNeverCreatesChats(t *testing.T) {
-	db := openTestDB(t)
-	if err := db.ClearChatUnreadByOwnMessage(ownReadChat, ownReadBase); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.GetChat(ownReadChat); err == nil {
-		t.Fatal("clearing unread created a chat")
-	}
-}

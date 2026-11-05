@@ -198,7 +198,7 @@ func TestHistoryOldOwnMessageDoesNotClearLaterUnread(t *testing.T) {
 	}
 }
 
-func TestHistoryNewestOwnMessageClearsUnreadWhenConversationIsSilent(t *testing.T) {
+func TestHistoryNewestOwnMessagePreservesUnreadWhenConversationIsSilent(t *testing.T) {
 	chat := types.JID{User: "5551230000", Server: types.DefaultUserServer}
 	group := types.JID{User: "120363000000000002", Server: types.GroupServer}
 	for _, jid := range []types.JID{chat, group} {
@@ -210,13 +210,13 @@ func TestHistoryNewestOwnMessageClearsUnreadWhenConversationIsSilent(t *testing.
 			historyMessage(jid, "own-new", true, ownReadBase.Add(time.Minute), "reply"),
 			historyMessage(jid, "in-old", false, ownReadBase, "hello"),
 		}})
-		requireUnread(t, a, jid, false, 0)
+		requireUnread(t, a, jid, true, 1)
 
 		// Idempotent when the same batch is processed again.
 		runHistory(t, a, &waHistorySync.Conversation{ID: proto.String(jid.String()), Messages: []*waHistorySync.HistorySyncMsg{
 			historyMessage(jid, "own-new", true, ownReadBase.Add(time.Minute), "reply"),
 		}})
-		requireUnread(t, a, jid, false, 0)
+		requireUnread(t, a, jid, true, 1)
 	}
 }
 
@@ -263,8 +263,8 @@ func TestHistoryStoredOwnReplyPreservesManualUnread(t *testing.T) {
 			runHistory(t, a, &waHistorySync.Conversation{ID: proto.String(chat.String()), Messages: []*waHistorySync.HistorySyncMsg{
 				historyMessage(chat, "own", true, ownReadBase, "reply"),
 			}})
-			requireUnread(t, a, chat, !placeholder, 0)
-			// Even a newly decoded reply must only acknowledge once.
+			requireUnread(t, a, chat, true, 0)
+			// Decoding history is not evidence that the chat was just read.
 			if err := a.db.SetChatUnread(chat.String(), true); err != nil {
 				t.Fatal(err)
 			}
