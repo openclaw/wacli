@@ -427,7 +427,6 @@ func migrateLIDMessagesToPN(tx *sql.Tx, lidJID, pnJID string) error {
 			reaction_to_id = NULL,
 			reaction_emoji = NULL,
 			media_type = NULL,
-			kind = NULL,
 			media_caption = NULL,
 			filename = NULL,
 			mime_type = NULL,
@@ -441,7 +440,8 @@ func migrateLIDMessagesToPN(tx *sql.Tx, lidJID, pnJID string) error {
 			media_unavailable_at = NULL,
 			edited = 0,
 			edited_ts = 0,
-			buttons = NULL
+			buttons = NULL,
+			kind = NULL
 		WHERE chat_jid = ? AND payload_purged_at IS NOT NULL
 	`, pnJID); err != nil {
 		return fmt.Errorf("preserve purged lid message tombstones: %w", err)

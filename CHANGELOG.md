@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Messages: record the semantic kind of polls, poll votes and updates, contact cards and events in a new nullable `messages.kind` column (migration 35) and expose it as `kind` in JSON and `Kind` in webhooks, without touching `media_type`; revoked messages read as `revoked`. Older stores stay readable read-only. Thanks @nicolasbiondic.
+- Messages: record the semantic kind of polls, poll votes and updates, contact cards and events in a new nullable `messages.kind` column (migration 37, also re-checked on every writable open) and expose it as `kind` in JSON and `Kind` in webhooks, without touching `media_type`; revoked messages read as `revoked`. Older stores stay readable read-only. Thanks @nicolasbiondic.
 
 - Messages: preserve document, image, and video header attachments from business templates, interactive messages, and button messages during live and history sync, keeping their body text and enabling normal media downloads. Thanks @daghreri (#543).
 

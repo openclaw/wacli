@@ -374,7 +374,6 @@ func (d *DB) PurgeMessage(chatJID, msgID string) error {
 			reaction_to_id = NULL,
 			reaction_emoji = NULL,
 			media_type = NULL,
-			kind = NULL,
 			media_caption = NULL,
 			filename = NULL,
 			mime_type = NULL,
@@ -389,6 +388,7 @@ func (d *DB) PurgeMessage(chatJID, msgID string) error {
 			edited = 0,
 			edited_ts = 0,
 			buttons = NULL,
+			kind = NULL,
 			payload_purged_at = COALESCE(payload_purged_at, ?)
 		WHERE chat_jid = ? AND msg_id = ?
 	`, purgedAt, chatJID, msgID); err != nil {

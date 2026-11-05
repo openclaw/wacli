@@ -47,8 +47,10 @@ var schemaMigrations = []migration{
 	{version: 31, name: "content-free message change journal", up: migrateChanges},
 	{version: 32, name: "message receipt retrieval revisions", up: migrateReceiptRetrieval},
 	{version: 33, name: "ordered chat auto-unarchive", up: migrateChatAutoUnarchive},
-	// 34 is left to the ad referral column (#496), which is still in review.
-	{version: 35, name: "messages semantic kind", up: migrateMessageKind},
+	// 34-36 are taken by open proposals (stickers, ad referrals, lists). The
+	// column is also re-checked by ensureCurrentSchema, so a store whose row 37
+	// belongs to another migration still gets it.
+	{version: 37, name: "messages semantic kind", up: migrateMessageKind},
 }
 
 // migrateMessageKind adds the nullable messages.kind column (poll, poll_vote,
@@ -75,10 +77,15 @@ func migrateMessageKind(d *DB) error {
 
 // refreshMessageChangeTriggers rebuilds the message change triggers when the
 // update trigger does not compare column yet (it was created before the
-// column existed). A store without the change journal has nothing to rebuild.
+// column existed). A store without the change journal has nothing to rebuild,
+// and the triggers write to it, so they are left alone there.
 func refreshMessageChangeTriggers(d *DB, column string) error {
+	journal, err := d.tableExists("message_changes")
+	if err != nil || !journal {
+		return err
+	}
 	var triggerSQL sql.NullString
-	err := d.sql.QueryRow(`SELECT sql FROM sqlite_master WHERE type='trigger' AND name='retrieval_messages_update'`).Scan(&triggerSQL)
+	err = d.sql.QueryRow(`SELECT sql FROM sqlite_master WHERE type='trigger' AND name='retrieval_messages_update'`).Scan(&triggerSQL)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
