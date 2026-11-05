@@ -261,6 +261,7 @@ func extractWAProto(m *waProto.Message, pm *ParsedMessage) *waProto.Message {
 	extractLocation(m, pm)
 	extractContactText(m, pm)
 	extractBusinessText(m, pm)
+	extractBusinessHeaderMedia(m, pm)
 	extractPoll(m, pm)
 	extractPollAddOption(m, pm)
 	extractPollUpdate(m, pm)
