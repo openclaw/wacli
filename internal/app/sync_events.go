@@ -805,8 +805,9 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 			}
 			storedPM := pm
 			storedPM.UnhandledPayload = ""
-			if err := a.storeParsedMessageForSync(ctx, storedPM, messageStoreOptions{skipOwnReadMark: true}, limits...); err == nil {
-				if ownMessageIsReply(pm) && pm.Timestamp.After(lastOwnReply) {
+			var freshOwnReply bool
+			if err := a.storeParsedMessageForSync(ctx, storedPM, messageStoreOptions{freshHistoryOwnReply: &freshOwnReply}, limits...); err == nil {
+				if freshOwnReply && pm.Timestamp.After(lastOwnReply) {
 					lastOwnReply = pm.Timestamp
 				}
 				unhandledWarnings.observe(a, pm)
@@ -925,10 +926,9 @@ func (a *App) storeHistoryUnreadCount(ctx context.Context, chatID string, conv *
 	}
 }
 
-// storeHistoryOwnReply marks a chat read when the newest own reply in a history
-// conversation has no newer incoming message. It runs after the whole
-// conversation is stored, so batch order cannot hide a later unread message. A
-// conversation that reports its own unread state is trusted as is.
+// storeHistoryOwnReply acknowledges through the newest fresh own reply after
+// the whole conversation is stored. Same-second history order is unresolved;
+// those messages remain unread. Reported conversation unread state wins.
 func (a *App) storeHistoryOwnReply(ctx context.Context, chatID string, conv *waHistorySync.Conversation, lastOwnReply time.Time) {
 	if lastOwnReply.IsZero() || conv.UnreadCount != nil || conv.MarkedAsUnread != nil {
 		return

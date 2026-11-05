@@ -79,9 +79,10 @@ func TestOwnMessageNotNewerThanIncomingKeepsUnread(t *testing.T) {
 	db := openTestDB(t)
 	seedUnreadChat(t, db, ownReadChat, 2, false)
 	storeMsg(t, db, UpsertMessageParams{MsgID: "in-late", Timestamp: ownReadBase.Add(10 * time.Minute), Text: "newer"})
-	// A historical own message older than a received one must not swallow it.
+	// A late own message can reduce the covered count, but must not swallow
+	// the newer incoming message or increase an already reduced count.
 	storeMsg(t, db, UpsertMessageParams{MsgID: "own-old", Timestamp: ownReadBase.Add(time.Minute), FromMe: true, Text: "old reply"})
-	assertUnread(t, db, ownReadChat, true, 2)
+	assertUnread(t, db, ownReadChat, true, 1)
 
 	seedUnreadChat(t, db, "5559990000@s.whatsapp.net", 0, true)
 	storeMsg(t, db, UpsertMessageParams{ChatJID: "5559990000@s.whatsapp.net", MsgID: "in", Timestamp: ownReadBase.Add(10 * time.Minute), Text: "newer"})
@@ -96,6 +97,7 @@ func TestOwnMessageIgnoresNonReadableIncomingWhenComparing(t *testing.T) {
 	storeMsg(t, db, UpsertMessageParams{MsgID: "in-react", Timestamp: ownReadBase.Add(9 * time.Minute), ReactionToID: "x", ReactionEmoji: "+1"})
 	storeMsg(t, db, UpsertMessageParams{MsgID: "in-proto", Timestamp: ownReadBase.Add(9 * time.Minute), DisplayText: "(message)"})
 	storeMsg(t, db, UpsertMessageParams{MsgID: "in-revoked", Timestamp: ownReadBase.Add(9 * time.Minute), Revoked: true})
+	storeMsg(t, db, UpsertMessageParams{MsgID: "in-deleted", Timestamp: ownReadBase.Add(9 * time.Minute), DeletedAt: ownReadBase.Add(10 * time.Minute)})
 	storeMsg(t, db, UpsertMessageParams{MsgID: "own", Timestamp: ownReadBase.Add(time.Minute), FromMe: true, Text: "ok"})
 	assertUnread(t, db, ownReadChat, false, 0)
 }

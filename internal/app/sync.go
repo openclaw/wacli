@@ -407,9 +407,9 @@ type messageStoreOptions struct {
 	archiveIncoming          bool
 	archiveObservedMS        int64
 	archiveSettingObservedMS int64
-	// skipOwnReadMark stores this account's own messages without marking the
-	// chat read. History batches reconcile it once the whole chat is stored.
-	skipOwnReadMark bool
+	// History defers acknowledgement and receives freshness from the same
+	// transaction that stores the message, including placeholder decoding.
+	freshHistoryOwnReply *bool
 }
 
 // ownMessageIsReply reports whether pm, sent by this account, answers the chat.
@@ -522,7 +522,15 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage, optio
 		displayText = store.DeletedMessageDisplayText
 	}
 
-	if err := a.db.UpsertMessage(store.UpsertMessageParams{
+	upsert := func(p store.UpsertMessageParams) error {
+		if options.freshHistoryOwnReply != nil {
+			fresh, err := a.db.UpsertHistoryMessage(p)
+			*options.freshHistoryOwnReply = fresh
+			return err
+		}
+		return a.db.UpsertMessage(p)
+	}
+	if err := upsert(store.UpsertMessageParams{
 		ArchiveIncoming:          options.archiveIncoming,
 		ArchiveObservedMS:        options.archiveObservedMS,
 		ArchiveSettingObservedMS: options.archiveSettingObservedMS,
@@ -553,7 +561,7 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage, optio
 		FileLength:               fileLen,
 		Edited:                   pm.Edited,
 		Revoked:                  pm.Revoked,
-		SkipOwnReadMark:          options.skipOwnReadMark || !ownMessageIsReply(pm),
+		SkipOwnReadMark:          !ownMessageIsReply(pm),
 	}); err != nil {
 		return err
 	}

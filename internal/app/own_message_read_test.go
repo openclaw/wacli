@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -243,4 +244,110 @@ func TestHistoryOwnReactionDoesNotClearUnread(t *testing.T) {
 	}}
 	runHistory(t, a, &waHistorySync.Conversation{ID: proto.String(chat.String()), Messages: []*waHistorySync.HistorySyncMsg{reaction}})
 	requireUnread(t, a, chat, true, 1)
+}
+
+func TestHistoryStoredOwnReplyPreservesManualUnread(t *testing.T) {
+	for _, placeholder := range []bool{false, true} {
+		t.Run(map[bool]string{false: "stored reply", true: "newly decoded reply"}[placeholder], func(t *testing.T) {
+			a := newTestApp(t)
+			a.wa = newFakeWA()
+			chat := types.NewJID("5551230000", types.DefaultUserServer)
+			msg := textMessage("reply")
+			if placeholder {
+				msg = &waE2E.Message{}
+			}
+			feedLive(t, a, liveMessage(chat, "own", true, ownReadBase, msg))
+			if err := a.db.SetChatUnread(chat.String(), true); err != nil {
+				t.Fatal(err)
+			}
+			runHistory(t, a, &waHistorySync.Conversation{ID: proto.String(chat.String()), Messages: []*waHistorySync.HistorySyncMsg{
+				historyMessage(chat, "own", true, ownReadBase, "reply"),
+			}})
+			requireUnread(t, a, chat, !placeholder, 0)
+			// Even a newly decoded reply must only acknowledge once.
+			if err := a.db.SetChatUnread(chat.String(), true); err != nil {
+				t.Fatal(err)
+			}
+			runHistory(t, a, &waHistorySync.Conversation{ID: proto.String(chat.String()), Messages: []*waHistorySync.HistorySyncMsg{
+				historyMessage(chat, "own", true, ownReadBase, "reply"),
+			}})
+			requireUnread(t, a, chat, true, 0)
+		})
+	}
+}
+
+func TestHistoryOwnReplyPreservesUnresolvedSameSecond(t *testing.T) {
+	chat := types.NewJID("5551230000", types.DefaultUserServer)
+	for _, ownFirst := range []bool{false, true} {
+		for _, markerOnly := range []bool{false, true} {
+			t.Run(fmt.Sprintf("ownFirst=%v/markerOnly=%v", ownFirst, markerOnly), func(t *testing.T) {
+				a := newTestApp(t)
+				a.wa = newFakeWA()
+				feedLive(t, a, liveMessage(chat, "older", false, ownReadBase.Add(-time.Minute), textMessage("older")))
+				if markerOnly {
+					if err := a.db.SetChatUnreadCount(chat.String(), 0); err != nil {
+						t.Fatal(err)
+					}
+					if err := a.db.SetChatUnread(chat.String(), true); err != nil {
+						t.Fatal(err)
+					}
+				}
+				messages := []*waHistorySync.HistorySyncMsg{
+					historyMessage(chat, "own", true, ownReadBase.Add(100*time.Millisecond), "reply"),
+					historyMessage(chat, "later", false, ownReadBase.Add(900*time.Millisecond), "later"),
+				}
+				if !ownFirst {
+					messages[0], messages[1] = messages[1], messages[0]
+				}
+				runHistory(t, a, &waHistorySync.Conversation{ID: proto.String(chat.String()), Messages: messages})
+				count := 1
+				if markerOnly {
+					count = 0
+				}
+				requireUnread(t, a, chat, true, count)
+			})
+		}
+	}
+}
+
+func TestLiveTombstonedOwnReplyReplayPreservesUnread(t *testing.T) {
+	for _, revoke := range []bool{false, true} {
+		t.Run(map[bool]string{false: "deleted-for-me", true: "revoked"}[revoke], func(t *testing.T) {
+			a := newTestApp(t)
+			a.wa = newFakeWA()
+			chat := types.NewJID("5551230000", types.DefaultUserServer)
+			own := liveMessage(chat, "own", true, ownReadBase, textMessage("reply"))
+			feedLive(t, a, own)
+			var err error
+			if revoke {
+				err = a.db.MarkMessageRevoked(chat.String(), "own")
+			} else {
+				err = a.db.MarkMessageDeletedForMe(chat.String(), "own", chat.String(), true, ownReadBase.Add(time.Minute))
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := a.db.SetChatUnread(chat.String(), true); err != nil {
+				t.Fatal(err)
+			}
+			feedLive(t, a, own)
+			requireUnread(t, a, chat, true, 0)
+			runHistory(t, a, &waHistorySync.Conversation{ID: proto.String(chat.String()), Messages: []*waHistorySync.HistorySyncMsg{
+				historyMessage(chat, "own", true, ownReadBase, "reply"),
+			}})
+			requireUnread(t, a, chat, true, 0)
+			if err := a.db.PurgeMessage(chat.String(), "own"); err != nil {
+				t.Fatal(err)
+			}
+			if err := a.db.SetChatUnreadCount(chat.String(), 2); err != nil {
+				t.Fatal(err)
+			}
+			feedLive(t, a, own)
+			requireUnread(t, a, chat, true, 2)
+			runHistory(t, a, &waHistorySync.Conversation{ID: proto.String(chat.String()), Messages: []*waHistorySync.HistorySyncMsg{
+				historyMessage(chat, "own", true, ownReadBase, "reply"),
+			}})
+			requireUnread(t, a, chat, true, 2)
+		})
+	}
 }

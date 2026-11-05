@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Chats: mark a chat read when this account sends a message in it from any device or `wacli send`, clearing the unread count and manual marker unless a newer incoming message exists; reactions, edits, revocations, poll votes, calls, protocol rows, and replays are ignored.
+- Chats: acknowledge unread messages through a fresh reply from this account on any device or `wacli send`, preserving later arrivals and unresolved same-second history boundaries. Reactions, edits, revocations, poll votes, calls, protocol rows, and replays (including tombstones) do not acknowledge the chat or clear newer manual markers.
 - Messages: preserve document, image, and video header attachments from business templates, interactive messages, and button messages during live and history sync, keeping their body text and enabling normal media downloads. Thanks @daghreri (#543).
 
 - Dependencies: fix reachable HTML parsing vulnerabilities with x/net 0.62.0 and refresh eligible WhatsApp, SQL tooling, gRPC, YAML, and pnpm dependencies after the 48-hour cooldown, retaining Go 1.27.0 and Node 24 minimums.
