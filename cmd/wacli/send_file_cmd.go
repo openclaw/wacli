@@ -97,7 +97,7 @@ func newSendFileCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 
-			res, err := runSendOperation(ctx, reconnectForSend(a), func(ctx context.Context) (sendFileOutcome, error) {
+			res, err := runFileSendOperation(ctx, reconnectForSend(a), filePath, func(ctx context.Context) (sendFileOutcome, error) {
 				return sendFile(ctx, a, toJID, filePath, sendFileOptions{
 					filename:      filename,
 					caption:       caption,
