@@ -6,6 +6,38 @@ import (
 	waProto "go.mau.fi/whatsmeow/binary/proto"
 )
 
+type businessMediaHeader interface {
+	GetDocumentMessage() *waProto.DocumentMessage
+	GetImageMessage() *waProto.ImageMessage
+	GetVideoMessage() *waProto.VideoMessage
+}
+
+func extractBusinessHeaderMedia(m *waProto.Message, pm *ParsedMessage) {
+	if pm.Media != nil {
+		return
+	}
+	tmpl := m.GetTemplateMessage()
+	headers := []businessMediaHeader{
+		hydratedTemplate(tmpl),
+		tmpl.GetFourRowTemplate(),
+		tmpl.GetInteractiveMessageTemplate().GetHeader(),
+		m.GetButtonsMessage(),
+		m.GetInteractiveMessage().GetHeader(),
+	}
+	for _, header := range headers {
+		// Generated getters accept nil receivers. Reuse the ordinary media
+		// mapper after business text so the header cannot replace that text.
+		extractMedia(&waProto.Message{
+			DocumentMessage: header.GetDocumentMessage(),
+			ImageMessage:    header.GetImageMessage(),
+			VideoMessage:    header.GetVideoMessage(),
+		}, pm)
+		if pm.Media != nil {
+			return
+		}
+	}
+}
+
 func extractMedia(m *waProto.Message, pm *ParsedMessage) {
 	if img := m.GetImageMessage(); img != nil {
 		if pm.Text == "" {
@@ -24,23 +56,11 @@ func extractMedia(m *waProto.Message, pm *ParsedMessage) {
 	}
 
 	if vid := m.GetVideoMessage(); vid != nil {
-		if pm.Text == "" {
-			pm.Text = vid.GetCaption()
-		}
-		mediaType := "video"
-		if vid.GetGifPlayback() {
-			mediaType = "gif"
-		}
-		pm.Media = &Media{
-			Type:          mediaType,
-			Caption:       vid.GetCaption(),
-			MimeType:      vid.GetMimetype(),
-			DirectPath:    vid.GetDirectPath(),
-			MediaKey:      clone(vid.GetMediaKey()),
-			FileSHA256:    clone(vid.GetFileSHA256()),
-			FileEncSHA256: clone(vid.GetFileEncSHA256()),
-			FileLength:    vid.GetFileLength(),
-		}
+		extractVideo(vid, pm)
+	}
+	// Round video notes (PTV) carry an ordinary VideoMessage in their own field.
+	if ptv := m.GetPtvMessage(); ptv != nil {
+		extractVideo(ptv, pm)
 	}
 
 	if aud := m.GetAudioMessage(); aud != nil {
@@ -88,6 +108,26 @@ func extractMedia(m *waProto.Message, pm *ParsedMessage) {
 			FileEncSHA256: clone(sticker.GetFileEncSHA256()),
 			FileLength:    sticker.GetFileLength(),
 		}
+	}
+}
+
+func extractVideo(vid *waProto.VideoMessage, pm *ParsedMessage) {
+	if pm.Text == "" {
+		pm.Text = vid.GetCaption()
+	}
+	mediaType := "video"
+	if vid.GetGifPlayback() {
+		mediaType = "gif"
+	}
+	pm.Media = &Media{
+		Type:          mediaType,
+		Caption:       vid.GetCaption(),
+		MimeType:      vid.GetMimetype(),
+		DirectPath:    vid.GetDirectPath(),
+		MediaKey:      clone(vid.GetMediaKey()),
+		FileSHA256:    clone(vid.GetFileSHA256()),
+		FileEncSHA256: clone(vid.GetFileEncSHA256()),
+		FileLength:    vid.GetFileLength(),
 	}
 }
 

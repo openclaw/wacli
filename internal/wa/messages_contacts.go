@@ -59,7 +59,7 @@ func contactDetails(contact *waProto.ContactMessage) (string, []string) {
 		if !ok {
 			continue
 		}
-		field := strings.ToUpper(strings.TrimSpace(strings.Split(key, ";")[0]))
+		field := vCardPropertyName(key)
 		value = unescapeVCardValue(strings.TrimSpace(value))
 		if value == "" {
 			continue
@@ -74,6 +74,18 @@ func contactDetails(contact *waProto.ContactMessage) (string, []string) {
 		}
 	}
 	return name, phones
+}
+
+// vCardPropertyName returns the upper-cased property name without parameters
+// or group. iPhone contact cards group related lines, as in
+// "item1.TEL;type=CELL:+39 333 1234567", and the group must not hide the TEL.
+func vCardPropertyName(key string) string {
+	name, _, _ := strings.Cut(key, ";")
+	name = strings.TrimSpace(name)
+	if dot := strings.LastIndexByte(name, '.'); dot >= 0 {
+		name = name[dot+1:]
+	}
+	return strings.ToUpper(name)
 }
 
 func unfoldedVCardLines(vcard string) []string {

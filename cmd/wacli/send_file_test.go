@@ -9,6 +9,7 @@ import (
 	"image/color"
 	"image/jpeg"
 	"image/png"
+	"mime"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -43,6 +44,22 @@ func TestDetectSendFileMIMEAddsOpusCodecForOgg(t *testing.T) {
 				t.Fatalf("mime = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestDetectSendFileMIMEUsesAudioMP4ForM4A(t *testing.T) {
+	previous := mime.TypeByExtension(".m4a")
+	if err := mime.AddExtensionType(".m4a", "audio/mp4a-latm"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = mime.AddExtensionType(".m4a", previous) })
+	for _, filePath := range []string{"service.m4a", "SERVICE.M4A"} {
+		if got := detectSendFileMIME(filePath, "", nil); got != "audio/mp4" {
+			t.Fatalf("%s: mime = %q, want audio/mp4", filePath, got)
+		}
+	}
+	if got := detectSendFileMIME("service.m4a", "audio/custom", nil); got != "audio/custom" {
+		t.Fatalf("explicit MIME override = %q, want audio/custom", got)
 	}
 }
 

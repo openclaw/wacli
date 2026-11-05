@@ -71,6 +71,18 @@ func TestRunSendAttemptTimesOut(t *testing.T) {
 	}
 }
 
+func TestRunSendAttemptReportsCallerDeadline(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	_, err := runSendAttempt(ctx, time.Hour, func(ctx context.Context) (string, error) {
+		<-ctx.Done()
+		return "", ctx.Err()
+	})
+	if !errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "1h0m0s") {
+		t.Fatalf("err = %v, want caller deadline", err)
+	}
+}
+
 func TestWaitForPostSendRetryReceipts(t *testing.T) {
 	start := time.Now()
 	waitForPostSendRetryReceipts(context.Background(), 10*time.Millisecond)
@@ -304,5 +316,49 @@ func TestWarmupRecipientLogsErrorToStderr(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "warn: send warmup for") {
 		t.Fatalf("expected warning in stderr, got: %q", stderr.String())
+	}
+}
+
+type uploadDeadlineWA struct {
+	*fakeSendFileWA
+	deadline time.Time
+}
+
+func (f *uploadDeadlineWA) Upload(ctx context.Context, data []byte, mediaType whatsmeow.MediaType) (whatsmeow.UploadResponse, error) {
+	f.deadline, _ = ctx.Deadline()
+	return f.fakeSendFileWA.Upload(ctx, data, mediaType)
+}
+
+func TestFileSendUploadDeadlineGrowsWithFileSize(t *testing.T) {
+	a, _, _ := newSendFileFixture(t)
+	wa := &uploadDeadlineWA{fakeSendFileWA: a.wa.(*fakeSendFileWA)}
+	a.wa = wa
+	path := filepath.Join(t.TempDir(), "large.zip")
+	if err := os.WriteFile(path, make([]byte, 17*1024*1024), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	to := types.NewJID("15550000001", types.DefaultUserServer)
+	send := func(ctx context.Context) {
+		t.Helper()
+		_, err := runFileSendOperation(ctx, nil, path, func(ctx context.Context) (sendFileOutcome, error) {
+			return sendFile(ctx, a, to, path, sendFileOptions{})
+		})
+		if err != nil {
+			t.Fatalf("send: %v", err)
+		}
+	}
+
+	start := time.Now()
+	send(context.Background())
+	if got, want := wa.deadline.Sub(start), sendAttemptTimeout+272*time.Second; got < want-time.Second || got > want+time.Second {
+		t.Fatalf("upload deadline in %s, want %s", got, want)
+	}
+
+	callerCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	callerDeadline, _ := callerCtx.Deadline()
+	send(callerCtx)
+	if !wa.deadline.Equal(callerDeadline) {
+		t.Fatalf("upload deadline = %s, want caller deadline %s", wa.deadline, callerDeadline)
 	}
 }

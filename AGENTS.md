@@ -18,7 +18,7 @@
 - **FTS5 table** is a separate trigger-synced table in `wacli.db`; requires `-tags sqlite_fts5` at build time.
 - **Store lock**: a `LOCK` file in the store dir is acquired before any write operation; `--lock-wait` controls the wait timeout.
 - **Read-only mode**: `--read-only` flag or `WACLI_READONLY=1` env; write commands exit immediately with a clear error.
-- **Send retry**: bounded 45 s attempt timeout; retries once after reconnect for stale-session / usync-timeout errors.
+- **Send retry**: bounded 45 s attempt timeout (file and voice sends add 1 s per 64 KiB for the upload); retries once after reconnect for stale-session / usync-timeout errors.
 - **Store path precedence**: `--store` flag → `WACLI_STORE_DIR` env → XDG `~/.local/state/wacli` on Linux (legacy `~/.wacli` fallback) → `~/.wacli` elsewhere.
 
 ## Build, Test, and Development Commands

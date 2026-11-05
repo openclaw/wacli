@@ -507,7 +507,12 @@ func detectSendFileMIME(filePath, mimeOverride string, data []byte) string {
 	mimeType := strings.TrimSpace(mimeOverride)
 	if mimeType == "" {
 		// Use filePath for MIME detection, not the display name override.
-		mimeType = mime.TypeByExtension(strings.ToLower(filepath.Ext(filePath)))
+		ext := strings.ToLower(filepath.Ext(filePath))
+		if ext == ".m4a" {
+			mimeType = "audio/mp4"
+		} else {
+			mimeType = mime.TypeByExtension(ext)
+		}
 	}
 	if mimeType == "" {
 		sniff := data

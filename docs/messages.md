@@ -129,9 +129,11 @@ wacli --read-only --json messages list --sender "Ada" --limit 100
 
 - Uses SQLite FTS5 when the binary was built with `-tags sqlite_fts5`.
 - Falls back to `LIKE` if FTS5 is not available.
-- `--type` accepts `text`, `image`, `video`, `audio`, or `document`.
-- Shared WhatsApp contact cards are stored as searchable text with contact names and phone numbers when WhatsApp includes a vCard payload.
+- `--type` accepts `text`, `image`, `video`, `audio`, or `document`. Round video notes are stored as `video`.
+- Shared WhatsApp contact cards are stored as searchable text with contact names and phone numbers when WhatsApp includes a vCard payload, including iPhone cards that group properties as `item1.TEL` and `item1.FN`.
 - Associated-child and group-status-mention wrappers retain their inner text, media, and reply context. Group invitations expose their caption, with the group name as a fallback. These parser fixes apply on re-ingestion; they cannot recover absent payloads or missing decryption keys.
+- History sync unwraps disappearing-message, view-once, and document-with-caption envelopes the same way live messages are unwrapped, so their text, media, and reply context are stored instead of `(message)`.
+- Business templates, interactive messages, and legacy button messages retain document, image, and video header attachments alongside their body text and buttons. These attachments use the normal media download and backfill commands. Previously stored text-only rows need message re-delivery or history re-ingestion to recover missing attachment metadata; the original payload is not retained locally.
 - Comment payloads retain their inner text or media and their envelope's reply target. Album headers show expected image/video counts; those summaries do not recover missing child captions or undecryptable history.
 - `--starred` restricts list/search results to messages marked as starred by WhatsApp.
 - Time filters accept RFC3339 or `YYYY-MM-DD`.
@@ -139,6 +141,8 @@ wacli --read-only --json messages list --sender "Ada" --limit 100
 ## Delivery state
 
 Messages you sent carry `DeliveredTo` and `ReadBy`: how many recipients reported the message delivered, and how many of those went on to read it. A direct chat counts one recipient; a group counts one per participant who reported, so a chat where everybody has read is distinguishable from one where a single member has. Playing a voice note counts as reading it, and a state never moves backwards.
+
+Malformed receipt entries are skipped while valid entries in the same batch are retained. A `message_receipt_invalid` warning keeps that sync incomplete: retry sync and report repeated warnings. This does not recover skipped receipts or certify freshness; genuine storage failures also keep freshness unchanged.
 
 `messages show` reports the same two counts, and an identity migration from a `@lid` chat to its phone number carries the reports with their messages, counting a recipient that reported under both identities once.
 

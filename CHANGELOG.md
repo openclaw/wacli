@@ -3,6 +3,26 @@
 ## Unreleased
 
 - Chats: mark a chat read when this account sends a message in it from any device or `wacli send`, clearing the unread count and manual marker unless a newer incoming message exists; reactions, edits, revocations, poll votes, calls, protocol rows, and replays are ignored.
+- Messages: preserve document, image, and video header attachments from business templates, interactive messages, and button messages during live and history sync, keeping their body text and enabling normal media downloads. Thanks @daghreri (#543).
+
+- Dependencies: fix reachable HTML parsing vulnerabilities with x/net 0.62.0 and refresh eligible WhatsApp, SQL tooling, gRPC, YAML, and pnpm dependencies after the 48-hour cooldown, retaining Go 1.27.0 and Node 24 minimums.
+
+- CI: schedule weekly CodeQL main scans while retaining PR and manual analysis.
+
+- Send: send `.m4a` files as `audio/mp4` instead of the system MIME table's `audio/mp4a-latm`, which WhatsApp clients hide. Thanks @ViaxCo (#549).
+- Sync: name broadcast-list chats from local contacts instead of a group query that WhatsApp never answers, so each broadcast message no longer blocks event handling for 75 seconds and stalls `sync --once`. Thanks @ViaxCo (#550).
+- Sync: keep valid delivery/read receipts after malformed entries in the same batch, report invalid input separately from storage failures, and keep incomplete syncs from advancing freshness. Thanks @jesusvillota (#537).
+- Sync: name the protocol message type in unhandled-payload warnings (`protocolMessage:APP_STATE_SYNC_KEY_SHARE` instead of `protocolMessage`), so a `(message)` placeholder from an internal control can be told apart from a missed mutation. Thanks @3li7alaki (#547, #546).
+
+## 0.25.1 - 2026-10-26
+
+**Highlights:** reliable slow file and voice uploads, plus complete decoding of wrapped history and video notes.
+
+- Send: extend the `send file` and `send voice` attempt timeout by one second per 64 KiB, so uploads slower than 45 seconds no longer fail with `send timed out after 45s`. Thanks @ViaxCo (#535, #534).
+
+- Messages: read wrapped history payloads, grouped iPhone contact-card fields, and round video notes with their media and reply context. Thanks @emanuma03-alt (#529).
+
+- Dependencies: update the GraphQL parser after the 48-hour cooldown, preserving Go 1.27.0 and Node 24 minimums.
 
 ## 0.25.0 - 2026-10-23
 
