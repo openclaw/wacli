@@ -6,6 +6,8 @@ Read when: running continuous capture, one-shot sync, contact/group refresh, or 
 
 Startup repairs historical LID identities using indexed message lookups without rebuilding unchanged search content. Interrupting startup stops identity repair between individual identities; the next run resumes any remaining repairs.
 
+Broadcast-list chat names come from the local WhatsApp contact store, then the message's push name, then the list JID. Sync does not query group metadata for broadcast lists.
+
 Remote logout stops sync and emits `logged_out`; it retains the existing successful-stop exit status. `auth status` and `doctor` remember the observed revocation until a confirmed login.
 
 ## Command
