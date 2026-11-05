@@ -133,6 +133,7 @@ wacli --read-only --json messages list --sender "Ada" --limit 100
 - Shared WhatsApp contact cards are stored as searchable text with contact names and phone numbers when WhatsApp includes a vCard payload, including iPhone cards that group properties as `item1.TEL` and `item1.FN`.
 - Associated-child and group-status-mention wrappers retain their inner text, media, and reply context. Group invitations expose their caption, with the group name as a fallback. These parser fixes apply on re-ingestion; they cannot recover absent payloads or missing decryption keys.
 - History sync unwraps disappearing-message, view-once, and document-with-caption envelopes the same way live messages are unwrapped, so their text, media, and reply context are stored instead of `(message)`.
+- Business templates, interactive messages, and legacy button messages retain document, image, and video header attachments alongside their body text and buttons. These attachments use the normal media download and backfill commands. Previously stored text-only rows need message re-delivery or history re-ingestion to recover missing attachment metadata; the original payload is not retained locally.
 - Comment payloads retain their inner text or media and their envelope's reply target. Album headers show expected image/video counts; those summaries do not recover missing child captions or undecryptable history.
 - `--starred` restricts list/search results to messages marked as starred by WhatsApp.
 - Time filters accept RFC3339 or `YYYY-MM-DD`.

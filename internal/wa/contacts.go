@@ -136,7 +136,7 @@ func (c *Client) ResolveChatName(ctx context.Context, chat types.JID, pushName s
 				return name
 			}
 		}
-	} else if chat.Server == types.GroupServer || chat.IsBroadcastList() {
+	} else if chat.Server == types.GroupServer {
 		info, err := c.GetGroupInfo(ctx, chat)
 		if err == nil && info != nil {
 			if name := strings.TrimSpace(info.GroupName.Name); name != "" {

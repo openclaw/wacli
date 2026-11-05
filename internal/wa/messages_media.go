@@ -6,6 +6,38 @@ import (
 	waProto "go.mau.fi/whatsmeow/binary/proto"
 )
 
+type businessMediaHeader interface {
+	GetDocumentMessage() *waProto.DocumentMessage
+	GetImageMessage() *waProto.ImageMessage
+	GetVideoMessage() *waProto.VideoMessage
+}
+
+func extractBusinessHeaderMedia(m *waProto.Message, pm *ParsedMessage) {
+	if pm.Media != nil {
+		return
+	}
+	tmpl := m.GetTemplateMessage()
+	headers := []businessMediaHeader{
+		hydratedTemplate(tmpl),
+		tmpl.GetFourRowTemplate(),
+		tmpl.GetInteractiveMessageTemplate().GetHeader(),
+		m.GetButtonsMessage(),
+		m.GetInteractiveMessage().GetHeader(),
+	}
+	for _, header := range headers {
+		// Generated getters accept nil receivers. Reuse the ordinary media
+		// mapper after business text so the header cannot replace that text.
+		extractMedia(&waProto.Message{
+			DocumentMessage: header.GetDocumentMessage(),
+			ImageMessage:    header.GetImageMessage(),
+			VideoMessage:    header.GetVideoMessage(),
+		}, pm)
+		if pm.Media != nil {
+			return
+		}
+	}
+}
+
 func extractMedia(m *waProto.Message, pm *ParsedMessage) {
 	if img := m.GetImageMessage(); img != nil {
 		if pm.Text == "" {
