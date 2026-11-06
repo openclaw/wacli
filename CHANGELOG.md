@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Messages: record the semantic kind of polls, poll votes and updates, contact cards and events in a new nullable `messages.kind` column (migration 37, also re-checked on every writable open) and expose it as `kind` in JSON and `Kind` in webhooks, without touching `media_type`; revoked messages read as `revoked`. Older stores stay readable read-only. Thanks @nicolasbiondic.
+
 ## 0.26.0 - 2026-11-05
 
 **Highlights:** fresh own replies mark chats read, broadcast sync avoids long stalls, business attachments and M4A audio arrive intact, and networking security fixes.

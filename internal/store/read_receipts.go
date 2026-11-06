@@ -6,16 +6,18 @@ import (
 	"strings"
 )
 
-const receiptEligible = "chat_jid = ? AND from_me = 0 AND revoked = 0 AND deleted_for_me = 0 AND deleted_at IS NULL AND COALESCE(reaction_to_id,'') = '' AND COALESCE(reaction_emoji,'') = '' AND (COALESCE(display_text,'') != '(message)' OR TRIM(COALESCE(text,'')) != '')"
+func (d *DB) receiptEligible() string {
+	return "chat_jid = ? AND from_me = 0 AND revoked = 0 AND deleted_for_me = 0 AND deleted_at IS NULL AND COALESCE(reaction_to_id,'') = '' AND COALESCE(reaction_emoji,'') = '' AND " + d.unreadContentPredicate()
+}
 
 // ReadBoundary resolves an exact inbound anchor before app-state recovery can
 // start. The chat predicate prevents an ID from another chat becoming a cutoff.
 func (d *DB) ReadBoundary(jid, id string) (MessageInfo, error) {
-	m, _, err := readBoundary(d.sql, jid, id)
+	m, _, err := d.readBoundary(d.sql, jid, id)
 	return m, err
 }
 
-func readBoundary(db interface {
+func (d *DB) readBoundary(db interface {
 	QueryRow(string, ...any) *sql.Row
 }, jid, id string) (MessageInfo, int64, error) {
 	if strings.TrimSpace(id) == "" || id != strings.TrimSpace(id) {
@@ -23,7 +25,7 @@ func readBoundary(db interface {
 	}
 	m := MessageInfo{ChatJID: jid}
 	var rowID, ts int64
-	err := db.QueryRow("SELECT rowid, msg_id, COALESCE(sender_jid,''), ts FROM messages WHERE "+receiptEligible+" AND msg_id = ?", jid, id).Scan(&rowID, &m.MsgID, &m.SenderJID, &ts)
+	err := db.QueryRow("SELECT rowid, msg_id, COALESCE(sender_jid,''), ts FROM messages WHERE "+d.receiptEligible()+" AND msg_id = ?", jid, id).Scan(&rowID, &m.MsgID, &m.SenderJID, &ts)
 	if err != nil {
 		return MessageInfo{}, 0, fmt.Errorf("read boundary %q must be a stored inbound message in chat %s: %w", id, jid, err)
 	}
@@ -59,7 +61,7 @@ func (d *DB) readReceiptCandidates(jid, throughID string, limit int) ([]MessageI
 	boundary := ""
 	var boundaryArgs []any
 	if throughID != "" {
-		m, rowID, err := readBoundary(tx, jid, throughID)
+		m, rowID, err := d.readBoundary(tx, jid, throughID)
 		if err != nil {
 			return nil, err
 		}
@@ -75,7 +77,7 @@ func (d *DB) readReceiptCandidates(jid, throughID string, limit int) ([]MessageI
 		return nil, tx.Commit()
 	}
 	var available int
-	if err := tx.QueryRow("SELECT COUNT(*) FROM messages WHERE "+receiptEligible, jid).Scan(&available); err != nil {
+	if err := tx.QueryRow("SELECT COUNT(*) FROM messages WHERE "+d.receiptEligible(), jid).Scan(&available); err != nil {
 		return nil, err
 	}
 	// With no eligible rows, the caller can clear local metadata without
@@ -90,7 +92,7 @@ func (d *DB) readReceiptCandidates(jid, throughID string, limit int) ([]MessageI
 	}
 	args := append([]any{jid, want}, boundaryArgs...)
 	args = append(args, limit)
-	rows, err := tx.Query("SELECT msg_id, COALESCE(sender_jid,''), ts FROM (SELECT msg_id, sender_jid, ts, rowid FROM messages WHERE "+receiptEligible+" ORDER BY ts DESC, rowid DESC LIMIT ?)"+boundary+" ORDER BY ts ASC, rowid ASC LIMIT ?", args...)
+	rows, err := tx.Query("SELECT msg_id, COALESCE(sender_jid,''), ts FROM (SELECT msg_id, sender_jid, ts, rowid FROM messages WHERE "+d.receiptEligible()+" ORDER BY ts DESC, rowid DESC LIMIT ?)"+boundary+" ORDER BY ts ASC, rowid ASC LIMIT ?", args...)
 	if err != nil {
 		return nil, err
 	}
@@ -118,6 +120,6 @@ func (d *DB) readReceiptCandidates(jid, throughID string, limit int) ([]MessageI
 // to acknowledge. Recheck eligibility atomically so an arrival after selection
 // keeps its count or marker. No message read boundary or network state changes.
 func (d *DB) ClearChatUnreadMarker(jid string) error {
-	_, err := d.sql.ExecContext(storeCtx(), "UPDATE chats SET unread = 0, unread_count = 0 WHERE jid = ? AND NOT EXISTS (SELECT 1 FROM messages WHERE "+receiptEligible+")", jid, jid)
+	_, err := d.sql.ExecContext(storeCtx(), "UPDATE chats SET unread = 0, unread_count = 0 WHERE jid = ? AND NOT EXISTS (SELECT 1 FROM messages WHERE "+d.receiptEligible()+")", jid, jid)
 	return err
 }

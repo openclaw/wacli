@@ -8,6 +8,16 @@ import (
 	"time"
 )
 
+// Semantic content can have neither text nor media. Keep bounded recounts and
+// receipt selection aligned, without naming kind on an older read-only store.
+func (d *DB) unreadContentPredicate() string {
+	content := "COALESCE(display_text, '') != '(message)' OR TRIM(COALESCE(text, '')) != ''"
+	if d.kindEnabled {
+		content += " OR COALESCE(kind, '') != ''"
+	}
+	return "(" + content + ")"
+}
+
 // ClearChatUnreadThrough reduces the count without resurrecting messages that
 // a later read already cleared. The update and recount share one SQLite snapshot.
 func (d *DB) ClearChatUnreadThrough(jid string, through time.Time, ids []string) error {
@@ -29,12 +39,12 @@ func (d *DB) clearChatUnreadThrough(jid string, through time.Time, ids []string,
 	if through.IsZero() {
 		return d.SetChatUnread(jid, false)
 	}
-	return clearChatUnreadThrough(d.sql, jid, through, ids, preserveMarker)
+	return clearChatUnreadThrough(d.sql, jid, through, ids, preserveMarker, d.unreadContentPredicate())
 }
 
 func clearChatUnreadThrough(db interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
-}, jid string, through time.Time, ids []string, preserveMarker bool) error {
+}, jid string, through time.Time, ids []string, preserveMarker bool, contentPredicate string) error {
 	args := []any{unix(through)}
 	boundary := "0"
 	ids = uniqueNonEmptyStrings(ids)
@@ -54,7 +64,7 @@ func clearChatUnreadThrough(db interface {
     AND COALESCE(reaction_to_id, '') = ''
     AND COALESCE(reaction_emoji, '') = ''
     AND revoked = 0 AND deleted_for_me = 0 AND deleted_at IS NULL
-    AND (COALESCE(display_text, '') != '(message)' OR TRIM(COALESCE(text, '')) != '')
+    AND `+contentPredicate+`
     AND (messages.ts > position.ts OR (messages.ts = position.ts AND messages.rowid > position.row_id))
   )
   UPDATE chats SET unread_count = MIN(unread_count, remaining.count),

@@ -83,6 +83,7 @@ type Message struct {
 	QuotedMsgID     string   `json:"quoted_msg_id,omitempty"`
 	QuotedSenderJID string   `json:"quoted_sender_jid,omitempty"`
 	Buttons         []Button `json:",omitempty"`
+	Kind            string   `json:"kind,omitempty"`
 	IsForwarded     bool
 	ForwardingScore uint32
 	ReactionToID    string
