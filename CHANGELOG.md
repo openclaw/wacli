@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Lists: persist WhatsApp List/Business label definitions and chat membership events; add read-only `lists list` (`labels list`) and `chats list --list ID_OR_NAME`, with explicit unknown completeness and LID/phone membership reconciliation. Message memberships and favorites/system-list filtering remain out of scope.
+
 ## 0.26.0 - 2026-11-05
 
 **Highlights:** fresh own replies mark chats read, broadcast sync avoids long stalls, business attachments and M4A audio arrive intact, and networking security fixes.
