@@ -808,7 +808,7 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 			}
 			storedPM := pm
 			storedPM.UnhandledPayload = ""
-			if err := a.storeParsedMessageForSync(ctx, storedPM, messageStoreOptions{}, limits...); err == nil {
+			if err := a.storeParsedMessageForSync(ctx, storedPM, messageStoreOptions{skipOwnReadMark: true}, limits...); err == nil {
 				unhandledWarnings.observe(a, pm)
 				a.emitSyncProgress(messagesStored.Add(1))
 				if pm.Poll != nil || pm.PollAdd != nil || pm.PollVote != nil {

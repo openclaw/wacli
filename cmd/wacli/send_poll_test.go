@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -192,6 +193,119 @@ func TestCleanVoteOptionsDedupAndTrim(t *testing.T) {
 	}
 	if _, err := cleanVoteOptions(nil); err == nil {
 		t.Fatal("expected error for empty options")
+	}
+}
+
+func TestPersistOutboundVotePreservesUnread(t *testing.T) {
+	// Direct votes and follow-owner delegated votes both use this producer.
+	for _, count := range []int{0, 2} {
+		t.Run(fmt.Sprintf("count=%d", count), func(t *testing.T) {
+			a, err := app.New(app.Options{StoreDir: t.TempDir(), AllowUnauthed: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(a.Close)
+			if err := a.OpenWA(); err != nil {
+				t.Fatal(err)
+			}
+			chat := types.NewJID("5551230000", types.DefaultUserServer)
+			now := time.Unix(1700000000, 0)
+			if err := a.DB().UpsertChat(chat.String(), "dm", "test", now); err != nil {
+				t.Fatal(err)
+			}
+			if err := a.DB().SetChatUnreadCount(chat.String(), count); err != nil {
+				t.Fatal(err)
+			}
+			if err := a.DB().SetChatUnread(chat.String(), true); err != nil {
+				t.Fatal(err)
+			}
+			if err := persistOutboundVote(t.Context(), a, chat, chat.String(), "poll", "vote", []string{"Yes"}, now); err != nil {
+				t.Fatal(err)
+			}
+			c, err := a.DB().GetChat(chat.String())
+			if err != nil || !c.Unread || c.UnreadCount != count {
+				t.Fatalf("vote acknowledged chat: %+v, %v", c, err)
+			}
+		})
+	}
+}
+
+type unreadVoteWA struct {
+	*fakeSendFileWA
+	votes int
+}
+
+func (f *unreadVoteWA) SendPollVote(context.Context, *types.MessageInfo, []string) (types.MessageID, error) {
+	f.votes++
+	return "vote", nil
+}
+
+func (f *unreadVoteWA) GetUserInfo(context.Context, []types.JID) (map[types.JID]types.UserInfo, error) {
+	return nil, nil
+}
+
+func (f *unreadVoteWA) IsOnWhatsApp(context.Context, []string) ([]types.IsOnWhatsAppResponse, error) {
+	return nil, nil
+}
+
+type unreadVoteApp struct {
+	*app.App
+	client *unreadVoteWA
+}
+
+func (a *unreadVoteApp) WA() app.WAClient                                  { return a.client }
+func (a *unreadVoteApp) EnsureAuthed(context.Context) error                { return nil }
+func (a *unreadVoteApp) Connect(context.Context, bool, func(string)) error { return nil }
+
+func TestPollVoteExecutionPathsPreserveUnread(t *testing.T) {
+	for _, delegated := range []bool{false, true} {
+		for _, count := range []int{0, 2} {
+			t.Run(fmt.Sprintf("delegated=%v/count=%d", delegated, count), func(t *testing.T) {
+				real, err := app.New(app.Options{StoreDir: t.TempDir(), AllowUnauthed: true})
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(real.Close)
+				client := &unreadVoteWA{fakeSendFileWA: &fakeSendFileWA{}}
+				a := &unreadVoteApp{App: real, client: client}
+				chat := types.NewJID("5551230000", types.DefaultUserServer)
+				if err := a.DB().UpsertChat(chat.String(), "dm", "test", time.Unix(1700000000, 0)); err != nil {
+					t.Fatal(err)
+				}
+				if err := a.DB().SetChatUnreadCount(chat.String(), count); err != nil {
+					t.Fatal(err)
+				}
+				if err := a.DB().SetChatUnread(chat.String(), true); err != nil {
+					t.Fatal(err)
+				}
+				t.Logf("before vote: unread=true unread_count=%d", count)
+				if delegated {
+					resp, err := executeDelegatedPollVote(t.Context(), a, sendDelegateRequest{To: chat.String(), ID: "poll", Options: []string{"Yes"}})
+					if err != nil || !resp.Sent || resp.StoreWarning != "" {
+						t.Fatalf("delegated vote: %+v, %v", resp, err)
+					}
+				} else {
+					cmd := newPollVoteCmdWithApp(&rootFlags{asJSON: true, timeout: time.Second}, func(context.Context) (pollVoteApp, func(), error) {
+						return a, func() {}, nil
+					})
+					cmd.SetArgs([]string{"--to", chat.String(), "--id", "poll", "--option", "Yes", "--post-send-wait", "0"})
+					raw := captureRootStdout(t, func() {
+						if err := cmd.Execute(); err != nil {
+							t.Error(err)
+						}
+					})
+					t.Logf("direct command output: %s", raw)
+				}
+				c, err := a.DB().GetChat(chat.String())
+				if err != nil || !c.Unread || c.UnreadCount != count || client.votes != 1 {
+					t.Fatalf("vote acknowledged chat or did not send: %+v, votes=%d, %v", c, client.votes, err)
+				}
+				if _, err := a.DB().GetMessage(chat.String(), "vote"); err != nil {
+					t.Fatalf("vote was not persisted: %v", err)
+				}
+				t.Logf("after successful vote and persistence: unread=%v unread_count=%d", c.Unread, c.UnreadCount)
+			})
+		}
 	}
 }
 
