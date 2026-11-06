@@ -7,6 +7,8 @@ import (
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/types"
+
+	"github.com/openclaw/wacli/internal/wa"
 )
 
 const profilePictureInfoKind = "profile_picture_info"
@@ -55,10 +57,12 @@ func executeProfilePictureInfo(ctx context.Context, client profilePictureClient,
 		return failure("not_set", "profile picture is not set")
 	case errors.Is(err, whatsmeow.ErrProfilePictureUnauthorized):
 		return failure("hidden", "profile picture is private")
-	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
-		return failure("timeout", "profile picture lookup timed out")
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled), errors.Is(err, whatsmeow.ErrIQTimedOut):
+		return failure("timeout", "profile picture lookup timed out; retry")
+	case errors.Is(err, wa.ErrNotConnected):
+		return failure("unavailable", "sync is not connected to WhatsApp; wait for it to reconnect and retry")
 	case err != nil:
-		return failure("lookup_failed", "profile picture lookup failed")
+		return failure("lookup_failed", "profile picture lookup failed: "+err.Error()+"; retry, and check the sync log if it persists")
 	case info == nil && req.ExistingID != "":
 		return sendDelegateResponse{OK: true, ProfilePicture: &profilePictureInfo{JID: jid.String(), Unchanged: true}}
 	case info == nil || info.URL == "":

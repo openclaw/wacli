@@ -31,7 +31,11 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// maxSendFileSize is the default upload cap. The whole file is read into memory
+// before upload, so it stays conservative; `send file --max-size-mb` raises it
+// per send up to maxSendFileSizeLimit, WhatsApp's own limit for documents.
 const maxSendFileSize = 100 * 1024 * 1024
+const maxSendFileSizeLimit int64 = 2048 * 1024 * 1024
 const imageThumbnailMaxDimension = 96
 const imageThumbnailMaxPixels = 40_000_000
 const voiceWaveformSamples = 64
@@ -49,6 +53,8 @@ type sendFileOptions struct {
 	replyTo       string
 	replyToSender string
 	ptt           bool
+	// maxSize is the upload cap in bytes; 0 means maxSendFileSize.
+	maxSize int64
 }
 
 type voiceNoteMetadata struct {
@@ -77,7 +83,11 @@ func sendFile(ctx context.Context, a interface {
 	}
 	opts.mediaAs = mediaAs
 
-	data, err := readSendFileData(filePath)
+	maxSize, err := resolveSendFileMaxSize(opts.maxSize)
+	if err != nil {
+		return sendFileOutcome{}, err
+	}
+	data, err := readSendFileDataLimited(filePath, maxSize)
 	if err != nil {
 		return sendFileOutcome{}, err
 	}
@@ -428,7 +438,37 @@ func newAudioMessage(up whatsmeow.UploadResponse, mimeType string, ptt bool, met
 }
 
 func readSendFileData(filePath string) ([]byte, error) {
-	return readRegularFileLimitedWithOpener(filePath, maxSendFileSize, openOutboundMedia)
+	return readSendFileDataLimited(filePath, maxSendFileSize)
+}
+
+func readSendFileDataLimited(filePath string, maxBytes int64) ([]byte, error) {
+	return readRegularFileLimitedWithOpener(filePath, maxBytes, openOutboundMedia)
+}
+
+// resolveSendFileMaxSize turns a requested cap (0 = default) into bytes, refusing
+// values WhatsApp would reject anyway.
+func resolveSendFileMaxSize(requested int64) (int64, error) {
+	switch {
+	case requested == 0:
+		return maxSendFileSize, nil
+	case requested < 0:
+		return 0, fmt.Errorf("max file size must be positive")
+	case requested > maxSendFileSizeLimit:
+		return 0, fmt.Errorf("max file size %d bytes exceeds WhatsApp's %d byte limit", requested, int64(maxSendFileSizeLimit))
+	}
+	return requested, nil
+}
+
+// sendFileMaxSizeFromMB converts the --max-size-mb flag (MiB) into bytes.
+func sendFileMaxSizeFromMB(mb int64) (int64, error) {
+	if mb <= 0 {
+		return 0, fmt.Errorf("--max-size-mb must be positive")
+	}
+	// Bound the input before multiplication so huge values cannot wrap.
+	if mb > maxSendFileSizeLimit/(1024*1024) {
+		return 0, fmt.Errorf("--max-size-mb must not exceed 2048")
+	}
+	return mb * 1024 * 1024, nil
 }
 
 func attachSendFileReplyContext(msg *waProto.Message, info *waProto.ContextInfo) {

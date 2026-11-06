@@ -53,6 +53,7 @@ type sendDelegateRequest struct {
 	MIME                 string   `json:"mime,omitempty"`
 	As                   string   `json:"as,omitempty"`
 	PTT                  bool     `json:"ptt,omitempty"`
+	MaxSizeBytes         int64    `json:"max_size_bytes,omitempty"`
 	ID                   string   `json:"id,omitempty"`
 	Reaction             string   `json:"reaction,omitempty"`
 	Sender               string   `json:"sender,omitempty"`
@@ -624,6 +625,10 @@ func executeDelegatedText(ctx context.Context, a *app.App, req sendDelegateReque
 }
 
 func executeDelegatedFile(ctx context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {
+	maxSize, err := resolveSendFileMaxSize(req.MaxSizeBytes)
+	if err != nil {
+		return sendDelegateResponse{}, err
+	}
 	mediaAs, err := validateSendFileMediaOptions(req.As, req.PTT || req.Kind == "voice")
 	if err != nil {
 		return sendDelegateResponse{}, err
@@ -645,6 +650,7 @@ func executeDelegatedFile(ctx context.Context, a *app.App, req sendDelegateReque
 			replyTo:       req.ReplyTo,
 			replyToSender: req.ReplyToSender,
 			ptt:           req.PTT || req.Kind == "voice",
+			maxSize:       maxSize,
 		})
 		if err != nil {
 			return sendDelegateResponse{}, err

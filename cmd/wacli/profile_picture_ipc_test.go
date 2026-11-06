@@ -11,6 +11,8 @@ import (
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/types"
+
+	"github.com/openclaw/wacli/internal/wa"
 )
 
 type pictureFake struct {
@@ -39,12 +41,21 @@ func TestProfilePictureInfo(t *testing.T) {
 		{"", "not_set", fmt.Errorf("wrapped: %w", whatsmeow.ErrProfilePictureNotSet)},
 		{"", "hidden", fmt.Errorf("wrapped: %w", whatsmeow.ErrProfilePictureUnauthorized)},
 		{"", "timeout", context.DeadlineExceeded}, {"", "lookup_failed", fmt.Errorf("network")},
+		// whatsmeow's own IQ deadline (75 s) fires before the command budget.
+		{"", "timeout", fmt.Errorf("wrapped: %w", whatsmeow.ErrIQTimedOut)},
+		{"", "unavailable", wa.ErrNotConnected},
 	} {
 		t.Run(tc.jid+tc.code, func(t *testing.T) {
 			f := &pictureFake{err: tc.err}
 			resp := executeProfilePictureInfo(context.Background(), f, sendDelegateRequest{JID: tc.jid, Preview: true})
 			if resp.ErrorCode != tc.code || resp.OK != (tc.code == "") {
 				t.Fatalf("%+v", resp)
+			}
+			if tc.code == "unavailable" && tc.err != nil && !strings.Contains(resp.Error, "reconnect and retry") {
+				t.Fatalf("disconnected client gives no recovery action: %q", resp.Error)
+			}
+			if tc.code == "lookup_failed" && !strings.Contains(resp.Error, "network") {
+				t.Fatalf("lookup failure drops its cause: %q", resp.Error)
 			}
 			if tc.code == "invalid_jid" && f.calls != 0 {
 				t.Fatal("queried invalid JID")
