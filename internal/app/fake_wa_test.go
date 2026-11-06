@@ -96,6 +96,8 @@ type fakeWA struct {
 	markReadCalls           []fakeMarkReadCall
 	markReadBeforeApply     func()
 	markReadAfterApply      func()
+	appStatePatches         []appstate.PatchInfo
+	appStatePatchErr        error
 	readReceiptCalls        []fakeReadReceiptCall
 	onReadReceipt           func(int) (types.ReceiptType, error)
 	readReceiptErr          error
@@ -1056,6 +1058,14 @@ type fakeSaveContactCall struct {
 // own mutation (indexed by the phone number, as BuildSaveContact emits it),
 // which it writes to its contact store before SendAppState returns.
 func (f *fakeWA) SendAppStatePatch(ctx context.Context, patch appstate.PatchInfo, beforeApply func()) ([]any, error) {
+	if patch.Type == appstate.WAPatchRegular {
+		f.mu.Lock()
+		f.appStatePatches = append(f.appStatePatches, patch)
+		err := f.appStatePatchErr
+		f.mu.Unlock()
+		beforeApply()
+		return nil, err
+	}
 	action := patch.Mutations[0].Value.GetContactAction()
 	target, _ := types.ParseJID(action.GetPnJID())
 	lid, _ := types.ParseJID(action.GetLidJID())

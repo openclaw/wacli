@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Quick replies: add standalone WhatsApp Business `quick-replies list|create|edit|delete`, independent full-sync coverage and guarded `app-state resync regular` (migration 38, with a collision guard). Writes and resync delegate outside the send queue; known-broken full syncs always refuse. Capture regular send-result/409 batches synchronously through the SDK primitives so delayed echoes cannot undo newer edits/deletions; device clocks never arbitrate state. No Lists or chat-label management is included.
+
 ## 0.26.0 - 2026-11-05
 
 **Highlights:** fresh own replies mark chats read, broadcast sync avoids long stalls, business attachments and M4A audio arrive intact, and networking security fixes.
