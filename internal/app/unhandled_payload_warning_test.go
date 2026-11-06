@@ -110,3 +110,56 @@ func TestHistoryUnhandledPayloadWarningsCapsDistinctShapes(t *testing.T) {
 		t.Fatalf("missing suppression summary:\n%s", eventsOut.String())
 	}
 }
+
+func TestSyncProtocolWarningIncludesSubtypeAndRetainsRow(t *testing.T) {
+	for _, source := range []string{"live", "history"} {
+		t.Run(source, func(t *testing.T) {
+			a := newTestApp(t)
+			a.wa = newFakeWA()
+			var eventsOut bytes.Buffer
+			a.opts.Events = out.NewEventWriter(&eventsOut, true)
+			chat := types.NewJID("15550000001", types.DefaultUserServer)
+			ts := time.Unix(1700000000, 0)
+			message := &waProto.Message{ProtocolMessage: &waProto.ProtocolMessage{
+				Type: waProto.ProtocolMessage_APP_STATE_SYNC_KEY_SHARE.Enum(),
+			}}
+			var stored, lastEvent atomic.Int64
+			if source == "live" {
+				a.handleLiveSyncMessage(context.Background(), SyncOptions{}, &events.Message{
+					Info:    types.MessageInfo{MessageSource: types.MessageSource{Chat: chat, Sender: chat}, ID: "control", Timestamp: ts},
+					Message: message,
+				}, &stored, func(string, string) {}, nil)
+			} else {
+				a.handleHistorySync(context.Background(), SyncOptions{}, historySyncOf(chat, &waProto.WebMessageInfo{
+					Key:              &waProto.MessageKey{RemoteJID: proto.String(chat.String()), ID: proto.String("control")},
+					MessageTimestamp: proto.Uint64(uint64(ts.Unix())), Message: message,
+				}), &stored, &lastEvent, func(string, string) {})
+			}
+			row, err := a.db.GetMessage(chat.String(), "control")
+			if err != nil || row.Text != "" || row.DisplayText != "(message)" || stored.Load() != 1 {
+				t.Fatalf("protocol placeholder not retained: row=%+v stored=%d err=%v", row, stored.Load(), err)
+			}
+			var warnings int
+			for line := range strings.SplitSeq(strings.TrimSpace(eventsOut.String()), "\n") {
+				var event struct {
+					Event string         `json:"event"`
+					Data  map[string]any `json:"data"`
+				}
+				if err := json.Unmarshal([]byte(line), &event); err != nil {
+					t.Fatal(err)
+				}
+				if event.Event != "warning" || event.Data["code"] != "unhandled_message_payload" {
+					continue
+				}
+				warnings++
+				if event.Data["payload"] != "protocolMessage:APP_STATE_SYNC_KEY_SHARE" || event.Data["msg_id"] != "control" {
+					t.Fatalf("unexpected protocol warning: %+v", event.Data)
+				}
+				t.Logf("synthetic %s warning: %s", source, line)
+			}
+			if warnings != 1 {
+				t.Fatalf("got %d protocol warnings, want 1: %s", warnings, eventsOut.String())
+			}
+		})
+	}
+}

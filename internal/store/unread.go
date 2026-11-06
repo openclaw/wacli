@@ -1,6 +1,8 @@
 package store
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -27,6 +29,12 @@ func (d *DB) clearChatUnreadThrough(jid string, through time.Time, ids []string,
 	if through.IsZero() {
 		return d.SetChatUnread(jid, false)
 	}
+	return clearChatUnreadThrough(d.sql, jid, through, ids, preserveMarker)
+}
+
+func clearChatUnreadThrough(db interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, jid string, through time.Time, ids []string, preserveMarker bool) error {
 	args := []any{unix(through)}
 	boundary := "0"
 	ids = uniqueNonEmptyStrings(ids)
@@ -38,14 +46,14 @@ func (d *DB) clearChatUnreadThrough(jid string, through time.Time, ids []string,
 		}
 	}
 	args = append(args, jid, preserveMarker, jid)
-	_, err := d.sql.ExecContext(storeCtx(), `
+	_, err := db.ExecContext(storeCtx(), `
   WITH position AS (SELECT ? AS ts, `+boundary+` AS row_id),
   remaining AS (
    SELECT COUNT(*) AS count FROM messages, position
    WHERE chat_jid = ? AND from_me = 0
     AND COALESCE(reaction_to_id, '') = ''
     AND COALESCE(reaction_emoji, '') = ''
-    AND revoked = 0 AND deleted_for_me = 0
+    AND revoked = 0 AND deleted_for_me = 0 AND deleted_at IS NULL
     AND (COALESCE(display_text, '') != '(message)' OR TRIM(COALESCE(text, '')) != '')
     AND (messages.ts > position.ts OR (messages.ts = position.ts AND messages.rowid > position.row_id))
   )

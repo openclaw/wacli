@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -47,6 +48,9 @@ type UpsertMessageParams struct {
 	DeletedForMe             bool
 	DeletedAt                time.Time
 	DeletionReason           string
+	// SkipOwnReadMark keeps a FromMe row from marking the chat read. Set it for
+	// rows that are not replies, such as calls and poll votes.
+	SkipOwnReadMark bool
 }
 
 func (d *DB) messageSelectColumns(snippet string) string {
@@ -138,7 +142,8 @@ func (d *DB) UpsertMessage(p UpsertMessageParams) error {
 		ChatJid_2:       strings.TrimSpace(p.ChatJID),
 		MsgID_2:         strings.TrimSpace(p.MsgID),
 	}
-	if !p.ArchiveIncoming {
+	markRead := p.marksChatRead()
+	if !p.ArchiveIncoming && !markRead {
 		return d.q.UpsertMessage(storeCtx(), params)
 	}
 	tx, err := d.sql.Begin()
@@ -148,13 +153,59 @@ func (d *DB) UpsertMessage(p UpsertMessageParams) error {
 	defer tx.Rollback()
 	// Decide and write under the writer lock before reading message state.
 	// A deferred read-then-write transaction can fail with SQLITE_BUSY_SNAPSHOT.
-	if err := recordChatArchiveIncoming(tx, p.ChatJID, p.MsgID, p.Timestamp, p.ArchiveObservedMS, p.ArchiveSettingObservedMS, false); err != nil {
+	if p.ArchiveIncoming {
+		if err := recordChatArchiveIncoming(tx, p.ChatJID, p.MsgID, p.Timestamp, p.ArchiveObservedMS, p.ArchiveSettingObservedMS, false); err != nil {
+			return err
+		}
+	} else if _, err := tx.ExecContext(storeCtx(), `UPDATE chats SET unread = unread WHERE jid = ?`, p.ChatJID); err != nil {
 		return err
+	}
+	if markRead {
+		stored, err := ownReplyStored(tx, p.ChatJID, p.MsgID)
+		if err != nil {
+			return err
+		}
+		markRead = !stored
 	}
 	if err := d.q.WithTx(tx).UpsertMessage(storeCtx(), params); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if markRead {
+		if err := clearChatUnreadThrough(tx, p.ChatJID, p.Timestamp, []string{p.MsgID}, true); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// marksChatRead reports whether storing this row means the account answered the
+// chat. Only a real message from this account counts: reactions, edits,
+// deletions and contentless protocol rows do not, mirroring which incoming rows
+// are readable. SkipOwnReadMark opts a row out (calls, votes).
+func (p UpsertMessageParams) marksChatRead() bool {
+	return p.FromMe && !p.SkipOwnReadMark && !p.Timestamp.IsZero() &&
+		strings.TrimSpace(p.ChatJID) != "" &&
+		!p.Edited && !p.Revoked && !p.DeletedForMe && p.DeletedAt.IsZero() &&
+		strings.TrimSpace(p.ReactionToID) == "" && strings.TrimSpace(p.ReactionEmoji) == "" &&
+		(p.DisplayText != "(message)" || strings.TrimSpace(p.Text) != "")
+}
+
+// ownReplyStored reports whether this message ID is already stored as a reply.
+// Re-storing it (replay, retry, backfill) must not clear an unread marker or
+// count that was set after the original reply.
+func ownReplyStored(db interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, chatJID, msgID string) (bool, error) {
+	var one int
+	// A tombstone is proof of prior processing even after its payload is purged.
+	err := db.QueryRowContext(storeCtx(), `SELECT 1 FROM messages WHERE chat_jid = ? AND msg_id = ? AND from_me = 1 AND (revoked != 0 OR deleted_for_me != 0 OR deleted_at IS NOT NULL OR (COALESCE(reaction_to_id,'') = '' AND COALESCE(reaction_emoji,'') = '' AND (COALESCE(display_text,'') != '(message)' OR TRIM(COALESCE(text,'')) != '')))`, strings.TrimSpace(chatJID), strings.TrimSpace(msgID)).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 func (d *DB) MarkMessageRevoked(chatJID, msgID string) error {
