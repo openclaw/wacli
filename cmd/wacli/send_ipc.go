@@ -33,6 +33,9 @@ var errSendDelegateUnavailable = errors.New("send delegate unavailable")
 type sendDelegateRequest struct {
 	Version              int      `json:"version"`
 	Kind                 string   `json:"kind"`
+	JID                  string   `json:"jid,omitempty"`
+	Preview              bool     `json:"preview,omitempty"`
+	ExistingID           string   `json:"existing_id,omitempty"`
 	To                   string   `json:"to,omitempty"`
 	Pick                 int      `json:"pick,omitempty"`
 	Message              string   `json:"message,omitempty"`
@@ -85,6 +88,8 @@ type sendDelegateRequest struct {
 type sendDelegateResponse struct {
 	OK             bool                 `json:"ok"`
 	Error          string               `json:"error,omitempty"`
+	ErrorCode      string               `json:"error_code,omitempty"`
+	ProfilePicture *profilePictureInfo  `json:"profile_picture,omitempty"`
 	Sent           bool                 `json:"sent,omitempty"`
 	To             string               `json:"to,omitempty"`
 	ID             string               `json:"id,omitempty"`
@@ -301,7 +306,7 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDele
 		writeDelegateResult(conn, requestCtx, req, resp, err)
 		return
 	}
-	if req.Kind == presenceSubscribeKind {
+	if req.Kind == presenceSubscribeKind || req.Kind == profilePictureInfoKind {
 		// Watching presence puts nothing in a chat, and it may wait for an
 		// answer: it neither queues behind sends nor takes a paced send slot,
 		// but it keeps the same budget.
@@ -378,6 +383,8 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 	defer cancel()
 
 	switch req.Kind {
+	case profilePictureInfoKind:
+		return executeProfilePictureInfo(ctx, a.WA(), req), nil
 	case mediaDownloadKind:
 		if req.To == "" || req.ID == "" {
 			return sendDelegateResponse{}, fmt.Errorf("exact media chat and message ID are required")
