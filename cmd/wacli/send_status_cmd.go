@@ -146,6 +146,8 @@ func newSendStatusCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().StringVar(&message, "message", "", "status text or media caption")
 	cmd.Flags().StringVar(&filePath, "file", "", "media file to send as a status update")
 	cmd.Flags().StringVar(&mimeOverride, "mime", "", "override detected MIME type for --file")
+	// Status rows live outside chats and never acknowledge chat unread state.
+	cmd.Flags().Bool("keep-unread", false, "preserve chat unread state (status broadcasts never mark chats read)")
 	cmd.Flags().StringVar(&backgroundColor, "background-color", "", "text status background color (#RRGGBB or #AARRGGBB)")
 	cmd.Flags().Int32Var(&font, "font", 0, "WhatsApp text status font number")
 	cmd.Flags().DurationVar(&postSendWait, "post-send-wait", postSendRetryReceiptWait, "keep the connection alive after send so retry receipts can be handled (0 disables)")

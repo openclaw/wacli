@@ -27,6 +27,7 @@ const (
 )
 
 type sendStickerOptions struct {
+	keepUnread    bool
 	replyTo       string
 	replyToSender string
 }
@@ -72,27 +73,34 @@ func sendSticker(ctx context.Context, a interface {
 
 	now := time.Now().UTC()
 	name := filepath.Base(filePath)
-	chatName := a.WA().ResolveChatName(ctx, to, "")
+	storedChat := to
+	if opts.keepUnread {
+		// Match sync's echo key so it finds this already-processed own row.
+		// Leave the legacy storage path unchanged without the opt-in.
+		storedChat = canonicalOutboundChat(ctx, a.WA(), to)
+	}
+	chatName := a.WA().ResolveChatName(ctx, storedChat, "")
 	var storeErr error
-	if err := a.DB().UpsertChat(to.String(), chatKindFromJID(to), chatName, now); err != nil {
+	if err := a.DB().UpsertChat(storedChat.String(), chatKindFromJID(storedChat), chatName, now); err != nil {
 		storeErr = fmt.Errorf("chat update: %w", err)
 	}
 	if err := a.DB().UpsertMessage(store.UpsertMessageParams{
-		ChatJID:       to.String(),
-		ChatName:      chatName,
-		MsgID:         id,
-		SenderJID:     "",
-		SenderName:    "me",
-		Timestamp:     now,
-		FromMe:        true,
-		MediaType:     "sticker",
-		Filename:      name,
-		MimeType:      sendStickerMIME,
-		DirectPath:    up.DirectPath,
-		MediaKey:      up.MediaKey,
-		FileSHA256:    up.FileSHA256,
-		FileEncSHA256: up.FileEncSHA256,
-		FileLength:    up.FileLength,
+		SkipOwnReadMark: opts.keepUnread,
+		ChatJID:         storedChat.String(),
+		ChatName:        chatName,
+		MsgID:           id,
+		SenderJID:       "",
+		SenderName:      "me",
+		Timestamp:       now,
+		FromMe:          true,
+		MediaType:       "sticker",
+		Filename:        name,
+		MimeType:        sendStickerMIME,
+		DirectPath:      up.DirectPath,
+		MediaKey:        up.MediaKey,
+		FileSHA256:      up.FileSHA256,
+		FileEncSHA256:   up.FileEncSHA256,
+		FileLength:      up.FileLength,
 	}); err != nil {
 		storeErr = errors.Join(storeErr, fmt.Errorf("message update: %w", err))
 	}

@@ -12,6 +12,10 @@ import (
 )
 
 func newSendFileCmd(flags *rootFlags) *cobra.Command {
+	return newSendFileCmdWithApp(flags, openOutboundSendApp(flags))
+}
+
+func newSendFileCmdWithApp(flags *rootFlags, open outboundSendAppOpener) *cobra.Command {
 	var to string
 	var pick int
 	var filePath string
@@ -22,6 +26,7 @@ func newSendFileCmd(flags *rootFlags) *cobra.Command {
 	var replyTo string
 	var replyToSender string
 	var ptt bool
+	var keepUnread bool
 	maxSizeMB := int64(maxSendFileSize / (1024 * 1024))
 	postSendWait := postSendRetryReceiptWait
 
@@ -50,13 +55,14 @@ func newSendFileCmd(flags *rootFlags) *cobra.Command {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
-			a, lk, err := newApp(ctx, flags, true, false)
+			a, close, err := open(ctx)
 			if err != nil {
 				delegateFile := filePath
 				if abs, absErr := filepath.Abs(filePath); absErr == nil {
 					delegateFile = abs
 				}
 				resp, delegated, delegateErr := tryDelegateSend(ctx, flags, err, sendDelegateRequest{
+					KeepUnread:     keepUnread,
 					Kind:           "file",
 					To:             to,
 					Pick:           pick,
@@ -79,7 +85,7 @@ func newSendFileCmd(flags *rootFlags) *cobra.Command {
 				}
 				return err
 			}
-			defer closeApp(a, lk)
+			defer close()
 
 			if err := a.EnsureAuthed(ctx); err != nil {
 				return err
@@ -99,6 +105,7 @@ func newSendFileCmd(flags *rootFlags) *cobra.Command {
 
 			res, err := runFileSendOperation(ctx, reconnectForSend(a), filePath, func(ctx context.Context) (sendFileOutcome, error) {
 				return sendFile(ctx, a, toJID, filePath, sendFileOptions{
+					keepUnread:    keepUnread,
 					filename:      filename,
 					caption:       caption,
 					mimeOverride:  mimeOverride,
@@ -139,6 +146,7 @@ func newSendFileCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().StringVar(&replyTo, "reply-to", "", "message ID to quote/reply to")
 	cmd.Flags().StringVar(&replyToSender, "reply-to-sender", "", "sender JID of the quoted message (required for unsynced group replies)")
 	cmd.Flags().BoolVar(&ptt, "ptt", false, "send OGG/Opus audio as a WhatsApp voice note")
+	cmd.Flags().BoolVar(&keepUnread, "keep-unread", false, "preserve the chat's unread state when sending")
 	cmd.Flags().Int64Var(&maxSizeMB, "max-size-mb", maxSizeMB, "largest file to send, in MiB; the file is read into memory (max 2048, WhatsApp's document limit)")
 	cmd.Flags().DurationVar(&postSendWait, "post-send-wait", postSendRetryReceiptWait, "keep the connection alive after send so retry receipts can be handled (0 disables)")
 	return cmd
