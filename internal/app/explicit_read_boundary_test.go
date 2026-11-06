@@ -107,7 +107,7 @@ func TestExplicitReadBoundaryRejectsInvalidAnchorsBeforeUpdates(t *testing.T) {
 		}
 		for _, m := range []store.UpsertMessageParams{
 			{ChatJID: "789@s.whatsapp.net", MsgID: "foreign"},
-			{ChatJID: chat.String(), MsgID: "outgoing", FromMe: true},
+			{ChatJID: chat.String(), MsgID: "outgoing", FromMe: true, SkipOwnReadMark: true}, // a fixture, not a reply that marks the chat read
 			{ChatJID: chat.String(), MsgID: "revoked", Revoked: true},
 			{ChatJID: chat.String(), MsgID: "deleted", DeletedForMe: true},
 			{ChatJID: chat.String(), MsgID: "reaction", ReactionToID: "handled", ReactionEmoji: "ok"},

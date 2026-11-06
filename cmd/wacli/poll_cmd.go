@@ -43,7 +43,23 @@ type pollVoteSender interface {
 	SendPollVote(ctx context.Context, pollInfo *types.MessageInfo, options []string) (types.MessageID, error)
 }
 
+type pollVoteApp interface {
+	DB() *store.DB
+	WA() app.WAClient
+	StoreDir() string
+	LocalResolver() (app.LocalResolver, error)
+	EnsureAuthed(context.Context) error
+	Connect(context.Context, bool, func(string)) error
+}
+
 func newPollVoteCmd(flags *rootFlags) *cobra.Command {
+	return newPollVoteCmdWithApp(flags, func(ctx context.Context) (pollVoteApp, func(), error) {
+		a, lk, err := newApp(ctx, flags, true, false)
+		return a, func() { closeApp(a, lk) }, err
+	})
+}
+
+func newPollVoteCmdWithApp(flags *rootFlags, open func(context.Context) (pollVoteApp, func(), error)) *cobra.Command {
 	var to string
 	var pick int
 	var msgID string
@@ -69,7 +85,7 @@ func newPollVoteCmd(flags *rootFlags) *cobra.Command {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
-			a, lk, err := newApp(ctx, flags, true, false)
+			a, close, err := open(ctx)
 			if err != nil {
 				resp, delegated, delegateErr := tryDelegateSend(ctx, flags, err, sendDelegateRequest{
 					Kind:           "poll_vote",
@@ -88,7 +104,7 @@ func newPollVoteCmd(flags *rootFlags) *cobra.Command {
 				}
 				return err
 			}
-			defer closeApp(a, lk)
+			defer close()
 
 			if err := a.EnsureAuthed(ctx); err != nil {
 				return err
@@ -196,11 +212,11 @@ func requirePollSelectableCount(selectable uint32, requested []string) error {
 // buildPollVoteInfo resolves the MessageInfo whatsmeow needs to encrypt the
 // vote. Looks up the poll in the local store first; falls back to manually
 // supplied --sender for unknown polls.
-func buildPollVoteInfo(ctx context.Context, a *app.App, chat types.JID, pollMsgID, senderOverride string) (*types.MessageInfo, []string, uint32, string, error) {
+func buildPollVoteInfo(ctx context.Context, a pollVoteApp, chat types.JID, pollMsgID, senderOverride string) (*types.MessageInfo, []string, uint32, string, error) {
 	return buildPollVoteInfoForChats(ctx, a, chat, pollChatJIDCandidates(ctx, a, chat), pollMsgID, senderOverride)
 }
 
-func buildPollVoteInfoForChats(ctx context.Context, a *app.App, chat types.JID, chatJIDs []string, pollMsgID, senderOverride string) (*types.MessageInfo, []string, uint32, string, error) {
+func buildPollVoteInfoForChats(ctx context.Context, a pollVoteApp, chat types.JID, chatJIDs []string, pollMsgID, senderOverride string) (*types.MessageInfo, []string, uint32, string, error) {
 	chatJID := ""
 	if len(chatJIDs) > 0 {
 		chatJID = chatJIDs[0]
@@ -306,7 +322,7 @@ func buildPollVoteInfoForChats(ctx context.Context, a *app.App, chat types.JID, 
 	return info, knownOptions, selectableCount, chatJID, nil
 }
 
-func primaryPollChatJID(ctx context.Context, a *app.App, jid types.JID) string {
+func primaryPollChatJID(ctx context.Context, a pollVoteApp, jid types.JID) string {
 	candidates := pollChatJIDCandidates(ctx, a, jid)
 	if len(candidates) == 0 {
 		return ""
@@ -314,7 +330,7 @@ func primaryPollChatJID(ctx context.Context, a *app.App, jid types.JID) string {
 	return candidates[0]
 }
 
-func pollChatJIDCandidates(ctx context.Context, a *app.App, jid types.JID) []string {
+func pollChatJIDCandidates(ctx context.Context, a pollVoteApp, jid types.JID) []string {
 	jids := make([]types.JID, 0, 3)
 	if a != nil {
 		if _, err := os.Stat(filepath.Join(a.StoreDir(), "session.db")); err == nil {
@@ -332,7 +348,7 @@ func pollChatJIDCandidates(ctx context.Context, a *app.App, jid types.JID) []str
 	return jidStrings(jids)
 }
 
-func persistOutboundVote(ctx context.Context, a *app.App, chat types.JID, chatJID, pollMsgID, voteMsgID string, options []string, now time.Time) error {
+func persistOutboundVote(ctx context.Context, a pollVoteApp, chat types.JID, chatJID, pollMsgID, voteMsgID string, options []string, now time.Time) error {
 	if strings.TrimSpace(chatJID) == "" {
 		chatJID = primaryPollChatJID(ctx, a, chat)
 	}
@@ -342,14 +358,15 @@ func persistOutboundVote(ctx context.Context, a *app.App, chat types.JID, chatJI
 		storeErr = fmt.Errorf("chat update: %w", err)
 	}
 	if err := a.DB().UpsertMessage(store.UpsertMessageParams{
-		ChatJID:    chatJID,
-		ChatName:   chatName,
-		MsgID:      voteMsgID,
-		SenderName: "me",
-		Timestamp:  now,
-		FromMe:     true,
-		Text:       "Voted: " + strings.Join(options, ", "),
-		Kind:       "poll_vote",
+		ChatJID:         chatJID,
+		ChatName:        chatName,
+		MsgID:           voteMsgID,
+		SenderName:      "me",
+		Timestamp:       now,
+		FromMe:          true,
+		Text:            "Voted: " + strings.Join(options, ", "),
+		Kind:            "poll_vote",
+		SkipOwnReadMark: true,
 	}); err != nil {
 		storeErr = errors.Join(storeErr, fmt.Errorf("message update: %w", err))
 	}
@@ -370,7 +387,7 @@ func persistOutboundVote(ctx context.Context, a *app.App, chat types.JID, chatJI
 	return storeErr
 }
 
-func executeDelegatedPollVote(ctx context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {
+func executeDelegatedPollVote(ctx context.Context, a pollVoteApp, req sendDelegateRequest) (sendDelegateResponse, error) {
 	if strings.TrimSpace(req.To) == "" || strings.TrimSpace(req.ID) == "" {
 		return sendDelegateResponse{}, fmt.Errorf("poll vote requires --to and --id")
 	}
@@ -382,7 +399,7 @@ func executeDelegatedPollVote(ctx context.Context, a *app.App, req sendDelegateR
 	if err != nil {
 		return sendDelegateResponse{}, err
 	}
-	toJID = warmupDelegatedRecipient(ctx, a, toJID)
+	toJID = warmupRecipient(ctx, a.WA(), toJID, os.Stderr)
 	info, knownOptions, selectableCount, pollChatJID, err := buildPollVoteInfo(ctx, a, toJID, req.ID, req.Sender)
 	if err != nil {
 		return sendDelegateResponse{}, err

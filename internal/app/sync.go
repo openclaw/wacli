@@ -407,6 +407,17 @@ type messageStoreOptions struct {
 	archiveIncoming          bool
 	archiveObservedMS        int64
 	archiveSettingObservedMS int64
+	// Historical imports are not evidence of a new read action.
+	skipOwnReadMark bool
+}
+
+// ownMessageIsReply reports whether pm, sent by this account, answers the chat.
+// Reactions, edits, deletions, poll votes, calls and contentless protocol rows
+// do not: they say nothing about having read the conversation.
+func ownMessageIsReply(pm wa.ParsedMessage) bool {
+	return pm.FromMe && pm.HasContent() && !pm.Edited && !pm.Revoked &&
+		strings.TrimSpace(pm.ReactionToID) == "" && strings.TrimSpace(pm.ReactionEmoji) == "" &&
+		pm.PollVote == nil && pm.PollAdd == nil && pm.Call == nil
 }
 
 func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage, options messageStoreOptions) error {
@@ -542,6 +553,7 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage, optio
 		FileLength:               fileLen,
 		Edited:                   pm.Edited,
 		Revoked:                  pm.Revoked,
+		SkipOwnReadMark:          options.skipOwnReadMark || !ownMessageIsReply(pm),
 	}); err != nil {
 		return err
 	}

@@ -176,6 +176,35 @@ func TestSemanticUnreadContentPredicates(t *testing.T) {
 	}
 }
 
+// The #533 transactional own-reply path must use the same semantic predicate
+// as explicit bounded reads, while retaining main's deleted-at exclusion.
+func TestOwnReplyPreservesLaterSemanticUnread(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		count   int
+		deleted bool
+	}{
+		{"count", 2, false}, {"marker", 0, false},
+		{"deleted-count", 2, true}, {"deleted-marker", 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := openTestDB(t)
+			seedUnreadChat(t, db, ownReadChat, tc.count, tc.count == 0)
+			incoming := UpsertMessageParams{MsgID: "event", Kind: "event", DisplayText: "(message)", Timestamp: ownReadBase.Add(2 * time.Minute)}
+			if tc.deleted {
+				incoming.DeletedAt = ownReadBase.Add(3 * time.Minute)
+			}
+			storeMsg(t, db, incoming)
+			storeMsg(t, db, UpsertMessageParams{MsgID: "own-reply", FromMe: true, Text: "reply", Timestamp: ownReadBase.Add(time.Minute)})
+			wantCount := 0
+			if tc.count > 0 && !tc.deleted {
+				wantCount = 1
+			}
+			assertUnread(t, db, ownReadChat, !tc.deleted, wantCount)
+		})
+	}
+}
+
 func TestReadReceiptContentOnLegacyReadOnlyStore(t *testing.T) {
 	db := openTestDB(t)
 	chat := "123@s.whatsapp.net"
