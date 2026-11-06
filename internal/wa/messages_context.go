@@ -20,6 +20,9 @@ func contextInfoForMessage(m *waProto.Message) *waProto.ContextInfo {
 	if vid := m.GetVideoMessage(); vid != nil {
 		return vid.GetContextInfo()
 	}
+	if ptv := m.GetPtvMessage(); ptv != nil {
+		return ptv.GetContextInfo()
+	}
 	if aud := m.GetAudioMessage(); aud != nil {
 		return aud.GetContextInfo()
 	}
@@ -95,6 +98,9 @@ func displayTextForProto(m *waProto.Message) string {
 		if vid.GetGifPlayback() {
 			return "Sent gif"
 		}
+		return "Sent video"
+	}
+	if m.GetPtvMessage() != nil {
 		return "Sent video"
 	}
 	if aud := m.GetAudioMessage(); aud != nil {
