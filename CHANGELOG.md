@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Profile: `profile business get` reads the full WhatsApp Business profile (description, websites, hours, categories) and `profile business set` updates description, address, email, websites and weekly hours with WhatsApp Web's delta mutation, validating WhatsApp's limits first. Both delegate to the running `wacli sync` through the send socket (kinds `business_profile_get`, `business_profile_set`) and stay outside the message-send queue. `catalog list` reads a business catalog page (id, name, price, sale price, currency, images, hidden, review status) with the public HTTPS query WhatsApp Web uses, since WhatsApp no longer answers the `w:biz:catalog` IQ; it needs no session and works with `--read-only`.
+
 ## 0.25.0 - 2026-10-23
 
 **Highlights:** opt-in file uploads up to 2048 MiB, durable poll vote retractions, and reliable uncached media downloads.
