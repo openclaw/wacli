@@ -634,7 +634,7 @@ func executeDelegatedFile(ctx context.Context, a *app.App, req sendDelegateReque
 	if err := warnRapidSendIfNeeded(a.StoreDir(), time.Now().UTC(), os.Stderr); err != nil {
 		return sendDelegateResponse{}, err
 	}
-	res, err := runSendOperation(ctx, reconnectForSend(a), func(ctx context.Context) (sendDelegateResponse, error) {
+	res, err := runFileSendOperation(ctx, reconnectForSend(a), req.File, func(ctx context.Context) (sendDelegateResponse, error) {
 		outcome, err := sendFile(ctx, a, toJID, req.File, sendFileOptions{
 			filename:      req.Filename,
 			caption:       req.Caption,

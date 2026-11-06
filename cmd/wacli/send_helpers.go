@@ -17,6 +17,7 @@ import (
 )
 
 const sendAttemptTimeout = 45 * time.Second
+const minUploadBytesPerSecond = 64 * 1024
 const postSendRetryReceiptWait = 2 * time.Second
 const rapidSendWarningThreshold = 5 * time.Second
 const lastSendAttemptFile = ".last-send-at"
@@ -26,7 +27,24 @@ func runSendOperation[T any](
 	reconnect func(context.Context) error,
 	op func(context.Context) (T, error),
 ) (T, error) {
-	return runOperationWithRetry(ctx, reconnect, op, isRetryableSendError)
+	return runOperationWithRetry(ctx, reconnect, op, isRetryableSendError, sendAttemptTimeout)
+}
+
+func runFileSendOperation[T any](
+	ctx context.Context,
+	reconnect func(context.Context) error,
+	filePath string,
+	op func(context.Context) (T, error),
+) (T, error) {
+	return runOperationWithRetry(ctx, reconnect, op, isRetryableSendError, fileSendAttemptTimeout(filePath))
+}
+
+func fileSendAttemptTimeout(filePath string) time.Duration {
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return sendAttemptTimeout
+	}
+	return sendAttemptTimeout + time.Duration(info.Size()/minUploadBytesPerSecond)*time.Second
 }
 
 // Share the bounded attempt/reconnect mechanics while allowing idempotent
@@ -36,8 +54,9 @@ func runOperationWithRetry[T any](
 	reconnect func(context.Context) error,
 	op func(context.Context) (T, error),
 	retryable func(error) bool,
+	timeout time.Duration,
 ) (T, error) {
-	result, err := runSendAttempt(ctx, sendAttemptTimeout, op)
+	result, err := runSendAttempt(ctx, timeout, op)
 	if err == nil {
 		return result, nil
 	}
@@ -49,7 +68,7 @@ func runOperationWithRetry[T any](
 	if reconnectErr := reconnect(ctx); reconnectErr != nil {
 		return zero, fmt.Errorf("%w; reconnect failed: %v", err, reconnectErr)
 	}
-	return runSendAttempt(ctx, sendAttemptTimeout, op)
+	return runSendAttempt(ctx, timeout, op)
 }
 
 func runSendAttempt[T any](ctx context.Context, timeout time.Duration, op func(context.Context) (T, error)) (T, error) {
@@ -68,14 +87,14 @@ func runSendAttempt[T any](ctx context.Context, timeout time.Duration, op func(c
 
 	select {
 	case res := <-ch:
-		if errors.Is(res.err, context.DeadlineExceeded) && errors.Is(attemptCtx.Err(), context.DeadlineExceeded) {
+		if errors.Is(res.err, context.DeadlineExceeded) && errors.Is(attemptCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
 			var zero T
 			return zero, fmt.Errorf("send timed out after %s", timeout)
 		}
 		return res.value, res.err
 	case <-attemptCtx.Done():
 		var zero T
-		if errors.Is(attemptCtx.Err(), context.DeadlineExceeded) {
+		if errors.Is(attemptCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
 			return zero, fmt.Errorf("send timed out after %s", timeout)
 		}
 		return zero, attemptCtx.Err()

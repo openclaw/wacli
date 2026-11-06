@@ -151,8 +151,20 @@ func ParseHistoryMessage(chatJID string, hist *waProto.WebMessageInfo) ParsedMes
 	}
 	pm.SenderJID = sender
 
-	if hist.GetMessage() != nil {
-		markUnhandledPayload(extractWAProto(hist.GetMessage(), &pm), &pm)
+	if raw := hist.GetMessage(); raw != nil {
+		// whatsmeow unwraps live events before dispatch but not history
+		// messages, so content inside ephemeral, view-once or
+		// document-with-caption envelopes would otherwise be stored as
+		// "(message)". Apply the same unwrapping, then carry over what the
+		// envelopes said about the message.
+		evt := (&events.Message{RawMessage: raw}).UnwrapRaw()
+		if evt.Info.DeviceSentMeta != nil {
+			applyDeviceSentDestination(evt.Info.DeviceSentMeta.DestinationJID, &pm)
+		}
+		if evt.IsEdit {
+			pm.Edited = true
+		}
+		markUnhandledPayload(extractWAProto(evt.Message, &pm), &pm)
 	}
 	return pm
 }
@@ -187,6 +199,14 @@ func markUnhandledPayload(m *waProto.Message, pm *ParsedMessage) {
 		switch fd.Name() {
 		case "messageContextInfo":
 			return true
+		case "protocolMessage":
+			// The type is what tells an internal control (key share, peer data
+			// operation, history notification) from a mutation the parser missed;
+			// the bare field name reported them all alike (#546).
+			if protocol := m.GetProtocolMessage(); protocol != nil && protocol.Type != nil {
+				names = append(names, "protocolMessage:"+protocol.GetType().String())
+				return true
+			}
 		}
 		names = append(names, string(fd.Name()))
 		return true
@@ -250,6 +270,7 @@ func extractWAProto(m *waProto.Message, pm *ParsedMessage) *waProto.Message {
 	extractLocation(m, pm)
 	extractContactText(m, pm)
 	extractBusinessText(m, pm)
+	extractBusinessHeaderMedia(m, pm)
 	extractPoll(m, pm)
 	extractPollAddOption(m, pm)
 	extractPollUpdate(m, pm)
