@@ -2,17 +2,60 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/openclaw/wacli/internal/store"
 	"github.com/openclaw/wacli/internal/wa"
 	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/proto/waHistorySync"
+	"go.mau.fi/whatsmeow/proto/waWeb"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
 )
+
+func TestHistoryDoesNotResurrectUnreadAfterOwnRead(t *testing.T) {
+	for _, reply := range []bool{false, true} {
+		t.Run(fmt.Sprint("reply=", reply), func(t *testing.T) {
+			a := newTestApp(t)
+			a.wa = newFakeWA()
+			at := time.Date(2024, 3, 1, 12, 0, 0, 0, time.UTC)
+			chat := types.NewJID("123", types.DefaultUserServer)
+			seedReceiptChat(t, a, chat, "dm", []store.UpsertMessageParams{{MsgID: "incoming"}}, 2)
+			var stored, last atomic.Int64
+			if reply {
+				a.handleLiveSyncMessage(t.Context(), SyncOptions{}, &events.Message{
+					Info:    types.MessageInfo{MessageSource: types.MessageSource{Chat: chat, IsFromMe: true}, ID: "3EB0-linked-reply", Timestamp: at.Add(time.Second)},
+					Message: &waE2E.Message{Conversation: proto.String("reply")},
+				}, &stored, nil, nil)
+			} else {
+				a.handleReceiptPersistenceEvent(t.Context(), &events.Receipt{MessageSource: types.MessageSource{Chat: chat, IsFromMe: true}, Type: types.ReceiptTypeRead, Timestamp: at.Add(time.Second), MessageIDs: []types.MessageID{"incoming"}})
+			}
+			conv := &waHistorySync.Conversation{ID: proto.String(chat.String()), UnreadCount: proto.Uint32(50), MarkedAsUnread: proto.Bool(true)}
+			a.handleHistorySync(t.Context(), SyncOptions{}, &events.HistorySync{Data: &waHistorySync.HistorySync{Conversations: []*waHistorySync.Conversation{conv}}}, &stored, &last, nil)
+			c, err := a.db.GetChat(chat.String())
+			if err != nil || c.UnreadCount != 0 || c.Unread {
+				t.Fatalf("stale history restored unread: %+v, %v", c, err)
+			}
+			// A newer inbound in the same snapshot must be stored before the
+			// unread decision, otherwise the known read would suppress it too.
+			conv.UnreadCount = proto.Uint32(1)
+			conv.Messages = []*waHistorySync.HistorySyncMsg{{Message: &waWeb.WebMessageInfo{Key: &waCommon.MessageKey{ID: proto.String("newer"), FromMe: proto.Bool(false)}, MessageTimestamp: proto.Uint64(uint64(at.Add(2 * time.Second).Unix())), Message: &waE2E.Message{Conversation: proto.String("new question")}}}}
+			a.handleHistorySync(t.Context(), SyncOptions{}, &events.HistorySync{Data: &waHistorySync.HistorySync{Conversations: []*waHistorySync.Conversation{conv}}}, &stored, &last, nil)
+			c, err = a.db.GetChat(chat.String())
+			if err != nil || c.UnreadCount != 1 || !c.Unread {
+				t.Fatalf("newer history lost unread: %+v, %v", c, err)
+			}
+			if len(readReceiptCallsOf(a.wa.(*fakeWA))) != 0 {
+				t.Fatal("local inference sent read receipts")
+			}
+		})
+	}
+}
 
 func TestLiveSyncCountsSenderKeyPlaceholderUpgradeOnce(t *testing.T) {
 	a := newTestApp(t)

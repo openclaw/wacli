@@ -757,7 +757,6 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 		if chatID == "" {
 			continue
 		}
-		a.storeHistoryUnreadCount(ctx, chatID, conv)
 		var pendingPolls []historyPollSideEffect
 		for _, m := range conv.Messages {
 			lastEvent.Store(nowUTC().UnixNano())
@@ -823,6 +822,7 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 			flushCtx = context.WithoutCancel(ctx)
 		}
 		a.handleHistoryPollSideEffectsBatch(flushCtx, pendingPolls)
+		a.storeHistoryUnreadCount(flushCtx, chatID, conv)
 	}
 	if !a.eventsEnabled() {
 		a.emitOrPrint("progress", map[string]any{"messages_synced": messagesStored.Load()}, "\rSynced %d messages...", messagesStored.Load())
@@ -903,14 +903,7 @@ func (a *App) storeHistoryUnreadCount(ctx context.Context, chatID string, conv *
 	}
 	count := int(conv.GetUnreadCount())
 	chat = a.canonicalStoreJID(ctx, chat)
-	var storeErr error
-	if count > 0 {
-		storeErr = a.db.SetChatUnreadCount(canonicalJIDString(chat), count)
-	} else if conv.GetMarkedAsUnread() {
-		storeErr = a.db.SetChatUnread(canonicalJIDString(chat), true)
-	} else {
-		storeErr = a.db.SetChatUnreadCount(canonicalJIDString(chat), 0)
-	}
+	storeErr := a.db.SetHistoryChatUnread(canonicalJIDString(chat), count, conv.GetMarkedAsUnread())
 	if storeErr != nil {
 		a.emitWarning(
 			"history_unread_store_failed",

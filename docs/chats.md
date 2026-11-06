@@ -49,6 +49,25 @@ wacli chats cleanup [--days N] [--jid JID] [--dry-run] [--confirm]
 
 ## Read receipts
 
+Local read positions from fresh own replies and read events are retained across
+restarts. A history resync cannot restore an unread count or marker when that
+position covers every stored readable incoming message. Conversation messages
+are stored before this decision, so a newer incoming message in the snapshot
+still permits its unread state. Merely importing an old own message is not
+evidence of a read; existing stores start with no inferred read position.
+
+Positions use timestamp and local row order. During a LID-to-phone merge the
+timestamp is retained, but the moved LID's same-second row boundary is treated
+as unknown because message rows receive new IDs. This favors keeping a possible
+unread message over incorrectly clearing it. Missing local history also limits
+what can be inferred; this is not a replacement for a complete WhatsApp index.
+
+Reply inference uses the existing default-on own-reply behavior, not a new
+receipt mode or network operation. Internal non-reply imports/actions use
+`SkipOwnReadMark`; there is no general human-versus-automated provenance on
+linked-device messages, so an automated send that looks like a normal reply
+can also mark the local chat read. No new flag or privacy setting is introduced.
+
 Read events carrying message IDs are applied as bounded ranges, including live echoes and later recovery replay. If newer readable messages remain, an existing marker-only unread state is preserved even when the event came from another device or a plain mark-read. Events containing only a timestamp keep their existing clearing behavior. Replaying an older range never restores a marker that has already been cleared.
 
 Use `wacli chats mark-read --chat CHAT --receipts` to send receipts for stored unread incoming messages. Plain `mark-read` keeps its existing app-state behavior and does not notify message senders. `mark-unread` remains available through a running sync process.

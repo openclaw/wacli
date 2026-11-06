@@ -7,7 +7,9 @@ CREATE TABLE IF NOT EXISTS chats (
     pinned INTEGER NOT NULL DEFAULT 0,
     muted_until INTEGER NOT NULL DEFAULT 0,
     unread INTEGER NOT NULL DEFAULT 0,
-    unread_count INTEGER NOT NULL DEFAULT 0
+    unread_count INTEGER NOT NULL DEFAULT 0,
+    read_through_ts INTEGER NOT NULL DEFAULT 0,
+    read_through_rowid INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS contacts (
