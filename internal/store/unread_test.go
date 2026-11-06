@@ -1,9 +1,96 @@
 package store
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestHistoryReadPositionSurvivesRestartAndOlderReads(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "wacli.db")
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedUnreadChat(t, db, ownReadChat, 2, false)
+	storeMsg(t, db, UpsertMessageParams{MsgID: "incoming", Timestamp: ownReadBase, Text: "question"})
+	storeMsg(t, db, UpsertMessageParams{MsgID: "reply", Timestamp: ownReadBase.Add(time.Minute), FromMe: true, Text: "answer"})
+	if err := db.ClearChatUnreadThrough(ownReadChat, ownReadBase, []string{"incoming"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := db.SetHistoryChatUnread(ownReadChat, 500, true); err != nil {
+		t.Fatal(err)
+	}
+	assertUnread(t, db, ownReadChat, false, 0)
+	// An old read must not erase a later manual marker, and neither should a
+	// stale history snapshot. This only guards counters; it is not a new read.
+	if err := db.SetChatUnread(ownReadChat, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetHistoryChatUnread(ownReadChat, 500, false); err != nil {
+		t.Fatal(err)
+	}
+	assertUnread(t, db, ownReadChat, true, 0)
+}
+
+func TestHistoryReadPositionPreservesLaterSameSecondArrival(t *testing.T) {
+	db := openTestDB(t)
+	seedUnreadChat(t, db, ownReadChat, 1, false)
+	storeMsg(t, db, UpsertMessageParams{MsgID: "first", Timestamp: ownReadBase, Text: "first"})
+	if err := db.ClearChatUnreadThrough(ownReadChat, ownReadBase, []string{"first"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetHistoryChatUnread(ownReadChat, 10, true); err != nil {
+		t.Fatal(err)
+	}
+	assertUnread(t, db, ownReadChat, false, 0)
+	storeMsg(t, db, UpsertMessageParams{MsgID: "later", Timestamp: ownReadBase, Text: "later"})
+	if err := db.SetHistoryChatUnread(ownReadChat, 1, false); err != nil {
+		t.Fatal(err)
+	}
+	assertUnread(t, db, ownReadChat, true, 1)
+}
+
+func TestHistoryWithoutReadEvidenceKeepsPhoneUnreadState(t *testing.T) {
+	db := openTestDB(t)
+	seedUnreadChat(t, db, ownReadChat, 2, false)
+	storeMsg(t, db, UpsertMessageParams{MsgID: "historical-own", Timestamp: ownReadBase, FromMe: true, Text: "history", SkipOwnReadMark: true})
+	if err := db.SetHistoryChatUnread(ownReadChat, 9, false); err != nil {
+		t.Fatal(err)
+	}
+	assertUnread(t, db, ownReadChat, true, 9)
+	if err := db.SetHistoryChatUnread(ownReadChat, 0, true); err != nil {
+		t.Fatal(err)
+	}
+	assertUnread(t, db, ownReadChat, true, 9)
+	if err := db.SetHistoryChatUnread(ownReadChat, 0, false); err != nil {
+		t.Fatal(err)
+	}
+	assertUnread(t, db, ownReadChat, false, 0)
+}
+
+func TestHistoryReadPositionFollowsLIDMigration(t *testing.T) {
+	db := openTestDB(t)
+	lid := "123@lid"
+	seedUnreadChat(t, db, lid, 1, false)
+	storeMsg(t, db, UpsertMessageParams{ChatJID: lid, MsgID: "incoming", Timestamp: ownReadBase, Text: "question"})
+	storeMsg(t, db, UpsertMessageParams{ChatJID: lid, MsgID: "reply", Timestamp: ownReadBase.Add(time.Minute), FromMe: true, Text: "answer"})
+	if err := db.MigrateLIDToPN(lid, ownReadChat); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetHistoryChatUnread(ownReadChat, 100, true); err != nil {
+		t.Fatal(err)
+	}
+	assertUnread(t, db, ownReadChat, false, 0)
+}
 
 func TestClearChatUnreadThroughCountsOnlyWhatAReadMissed(t *testing.T) {
 	db := openTestDB(t)

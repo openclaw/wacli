@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Preserve local read positions across restarts so stale history snapshots do not restore unread counters after a fresh own reply or an account read event. No additional receipts are sent.
+
 ## 0.26.0 - 2026-11-05
 
 **Highlights:** fresh own replies mark chats read, broadcast sync avoids long stalls, business attachments and M4A audio arrive intact, and networking security fixes.
