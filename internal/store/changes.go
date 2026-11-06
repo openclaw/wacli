@@ -50,6 +50,20 @@ func migrateChanges(d *DB) error {
  UPDATE change_state SET retained_count=retained_count+1 WHERE id=1;` + changeCleanupSQL + `END;`); err != nil {
 		return err
 	}
+	if err = createMessageChangeTriggers(tx); err != nil {
+		return err
+	}
+	// Purge invalidates replay if removing a retained reference makes it incomplete.
+	if _, err = tx.Exec(`DROP TRIGGER IF EXISTS changes_payload_purge;
+ CREATE TRIGGER changes_payload_purge AFTER INSERT ON message_payload_purges BEGIN
+ DELETE FROM message_changes WHERE chat_jid=new.chat_jid AND msg_id=new.msg_id;
+ END`); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func createMessageChangeTriggers(tx *sql.Tx) error {
 	// All durable message columns are meaningful except internal edit ordering and
 	// repeat tombstone recording times. Compare actual stored values, not inputs.
 	rows, err := tx.Query(`PRAGMA table_info(messages)`)
@@ -111,15 +125,9 @@ func migrateChanges(d *DB) error {
 			return err
 		}
 	}
-	// Purge invalidates replay if removing a retained reference makes it incomplete.
-	if _, err = tx.Exec(`DROP TRIGGER IF EXISTS changes_payload_purge;
- CREATE TRIGGER changes_payload_purge AFTER INSERT ON message_payload_purges BEGIN
- DELETE FROM message_changes WHERE chat_jid=new.chat_jid AND msg_id=new.msg_id;
- END`); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return nil
 }
+
 func (d *DB) cleanupChanges() error {
 	exists, err := d.tableExists("change_state")
 	if err != nil || !exists {

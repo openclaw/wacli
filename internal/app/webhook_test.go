@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/openclaw/wacli/internal/wa"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
+	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
@@ -113,6 +115,60 @@ func TestHandleLiveSyncMessagePostsSignedWebhookWithGroupName(t *testing.T) {
 		if !bytes.Contains(got.body, want) {
 			t.Fatalf("webhook body missing %s: %s", want, got.body)
 		}
+	}
+}
+
+func TestSyncWebhookPayloadCarriesAdReferralOnlyWhenPresent(t *testing.T) {
+	a := newTestApp(t)
+	chat := types.NewJID("15551234567", types.DefaultUserServer)
+	mediaType := waE2E.ContextInfo_ExternalAdReplyInfo_IMAGE
+	pm := wa.ParseLiveMessage(&events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{Chat: chat, Sender: chat},
+			ID:            "ctwa-hook",
+			Timestamp:     time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		},
+		Message: &waProto.Message{ExtendedTextMessage: &waProto.ExtendedTextMessage{
+			Text: proto.String("Hello"),
+			ContextInfo: &waProto.ContextInfo{
+				ExternalAdReply: &waE2E.ContextInfo_ExternalAdReplyInfo{
+					Title:     proto.String("Spring sneaker drop"),
+					MediaType: &mediaType,
+					Thumbnail: []byte{0x1},
+					SourceID:  proto.String("120212345678901234"),
+				},
+				ConversionSource: proto.String("FB_Ads"),
+			},
+		}},
+	})
+
+	raw, err := json.Marshal(a.newSyncWebhookPayload(context.Background(), pm))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got struct {
+		AdReferral map[string]any
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	want := map[string]any{"source_id": "120212345678901234", "title": "Spring sneaker drop", "media_type": "image", "conversion_source": "FB_Ads"}
+	if len(got.AdReferral) != len(want) {
+		t.Fatalf("AdReferral = %v, want %v (payload %s)", got.AdReferral, want, raw)
+	}
+	for k, v := range want {
+		if got.AdReferral[k] != v {
+			t.Fatalf("AdReferral[%s] = %v, want %v", k, got.AdReferral[k], v)
+		}
+	}
+
+	pm.AdReferral = nil
+	raw, err = json.Marshal(a.newSyncWebhookPayload(context.Background(), pm))
+	if err != nil {
+		t.Fatalf("marshal plain: %v", err)
+	}
+	if bytes.Contains(raw, []byte("AdReferral")) {
+		t.Fatalf("payload without a referral still has the key: %s", raw)
 	}
 }
 

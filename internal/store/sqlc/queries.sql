@@ -203,7 +203,7 @@ INSERT INTO messages(
     is_forwarded, forwarding_score, reaction_to_id, reaction_emoji,
     media_type, media_caption, filename, mime_type, direct_path,
     media_key, file_sha256, file_enc_sha256, file_length, revoked, deleted_for_me,
-    deleted_at, deletion_reason, edited, edited_ts, buttons
+    deleted_at, deletion_reason, edited, edited_ts, buttons, ad_referral
 ) SELECT
     ?, ?, ?, ?, ?,
     ?, ?, ?, ?,
@@ -212,7 +212,7 @@ INSERT INTO messages(
     ?, ?, ?, ?, ?,
     ?, ?, ?, ?,
     ?, ?, ?, ?,
-    ?, ?, ?
+    ?, ?, ?, ?
 WHERE NOT EXISTS (
     SELECT 1 FROM message_payload_purges p WHERE p.chat_jid = ? AND p.msg_id = ?
 )
@@ -248,7 +248,8 @@ ON CONFLICT(chat_jid, msg_id) DO UPDATE SET
     deletion_reason=CASE WHEN messages.deleted_at IS NOT NULL THEN COALESCE(NULLIF(messages.deletion_reason,''), excluded.deletion_reason) ELSE excluded.deletion_reason END,
     edited=CASE WHEN messages.deleted_at IS NOT NULL THEN messages.edited WHEN excluded.deleted_at IS NOT NULL THEN 0 WHEN excluded.edited != 0 THEN 1 WHEN messages.edited != 0 THEN messages.edited ELSE 0 END,
     edited_ts=CASE WHEN messages.deleted_at IS NOT NULL THEN messages.edited_ts WHEN excluded.deleted_at IS NOT NULL THEN 0 WHEN excluded.edited != 0 AND (messages.edited = 0 OR excluded.edited_ts > messages.edited_ts) THEN excluded.edited_ts WHEN messages.edited != 0 THEN messages.edited_ts ELSE 0 END,
-    buttons=CASE WHEN messages.deleted_at IS NOT NULL OR excluded.deleted_at IS NOT NULL THEN COALESCE(messages.buttons, excluded.buttons) WHEN (messages.edited != 0 AND excluded.edited = 0) OR (messages.edited != 0 AND excluded.edited != 0 AND excluded.edited_ts < messages.edited_ts) OR (messages.edited = 0 AND excluded.edited = 0 AND excluded.ts < messages.ts) THEN messages.buttons ELSE excluded.buttons END
+    buttons=CASE WHEN messages.deleted_at IS NOT NULL OR excluded.deleted_at IS NOT NULL THEN COALESCE(messages.buttons, excluded.buttons) WHEN (messages.edited != 0 AND excluded.edited = 0) OR (messages.edited != 0 AND excluded.edited != 0 AND excluded.edited_ts < messages.edited_ts) OR (messages.edited = 0 AND excluded.edited = 0 AND excluded.ts < messages.ts) THEN messages.buttons ELSE excluded.buttons END,
+    ad_referral=COALESCE(messages.ad_referral, excluded.ad_referral)
 WHERE messages.payload_purged_at IS NULL;
 
 -- name: MarkMessageRevoked :execrows
@@ -296,13 +297,6 @@ SET text = ?,
     edited_ts = strftime('%s', 'now')
 WHERE chat_jid = ? AND msg_id = ? AND deleted_at IS NULL;
 
--- name: GetMessage :one
-SELECT m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.quoted_msg_id,''), COALESCE(m.quoted_sender_jid,''), m.is_forwarded, m.forwarding_score, COALESCE(m.reaction_to_id,''), COALESCE(m.reaction_emoji,''), COALESCE(m.media_type,''), COALESCE(m.media_caption,''), COALESCE(m.filename,''), COALESCE(m.mime_type,''), COALESCE(m.direct_path,''), COALESCE(m.local_path,''), COALESCE(m.downloaded_at,0), CASE WHEN s.msg_id IS NULL THEN 0 ELSE 1 END, COALESCE(s.starred_at,0), m.revoked, m.deleted_for_me, COALESCE(m.deleted_at,0), COALESCE(m.deletion_reason,''), COALESCE(m.payload_purged_at,0), m.edited, COALESCE(m.buttons,''), ''
-FROM messages m
-LEFT JOIN chats c ON c.jid = m.chat_jid
-LEFT JOIN starred s ON s.chat_jid = m.chat_jid AND s.msg_id = m.msg_id
-WHERE m.chat_jid = ? AND m.msg_id = ?;
-
 -- name: CountMessages :one
 SELECT COUNT(1) FROM messages;
 
@@ -328,24 +322,6 @@ WHERE anchor.chat_jid = ? AND anchor.msg_id = ?
   AND (m.ts, m.rowid) > (anchor.ts, anchor.rowid)
 ORDER BY m.ts ASC, m.rowid ASC
 LIMIT 1;
-
--- name: MessageContextBefore :many
-SELECT m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.quoted_msg_id,''), COALESCE(m.quoted_sender_jid,''), m.is_forwarded, m.forwarding_score, COALESCE(m.reaction_to_id,''), COALESCE(m.reaction_emoji,''), COALESCE(m.media_type,''), COALESCE(m.media_caption,''), COALESCE(m.filename,''), COALESCE(m.mime_type,''), COALESCE(m.direct_path,''), COALESCE(m.local_path,''), COALESCE(m.downloaded_at,0), CASE WHEN s.msg_id IS NULL THEN 0 ELSE 1 END, COALESCE(s.starred_at,0), m.revoked, m.deleted_for_me, COALESCE(m.deleted_at,0), COALESCE(m.deletion_reason,''), COALESCE(m.payload_purged_at,0), m.edited, COALESCE(m.buttons,''), ''
-FROM messages m
-LEFT JOIN chats c ON c.jid = m.chat_jid
-LEFT JOIN starred s ON s.chat_jid = m.chat_jid AND s.msg_id = m.msg_id
-WHERE m.chat_jid = ? AND m.deleted_at IS NULL AND (m.ts < ? OR (m.ts = ? AND m.rowid < ?))
-ORDER BY m.ts DESC, m.rowid DESC
-LIMIT ?;
-
--- name: MessageContextAfter :many
-SELECT m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.quoted_msg_id,''), COALESCE(m.quoted_sender_jid,''), m.is_forwarded, m.forwarding_score, COALESCE(m.reaction_to_id,''), COALESCE(m.reaction_emoji,''), COALESCE(m.media_type,''), COALESCE(m.media_caption,''), COALESCE(m.filename,''), COALESCE(m.mime_type,''), COALESCE(m.direct_path,''), COALESCE(m.local_path,''), COALESCE(m.downloaded_at,0), CASE WHEN s.msg_id IS NULL THEN 0 ELSE 1 END, COALESCE(s.starred_at,0), m.revoked, m.deleted_for_me, COALESCE(m.deleted_at,0), COALESCE(m.deletion_reason,''), COALESCE(m.payload_purged_at,0), m.edited, COALESCE(m.buttons,''), ''
-FROM messages m
-LEFT JOIN chats c ON c.jid = m.chat_jid
-LEFT JOIN starred s ON s.chat_jid = m.chat_jid AND s.msg_id = m.msg_id
-WHERE m.chat_jid = ? AND m.deleted_at IS NULL AND (m.ts > ? OR (m.ts = ? AND m.rowid > ?))
-ORDER BY m.ts ASC, m.rowid ASC
-LIMIT ?;
 
 -- name: SetStarredDelete :exec
 DELETE FROM starred WHERE chat_jid = ? AND msg_id = ?;
