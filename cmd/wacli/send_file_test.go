@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -20,6 +21,7 @@ import (
 	"github.com/openclaw/wacli/internal/wa"
 	"go.mau.fi/whatsmeow"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
+	"go.mau.fi/whatsmeow/types"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -496,5 +498,114 @@ func TestAttachSendFileReplyContext(t *testing.T) {
 				t.Fatalf("context info was not attached")
 			}
 		})
+	}
+}
+
+func TestResolveSendFileMaxSize(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		requested int64
+		want      int64
+		wantErr   bool
+	}{
+		{name: "default", requested: 0, want: maxSendFileSize},
+		{name: "raised", requested: 500 * 1024 * 1024, want: 500 * 1024 * 1024},
+		{name: "whatsapp limit", requested: maxSendFileSizeLimit, want: maxSendFileSizeLimit},
+		{name: "over whatsapp limit", requested: maxSendFileSizeLimit + 1, wantErr: true},
+		{name: "negative", requested: -1, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := resolveSendFileMaxSize(tc.requested)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got %d", got)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("resolveSendFileMaxSize(%d) = %d, %v; want %d", tc.requested, got, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestSendFileMaxSizeFromMB(t *testing.T) {
+	if got, err := sendFileMaxSizeFromMB(150); err != nil || got != 150*1024*1024 {
+		t.Fatalf("150 MiB = %d, %v", got, err)
+	}
+	if got, err := sendFileMaxSizeFromMB(2048); err != nil || got != maxSendFileSizeLimit {
+		t.Fatalf("2048 MiB = %d, %v", got, err)
+	}
+	for _, mb := range []int64{0, -5, 2049, (1 << 44) + 100, 1 << 44, 1<<63 - 1} {
+		if _, err := sendFileMaxSizeFromMB(mb); err == nil {
+			t.Fatalf("expected error for %d MiB", mb)
+		}
+	}
+}
+
+func TestReadSendFileDataLimitedHonorsRaisedCap(t *testing.T) {
+	path := t.TempDir() + "/doc.bin"
+	if err := fsutil.WritePrivateFile(path, []byte("0123456789A")); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if _, err := readSendFileDataLimited(path, 10); err == nil || !strings.Contains(err.Error(), "file too large") {
+		t.Fatalf("expected file too large under a 10 byte cap, got %v", err)
+	}
+	data, err := readSendFileDataLimited(path, 11)
+	if err != nil || string(data) != "0123456789A" {
+		t.Fatalf("raised cap: %q, %v", data, err)
+	}
+}
+
+func TestSendFileCommandExposesMaxSizeFlag(t *testing.T) {
+	flag := newSendFileCmd(&rootFlags{}).Flags().Lookup("max-size-mb")
+	if flag == nil {
+		t.Fatal("missing --max-size-mb flag")
+	}
+	if flag.DefValue != "100" {
+		t.Fatalf("--max-size-mb default = %s, want 100", flag.DefValue)
+	}
+}
+
+func TestSendDelegateRequestCarriesMaxSize(t *testing.T) {
+	raw, err := json.Marshal(sendDelegateRequest{Kind: "file", MaxSizeBytes: 300 * 1024 * 1024})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var back sendDelegateRequest
+	if err := json.Unmarshal(raw, &back); err != nil || back.MaxSizeBytes != 300*1024*1024 {
+		t.Fatalf("round trip: %+v, %v (%s)", back, err, raw)
+	}
+	raw, _ = json.Marshal(sendDelegateRequest{Kind: "file"})
+	if strings.Contains(string(raw), "max_size_bytes") {
+		t.Fatalf("default cap should be omitted from the request: %s", raw)
+	}
+}
+
+func TestSendFileRejectsInvalidCapBeforeRead(t *testing.T) {
+	for _, cap := range []int64{-1, maxSendFileSizeLimit + 1, 1<<63 - 1} {
+		_, err := sendFile(context.Background(), nil, types.JID{}, "missing-file", sendFileOptions{maxSize: cap})
+		if err == nil || !strings.Contains(err.Error(), "max file size") {
+			t.Fatalf("cap %d: expected cap validation before reading, got %v", cap, err)
+		}
+	}
+}
+
+func TestDelegatedFileRejectsInvalidCapBeforeRecipient(t *testing.T) {
+	for _, cap := range []int64{-1, maxSendFileSizeLimit + 1, 1<<63 - 1} {
+		_, err := executeDelegatedFile(context.Background(), nil, sendDelegateRequest{Kind: "file", MaxSizeBytes: cap})
+		if err == nil || !strings.Contains(err.Error(), "max file size") {
+			t.Fatalf("cap %d: expected cap validation before recipient lookup, got %v", cap, err)
+		}
+	}
+}
+
+func TestSendFileCommandRejectsInvalidCapBeforeStore(t *testing.T) {
+	for _, cap := range []string{"0", "-1", "2049", "17592186044516", "9223372036854775807"} {
+		cmd := newSendFileCmd(&rootFlags{readOnly: true})
+		cmd.SetArgs([]string{"--to", "15550001111", "--file", "missing-file", "--max-size-mb", cap})
+		if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "--max-size-mb") {
+			t.Fatalf("cap %s: expected cap validation before store access, got %v", cap, err)
+		}
 	}
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"github.com/openclaw/wacli/internal/delegate"
 	"net"
 	"strings"
 	"sync/atomic"
@@ -176,7 +177,7 @@ func TestProductionServerDropsQueuedSendAfterCallerTimeout(t *testing.T) {
 func TestDelegateSendTimeoutWarnsAgainstBlindRetry(t *testing.T) {
 	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
 	storeDir := shortPresenceDelegateStoreDir(t)
-	ln, err := net.Listen("unix", sendDelegateSocketPath(storeDir))
+	ln, err := delegate.Listen(storeDir)
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}

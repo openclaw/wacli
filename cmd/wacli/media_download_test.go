@@ -12,6 +12,37 @@ import (
 	"github.com/openclaw/wacli/internal/store"
 )
 
+func TestMediaDownloadCacheMissOpensWritableStore(t *testing.T) {
+	t.Setenv("WACLI_READONLY", "")
+	dir := t.TempDir()
+	db, err := store.Open(filepath.Join(dir, "wacli.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	chat, id := "111@s.whatsapp.net", "uncached"
+	if err := db.UpsertChat(chat, "dm", "Synthetic", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertMessage(store.UpsertMessageParams{ChatJID: chat, MsgID: id, SenderJID: chat, Timestamp: time.Now(), MediaType: "audio", MimeType: "audio/ogg", DirectPath: "/uncached", MediaKey: make([]byte, 32)}); err != nil {
+		t.Fatal(err)
+	}
+	for _, suffix := range []string{"-wal", "-shm"} {
+		if _, err := os.Stat(filepath.Join(dir, "wacli.db") + suffix); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Keep WAL sidecars alive in this process, without taking the store lock.
+	// The command's process must open its first SQLite handle read-only.
+	// No session is authenticated, so reaching the auth check proves that the
+	// writable store initialized after the cache miss without connecting to WA.
+	stdout, stderr, err := runPresenceDelegateHelper(t, []string{"--store", dir, "media", "download", "--chat", chat, "--id", id, "--output", filepath.Join(dir, "output.ogg")})
+	if err == nil || !strings.Contains(stderr, "not authenticated") {
+		t.Fatalf("download error = %v stdout=%s stderr=%s, want authentication check after writable store open", err, stdout, stderr)
+	}
+}
+
 // A malformed old location fails before any HTTP request, reproducing the
 // observed stale-location bug without exposing account data or using WhatsApp.
 func TestMediaDownloadVerifiedCacheBypassesExpiredLocationAndStoreLock(t *testing.T) {

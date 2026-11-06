@@ -44,7 +44,8 @@ func (a *App) AddChatStatePersistenceHandler(ctx context.Context) (func(), error
 	handlerID := waClient.AddEventHandler(func(evt any) {
 		switch v := evt.(type) {
 		case *events.AppState, *events.Star, *events.DeleteForMe,
-			*events.Archive, *events.UnarchiveChatsSetting, *events.Pin, *events.Mute, *events.MarkChatAsRead:
+			*events.Archive, *events.UnarchiveChatsSetting, *events.Pin, *events.Mute, *events.MarkChatAsRead,
+			*events.Contact:
 			a.handleAppStatePersistenceEvent(ctx, evt, nil)
 		case *wa.AppStateKeyUnavailable:
 			a.warnEmptyAppStateKey(v)
@@ -673,7 +674,18 @@ func (a *App) fetchAndPersistAppState(ctx context.Context, collection appstate.W
 	}
 	result := make(chan error, 1)
 	frontier := a.appStatePersist.complete(ticket, func() {
-		result <- a.persistFetchedAppStateEvents(ctx, eventsToPersist, tracker)
+		persistCtx := ctx
+		if collection == appstate.WAPatchCriticalUnblockLow {
+			persistCtx = context.WithoutCancel(ctx)
+		}
+		persistErr := a.persistFetchedAppStateEvents(persistCtx, eventsToPersist, tracker)
+		if collection == appstate.WAPatchCriticalUnblockLow {
+			// Drain even without events or after fetch cancellation: SDK store
+			// writes precede event delivery and must retain their canonical JID.
+			_, drainErr := a.drainContactJournal(persistCtx)
+			persistErr = errors.Join(persistErr, drainErr)
+		}
+		result <- persistErr
 	})
 	if waitErr := a.appStatePersist.waitThrough(ctx, frontier); waitErr != nil {
 		return fetchErr, waitErr
@@ -788,7 +800,9 @@ func (a *App) completeLocalAppStateWrite(ctx context.Context, pending *pendingLo
 	// exits before that goroutine runs, and future incremental deltas would
 	// skip the batch forever. On broken collections the degraded pre-write
 	// path keeps later writes fast despite the kept debt; a verified full
-	// replay or primary recovery snapshot clears it.
+	// replay or primary recovery snapshot clears it. A contact save settles
+	// its own intent once it mirrored the journal of whatsmeow's contact
+	// store writes for its send (see SaveContact).
 	return <-result
 }
 
@@ -882,6 +896,13 @@ func (a *App) handleChatStateEvent(ctx context.Context, evt any) error {
 		}
 	}
 	return nil
+}
+
+// Contact events only trigger a journal drain: asynchronous event payloads
+// cannot establish the order of SDK contact-store writes.
+func (a *App) handleContactEvent(ctx context.Context, _ *events.Contact) error {
+	_, err := a.drainContactJournal(ctx)
+	return err
 }
 
 func mutedUntilFromAction(action *waSyncAction.MuteAction) int64 {

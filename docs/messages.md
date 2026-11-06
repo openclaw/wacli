@@ -172,15 +172,6 @@ Empty fields are omitted, and messages without this context have no
 `ad_referral`. A later copy of the message without it keeps the stored
 referral; `messages purge` clears it.
 
-The next writable open applies migration 35 (33 is ordered chat auto-unarchive;
-34 is reserved for lists). It also checks the column and refreshes the change
-triggers if another migration already occupies that number, without reseeding
-the journal. Older ad-referral builds recorded migration 33, which makes the
-number-only migration runner skip main's auto-unarchive step. Its existing
-schema guard still adds the archive columns and preference table on writable
-open, preserving referrals and leaving unknown archive preferences for recovery.
-Read-only opens never migrate and omit referrals when the column is absent.
-
 - `media_type` is the ad's own media kind (`image` or `video`), not the message's `media_type`.
 - Each text field is trimmed and capped at 1024 bytes, cut on a valid UTF-8 boundary.
 - Thumbnails and other ad media bytes are not stored.

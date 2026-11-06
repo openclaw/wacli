@@ -13,7 +13,7 @@ inputs:
   node-version:
     description: Node.js version to install when setup-node is true.
     required: false
-    default: "26"
+    default: "26.12.1"
   setup-pnpm:
     description: Whether to install the pnpm version from package.json.
     required: false

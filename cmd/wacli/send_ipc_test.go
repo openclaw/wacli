@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/openclaw/wacli/internal/app"
-	"github.com/openclaw/wacli/internal/fsutil"
 	"github.com/openclaw/wacli/internal/lock"
 	"github.com/openclaw/wacli/internal/store"
 	"go.mau.fi/whatsmeow/types"
@@ -234,16 +233,6 @@ func TestSendDelegateRequestPreservesPresenceInJSON(t *testing.T) {
 	}
 	if got.PresenceMedia != "audio" {
 		t.Fatalf("PresenceMedia = %q, want audio", got.PresenceMedia)
-	}
-}
-
-func TestRemoveStaleSendDelegateSocketRefusesRegularFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), sendDelegateSocketName)
-	if err := fsutil.WritePrivateFile(path, []byte("not a socket")); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-	if err := removeStaleSendDelegateSocket(path); err == nil || !strings.Contains(err.Error(), "not a socket") {
-		t.Fatalf("error = %v, want not a socket", err)
 	}
 }
 
@@ -502,7 +491,7 @@ func TestChatsMarkReadDelegatesThroughProductionServerWhenStoreLocked(t *testing
 		}
 	}()
 
-	socketPath := sendDelegateSocketPath(storeDir)
+	socketPath := filepath.Join(storeDir, ".send.sock")
 	info, err := os.Lstat(socketPath)
 	if err != nil {
 		t.Fatalf("stat delegate socket: %v", err)

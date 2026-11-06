@@ -3,9 +3,36 @@
 ## Unreleased
 
 - Messages: keep Click-to-WhatsApp ad referrals (ad ID, source, headline, media type, click ID) and expose them as `ad_referral` in message JSON, sync webhook payloads, and a `messages show` line. Each text field is capped at 1024 bytes and thumbnails are not stored. Thanks @nicolasbiondic (#473).
-- Store: move the ad-referral migration to 35, reserving 33 for ordered chat auto-unarchive and 34 for lists; repair the referral column and change triggers on writable opens even when a migration number is already occupied. Legacy ad-referral stores at 33 also receive the auto-unarchive schema through its existing guard.
+
+## 0.25.0 - 2026-10-23
+
+**Highlights:** opt-in file uploads up to 2048 MiB, durable poll vote retractions, and reliable uncached media downloads.
+
+- Send: add `send file --max-size-mb` to raise the 100 MiB upload cap per send, up to 2048 MiB, with bounded validation and forwarding to a running `sync` delegate. Thanks @aleixrodriala (#525).
+- Polls: retain timestamped vote retractions so older live/history replay, restarts, and phone/LID reconciliation cannot restore withdrawn selections. Thanks @shaun0927 (#516).
+- Media: close the read-only cache database before opening a writer so uncached downloads work with WAL sidecars and no running sync. Thanks @stijnhoste (#524).
+- Dependencies: refresh SQL parser and Google API/RPC modules after the 48-hour cooldown, retaining Go 1.27.0 and Node 24 minimums.
+
+## 0.24.0 - 2026-10-21
+
+- Send: quote file, voice, and sticker replies with stored text or media content, resolve phone/LID identities, and reject missing or unusable direct-chat quote targets before upload. Thanks @larskluge (#506).
+- Send: use bounded high-resolution link-preview thumbnails by default; set `WACLI_LINKPREVIEW_SMALL=1` to restore inline-only thumbnails and the 300 KiB download cap. Thanks @samuba (#510).
+- Send: report skipped previews and support explicit, strictly validated `WACLI_LINKPREVIEW_ALLOW_CIDRS` exceptions for trusted networks, preserving default SSRF denial and independent webhook permissions. Thanks @samuba (#509).
+- Contacts: add delegated account contact saves and renames with required `--account-wide` consent and separate default-off `--phonebook` permission; mirror applied contact edits in order and retain recovery debt for incomplete batches. Thanks @nicolasbiondic and @muriloprataviera (#505, #500).
+- Send: retain sync-compatible quoted display text and canonical reaction history for direct and delegated sends. Thanks @goutamadwant (#507, #503).
+
+## 0.23.0 - 2026-10-20
+
+- Security: build source, CI, Docker, and release artifacts with Go 1.27.3 to fix GO-2026-6809 while retaining the Go 1.27.0 source minimum.
+
+- Windows: use a current-user-only named pipe for sync delegation, avoiding crashes and restart loops caused by inaccessible AF_UNIX socket files (#511).
+
+- Dependencies: refresh WhatsApp protocol handling, utility and parser modules, SQLite WASM tooling, and pnpm 12.14.0 after the 48-hour cooldown, retaining Go 1.27.0 and Node 24 minimums.
+
 - Dependencies: update x/exp after the 48-hour cooldown while retaining the Go 1.27.0 source minimum and Go 1.27.2 build toolchain.
 - Sync: unarchive chats on eligible incoming messages when Keep chats archived is off, recover missing preferences on upgrade, and preserve newer unarchives across stale archive replays. Thanks @Luizssauro (#466).
+
+- Known issues: back up your archive before upgrading; upgraded stores can repeat archive-state recovery on every sync start, and a failed full replay can discard saved app state (#501).
 
 ## 0.22.0 - 2026-10-16
 

@@ -38,17 +38,21 @@ wacli polls list [--chat RECIPIENT] [--limit N] [--json]
 ## Replies and reactions
 
 - `send text` fetches Open Graph metadata for the first `http://` or `https://` URL and sends it as a WhatsApp link preview.
+- Preview images (`og:image`, up to 5 MB and 16 megapixels; JPEG, PNG, or GIF) are re-encoded as JPEG: a small inline thumbnail is always embedded, and an image at least 300 px wide is also uploaded as a high-resolution link thumbnail (up to 1200 px) so WhatsApp shows the wide banner preview instead of the small square. If the upload fails, the small preview is sent and a warning is printed to stderr by the sending command; for sends delegated to a running `sync --follow`, the warning is returned to the sender, so it never enters the sync process's `--events` stream.
+- Set `WACLI_LINKPREVIEW_SMALL=1` to restore inline-only thumbnails and the 300 KiB image download cap. For delegated sends set it in the `sync --follow` environment and restart the daemon.
 - Preview metadata fetches time out after 10 seconds and fall back to plain text.
 - Pass `--no-preview` to disable link-preview fetching.
+- When a preview cannot be fetched, the message is still sent as plain text and a `warning: link preview skipped for URL: reason (message text was still sent without a preview; pass --no-preview to send without fetching one)` line is printed to stderr after the send succeeds. Pass `--no-preview` when a skipped preview is expected. For sends delegated to a running `sync --follow`, the warning is returned to the sending command and printed there, so it never enters the sync process's `--events` stream.
+- Preview fetches refuse localhost, private, link-local, and other reserved addresses. Behind a fake-IP DNS proxy (for example Clash/Surge/sing-box TUN mode, which resolves every host into `198.18.0.0/15`), set `WACLI_LINKPREVIEW_ALLOW_CIDRS` to a comma-separated list of CIDRs to exempt, such as `WACLI_LINKPREVIEW_ALLOW_CIDRS=198.18.0.0/15`. It is empty by default. Every entry must be a canonical IPv4 or IPv6 network CIDR (no host bits, empty entries, or IPv4-mapped IPv6 prefixes); an invalid list disables preview fetching and produces a warning. These exceptions permit SSRF into the configured networks from message URLs, redirects, and image URLs. Only allow networks you explicitly trust; broad ranges such as `0.0.0.0/0` remove the IPv4 destination protection. Configure the environment of `sync --follow` for delegated sends and restart it after changing the setting. The exemption applies only to link preview fetches: sync webhooks still refuse those addresses unless `--webhook-allow-private` is set.
 - `--ephemeral` sends text with `ContextInfo.Expiration`, matching the disappearing-send path. For groups, wacli uses the live group timer when available; otherwise it falls back to a 7-day default. Set `--ephemeral-duration` to choose an explicit expiration.
 - `--message` is literal by default. Pass `--message-escapes` to interpret `\n`, `\r`, `\t`, `\\`, and `\"` before sending.
 - Use repeatable `--mention USER` with a phone number or user JID to add WhatsApp mentions to `send text`.
-- `send text --reply-to` reconstructs the stored text or supported media quote content (image, video/GIF, audio, document, or sticker); stored media must have complete sync metadata.
-- Other send commands use `--reply-to` to quote a stored message ID.
-- For unsynced group replies, pass `--reply-to-sender`.
+- `send text`, `send file`, `send voice`, and `send sticker` build the same quote for `--reply-to`: they reconstruct the stored text or supported media quote content (image, video/GIF, audio, document, or sticker), looking the message up under the chat's phone or LID identity; stored media must have complete sync metadata.
+- A `--reply-to` message that is not in the local store, was deleted, or has content that cannot be quoted is refused before any upload or send. Run `wacli sync` first.
+- For unsynced group replies, pass `--reply-to-sender`; the reply then quotes the message ID and sender without its content.
 - `send react` defaults to thumbs-up.
 - Pass `--reaction ""` to clear a reaction.
-- Sent reactions are stored locally immediately, including reaction target and display text.
+- Sent reactions are stored locally immediately under the canonical phone/LID chat, including reaction target and display text. Sent text replies also retain their quoted display text before the next sync.
 - For group reactions, pass `--sender` for the original message sender.
 - Use `--post-send-wait 0` to disable the retry-receipt grace window for latency-sensitive scripts.
 - If any send command (text, file, voice, sticker, status, react, poll, poll vote, select, or message forward) delivers a message but recording it in local history fails (disk full, locked store), the command still succeeds with the delivered id and prints a warning to stderr; JSON output carries the failure in `store_warning`, including for sends delegated to a running `sync --follow` process. Do not retry such a send — the recipient already has the message.
@@ -61,7 +65,7 @@ wacli polls list [--chat RECIPIENT] [--limit N] [--json]
 - Incoming polls and poll votes are stored during sync in the local poll tables.
 - `poll vote` validates selected options when the original poll is present in the local store.
 - For unsynced group polls, pass `--sender` with the poll author's JID.
-- `poll show` prints current aggregates and per-voter selections from the local store. JSON output includes `unknown_hashes` for vote hashes that could not be matched to a stored option.
+- `poll show` prints current aggregates and per-voter selections from the local store. JSON output includes `unknown_hashes` for vote hashes that could not be matched to a stored option. Retracted votes are omitted, while their timestamps remain in the store so older replay cannot restore a withdrawn selection.
 - `polls list` shows recently synced or sent polls, optionally filtered with `--chat`.
 
 ## Buttons and lists
@@ -102,7 +106,7 @@ wacli polls list [--chat RECIPIENT] [--limit N] [--json]
 ## Files
 
 - Set `WACLI_MEDIA_ROOTS` to a platform path-list of absolute directories (`:` on Unix, `;` on Windows) to confine which local files `send file`, `send voice`, `send sticker` and `send status --file` may upload. The file must resolve, symlinks included, to a path inside one of them; anything else is refused before the store is opened or a running `sync --follow` is asked to send. Unset or empty keeps the default of no restriction. Relative roots and nonempty lists without directories are errors; missing roots are skipped. Set the variable in both the invoking CLI and the `sync --follow` environment: the CLI checks before delegation, and an upgraded daemon enforces its own roots when it opens the upload. Restart sync after configuring this policy. Symlinked roots work; symlinks that escape all configured roots are refused. This is an upload guardrail, not an OS sandbox for a process that can change its own environment or the allowed files.
-- File uploads are capped at 100 MiB.
+- File uploads are capped at 100 MiB by default, because the whole file is read into memory before upload. `send file --max-size-mb N` raises the cap for one send, up to 2048 MiB (WhatsApp's document limit). When a running `sync` handles the send, the requested cap travels with the request and is validated again. Restart an older `sync` after upgrading: older versions ignore the new cap and retain the 100 MiB limit. Large files can require substantially more memory than their size during upload. Use `--as document` when sending large files as documents.
 - MIME type is detected automatically unless `--mime` is set.
 - WhatsApp derives the message bubble (image, video, audio, or document) from the message type, which wacli picks from the MIME by default. Use `--as auto|document|audio|image|video` to force it. For example, `--mime audio/mpeg --as document` delivers an mp3 as a downloadable document instead of an inline audio bubble, matching how the mobile app attaches files. `--as auto` (the default) keeps MIME-based detection. `--ptt` only accepts `--as auto` or `--as audio`.
 - `--filename` changes the displayed document name.

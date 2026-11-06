@@ -161,7 +161,7 @@ func TestAdReferralMigrationSurvivesOccupiedVersions(t *testing.T) {
 		occupyVersion  bool
 		columnRetained bool
 	}{
-		{name: "main 33 and lists 34"},
+		{name: "main 33, stickers 34 and lists 36"},
 		{name: "foreign row at referral version", occupyVersion: true},
 		{name: "existing column with stale trigger", occupyVersion: true, columnRetained: true},
 	} {
@@ -178,7 +178,7 @@ func TestAdReferralMigrationSurvivesOccupiedVersions(t *testing.T) {
 				t.Fatal(err)
 			}
 			downgradeToBeforeAdReferral(t, db)
-			if _, err := db.sql.Exec(`INSERT INTO schema_migrations VALUES(34, 'WhatsApp lists and chat memberships', 1)`); err != nil {
+			if _, err := db.sql.Exec(`INSERT INTO schema_migrations VALUES(34, 'stickers', 1), (36, 'WhatsApp lists and chat memberships', 1)`); err != nil {
 				t.Fatal(err)
 			}
 			if tc.occupyVersion {
@@ -204,7 +204,7 @@ func TestAdReferralMigrationSurvivesOccupiedVersions(t *testing.T) {
 			}
 			db = mustOpen(t, path)
 			defer db.Close()
-			for version, want := range map[int]string{33: "ordered chat auto-unarchive", 34: "WhatsApp lists and chat memberships"} {
+			for version, want := range map[int]string{33: "ordered chat auto-unarchive", 34: "stickers", 36: "WhatsApp lists and chat memberships"} {
 				var name string
 				if err := db.sql.QueryRow(`SELECT name FROM schema_migrations WHERE version=?`, version).Scan(&name); err != nil || name != want {
 					t.Fatalf("migration %d = %q, %v; want %q", version, name, err, want)
@@ -235,6 +235,65 @@ func TestAdReferralMigrationSurvivesOccupiedVersions(t *testing.T) {
 				t.Fatalf("referral-only changes = %+v, %v", after, err)
 			}
 		})
+	}
+}
+
+func TestLocalAdReferral9033UpgradeIsIdempotent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "wacli.db")
+	db := mustOpen(t, path)
+	chat := "lead@s.whatsapp.net"
+	ref := &AdReferral{SourceID: "local-ad", Title: "Preserved"}
+	if err := db.UpsertChat(chat, "dm", "Lead", time.Unix(100, 0)); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{ChatJID: chat, MsgID: "local", Timestamp: time.Unix(100, 0), Text: "Hi", AdReferral: ref}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.sql.Exec(`UPDATE schema_migrations SET version=9033 WHERE version=?`, adReferralMigrationVersion(t)); err != nil {
+		t.Fatal(err)
+	}
+	checkpoint, err := db.MessageChanges("", true, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var revision int64
+	if err := db.sql.QueryRow(`SELECT revision FROM retrieval_state WHERE id=1`).Scan(&revision); err != nil {
+		t.Fatal(err)
+	}
+	// The migration itself must not rewrite schema or payloads when the local
+	// build already installed the column and referral-aware change trigger.
+	var beforeSchema, afterSchema int
+	if err := db.sql.QueryRow(`PRAGMA schema_version`).Scan(&beforeSchema); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateMessagesAdReferralColumn(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.sql.QueryRow(`PRAGMA schema_version`).Scan(&afterSchema); err != nil || afterSchema != beforeSchema {
+		t.Fatalf("migration rewrote schema: %d -> %d, %v", beforeSchema, afterSchema, err)
+	}
+	db.Close()
+	for range 2 {
+		db = mustOpen(t, path)
+		msg, err := db.GetMessage(chat, "local")
+		if err != nil || msg.AdReferral == nil || *msg.AdReferral != *ref {
+			t.Fatalf("local referral = %+v, %v", msg.AdReferral, err)
+		}
+		changes, err := db.MessageChanges(checkpoint.NextCheckpoint, false, 100)
+		if err != nil || changes.StoreID != checkpoint.StoreID || len(changes.Changes) != 0 {
+			t.Fatalf("local journal changed = %+v, %v", changes, err)
+		}
+		var gotRevision int64
+		if err := db.sql.QueryRow(`SELECT revision FROM retrieval_state WHERE id=1`).Scan(&gotRevision); err != nil || gotRevision != revision {
+			t.Fatalf("revision = %d, %v; want %d", gotRevision, err, revision)
+		}
+		for _, version := range []int{9033, adReferralMigrationVersion(t)} {
+			var name string
+			if err := db.sql.QueryRow(`SELECT name FROM schema_migrations WHERE version=?`, version).Scan(&name); err != nil || name != "messages ad_referral column" {
+				t.Fatalf("migration %d = %q, %v", version, name, err)
+			}
+		}
+		db.Close()
 	}
 }
 

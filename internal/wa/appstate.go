@@ -45,6 +45,12 @@ func (c *Client) sendAppStateWithBoundary(ctx context.Context, patch appstate.Pa
 	return nil, c.SendAppState(ctx, patch)
 }
 
+// SendAppStatePatch sends an already validated patch with the shared
+// persistence boundary. Patch construction belongs to the caller.
+func (c *Client) SendAppStatePatch(ctx context.Context, patch appstate.PatchInfo, beforeApply func()) ([]any, error) {
+	return c.sendAppStateWithBoundary(ctx, patch, beforeApply)
+}
+
 func (c *Client) ArchiveChat(ctx context.Context, target types.JID, archive bool, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey, beforeApply func()) ([]any, error) {
 	return c.sendAppStateWithBoundary(ctx, appstate.BuildArchive(target, archive, lastMsgTS, lastMsgKey), beforeApply)
 }

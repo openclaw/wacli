@@ -39,6 +39,20 @@ func (q *Queries) ClearAllSystemNames(ctx context.Context, updatedAt int64) (int
 	return result.RowsAffected()
 }
 
+const clearContactActionName = `-- name: ClearContactActionName :exec
+UPDATE contacts SET full_name = NULL, first_name = NULL, updated_at = ? WHERE jid = ?
+`
+
+type ClearContactActionNameParams struct {
+	UpdatedAt int64
+	Jid       string
+}
+
+func (q *Queries) ClearContactActionName(ctx context.Context, arg ClearContactActionNameParams) error {
+	_, err := q.db.ExecContext(ctx, clearContactActionName, arg.UpdatedAt, arg.Jid)
+	return err
+}
+
 const countChatMessages = `-- name: CountChatMessages :one
 SELECT COUNT(1) FROM messages WHERE chat_jid = ?
 `
@@ -209,28 +223,6 @@ type DeletePollParams struct {
 
 func (q *Queries) DeletePoll(ctx context.Context, arg DeletePollParams) error {
 	_, err := q.db.ExecContext(ctx, deletePoll, arg.ChatJid, arg.MsgID)
-	return err
-}
-
-const deletePollVote = `-- name: DeletePollVote :exec
-DELETE FROM poll_votes
-WHERE chat_jid = ? AND poll_msg_id = ? AND voter_jid = ? AND ts <= ?
-`
-
-type DeletePollVoteParams struct {
-	ChatJid   string
-	PollMsgID string
-	VoterJid  string
-	Ts        int64
-}
-
-func (q *Queries) DeletePollVote(ctx context.Context, arg DeletePollVoteParams) error {
-	_, err := q.db.ExecContext(ctx, deletePollVote,
-		arg.ChatJid,
-		arg.PollMsgID,
-		arg.VoterJid,
-		arg.Ts,
-	)
 	return err
 }
 
@@ -1313,6 +1305,35 @@ type SetChatPinnedParams struct {
 
 func (q *Queries) SetChatPinned(ctx context.Context, arg SetChatPinnedParams) error {
 	_, err := q.db.ExecContext(ctx, setChatPinned, arg.Jid, arg.Pinned)
+	return err
+}
+
+const setContactActionName = `-- name: SetContactActionName :exec
+INSERT INTO contacts(jid, phone, full_name, first_name, updated_at)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(jid) DO UPDATE SET
+    phone=COALESCE(NULLIF(excluded.phone,''), contacts.phone),
+    full_name=excluded.full_name,
+    first_name=excluded.first_name,
+    updated_at=excluded.updated_at
+`
+
+type SetContactActionNameParams struct {
+	Jid       string
+	Phone     sql.NullString
+	FullName  sql.NullString
+	FirstName sql.NullString
+	UpdatedAt int64
+}
+
+func (q *Queries) SetContactActionName(ctx context.Context, arg SetContactActionNameParams) error {
+	_, err := q.db.ExecContext(ctx, setContactActionName,
+		arg.Jid,
+		arg.Phone,
+		arg.FullName,
+		arg.FirstName,
+		arg.UpdatedAt,
+	)
 	return err
 }
 

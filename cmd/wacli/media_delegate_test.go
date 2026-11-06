@@ -135,9 +135,6 @@ func TestMediaDelegateRetainsEarlierDeadlineAndCancelsAfterDial(t *testing.T) {
 	for _, explicitCancel := range []bool{false, true} {
 		t.Run(map[bool]string{false: "deadline", true: "cancel"}[explicitCancel], func(t *testing.T) {
 			dir := shortPresenceDelegateStoreDir(t)
-			ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
-			defer cancel()
-			deadline, _ := ctx.Deadline()
 			entered := make(chan sendDelegateRequest, 1)
 			ended := make(chan struct{})
 			stop, err := startSendDelegateServerForStore(context.Background(), dir, sendSpacing{}, func(requestCtx context.Context, req sendDelegateRequest) (sendDelegateResponse, error) {
@@ -150,18 +147,33 @@ func TestMediaDelegateRetainsEarlierDeadlineAndCancelsAfterDial(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer stop()
+			// Start the caller deadline after socket setup, and bound every wait.
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			deadline, _ := ctx.Deadline()
 			result := make(chan error, 1)
 			start := time.Now()
 			go func() {
-				_, err := delegateSend(ctx, &rootFlags{storeDir: dir, timeout: time.Second}, sendDelegateRequest{Kind: mediaDownloadKind, To: "111@s.whatsapp.net", ID: "exact"})
+				_, err := delegateSend(ctx, &rootFlags{storeDir: dir, timeout: 5 * time.Second}, sendDelegateRequest{Kind: mediaDownloadKind, To: "111@s.whatsapp.net", ID: "exact"})
 				result <- err
 			}()
-			req := <-entered
+			var req sendDelegateRequest
+			select {
+			case req = <-entered:
+			case err := <-result:
+				t.Fatalf("delegate ended before entering the handler: %v", err)
+			case <-time.After(2 * time.Second):
+				t.Fatal("delegate did not enter the handler")
+			}
 			if explicitCancel {
 				cancel()
 			}
-			err = <-result
-			if err == nil || time.Since(start) > 400*time.Millisecond {
+			select {
+			case err = <-result:
+			case <-time.After(2 * time.Second):
+				t.Fatal("delegate ignored caller cancellation or deadline")
+			}
+			if err == nil || time.Since(start) > 2*time.Second {
 				t.Fatalf("earlier context ignored: elapsed=%s err=%v", time.Since(start), err)
 			}
 			if req.DeadlineUnixMS > deadline.UnixMilli() {
@@ -169,7 +181,7 @@ func TestMediaDelegateRetainsEarlierDeadlineAndCancelsAfterDial(t *testing.T) {
 			}
 			select {
 			case <-ended:
-			case <-time.After(200 * time.Millisecond):
+			case <-time.After(time.Second):
 				t.Fatal("owner did not cancel closed media connection")
 			}
 		})

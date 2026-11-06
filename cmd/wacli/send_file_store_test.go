@@ -48,6 +48,16 @@ func (f *fakeSendFileWA) ResolveLIDToPN(_ context.Context, jid types.JID) types.
 	return jid
 }
 
+// Quoted replies look the target up under the chat's phone/LID alias and read
+// the linked account; model an unmapped phone and an unknown account.
+func (f *fakeSendFileWA) ResolvePNToLID(_ context.Context, jid types.JID) types.JID {
+	return jid
+}
+
+func (f *fakeSendFileWA) LinkedJID() string {
+	return ""
+}
+
 type fakeSendFileApp struct {
 	wa app.WAClient
 	db *store.DB

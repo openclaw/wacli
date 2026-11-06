@@ -47,8 +47,9 @@ var schemaMigrations = []migration{
 	{version: 31, name: "content-free message change journal", up: migrateChanges},
 	{version: 32, name: "message receipt retrieval revisions", up: migrateReceiptRetrieval},
 	{version: 33, name: "ordered chat auto-unarchive", up: migrateChatAutoUnarchive},
-	// Version 34 is reserved for lists. Older ad-referral builds used 33;
-	// both schema guards below repair stores whose version rows collide.
+	// Version 34 belongs to stickers. Older ad-referral builds used 33, 34 or
+	// local migration 9033; the ensureCurrentSchema guard below repairs stores
+	// whose version rows collide.
 	{version: 35, name: "messages ad_referral column", up: migrateMessagesAdReferralColumn},
 }
 

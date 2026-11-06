@@ -54,6 +54,9 @@ wacli --read-only media download --chat 1234567890@s.whatsapp.net --id ABC123 --
 wacli media download --chat 1234567890@s.whatsapp.net --id ABC123 --output /tmp/photo.jpg --retry-on-phone
 ```
 
+A cache miss closes its read-only database connection before opening the writable
+store, including when WAL sidecars remain from a previous connection.
+
 ## backfill
 
 Downloads media for every already-synced message that has downloadable metadata

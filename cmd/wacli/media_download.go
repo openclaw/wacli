@@ -43,11 +43,13 @@ func downloadExactMedia(ctx context.Context, flags *rootFlags, chat, id, output 
 	var info store.MediaDownloadInfo
 	var target string
 	if preflightErr == nil {
-		defer reader.Close()
 		info, preflightErr = reader.DB().GetMediaDownloadInfo(chat, id)
 		if preflightErr == nil {
 			target, preflightErr = reader.ResolveMediaOutputPath(info, output)
 		}
+		// Release the read-only WAL mapping before a cache miss opens a writer.
+		// SQLite shares that mapping across connections in this process.
+		reader.Close()
 		if preflightErr == nil {
 			bytes, hit, err := app.CopyVerifiedMediaCache(ctx, info, target)
 			if err != nil {
