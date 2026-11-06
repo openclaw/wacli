@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Send: add `--keep-unread` to preserve chat unread counts and manual markers for automated replies, including delegated sends and later echo/history replay. Opt-in delegation fails closed on older sync owners with an upgrade/restart hint; sends without the flag keep v0.26.0 behavior.
+
 ## 0.26.0 - 2026-11-05
 
 **Highlights:** fresh own replies mark chats read, broadcast sync avoids long stalls, business attachments and M4A audio arrive intact, and networking security fixes.

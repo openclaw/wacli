@@ -49,7 +49,8 @@ type UpsertMessageParams struct {
 	DeletedAt                time.Time
 	DeletionReason           string
 	// SkipOwnReadMark keeps a FromMe row from marking the chat read. Set it for
-	// rows that are not replies, such as calls and poll votes.
+	// rows that are not replies, such as calls and poll votes, and for outbound
+	// sends whose caller explicitly wants to preserve unread state.
 	SkipOwnReadMark bool
 }
 
@@ -195,7 +196,7 @@ func (p UpsertMessageParams) marksChatRead() bool {
 
 // ownReplyStored reports whether this message ID is already stored as a reply.
 // Re-storing it (replay, retry, backfill) must not clear an unread marker or
-// count that was set after the original reply.
+// count that was set after the original reply, or preserved by SkipOwnReadMark.
 func ownReplyStored(db interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }, chatJID, msgID string) (bool, error) {
