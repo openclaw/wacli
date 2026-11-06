@@ -48,6 +48,8 @@ func (d *DB) HistoricalLIDJIDs() ([]string, error) {
 		SELECT chat_jid FROM message_receipts WHERE chat_jid GLOB '*@lid'
 		UNION
 		SELECT recipient_jid FROM message_receipts WHERE recipient_jid GLOB '*@lid'
+		UNION
+		SELECT chat_jid FROM chat_lists WHERE chat_jid GLOB '*@lid'
 		ORDER BY 1
 	`)
 	if err != nil {
@@ -101,6 +103,9 @@ func (d *DB) MigrateLIDToPN(lidJID, pnJID string) error {
 	}()
 
 	if err := migrateLIDChatToPN(tx, lidJID, pnJID); err != nil {
+		return err
+	}
+	if err := migrateLIDListsToPN(tx, lidJID, pnJID); err != nil {
 		return err
 	}
 	if err := migrateLIDChatArchive(tx, lidJID, pnJID); err != nil {

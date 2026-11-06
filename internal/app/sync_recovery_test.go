@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -44,6 +45,147 @@ func (f *appStateContextWA) FetchAppStateEvents(ctx context.Context, name string
 
 func (f *appStateContextWA) RequestAppStateRecovery(ctx context.Context, name string) (types.MessageID, error) {
 	return f.requestAppStateRecovery(ctx, name)
+}
+
+func TestResyncRegularPersistsFullReplayAndClearsDebt(t *testing.T) {
+	a, f := newLabelWriteApp(t, labelEvent("7", "Label", time.Unix(100, 0), false, nil), quickReplyEvent("1", "gone", "x", time.Unix(100, 0), true))
+	if err := a.db.MarkAppStateRecoveryRequired("regular"); err != nil {
+		t.Fatal(err)
+	}
+	f.appStateFetchEvent = func(name string, full, onlyIfNotSynced bool) any {
+		if name != "regular" || !full || onlyIfNotSynced {
+			t.Fatalf("fetch = %s full=%t only=%t", name, full, onlyIfNotSynced)
+		}
+		select {
+		case <-a.chatStateSync:
+			a.chatStateSync <- struct{}{}
+			t.Fatal("full replay did not own synchronization lock")
+		default:
+		}
+		return quickReplyEvent("2", "phone", "from phone", time.Unix(101, 0), false)
+	}
+	got, err := a.ResyncAppState(t.Context(), "regular")
+	if err != nil || got != (AppStateResyncResult{Collection: "regular", Completeness: "complete", QuickReplies: 1, Lists: 1}) {
+		t.Fatalf("resync = %+v, %v", got, err)
+	}
+	if pending, err := a.db.AppStateRecoveryRequired("regular"); err != nil || pending {
+		t.Fatalf("debt = %v, %v", pending, err)
+	}
+	noPatch(t, f)
+}
+
+func TestResyncRegularEmptySnapshotIsComplete(t *testing.T) {
+	a, f := newLabelWriteApp(t)
+	got, err := a.ResyncAppState(t.Context(), "regular")
+	if err != nil || got.Completeness != "complete" || got.QuickReplies != 0 || got.Lists != 0 {
+		t.Fatalf("empty = %+v, %v", got, err)
+	}
+	if len(f.appStateFetches) != 1 || !f.appStateFetches[0].fullSync {
+		t.Fatalf("fetches = %+v", f.appStateFetches)
+	}
+}
+
+func TestResyncRegularRefusesKnownBrokenAndPointsToPrimaryRecovery(t *testing.T) {
+	a, f := newLabelWriteApp(t)
+	if err := a.db.SetAppStateFullSyncBroken("regular", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.ResyncAppState(t.Context(), "regular"); err == nil || !strings.Contains(err.Error(), "primary recovery") || !strings.Contains(err.Error(), "discard") || strings.Contains(err.Error(), "--force") {
+		t.Fatalf("broken collection = %v", err)
+	}
+	if _, err := a.ResyncAppState(t.Context(), "regular_low"); err == nil {
+		t.Fatal("accepted another collection")
+	}
+	if len(f.appStateFetches) != 0 {
+		t.Fatalf("refusal fetched: %+v", f.appStateFetches)
+	}
+	if pending, err := a.db.AppStateRecoveryRequired("regular"); err != nil || pending {
+		t.Fatalf("refusal created debt: %v, %v", pending, err)
+	}
+	if broken, err := a.db.AppStateFullSyncBrokenCollections(); err != nil || len(broken) != 1 {
+		t.Fatalf("refusal changed verification flag = %v, %v", broken, err)
+	}
+}
+
+func TestResyncRegularFailureKeepsDebt(t *testing.T) {
+	for _, persistenceFailure := range []bool{false, true} {
+		t.Run(fmt.Sprint(persistenceFailure), func(t *testing.T) {
+			a, f := newLabelWriteApp(t)
+			if persistenceFailure {
+				raw, err := sql.Open("sqlite3", filepath.Join(a.StoreDir(), "wacli.db"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer raw.Close()
+				if _, err := raw.Exec(`CREATE TRIGGER fail_quick_reply BEFORE INSERT ON quick_replies BEGIN SELECT RAISE(FAIL, 'injected persistence failure'); END`); err != nil {
+					t.Fatal(err)
+				}
+				f.appStateFetchEvent = func(string, bool, bool) any { return quickReplyEvent("1", "x", "y", time.Unix(100, 0), false) }
+			} else {
+				f.appStateFetchErr = errors.New("injected fetch failure")
+			}
+			if _, err := a.ResyncAppState(t.Context(), "regular"); err == nil {
+				t.Fatal("failed replay succeeded")
+			}
+			if pending, err := a.db.AppStateRecoveryRequired("regular"); err != nil || !pending {
+				t.Fatalf("failure debt = %v, %v", pending, err)
+			}
+			if replies, err := a.db.QuickReplies(); err != nil || replies.Completeness != "incomplete" {
+				t.Fatalf("failed replay completeness = %+v, %v", replies, err)
+			}
+			noPatch(t, f)
+		})
+	}
+}
+
+func TestResyncRegularUsesPrimaryRecoveryAfterMismatch(t *testing.T) {
+	a := newTestApp(t)
+	f := &appStateContextWA{fakeWA: newFakeWA()}
+	f.fetchEvents = func(context.Context, string, bool, bool) ([]any, error) { return nil, appstate.ErrMismatchingLTHash }
+	f.requestAppStateRecovery = func(_ context.Context, name string) (types.MessageID, error) {
+		if name != "regular" {
+			t.Errorf("recovery collection = %s", name)
+		}
+		go func() {
+			f.emit(quickReplyEvent("1", "recovered", "text", time.Unix(100, 0), false))
+			f.emit(&events.AppStateSyncComplete{Name: appstate.WAPatchRegular, Recovery: true})
+		}()
+		return "request", nil
+	}
+	a.wa = f
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	got, err := a.ResyncAppState(ctx, "regular")
+	if err != nil || got.QuickReplies != 1 || got.Completeness != "complete" {
+		t.Fatalf("recovered = %+v, %v", got, err)
+	}
+	if pending, err := a.db.AppStateRecoveryRequired("regular"); err != nil || pending {
+		t.Fatalf("recovery debt = %v, %v", pending, err)
+	}
+}
+
+func TestQuickReplyFailedFullReplayDoesNotMarkCoverage(t *testing.T) {
+	a := newTestApp(t)
+	f := &appStateContextWA{fakeWA: newFakeWA()}
+	a.wa = f
+	raw, err := sql.Open("sqlite3", filepath.Join(a.StoreDir(), "wacli.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	if _, err := raw.Exec(`CREATE TRIGGER fail_reply BEFORE INSERT ON quick_replies BEGIN SELECT RAISE(FAIL, 'injected failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	f.fetchEvents = func(context.Context, string, bool, bool) ([]any, error) {
+		return []any{quickReplyEvent("1", "x", "y", time.Unix(100, 0), false), &events.AppStateSyncComplete{Name: appstate.WAPatchRegular}}, nil
+	}
+	if _, err := a.ResyncAppState(t.Context(), "regular"); err == nil {
+		t.Fatal("replay should fail")
+	}
+	got, err := a.db.QuickReplies()
+	if err != nil || got.Completeness != "incomplete" {
+		t.Fatalf("failed replay marked complete: %+v, %v", got, err)
+	}
 }
 
 func TestAppStateLTHashMismatchRecoveryGetsFreshTimeoutAfterFullSyncExpires(t *testing.T) {
