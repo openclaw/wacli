@@ -55,16 +55,18 @@ without it the linked account's JID is read from the store (works with
 					return err
 				}
 			} else {
-				ctx, cancel := withTimeout(context.Background(), flags)
-				a, lk, err := newApp(ctx, flags, false, false)
+				// Only the linked JID is needed: read it from session.db the way
+				// `auth status --read-only` does, without opening the app or
+				// touching the running sync.
+				storeDir, err := resolveStoreDir(flags)
 				if err != nil {
-					cancel()
 					return err
 				}
-				linked := a.WA().LinkedJID()
-				closeApp(a, lk)
-				cancel()
-				if linked == "" {
+				authed, linked, err := readOnlyAuthStatus(storeDir)
+				if err != nil {
+					return err
+				}
+				if !authed || linked == "" {
 					return fmt.Errorf("account is not linked; pass --jid")
 				}
 				jid, err = types.ParseJID(linked)

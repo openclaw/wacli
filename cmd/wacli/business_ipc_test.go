@@ -295,3 +295,12 @@ func TestProfileBusinessCommandsAreRegistered(t *testing.T) {
 		t.Fatalf("%v %v", cmd, err)
 	}
 }
+
+func TestCatalogListReadOnlyWithoutSessionAsksForJID(t *testing.T) {
+	// The JID comes from session.db like `auth status --read-only`; no app, no
+	// WA client (a read-only app has none, which used to panic here).
+	err := execute([]string{"--store", t.TempDir(), "--read-only", "--json", "catalog", "list"})
+	if err == nil || !strings.Contains(err.Error(), "not linked") {
+		t.Fatalf("expected a not-linked refusal, got %v", err)
+	}
+}
