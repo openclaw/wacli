@@ -5,10 +5,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -333,6 +335,42 @@ func TestSendFileWithoutFFmpegSendsTheVoiceNoteBareAndSaysSo(t *testing.T) {
 	want := "voice note length not measured: ffprobe is not installed; voice note waveform not measured: ffmpeg is not installed"
 	if res.voiceWarning != want {
 		t.Fatalf("voice warning = %q, want %q", res.voiceWarning, want)
+	}
+}
+
+func TestDelegatedVoiceNoteWithCallerMetadataNeedsNoFFmpeg(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PATH without probes is set up for Unix")
+	}
+	// A host with neither ffprobe nor ffmpeg: a probe run would fail and say
+	// so in the voice warning.
+	t.Setenv("PATH", t.TempDir())
+	a, filePath := newVoiceNoteFixture(t)
+	waveform, err := json.Marshal(testVoiceWaveform())
+	if err != nil {
+		t.Fatalf("encode waveform: %v", err)
+	}
+	raw := `{"version":1,"kind":"voice","to":"15550000001@s.whatsapp.net","file":` + strconv.Quote(filePath) +
+		`,"mime":"audio/ogg; codecs=opus","seconds":24,"waveform":` + string(waveform) + `}`
+	var req sendDelegateRequest
+	if err := json.Unmarshal([]byte(raw), &req); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	opts, err := delegatedSendFileOptions(req)
+	if err != nil {
+		t.Fatalf("delegatedSendFileOptions: %v", err)
+	}
+
+	res, err := sendFile(context.Background(), a, types.NewJID("15550000001", types.DefaultUserServer), req.File, opts)
+	if err != nil {
+		t.Fatalf("sendFile: %v", err)
+	}
+	if res.voiceWarning != "" {
+		t.Fatalf("voice warning = %q, want none: a probe ran", res.voiceWarning)
+	}
+	audio := a.wa.(*fakeSendFileWA).sent.GetAudioMessage()
+	if audio == nil || !audio.GetPTT() || audio.GetSeconds() != 24 || len(audio.GetWaveform()) != voiceWaveformSamples {
+		t.Fatalf("sent %v, want a voice note with the caller's seconds and waveform", audio)
 	}
 }
 
