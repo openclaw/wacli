@@ -80,6 +80,11 @@ type sendDelegateRequest struct {
 	TimeoutMS            int64    `json:"timeout_ms,omitempty"`
 	DeadlineUnixMS       int64    `json:"deadline_unix_ms,omitempty"`
 	RetryOnPhone         bool     `json:"retry_on_phone,omitempty"`
+	// Seconds and Waveform are a voice note's length and its 64 levels
+	// (0..100) as the caller measured them. Each one given is used as is and
+	// spares the daemon its ffprobe or ffmpeg run; each one left out is probed.
+	Seconds  *int64 `json:"seconds,omitempty"`
+	Waveform []int  `json:"waveform,omitempty"`
 }
 
 type sendDelegateResponse struct {
@@ -98,6 +103,7 @@ type sendDelegateResponse struct {
 	StoreWarning   string               `json:"store_warning,omitempty"`
 	PreviewWarning string               `json:"preview_warning,omitempty"`
 	ThumbWarning   string               `json:"thumbnail_warning,omitempty"`
+	VoiceWarning   string               `json:"voice_warning,omitempty"`
 	Chat           string               `json:"chat,omitempty"`
 	Action         string               `json:"action,omitempty"`
 	Receipts       *int                 `json:"receipts,omitempty"`
@@ -617,12 +623,37 @@ func executeDelegatedText(ctx context.Context, a *app.App, req sendDelegateReque
 	return resp, nil
 }
 
-func executeDelegatedFile(ctx context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {
+// delegatedSendFileOptions reads a file or voice request into sendFile's
+// options, refusing a malformed one before anything is resolved or uploaded.
+func delegatedSendFileOptions(req sendDelegateRequest) (sendFileOptions, error) {
 	maxSize, err := resolveSendFileMaxSize(req.MaxSizeBytes)
 	if err != nil {
-		return sendDelegateResponse{}, err
+		return sendFileOptions{}, err
 	}
-	mediaAs, err := validateSendFileMediaOptions(req.As, req.PTT || req.Kind == "voice")
+	ptt := req.PTT || req.Kind == "voice"
+	mediaAs, err := validateSendFileMediaOptions(req.As, ptt)
+	if err != nil {
+		return sendFileOptions{}, err
+	}
+	voice, err := parseVoiceNoteMetadata(req.Seconds, req.Waveform, ptt)
+	if err != nil {
+		return sendFileOptions{}, err
+	}
+	return sendFileOptions{
+		filename:      req.Filename,
+		caption:       req.Caption,
+		mimeOverride:  req.MIME,
+		mediaAs:       mediaAs,
+		replyTo:       req.ReplyTo,
+		replyToSender: req.ReplyToSender,
+		ptt:           ptt,
+		maxSize:       maxSize,
+		voice:         voice,
+	}, nil
+}
+
+func executeDelegatedFile(ctx context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {
+	opts, err := delegatedSendFileOptions(req)
 	if err != nil {
 		return sendDelegateResponse{}, err
 	}
@@ -635,20 +666,11 @@ func executeDelegatedFile(ctx context.Context, a *app.App, req sendDelegateReque
 		return sendDelegateResponse{}, err
 	}
 	res, err := runFileSendOperation(ctx, reconnectForSend(a), req.File, func(ctx context.Context) (sendDelegateResponse, error) {
-		outcome, err := sendFile(ctx, a, toJID, req.File, sendFileOptions{
-			filename:      req.Filename,
-			caption:       req.Caption,
-			mimeOverride:  req.MIME,
-			mediaAs:       mediaAs,
-			replyTo:       req.ReplyTo,
-			replyToSender: req.ReplyToSender,
-			ptt:           req.PTT || req.Kind == "voice",
-			maxSize:       maxSize,
-		})
+		outcome, err := sendFile(ctx, a, toJID, req.File, opts)
 		if err != nil {
 			return sendDelegateResponse{}, err
 		}
-		resp := sendDelegateResponse{OK: true, Sent: true, To: toJID.String(), ID: outcome.id, File: outcome.meta}
+		resp := sendDelegateResponse{OK: true, Sent: true, To: toJID.String(), ID: outcome.id, File: outcome.meta, VoiceWarning: outcome.voiceWarning}
 		if outcome.storeWarning != nil {
 			resp.StoreWarning = outcome.storeWarning.Error()
 		}
@@ -657,6 +679,8 @@ func executeDelegatedFile(ctx context.Context, a *app.App, req sendDelegateReque
 	if err != nil {
 		return sendDelegateResponse{}, err
 	}
+	// The daemon's own log says it too: a socket client may not.
+	warnVoiceNoteMetadata(os.Stderr, res.VoiceWarning)
 	waitForPostSendRetryReceipts(ctx, millisDuration(req.PostSendWaitMS, 0))
 	return res, nil
 }
@@ -719,6 +743,7 @@ func executeDelegatedReact(ctx context.Context, a *app.App, req sendDelegateRequ
 func writeDelegatedSendOutput(flags *rootFlags, kind string, resp sendDelegateResponse) error {
 	warnLinkPreviewSkipped(os.Stderr, resp.PreviewWarning)
 	warnLinkPreviewThumbnail(os.Stderr, resp.ThumbWarning)
+	warnVoiceNoteMetadata(os.Stderr, resp.VoiceWarning)
 	warnSendStoreFailureMsg(os.Stderr, resp.ID, resp.StoreWarning)
 	if flags.asJSON {
 		body := map[string]any{"sent": resp.Sent, "to": resp.To, "id": resp.ID}
