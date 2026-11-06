@@ -193,6 +193,12 @@ func runAppStateWrite(flags *rootFlags, req appStateWriteRequest) error {
 }
 
 func writeAppStateWriteResult(flags *rootFlags, res appStateWriteResult) error {
+	switch res.Action {
+	case quickReplyCreateAction, quickReplyEditAction, quickReplyDeleteAction:
+		if res.QuickReply == nil {
+			return fmt.Errorf("the running sync process did not report the quick reply result; check before retrying")
+		}
+	}
 	if flags.asJSON {
 		body := map[string]any{"ok": true, "action": res.Action}
 		if res.Label != nil {

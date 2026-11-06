@@ -182,6 +182,14 @@ func TestExecuteDelegatedAppStateWriteRejectsBadRequestsBeforeAppUse(t *testing.
 	}
 }
 
+func TestQuickReplyWriteResultRequiresPayload(t *testing.T) {
+	for _, action := range []string{quickReplyCreateAction, quickReplyEditAction, quickReplyDeleteAction} {
+		if err := writeAppStateWriteResult(&rootFlags{}, appStateWriteResult{Action: action}); err == nil {
+			t.Fatalf("missing %s result accepted", action)
+		}
+	}
+}
+
 func TestDelegatedAppStateWriteDoesNotWaitForSendQueue(t *testing.T) {
 	for _, kind := range []string{appStateWriteKind, appStateResyncKind} {
 		t.Run(kind, func(t *testing.T) {
