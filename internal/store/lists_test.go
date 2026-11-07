@@ -38,18 +38,19 @@ func TestListsDefinitionsMembershipReplayAndDeletion(t *testing.T) {
 		t.Fatalf("definition = %+v, want %+v", result.Lists[0], want)
 	}
 	assertListChats(t, db, "7", chat)
-	if err := db.UpsertList(ListUpdate{ID: "7", Name: listPtr("Renamed"), Timestamp: at.Add(time.Second)}); err != nil {
+	if err := db.UpsertList(ListUpdate{ID: "7", Name: listPtr("Renamed"), Timestamp: at.Add(-time.Second)}); err != nil {
 		t.Fatal(err)
 	}
-	// A snapshot's older create must not undo a rename or a membership removal.
-	if err := db.SetChatList(chat, "7", false, at.Add(time.Second), false); err != nil {
+	// Store operations already arrive in authoritative persistence order.
+	// Repeating a current snapshot with an older device clock keeps the value.
+	if err := db.SetChatList(chat, "7", false, at.Add(-time.Second), false); err != nil {
 		t.Fatal(err)
 	}
 	for range 2 {
-		if err := db.UpsertList(create); err != nil {
+		if err := db.UpsertList(ListUpdate{ID: "7", Name: listPtr("Renamed"), Timestamp: at.Add(-time.Second)}); err != nil {
 			t.Fatal(err)
 		}
-		if err := db.SetChatList(chat, "7", true, at, true); err != nil {
+		if err := db.SetChatList(chat, "7", false, at.Add(-time.Second), true); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -63,9 +64,6 @@ func TestListsDefinitionsMembershipReplayAndDeletion(t *testing.T) {
 	}
 	assertListChats(t, db, "7", chat)
 	if err := db.UpsertList(ListUpdate{ID: "7", Deleted: listPtr(true), Timestamp: at.Add(3 * time.Second)}); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.UpsertList(create); err != nil {
 		t.Fatal(err)
 	}
 	assertListChats(t, db, "7")
@@ -85,7 +83,7 @@ func TestListsDefinitionsMembershipReplayAndDeletion(t *testing.T) {
 	if err != nil || len(result.Lists) != 1 || result.Lists[0].Name != "Renamed" {
 		t.Fatalf("undeleted list = %+v, %v", result, err)
 	}
-	// Equal timestamps resolve to deletion, whichever event arrives last.
+	// Equal timestamps are also data: the final accepted action wins.
 	tie := at.Add(5 * time.Second)
 	for _, deleted := range []bool{true, false} {
 		if err := db.UpsertList(ListUpdate{ID: "7", Deleted: listPtr(deleted), Timestamp: tie}); err != nil {
@@ -93,8 +91,8 @@ func TestListsDefinitionsMembershipReplayAndDeletion(t *testing.T) {
 		}
 	}
 	result, err = db.Lists()
-	if err != nil || len(result.Lists) != 0 {
-		t.Fatalf("equal-timestamp undelete won: %+v, %v", result, err)
+	if err != nil || len(result.Lists) != 1 {
+		t.Fatalf("later equal-timestamp undelete lost: %+v, %v", result, err)
 	}
 }
 
@@ -148,6 +146,87 @@ func TestListsIdentityMergeUsesNewestMembershipIncludingRemovals(t *testing.T) {
 		if err := db.sql.QueryRow(`SELECT count(*) FROM chat_lists WHERE chat_jid=?`, lid).Scan(&count); err != nil || count != 0 {
 			t.Fatalf("LID rows remain: %d, %v", count, err)
 		}
+	}
+}
+
+func TestMembershipOrderIgnoresSkewAcrossAliases(t *testing.T) {
+	for _, laterLID := range []bool{false, true} {
+		db := openTestDB(t)
+		at := time.Unix(100, 0)
+		lid, pn := "999@lid", "123@s.whatsapp.net"
+		if err := db.UpsertChat(pn, "dm", "Synthetic", at); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.UpsertList(ListUpdate{ID: "1", Name: listPtr("Label")}); err != nil {
+			t.Fatal(err)
+		}
+		older, later := lid, pn
+		if laterLID {
+			older, later = pn, lid
+		}
+		if err := db.SetChatList(older, "1", true, at.Add(time.Hour), false); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.SetChatList(later, "1", true, at.Add(time.Hour), false); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.SetChatList(later, "1", false, at, false); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.MigrateLIDToPN(lid, pn); err != nil {
+			t.Fatal(err)
+		}
+		assertListChats(t, db, "1")
+	}
+}
+
+// A store whose row 36 predates the ordering column (another build or an
+// earlier Lists prerequisite) gains it on the next writable open without
+// rewriting existing rows; read-only opens keep working without it.
+func TestListsAppliedOrderColumnUpgradeSurvivesMigrationCollision(t *testing.T) {
+	version := listsMigrationVersion(t)
+	path := filepath.Join(t.TempDir(), "wacli.db")
+	db := mustOpen(t, path)
+	at := time.Unix(100, 0)
+	pn := "123@s.whatsapp.net"
+	if err := db.UpsertChat(pn, "dm", "Existing", at); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertList(ListUpdate{ID: "7", Name: listPtr("Existing"), Timestamp: at}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetChatList(pn, "7", true, at.Add(time.Hour), true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.sql.Exec(`DROP INDEX idx_chat_lists_applied_order; ALTER TABLE chat_lists DROP COLUMN applied_order;
+		UPDATE schema_migrations SET name='foreign owner' WHERE version=?`, version); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	ro, err := OpenReadOnly(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertListChats(t, ro, "7", pn)
+	if has, err := ro.tableHasColumn("chat_lists", "applied_order"); err != nil || has {
+		t.Fatalf("read-only open migrated the schema: %t, %v", has, err)
+	}
+	ro.Close()
+	db = mustOpen(t, path)
+	defer db.Close()
+	if has, err := db.tableHasColumn("chat_lists", "applied_order"); err != nil || !has {
+		t.Fatalf("applied_order missing after writable open: %t, %v", has, err)
+	}
+	assertListChats(t, db, "7", pn)
+	// The legacy row carries no order; a later removal with a lower device
+	// clock still wins because it is the later accepted action.
+	if err := db.SetChatList(pn, "7", false, at, false); err != nil {
+		t.Fatal(err)
+	}
+	assertListChats(t, db, "7")
+	var owner string
+	if err := db.sql.QueryRow(`SELECT name FROM schema_migrations WHERE version=?`, version).Scan(&owner); err != nil || owner != "foreign owner" {
+		t.Fatalf("foreign migration changed: %q, %v", owner, err)
 	}
 }
 
@@ -404,13 +483,13 @@ func TestListsOverlappingMembershipsAndFilterBeforeLimit(t *testing.T) {
 			t.Fatalf("filter before limit / overlapping list %s: %+v, %v", id, chats, err)
 		}
 	}
-	// At equal timestamps, ambiguous replay must not undo a removal.
+	// At equal timestamps, the ordered later SET wins.
 	if err := db.SetChatList("123@s.whatsapp.net", "a", false, at, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.SetChatList("123@s.whatsapp.net", "a", true, at, true); err != nil {
 		t.Fatal(err)
 	}
-	assertListChats(t, db, "a")
+	assertListChats(t, db, "a", "123@s.whatsapp.net")
 	assertListChats(t, db, "b", "123@s.whatsapp.net")
 }

@@ -86,13 +86,16 @@ stderr. Inspect `lists list --json` alongside them.
 
 Sync persists live, startup full-sync, and recovery-snapshot events through the
 existing ordered app-state writer. Membership removals and definition deletions
-are retained as tombstones, and older timestamped replay cannot restore them.
-On an equal timestamp, removal/deletion wins conservatively. A newer undelete
-makes the definition and its retained memberships visible again. Snapshots are
+are retained as tombstones. Later accepted actions win in persistence order,
+including an undelete with an equal or lower device timestamp; timestamps are
+stored as data, not used to arbitrate changes. A later accepted undelete makes
+the definition and its retained memberships visible again. Snapshots are
 merged, not treated as authoritative replacement sets: absence from a replay
 does not remove a previously observed row. Known LID/phone mappings use the
-existing identity normalization and historical merge, keeping the newest
-membership state across aliases. Unresolved LIDs remain usable until a later
+existing identity normalization and historical merge, keeping the last-applied
+membership state across aliases. Legacy alias rows without application-order
+metadata cannot be ordered retrospectively; only those ambiguous ties retain
+removals. Unresolved LIDs remain usable until a later
 authenticated startup can resolve them.
 
 The next writable store open adds the list tables without changing existing

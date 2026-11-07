@@ -25,6 +25,25 @@ func migrateLists(d *DB) error {
 		);
 		INSERT OR IGNORE INTO list_sync_state(id) VALUES(1);
 	`)
+	if err != nil {
+		return err
+	}
+	// Keep the migration idempotent even when row 36 was already claimed by
+	// another build. Existing rows are not rewritten.
+	for _, col := range []struct{ table, name, ddl string }{
+		{"chat_lists", "applied_order", "ALTER TABLE chat_lists ADD COLUMN applied_order INTEGER NOT NULL DEFAULT 0"},
+	} {
+		has, err := d.tableHasColumn(col.table, col.name)
+		if err != nil {
+			return err
+		}
+		if !has {
+			if _, err := d.sql.Exec(col.ddl); err != nil {
+				return err
+			}
+		}
+	}
+	_, err = d.sql.Exec(`CREATE INDEX IF NOT EXISTS idx_chat_lists_applied_order ON chat_lists(applied_order)`)
 	return err
 }
 
@@ -66,6 +85,8 @@ func recordListFullSync(tx *sql.Tx, full bool) error {
 	return err
 }
 
+// UpsertList applies the persistence owner's ordered action sequence. Device
+// timestamps are data, not an arbitration clock (as for contact app-state SETs).
 func (d *DB) UpsertList(p ListUpdate) error {
 	if strings.TrimSpace(p.ID) == "" {
 		return fmt.Errorf("list ID is required")
@@ -83,9 +104,7 @@ func (d *DB) UpsertList(p ListUpdate) error {
 			type=COALESCE(excluded.type,lists.type), order_index=COALESCE(excluded.order_index,lists.order_index),
 			is_active=COALESCE(excluded.is_active,lists.is_active),
 			is_immutable=COALESCE(excluded.is_immutable,lists.is_immutable),
-			deleted=COALESCE(?,lists.deleted), updated_at=excluded.updated_at
-		WHERE excluded.updated_at > lists.updated_at
-			OR (excluded.updated_at = lists.updated_at AND lists.deleted <= excluded.deleted)`,
+			deleted=COALESCE(?,lists.deleted), updated_at=excluded.updated_at`,
 		p.ID, p.Name, p.Color, p.PredefinedID, p.Type, p.OrderIndex, p.IsActive, p.IsImmutable,
 		p.Deleted, p.Timestamp.UnixMilli(), p.Deleted)
 	if err != nil {
@@ -106,10 +125,12 @@ func (d *DB) SetChatList(chat, id string, labeled bool, at time.Time, fullSync b
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	_, err = tx.Exec(`INSERT INTO chat_lists(chat_jid,list_id,labeled,updated_at) VALUES(?,?,?,?)
-		ON CONFLICT(chat_jid,list_id) DO UPDATE SET labeled=excluded.labeled, updated_at=excluded.updated_at
-		WHERE excluded.updated_at > chat_lists.updated_at
-			OR (excluded.updated_at = chat_lists.updated_at AND excluded.labeled < chat_lists.labeled)`,
+	// Persist application order across raw LID/PN aliases for a later merge.
+	// Legacy rows start at zero: their device timestamps cannot establish order.
+	_, err = tx.Exec(`INSERT INTO chat_lists(chat_jid,list_id,labeled,updated_at,applied_order)
+		VALUES(?,?,?,?,(SELECT COALESCE(MAX(applied_order),0)+1 FROM chat_lists))
+		ON CONFLICT(chat_jid,list_id) DO UPDATE SET labeled=excluded.labeled, updated_at=excluded.updated_at,
+			applied_order=excluded.applied_order`,
 		chat, id, labeled, at.UnixMilli())
 	if err != nil {
 		return err
@@ -201,11 +222,11 @@ func (d *DB) ResolveList(value string) (string, error) {
 }
 
 func migrateLIDListsToPN(tx *sql.Tx, lid, pn string) error {
-	if _, err := tx.Exec(`INSERT INTO chat_lists(chat_jid,list_id,labeled,updated_at)
-		SELECT ?,list_id,labeled,updated_at FROM chat_lists WHERE chat_jid=?
-		ON CONFLICT(chat_jid,list_id) DO UPDATE SET labeled=excluded.labeled,updated_at=excluded.updated_at
-		WHERE excluded.updated_at > chat_lists.updated_at
-			OR (excluded.updated_at = chat_lists.updated_at AND excluded.labeled < chat_lists.labeled)`, pn, lid); err != nil {
+	if _, err := tx.Exec(`INSERT INTO chat_lists(chat_jid,list_id,labeled,updated_at,applied_order)
+		SELECT ?,list_id,labeled,updated_at,applied_order FROM chat_lists WHERE chat_jid=?
+		ON CONFLICT(chat_jid,list_id) DO UPDATE SET labeled=excluded.labeled,updated_at=excluded.updated_at,applied_order=excluded.applied_order
+		WHERE excluded.applied_order > chat_lists.applied_order
+			OR (excluded.applied_order = chat_lists.applied_order AND excluded.labeled < chat_lists.labeled)`, pn, lid); err != nil {
 		return err
 	}
 	_, err := tx.Exec(`DELETE FROM chat_lists WHERE chat_jid=?`, lid)
