@@ -128,7 +128,7 @@ func (a *App) syncAppStateDeltas(ctx context.Context, recoveries *sync.Map) {
 			map[string]any{"error": err.Error()})
 		return
 	}
-	archiveRecovery := a.requestChatArchiveRecovery(ctx, pending)
+	a.requestChatArchiveRecovery(ctx, pending)
 	for _, name := range pending {
 		if _, loaded := recoveries.LoadOrStore(name, struct{}{}); !loaded {
 			collection := appstate.WAPatchName(name)
@@ -146,32 +146,14 @@ func (a *App) syncAppStateDeltas(ctx context.Context, recoveries *sync.Map) {
 				fetchErr, persistenceErr := a.fetchAndPersistAppState(ctx, collection, false, &appStatePersistenceTracker{})
 				if err := errors.Join(fetchErr, persistenceErr); err != nil {
 					a.warnAppStateRecovery(name, err)
-				} else if archiveRecovery && collection == appstate.WAPatchRegularLow {
-					a.settleChatArchiveRecoveryWithoutSnapshot()
 				}
 				continue
 			}
 			a.recoverAppStateCollection(ctx, name, recoveries, appStateRecoveryStepTimeout)
 		}
 	}
-	fetchedRegularLow := false
-	if archiveRecovery && !slices.Contains(pending, string(appstate.WAPatchRegularLow)) && a.isAppStateFullSyncBroken(appstate.WAPatchRegularLow) {
-		fetchedRegularLow = true
-		// Archive metadata only, no replay debt, on a collection whose full sync
-		// does not verify: the phone may never answer the snapshot request, so
-		// settle after a persisted incremental fetch, as with replay debt above.
-		fetchErr, persistenceErr := a.fetchAndPersistAppState(ctx, appstate.WAPatchRegularLow, false, &appStatePersistenceTracker{})
-		if err := errors.Join(fetchErr, persistenceErr); err != nil {
-			a.warnAppStateRecovery(string(appstate.WAPatchRegularLow), err)
-		} else {
-			a.settleChatArchiveRecoveryWithoutSnapshot()
-		}
-	}
 	for _, name := range []appstate.WAPatchName{appstate.WAPatchRegularHigh, appstate.WAPatchRegularLow, appstate.WAPatchRegular} {
 		if _, recovering := recoveries.Load(string(name)); recovering {
-			continue
-		}
-		if name == appstate.WAPatchRegularLow && fetchedRegularLow {
 			continue
 		}
 		fullSync := name == appstate.WAPatchRegular
@@ -206,38 +188,22 @@ func (a *App) syncAppStateDeltas(ctx context.Context, recoveries *sync.Map) {
 // and settles the archive metadata too, so no separate request is needed and
 // the replay-debt path is left unchanged.
 //
-// It reports whether the archive metadata is still unknown, so a collection
-// whose full sync does not verify can settle it after an incremental fetch.
-func (a *App) requestChatArchiveRecovery(ctx context.Context, pending []string) bool {
+// Nothing short of a complete snapshot settles it. If the primary never
+// answers, the metadata stays unknown: archived chats stay archived, nothing
+// auto-unarchives, and the background request repeats at most once per
+// backgroundAppStateRecoveryInterval.
+func (a *App) requestChatArchiveRecovery(ctx context.Context, pending []string) {
 	required, err := a.db.ChatArchiveRecoveryRequired()
 	if err != nil {
 		a.warnAppStateRecovery(string(appstate.WAPatchRegularLow), err)
-		return false
+		return
 	}
-	if !required {
-		return false
-	}
-	if slices.Contains(pending, string(appstate.WAPatchRegularLow)) {
-		return true
+	if !required || slices.Contains(pending, string(appstate.WAPatchRegularLow)) {
+		return
 	}
 	// Generation 0 owns no intent: the snapshot clears no replay debt, and
 	// intents recorded while it is pending stay until their own recovery.
 	a.requestBackgroundAppStateRecovery(ctx, appstate.WAPatchRegularLow, 0)
-	return true
-}
-
-// settleChatArchiveRecoveryWithoutSnapshot resolves legacy archive uncertainty
-// on a regular_low whose full replay cannot verify. It settles only that
-// requirement; replay debt, if there is any, stays pending.
-func (a *App) settleChatArchiveRecoveryWithoutSnapshot() {
-	name := string(appstate.WAPatchRegularLow)
-	if err := a.db.SettleChatArchiveRecovery(nowUTC()); err != nil {
-		a.warnAppStateRecovery(name, err)
-		return
-	}
-	a.emitWarning("app_state_archive_settled_without_snapshot",
-		"warning: settled legacy chat archive boundaries after incremental sync; full sync is broken and any snapshot debt remains pending",
-		map[string]any{"name": name})
 }
 
 func (a *App) warnEmptyAppStateKey(evt *wa.AppStateKeyUnavailable) {

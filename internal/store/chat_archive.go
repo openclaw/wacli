@@ -37,7 +37,7 @@ func (d *DB) ChatArchiveRecoveryRequired() (bool, error) {
 	return required, err
 }
 
-// SettleChatArchiveRecovery normally runs once a complete regular_low snapshot
+// SettleChatArchiveRecovery runs once a complete regular_low snapshot
 // (a verified full replay or a primary recovery) has been persisted. Whatever the
 // snapshot did not supply is absent from the primary, so another replay cannot
 // recover it: an account that never toggled Keep chats archived has no
@@ -47,8 +47,7 @@ func (d *DB) ChatArchiveRecoveryRequired() (bool, error) {
 // stored as keep-archived without a timestamp so any real mutation replaces it,
 // and the chats stay archived behind a boundary at the snapshot time, so only
 // messages newer than the snapshot can unarchive them later. Known values are
-// left alone. A known-broken full sync may also settle after a persisted
-// incremental fetch, retaining the snapshot debt and these conservative defaults.
+// left alone.
 func (d *DB) SettleChatArchiveRecovery(at time.Time) error {
 	if at.IsZero() {
 		return nil

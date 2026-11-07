@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -113,9 +113,6 @@ func TestAutoUnarchiveRecoveryCompletesWithoutBrokenFullReplay(t *testing.T) {
 		}
 		if name == string(appstate.WAPatchRegularLow) && !full {
 			incremental++
-			// Keep this test on the primary-snapshot path, not the archive
-			// fallback after a successful incremental fetch.
-			return nil, errors.New("incremental unavailable")
 		}
 		return nil, nil
 	}
@@ -326,11 +323,6 @@ func TestAutoUnarchiveBrokenCollectionSettlesAfterRecoverySnapshot(t *testing.T)
 		if name == string(appstate.WAPatchRegularLow) && full {
 			t.Error("destructive full replay on known-broken collection")
 		}
-		if name == string(appstate.WAPatchRegularLow) {
-			// Keep this test on the primary-snapshot path, not the settlement
-			// after a successful incremental fetch (covered below).
-			return nil, errors.New("incremental unavailable")
-		}
 		return nil, nil
 	}
 	f.fetchAppState = func(ctx context.Context, name string, full, only bool) error {
@@ -390,51 +382,40 @@ func archiveSettlementState(t *testing.T, a *App, jid string) (preferenceRows in
 	return preferenceRows, actionMS
 }
 
-func TestAutoUnarchiveBrokenCollectionSettlesWithoutSnapshot(t *testing.T) {
+// A known-broken collection whose primary never answers settles nothing: a
+// successfully persisted incremental fetch is not a snapshot. The archive
+// metadata stays unknown, archived chats stay archived, a new arrival does not
+// auto-unarchive, and the background snapshot request repeats at most once
+// every backgroundAppStateRecoveryInterval. Replay debt, when the store carries
+// it, stays pending as well.
+func TestAutoUnarchiveBrokenCollectionWaitsForSnapshot(t *testing.T) {
 	for _, tc := range []struct {
-		name            string
-		broken          bool
-		noDebt          bool
-		fetchFail       bool
-		persistenceFail bool
-		wantSettled     bool
+		name       string
+		replayDebt bool
 	}{
-		{name: "broken successful incremental", broken: true, wantSettled: true},
-		{name: "not broken"},
-		{name: "failed incremental", broken: true, fetchFail: true},
-		{name: "failed persistence", broken: true, persistenceFail: true},
-		// Archive metadata only: the phone is asked once and may never answer.
-		{name: "broken without replay debt", broken: true, noDebt: true, wantSettled: true},
-		{name: "broken without replay debt, failed incremental", broken: true, noDebt: true, fetchFail: true},
+		{name: "archive metadata only"},
+		{name: "with replay debt", replayDebt: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a := newTestApp(t)
-			warnings := captureWarningCodes(t, a)
 			f := &appStateContextWA{fakeWA: newFakeWA()}
 			a.wa = f
+			ctx := context.Background()
 			chat := types.NewJID("15550000007", types.DefaultUserServer)
 			base := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
-			settled := base.Add(time.Hour)
-			previousNowUTC := nowUTC
-			nowUTC = func() time.Time { return settled }
-			t.Cleanup(func() { nowUTC = previousNowUTC })
 			if err := a.db.UpsertChat(chat.String(), "dm", "Legacy", base); err != nil {
 				t.Fatal(err)
 			}
 			if err := a.db.SetChatArchived(chat.String(), true); err != nil {
 				t.Fatal(err)
 			}
-			// Existing replay debt must survive the archive-only settlement.
-			if !tc.noDebt {
+			if tc.replayDebt {
 				if _, _, err := a.db.BeginAppStateRecovery(string(appstate.WAPatchRegularLow)); err != nil {
 					t.Fatal(err)
 				}
 			}
-			a.setAppStateFullSyncResult(appstate.WAPatchRegularLow, tc.broken)
-			if tc.persistenceFail {
-				failArchiveWrites(t, a)
-			}
-			requests, fullReplays := 0, 0
+			a.setAppStateFullSyncResult(appstate.WAPatchRegularLow, true)
+			requests, incremental := 0, 0
 			f.requestAppStateRecovery = func(context.Context, string) (types.MessageID, error) {
 				requests++
 				return "snapshot", nil
@@ -444,81 +425,67 @@ func TestAutoUnarchiveBrokenCollectionSettlesWithoutSnapshot(t *testing.T) {
 					return nil, nil
 				}
 				if full {
-					fullReplays++
+					t.Error("destructive full replay on known-broken collection")
 				}
-				if tc.fetchFail {
-					return nil, errors.New("injected incremental failure")
-				}
-				if tc.persistenceFail {
-					return []any{&events.Archive{JID: chat, Timestamp: base,
-						Action: &waSyncAction.ArchiveChatAction{Archived: proto.Bool(false)}}}, nil
-				}
+				// Every incremental fetch succeeds with nothing to persist; the
+				// primary never answers the snapshot request.
+				incremental++
 				return nil, nil
 			}
-			f.fetchAppState = func(context.Context, string, bool, bool) error { return nil }
-			raw, err := sql.Open("sqlite3", filepath.Join(a.opts.StoreDir, "wacli.db"))
-			if err != nil {
-				t.Fatal(err)
+			f.fetchAppState = func(ctx context.Context, name string, full, only bool) error {
+				_, err := f.fetchEvents(ctx, name, full, only)
+				return err
 			}
-			defer raw.Close()
-			var recoveries sync.Map
-			for cycle := 1; cycle <= 3; cycle++ {
-				a.syncAppStateDeltas(t.Context(), &recoveries)
-				if required, err := a.db.ChatArchiveRecoveryRequired(); err != nil || required == tc.wantSettled {
-					t.Fatalf("cycle %d: archive recovery required=%v, err=%v", cycle, required, err)
+			assertUnknown := func(stage string) {
+				t.Helper()
+				if required, err := a.db.ChatArchiveRecoveryRequired(); err != nil || !required {
+					t.Fatalf("%s: archive recovery settled without a snapshot: %v, %v", stage, required, err)
 				}
-				var intents int
-				if err := raw.QueryRow(`SELECT COUNT(*) FROM app_state_recovery_intents WHERE collection='regular_low'`).Scan(&intents); err != nil {
-					t.Fatal(err)
+				if required, err := a.db.AppStateRecoveryRequired(string(appstate.WAPatchRegularLow)); err != nil || required != tc.replayDebt {
+					t.Fatalf("%s: replay debt=%v, want %v; %v", stage, required, tc.replayDebt, err)
 				}
-				// The archive metadata is recovered from the phone and records no
-				// replay intent; a broken collection keeps its debt plus the
-				// snapshot request's own intent, a healthy one replays it away.
-				wantIntents := 0
-				if tc.broken && !tc.noDebt {
-					wantIntents = 2
+				if rows, boundary := archiveSettlementState(t, a, chat.String()); rows != 0 || boundary != 0 {
+					t.Fatalf("%s: settled without a snapshot: preference rows=%d archive_action_ms=%d", stage, rows, boundary)
 				}
-				if intents != wantIntents {
-					t.Fatalf("cycle %d: replay intents=%d, want %d", cycle, intents, wantIntents)
+				if got, err := a.db.GetChat(chat.String()); err != nil || !got.Archived {
+					t.Fatalf("%s: legacy archive changed without a snapshot: %+v, %v", stage, got, err)
 				}
 			}
-			rows, boundary := archiveSettlementState(t, a, chat.String())
-			if tc.wantSettled {
-				var id, enabled int
-				var timestamp int64
-				if err := raw.QueryRow(`SELECT id,enabled,timestamp_ms FROM chat_archive_setting`).Scan(&id, &enabled, &timestamp); err != nil {
-					t.Fatal(err)
-				}
-				if id != 1 || enabled != 0 || timestamp != 0 || rows != 1 || boundary != settled.UnixMilli() {
-					t.Fatalf("setting=(%d,%d,%d), rows=%d, boundary=%d", id, enabled, timestamp, rows, boundary)
-				}
-			} else if rows != 0 || boundary != 0 {
-				t.Fatalf("unexpected settlement: rows=%d, boundary=%d", rows, boundary)
-			}
-			if got, err := a.db.GetChat(chat.String()); err != nil || !got.Archived {
-				t.Fatalf("legacy archive changed: %+v, %v", got, err)
-			}
-			settlementWarnings := 0
-			for _, code := range warnings() {
-				if code == "app_state_archive_settled_without_snapshot" {
-					settlementWarnings++
+			// Three sync runs in one process: the request is sent once.
+			for start := 1; start <= 3; start++ {
+				var recoveries sync.Map
+				a.syncAppStateDeltas(ctx, &recoveries)
+				assertUnknown(fmt.Sprintf("start %d", start))
+				if requests != 1 || incremental != start {
+					t.Fatalf("start %d: snapshot requests=%d, incremental fetches=%d; want 1 and %d", start, requests, incremental, start)
 				}
 			}
-			wantWarnings := 0
-			if tc.wantSettled {
-				wantWarnings = 1
+			// A new arrival with the preference unknown keeps the chat archived.
+			var stored atomic.Int64
+			a.handleLiveSyncMessage(ctx, SyncOptions{}, &events.Message{
+				Info:    types.MessageInfo{MessageSource: types.MessageSource{Chat: chat, Sender: chat}, ID: "pending", Timestamp: time.Now()},
+				Message: &waE2E.Message{Conversation: proto.String("pending preference recovery")},
+			}, &stored, nil, nil)
+			assertUnknown("live arrival")
+			// The request repeats only once the interval has elapsed.
+			backdate := func(age time.Duration) {
+				a.appStateDegradedMu.Lock()
+				a.appStateRecoveryRequested[string(appstate.WAPatchRegularLow)] = time.Now().Add(-age)
+				a.appStateDegradedMu.Unlock()
 			}
-			if settlementWarnings != wantWarnings {
-				t.Fatalf("settlement warnings=%d, want %d", settlementWarnings, wantWarnings)
+			backdate(backgroundAppStateRecoveryInterval - time.Minute)
+			var early sync.Map
+			a.syncAppStateDeltas(ctx, &early)
+			if requests != 1 {
+				t.Fatalf("snapshot requested again before the interval elapsed: requests=%d, want 1", requests)
 			}
-			if tc.broken && (requests != 1 || fullReplays != 0) {
-				t.Fatalf("broken collection: requests=%d, full replays=%d", requests, fullReplays)
+			backdate(backgroundAppStateRecoveryInterval)
+			var due sync.Map
+			a.syncAppStateDeltas(ctx, &due)
+			if requests != 2 {
+				t.Fatalf("snapshot not requested again after the interval: requests=%d, want 2", requests)
 			}
-			// Healthy: the debt is replayed once, then the archive metadata is
-			// asked from the phone once per process.
-			if !tc.broken && (requests != 1 || fullReplays != 1) {
-				t.Fatalf("healthy collection: requests=%d, full replays=%d", requests, fullReplays)
-			}
+			assertUnknown("repeated request")
 		})
 	}
 }
@@ -661,11 +628,6 @@ func TestAutoUnarchiveFailedSnapshotMutationDefersSettlement(t *testing.T) {
 		f.fetchEvents = func(_ context.Context, name string, full, _ bool) ([]any, error) {
 			if name == string(appstate.WAPatchRegularLow) && full {
 				t.Error("destructive full replay on known-broken collection")
-			}
-			// Exercise snapshot persistence failures without first settling
-			// through a successful incremental fetch.
-			if name == string(appstate.WAPatchRegularLow) {
-				return nil, errors.New("incremental unavailable")
 			}
 			return nil, nil
 		}
