@@ -114,6 +114,19 @@ CREATE TABLE IF NOT EXISTS message_receipts (
 
 CREATE INDEX IF NOT EXISTS idx_message_receipts_msg ON message_receipts(chat_jid, msg_id);
 
+-- The label each member showed under their name in a group, one row per change.
+CREATE TABLE IF NOT EXISTS group_member_labels (
+    group_jid TEXT NOT NULL,
+    user_jid TEXT NOT NULL,
+    label TEXT NOT NULL, -- empty when the member cleared it
+    set_at INTEGER NOT NULL,
+    source TEXT NOT NULL, -- history_sync|label_change|message
+    observed_at INTEGER NOT NULL,
+    PRIMARY KEY (group_jid, user_jid, set_at, label)
+);
+
+CREATE INDEX IF NOT EXISTS idx_group_member_labels_user ON group_member_labels(user_jid);
+
 CREATE TABLE IF NOT EXISTS message_payload_purges (
     chat_jid TEXT NOT NULL,
     msg_id TEXT NOT NULL,

@@ -12,6 +12,7 @@ wacli groups refresh
 wacli groups create --name NAME [--user PHONE_OR_JID ...] [--announce-only] [--locked] [--join-approval] [--community|--linked-parent GROUP_JID]
 wacli groups info --jid GROUP_JID
 wacli groups participants list --jid GROUP_JID
+wacli groups participants labels --jid GROUP_JID [--user PHONE_OR_JID]
 wacli groups rename --jid GROUP_JID --name NAME
 wacli groups topic --jid GROUP_JID --text TEXT
 wacli groups description --jid GROUP_JID --text TEXT
@@ -41,6 +42,7 @@ wacli groups prune [--days N] [--left-only=false|--include-active] [--dry-run] [
 - `participants list` reads the last participant snapshot in `wacli.db` without connecting to WhatsApp. It works in read-only mode.
 - A participant result can be empty or stale. Run `wacli sync --once --refresh-groups` or `wacli groups refresh` to fetch joined-group info and replace the stored snapshots. Normal sync also refreshes a group snapshot when it stores a message from that group and the live group-info lookup succeeds. It keeps one answer per group for 10 minutes rather than asking with every message, asks again sooner when WhatsApp reports a change to the group or the sync reconnects, and retries a failed lookup after a minute.
 - Participant `updated_at` values record when wacli stored the snapshot. They are not WhatsApp join times or membership-change times.
+- Member labels (the text a member shows under their name in one group) are kept as a history per member. WhatsApp's group info does not carry them, so sync records them from history-sync group rosters, from label-change messages, and from the label each group message carries for its sender. `participants list` shows the current label (`label` and `label_set_at` in JSON, omitted when none was seen). `participants labels` lists the history, oldest first per member, with `set_at` and `source` (`history_sync`, `label_change` or `message`); for `message` rows `set_at` is the earliest message seen with that label, not the exact change. An empty `label` means the member cleared it. Both read `wacli.db` only and work in read-only mode; a store last written by an older wacli has no labels until the next writable open.
 - `info` fetches one group live and persists it, including whether the chat is a Community parent or linked subgroup.
 - `create` returns the new live group info and persists it locally. Use `--community` to create a community parent, or `--linked-parent` to create a subgroup inside an existing community.
 - `topic` and `description` both set the WhatsApp group description. Passing `--text ""` clears it.
@@ -66,6 +68,7 @@ wacli groups rename --jid 123456789@g.us --name "New name"
 wacli groups topic --jid 123456789@g.us --text "Launch planning"
 wacli groups announce-only --jid 123456789@g.us --on
 wacli --read-only groups participants list --jid 123456789@g.us --json
+wacli --read-only groups participants labels --jid 123456789@g.us --user "+1 (234) 567-8900"
 wacli groups participants add --jid 123456789@g.us --user "+1 (234) 567-8900"
 wacli groups requests approve --jid 123456789@g.us --user "+1 (234) 567-8900"
 wacli groups invite link get --jid 123456789@g.us

@@ -758,6 +758,7 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 			continue
 		}
 		a.storeHistoryUnreadCount(ctx, chatID, conv)
+		a.recordHistoryMemberLabels(ctx, chatID, conv)
 		var pendingPolls []historyPollSideEffect
 		for _, m := range conv.Messages {
 			lastEvent.Store(nowUTC().UnixNano())

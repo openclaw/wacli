@@ -40,6 +40,9 @@ type GroupParticipant struct {
 	UserJID   string    `json:"user_jid"`
 	Role      string    `json:"role"`
 	UpdatedAt time.Time `json:"updated_at"`
+	// Label is the member's current label in this group, if one was seen.
+	Label      string     `json:"label,omitempty"`
+	LabelSetAt *time.Time `json:"label_set_at,omitempty"`
 }
 
 type MediaDownloadInfo struct {

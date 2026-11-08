@@ -35,6 +35,8 @@ func (d *DB) HistoricalLIDJIDs() ([]string, error) {
 		UNION
 		SELECT user_jid FROM group_participants WHERE user_jid GLOB '*@lid'
 		UNION
+		SELECT user_jid FROM group_member_labels WHERE user_jid GLOB '*@lid'
+		UNION
 		SELECT chat_jid FROM polls WHERE chat_jid GLOB '*@lid'
 		UNION
 		SELECT sender_jid FROM polls WHERE sender_jid GLOB '*@lid' AND chat_jid NOT GLOB '*@g.us'
@@ -124,6 +126,9 @@ func (d *DB) MigrateLIDToPN(lidJID, pnJID string) error {
 		return err
 	}
 	if err := migrateLIDGroupIdentitiesToPN(tx, lidJID, pnJID); err != nil {
+		return err
+	}
+	if err := migrateLIDGroupMemberLabelsToPN(tx, lidJID, pnJID); err != nil {
 		return err
 	}
 	if err := migrateLIDMessageLocationsToPN(tx, lidJID, pnJID); err != nil {

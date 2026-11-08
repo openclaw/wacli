@@ -119,14 +119,24 @@ func (d *DB) ListGroupParticipants(groupJID string) ([]GroupParticipant, error) 
 	if err != nil {
 		return nil, err
 	}
+	labels, err := d.currentGroupMemberLabels(groupJID)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]GroupParticipant, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, GroupParticipant{
+		p := GroupParticipant{
 			GroupJID:  r.GroupJid,
 			UserJID:   r.UserJid,
 			Role:      r.Role,
 			UpdatedAt: fromUnix(r.UpdatedAt),
-		})
+		}
+		if l, ok := labels[r.UserJid]; ok && l.Label != "" {
+			p.Label = l.Label
+			setAt := l.SetAt
+			p.LabelSetAt = &setAt
+		}
+		out = append(out, p)
 	}
 	return out, nil
 }
@@ -205,6 +215,9 @@ func (d *DB) DeleteGroupLocalData(jid string) (err error) {
 		return err
 	}
 	if err = q.DeleteStarredForChat(ctx, jid); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(`DELETE FROM group_member_labels WHERE group_jid = ?`, jid); err != nil {
 		return err
 	}
 	if err = q.DeleteChat(ctx, jid); err != nil {
