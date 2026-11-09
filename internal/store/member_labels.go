@@ -7,27 +7,17 @@ import (
 	"time"
 )
 
-// Where a member label was seen. A history sync carries the group roster with
-// each member's label, a label change is its own control message, and every
-// ordinary group message repeats the sender's current label.
-const (
-	MemberLabelSourceHistorySync = "history_sync"
-	MemberLabelSourceChange      = "label_change"
-	MemberLabelSourceMessage     = "message"
-)
-
-// One row per label a member had in a group, so the label at any point in time
-// can be told. Participant snapshots are replaced wholesale on refresh and live
-// group info carries no labels, so the history lives in its own table.
+// The label each member last showed under their name in a group. Participant
+// snapshots are replaced wholesale on refresh and live group info carries no
+// labels, so labels live in their own table and survive a refresh.
 const groupMemberLabelsSchema = `
 CREATE TABLE IF NOT EXISTS group_member_labels (
     group_jid TEXT NOT NULL,
     user_jid TEXT NOT NULL,
     label TEXT NOT NULL, -- empty when the member cleared it
-    set_at INTEGER NOT NULL,
-    source TEXT NOT NULL, -- history_sync|label_change|message
-    observed_at INTEGER NOT NULL,
-    PRIMARY KEY (group_jid, user_jid, set_at, label)
+    label_at INTEGER NOT NULL, -- time of the newest evidence, 0 when unknown
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (group_jid, user_jid)
 );
 
 CREATE INDEX IF NOT EXISTS idx_group_member_labels_user ON group_member_labels(user_jid);
@@ -42,167 +32,91 @@ func ensureGroupMemberLabelsTable(d *DB) error {
 	return nil
 }
 
-type GroupMemberLabel struct {
-	GroupJID   string    `json:"group_jid"`
-	UserJID    string    `json:"user_jid"`
-	Label      string    `json:"label"`
-	SetAt      time.Time `json:"set_at"`
-	Source     string    `json:"source"`
-	ObservedAt time.Time `json:"observed_at"`
-}
-
 type RecordGroupMemberLabelParams struct {
 	GroupJID string
 	UserJID  string
 	Label    string
-	Source   string
-	// SetAt is when the member set the label, as WhatsApp reported it.
-	SetAt time.Time
-	// SeenAt stands in for a missing SetAt, typically the message timestamp.
-	// Such an observation only says the label was in effect by then, so it is
-	// merged into the label already known for that moment instead of becoming
-	// a row per message.
-	SeenAt time.Time
+	// At is when the label was known to be in effect: the message time, or the
+	// change time WhatsApp reported. Zero when nothing dates it.
+	At time.Time
 }
 
-// RecordGroupMemberLabel adds a label to a member's history. Observations may
-// arrive in any order (history sync is not chronological), so each one is
-// placed by its time: a label equal to the one in effect then adds nothing, and
-// an earlier sighting of the label that follows moves that label's estimated
-// start back instead of adding a duplicate.
-func (d *DB) RecordGroupMemberLabel(p RecordGroupMemberLabelParams) (err error) {
+// RecordGroupMemberLabel keeps the newest label seen for a member. Observations
+// arrive in any order (history sync is not chronological), so a label replaces
+// the stored one only when it is dated later; an undated label only fills a gap
+// and never replaces a dated one. Equal times resolve by label so the result
+// does not depend on arrival order.
+func (d *DB) RecordGroupMemberLabel(p RecordGroupMemberLabelParams) error {
 	groupJID := strings.TrimSpace(p.GroupJID)
 	userJID := strings.TrimSpace(p.UserJID)
 	if groupJID == "" || userJID == "" {
 		return fmt.Errorf("group and user JID are required")
 	}
-	label := strings.TrimSpace(p.Label)
-	source := strings.TrimSpace(p.Source)
-	at := p.SetAt
-	if at.IsZero() {
-		at = p.SeenAt
+	var at int64
+	if !p.At.IsZero() {
+		at = unix(p.At)
 	}
-	if at.IsZero() {
-		at = nowUTC()
-	}
-	tx, err := d.sql.Begin()
+	_, err := d.sql.Exec(`
+		INSERT INTO group_member_labels(group_jid, user_jid, label, label_at, updated_at)
+		VALUES(?, ?, ?, ?, ?)
+		ON CONFLICT(group_jid, user_jid) DO UPDATE SET
+			label = excluded.label,
+			label_at = excluded.label_at,
+			updated_at = excluded.updated_at
+		WHERE excluded.label_at > group_member_labels.label_at
+			OR (excluded.label_at = group_member_labels.label_at AND excluded.label > group_member_labels.label)
+	`, groupJID, userJID, strings.TrimSpace(p.Label), at, unix(nowUTC()))
 	if err != nil {
-		return err
-	}
-	defer func() {
-		if err != nil {
-			_ = tx.Rollback()
-		}
-	}()
-	prev, hasPrev, err := memberLabelNear(tx, groupJID, userJID, `set_at <= ? ORDER BY set_at DESC, rowid DESC`, unix(at))
-	if err != nil {
-		return err
-	}
-	if hasPrev && prev.Label == label {
-		return tx.Commit()
-	}
-	next, hasNext, err := memberLabelNear(tx, groupJID, userJID, `set_at > ? ORDER BY set_at ASC, rowid ASC`, unix(at))
-	if err != nil {
-		return err
-	}
-	if hasNext && next.Label == label && next.Source == MemberLabelSourceMessage {
-		// The next row only estimated when this label started; it started by now.
-		if _, err = tx.Exec(`UPDATE group_member_labels SET set_at = ?, source = ?, observed_at = ? WHERE rowid = ?`,
-			unix(at), source, unix(nowUTC()), next.rowID); err != nil {
-			return fmt.Errorf("move group member label: %w", err)
-		}
-		return tx.Commit()
-	}
-	if _, err = tx.Exec(`
-		INSERT OR IGNORE INTO group_member_labels(group_jid, user_jid, label, set_at, source, observed_at)
-		VALUES(?, ?, ?, ?, ?, ?)
-	`, groupJID, userJID, label, unix(at), source, unix(nowUTC())); err != nil {
 		return fmt.Errorf("record group member label: %w", err)
 	}
-	return tx.Commit()
+	return nil
 }
 
-type storedMemberLabel struct {
-	GroupMemberLabel
-	rowID int64
+type groupMemberLabel struct {
+	label string
+	at    time.Time
 }
 
-func memberLabelNear(tx *sql.Tx, groupJID, userJID, where string, at int64) (storedMemberLabel, bool, error) {
-	var l storedMemberLabel
-	var setAt, observedAt int64
-	err := tx.QueryRow(`
-		SELECT rowid, group_jid, user_jid, label, set_at, source, observed_at
-		FROM group_member_labels
-		WHERE group_jid = ? AND user_jid = ? AND `+where+`
-		LIMIT 1
-	`, groupJID, userJID, at).Scan(&l.rowID, &l.GroupJID, &l.UserJID, &l.Label, &setAt, &l.Source, &observedAt)
-	if err == sql.ErrNoRows {
-		return storedMemberLabel{}, false, nil
-	}
-	if err != nil {
-		return storedMemberLabel{}, false, err
-	}
-	l.SetAt = fromUnix(setAt)
-	l.ObservedAt = fromUnix(observedAt)
-	return l, true, nil
-}
-
-// ListGroupMemberLabels returns the label history of a group, oldest first per
-// member. An empty userJID lists every member.
-func (d *DB) ListGroupMemberLabels(groupJID, userJID string) ([]GroupMemberLabel, error) {
-	groupJID = strings.TrimSpace(groupJID)
-	if groupJID == "" {
-		return nil, fmt.Errorf("group JID is required")
-	}
+func (d *DB) groupMemberLabels(groupJID string) (map[string]groupMemberLabel, error) {
+	out := map[string]groupMemberLabel{}
 	if !d.memberLabelsEnabled {
-		return []GroupMemberLabel{}, nil
+		return out, nil
 	}
-	query := `SELECT group_jid, user_jid, label, set_at, source, observed_at
-		FROM group_member_labels WHERE group_jid = ?`
-	args := []any{groupJID}
-	if userJID = strings.TrimSpace(userJID); userJID != "" {
-		query += ` AND user_jid = ?`
-		args = append(args, userJID)
-	}
-	query += ` ORDER BY user_jid ASC, set_at ASC, rowid ASC`
-	rows, err := d.readQuery().Query(query, args...)
+	rows, err := d.readQuery().Query(`
+		SELECT user_jid, label, label_at FROM group_member_labels
+		WHERE group_jid = ? AND label <> ''
+	`, groupJID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []GroupMemberLabel{}
 	for rows.Next() {
-		var l GroupMemberLabel
-		var setAt, observedAt int64
-		if err := rows.Scan(&l.GroupJID, &l.UserJID, &l.Label, &setAt, &l.Source, &observedAt); err != nil {
+		var user, label string
+		var at int64
+		if err := rows.Scan(&user, &label, &at); err != nil {
 			return nil, err
 		}
-		l.SetAt = fromUnix(setAt)
-		l.ObservedAt = fromUnix(observedAt)
-		out = append(out, l)
+		l := groupMemberLabel{label: label}
+		if at > 0 {
+			l.at = fromUnix(at)
+		}
+		out[user] = l
 	}
 	return out, rows.Err()
 }
 
-// currentGroupMemberLabels maps each member of a group to their newest label.
-func (d *DB) currentGroupMemberLabels(groupJID string) (map[string]GroupMemberLabel, error) {
-	history, err := d.ListGroupMemberLabels(groupJID, "")
-	if err != nil {
-		return nil, err
-	}
-	current := make(map[string]GroupMemberLabel, len(history))
-	for _, l := range history {
-		current[l.UserJID] = l // history is ordered oldest first, so the last wins
-	}
-	return current, nil
-}
-
 func migrateLIDGroupMemberLabelsToPN(tx *sql.Tx, lidJID, pnJID string) error {
 	if _, err := tx.Exec(`
-		INSERT OR IGNORE INTO group_member_labels(group_jid, user_jid, label, set_at, source, observed_at)
-		SELECT group_jid, ?, label, set_at, source, observed_at
+		INSERT INTO group_member_labels(group_jid, user_jid, label, label_at, updated_at)
+		SELECT group_jid, ?, label, label_at, updated_at
 		FROM group_member_labels
 		WHERE user_jid = ?
+		ON CONFLICT(group_jid, user_jid) DO UPDATE SET
+			label = excluded.label,
+			label_at = excluded.label_at,
+			updated_at = excluded.updated_at
+		WHERE excluded.label_at > group_member_labels.label_at
+			OR (excluded.label_at = group_member_labels.label_at AND excluded.label > group_member_labels.label)
 	`, pnJID, lidJID); err != nil {
 		return fmt.Errorf("merge lid group member labels: %w", err)
 	}

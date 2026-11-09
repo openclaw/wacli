@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openclaw/wacli/internal/store"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waE2E"
@@ -18,8 +17,8 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// A history sync carries the roster's labels, a label-change message updates
-// one, and neither becomes a stored message.
+// A history sync carries the roster's labels and messages update them; the
+// newest dated one wins and a label change is not stored as a message.
 func TestHistorySyncRecordsMemberLabels(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
@@ -64,14 +63,20 @@ func TestHistorySyncRecordsMemberLabels(t *testing.T) {
 	var messagesStored, lastEvent atomic.Int64
 	a.handleHistorySync(context.Background(), SyncOptions{}, history, &messagesStored, &lastEvent, func(string, string) {})
 
-	labels, err := a.db.ListGroupMemberLabels(testGroupJID.String(), testMemberJID.String())
+	ps, err := a.db.ListGroupParticipants(testGroupJID.String())
 	if err != nil {
-		t.Fatalf("ListGroupMemberLabels: %v", err)
+		t.Fatalf("ListGroupParticipants: %v", err)
 	}
-	if len(labels) != 2 ||
-		labels[0].Label != "Mom of Alex" || !labels[0].SetAt.Equal(rosterAt) || labels[0].Source != store.MemberLabelSourceHistorySync ||
-		labels[1].Label != "Coach" || !labels[1].SetAt.Equal(changeAt) || labels[1].Source != store.MemberLabelSourceChange {
-		t.Fatalf("labels = %+v, want the roster label followed by the change", labels)
+	var label string
+	var at *time.Time
+	for _, p := range ps {
+		if p.UserJID == testMemberJID.String() {
+			label, at = p.Label, p.LabelUpdatedAt
+		}
+	}
+	// The ordinary message an hour after the change is the newest evidence.
+	if label != "Coach" || at == nil || !at.Equal(changeAt.Add(time.Hour)) {
+		t.Fatalf("label = %q at %v, want Coach from the newest message", label, at)
 	}
 	if _, err := a.db.GetMessage(testGroupJID.String(), "label-change"); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("label change stored as a message: err = %v", err)

@@ -12,27 +12,30 @@ import (
 )
 
 // recordMessageMemberLabel keeps the label a group message carried for its
-// sender. Ordinary messages repeat the current label, so the store only adds a
-// row when it changed; a label-change message is recorded as such.
+// sender. The label was in effect when the message was sent, so the message
+// time dates it; a label-change message is dated by the change itself.
 func (a *App) recordMessageMemberLabel(ctx context.Context, pm wa.ParsedMessage) {
 	if pm.MemberLabel == nil || pm.Chat.Server != types.GroupServer || strings.TrimSpace(pm.SenderJID) == "" {
 		return
 	}
-	source := store.MemberLabelSourceMessage
-	if pm.MemberLabelChange {
-		source = store.MemberLabelSourceChange
+	at := pm.Timestamp
+	if pm.MemberLabelChange && !pm.MemberLabel.SetAt.IsZero() {
+		at = pm.MemberLabel.SetAt
+	}
+	if at.IsZero() {
+		at = pm.MemberLabel.SetAt
 	}
 	a.recordMemberLabel(store.RecordGroupMemberLabelParams{
 		GroupJID: canonicalJIDString(pm.Chat),
 		UserJID:  a.canonicalStoreJIDString(ctx, pm.SenderJID),
 		Label:    pm.MemberLabel.Label,
-		Source:   source,
-		SetAt:    pm.MemberLabel.SetAt,
-		SeenAt:   pm.Timestamp,
+		At:       at,
 	})
 }
 
-// recordHistoryMemberLabels keeps the labels of a synced group's roster.
+// recordHistoryMemberLabels keeps the labels of a synced group's roster. A
+// roster label without its own timestamp stays undated: the snapshot's age is
+// unknown, so it must not override a label seen on a dated message.
 func (a *App) recordHistoryMemberLabels(ctx context.Context, chatID string, conv *waHistorySync.Conversation) {
 	group, err := types.ParseJID(chatID)
 	if err != nil || group.Server != types.GroupServer {
@@ -49,8 +52,7 @@ func (a *App) recordHistoryMemberLabels(ctx context.Context, chatID string, conv
 			GroupJID: groupJID,
 			UserJID:  a.canonicalStoreJIDString(ctx, user),
 			Label:    label.Label,
-			Source:   store.MemberLabelSourceHistorySync,
-			SetAt:    label.SetAt,
+			At:       label.SetAt,
 		})
 	}
 }

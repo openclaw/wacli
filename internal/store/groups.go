@@ -119,7 +119,7 @@ func (d *DB) ListGroupParticipants(groupJID string) ([]GroupParticipant, error) 
 	if err != nil {
 		return nil, err
 	}
-	labels, err := d.currentGroupMemberLabels(groupJID)
+	labels, err := d.groupMemberLabels(groupJID)
 	if err != nil {
 		return nil, err
 	}
@@ -131,10 +131,12 @@ func (d *DB) ListGroupParticipants(groupJID string) ([]GroupParticipant, error) 
 			Role:      r.Role,
 			UpdatedAt: fromUnix(r.UpdatedAt),
 		}
-		if l, ok := labels[r.UserJid]; ok && l.Label != "" {
-			p.Label = l.Label
-			setAt := l.SetAt
-			p.LabelSetAt = &setAt
+		if l, ok := labels[r.UserJid]; ok {
+			p.Label = l.label
+			if !l.at.IsZero() {
+				at := l.at
+				p.LabelUpdatedAt = &at
+			}
 		}
 		out = append(out, p)
 	}
