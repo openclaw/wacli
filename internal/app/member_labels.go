@@ -33,6 +33,17 @@ func (a *App) recordMessageMemberLabel(ctx context.Context, pm wa.ParsedMessage)
 	})
 }
 
+// handleMemberLabelChange records a label-change message, which has no content
+// of its own, so sync neither stores, counts nor forwards it as a message.
+func (a *App) handleMemberLabelChange(ctx context.Context, pm wa.ParsedMessage) bool {
+	if !pm.MemberLabelChange {
+		return false
+	}
+	pm.Chat = a.canonicalStoreJID(ctx, pm.Chat)
+	a.recordMessageMemberLabel(ctx, pm)
+	return true
+}
+
 // recordHistoryMemberLabels keeps the labels of a synced group's roster. A
 // roster label without its own timestamp stays undated: the snapshot's age is
 // unknown, so it must not override a label seen on a dated message.

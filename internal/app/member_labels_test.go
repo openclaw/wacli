@@ -13,6 +13,7 @@ import (
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/proto/waWeb"
+	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
 )
@@ -62,6 +63,9 @@ func TestHistorySyncRecordsMemberLabels(t *testing.T) {
 
 	var messagesStored, lastEvent atomic.Int64
 	a.handleHistorySync(context.Background(), SyncOptions{}, history, &messagesStored, &lastEvent, func(string, string) {})
+	if got := messagesStored.Load(); got != 1 {
+		t.Fatalf("messages counted = %d, want only the ordinary message", got)
+	}
 
 	ps, err := a.db.ListGroupParticipants(testGroupJID.String())
 	if err != nil {
@@ -83,5 +87,66 @@ func TestHistorySyncRecordsMemberLabels(t *testing.T) {
 	}
 	if _, err := a.db.GetMessage(testGroupJID.String(), "hello"); err != nil {
 		t.Fatalf("ordinary message not stored: %v", err)
+	}
+}
+
+func memberLabelOf(t *testing.T, a *App) string {
+	t.Helper()
+	ps, err := a.db.ListGroupParticipants(testGroupJID.String())
+	if err != nil {
+		t.Fatalf("ListGroupParticipants: %v", err)
+	}
+	for _, p := range ps {
+		if p.UserJID == testMemberJID.String() {
+			return p.Label
+		}
+	}
+	return ""
+}
+
+// The live path as seen on a real account: a member sets a label, then clears
+// it, each with a GROUP_MEMBER_LABEL_CHANGE message; plain text carries none.
+func TestLiveMemberLabelChangeAndClear(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+	f.groups[testGroupJID] = testGroup("Team")
+
+	base := time.Date(2026, 11, 9, 13, 0, 0, 0, time.UTC)
+	var stored atomic.Int64
+	feed := func(id string, at time.Time, msg *waProto.Message) {
+		a.handleLiveSyncMessage(context.Background(), SyncOptions{}, &events.Message{
+			Info: types.MessageInfo{
+				MessageSource: types.MessageSource{Chat: testGroupJID, Sender: testMemberJID, IsGroup: true},
+				ID:            id,
+				Timestamp:     at,
+			},
+			Message: msg,
+		}, &stored, func(string, string) {}, nil)
+	}
+	change := func(label string, at time.Time) *waProto.Message {
+		return &waProto.Message{ProtocolMessage: &waProto.ProtocolMessage{
+			Type:        waE2E.ProtocolMessage_GROUP_MEMBER_LABEL_CHANGE.Enum(),
+			MemberLabel: &waE2E.MemberLabel{Label: proto.String(label), LabelTimestamp: proto.Int64(at.Unix())},
+		}}
+	}
+
+	feed("first", base, &waProto.Message{Conversation: proto.String("hey")})
+	feed("set", base.Add(time.Minute), change("Mom of Alex", base.Add(time.Minute)))
+	feed("after-set", base.Add(2*time.Minute), &waProto.Message{Conversation: proto.String("hi")})
+	if got := memberLabelOf(t, a); got != "Mom of Alex" {
+		t.Fatalf("label after set = %q, want Mom of Alex", got)
+	}
+	feed("clear", base.Add(time.Hour), change("", base.Add(time.Hour)))
+	if got := memberLabelOf(t, a); got != "" {
+		t.Fatalf("label after clear = %q, want none", got)
+	}
+	if got := stored.Load(); got != 2 {
+		t.Fatalf("messages counted = %d, want the two text messages only", got)
+	}
+	for _, id := range []string{"set", "clear"} {
+		if _, err := a.db.GetMessage(testGroupJID.String(), id); !errors.Is(err, sql.ErrNoRows) {
+			t.Fatalf("label change %s stored as a message: err = %v", id, err)
+		}
 	}
 }
