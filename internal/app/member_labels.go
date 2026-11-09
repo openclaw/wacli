@@ -25,9 +25,21 @@ func (a *App) recordMessageMemberLabel(ctx context.Context, pm wa.ParsedMessage)
 	if at.IsZero() {
 		at = pm.MemberLabel.SetAt
 	}
+	groupJID := canonicalJIDString(pm.Chat)
+	userJID := a.canonicalStoreJIDString(ctx, pm.SenderJID)
+	if userJID == groupJID {
+		// History sync names no participant on this account's own messages,
+		// so the sender falls back to the group itself.
+		if !pm.FromMe {
+			return
+		}
+		if userJID = a.canonicalStoreJIDString(ctx, a.wa.LinkedJID()); userJID == "" {
+			return
+		}
+	}
 	a.recordMemberLabel(store.RecordGroupMemberLabelParams{
-		GroupJID: canonicalJIDString(pm.Chat),
-		UserJID:  a.canonicalStoreJIDString(ctx, pm.SenderJID),
+		GroupJID: groupJID,
+		UserJID:  userJID,
 		Label:    pm.MemberLabel.Label,
 		At:       at,
 	})

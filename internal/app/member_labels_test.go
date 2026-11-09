@@ -150,3 +150,61 @@ func TestLiveMemberLabelChangeAndClear(t *testing.T) {
 		}
 	}
 }
+
+// History sync names no participant on this account's own messages; their
+// label belongs to the linked account, never to the group.
+func TestHistoryOwnMemberLabelChangeIsTheLinkedAccounts(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+	f.authed = true
+	own := f.LinkedJID()
+	group := testGroup("Team")
+	ownJID, _ := types.ParseJID(own)
+	group.Participants = append(group.Participants, types.GroupParticipant{JID: ownJID})
+	f.groups[testGroupJID] = group
+
+	at := time.Date(2026, 11, 9, 9, 0, 0, 0, time.UTC)
+	history := &events.HistorySync{Data: &waHistorySync.HistorySync{
+		SyncType: waHistorySync.HistorySync_INITIAL_BOOTSTRAP.Enum(),
+		Conversations: []*waHistorySync.Conversation{{
+			ID: proto.String(testGroupJID.String()),
+			Messages: []*waHistorySync.HistorySyncMsg{{Message: &waWeb.WebMessageInfo{
+				Key: &waCommon.MessageKey{
+					RemoteJID: proto.String(testGroupJID.String()),
+					FromMe:    proto.Bool(true),
+					ID:        proto.String("own-label"),
+				},
+				MessageTimestamp: proto.Uint64(uint64(at.Unix())),
+				Message: &waProto.Message{ProtocolMessage: &waProto.ProtocolMessage{
+					Type:        waE2E.ProtocolMessage_GROUP_MEMBER_LABEL_CHANGE.Enum(),
+					MemberLabel: &waE2E.MemberLabel{Label: proto.String("Coach"), LabelTimestamp: proto.Int64(at.Unix())},
+				}},
+			}}, {Message: &waWeb.WebMessageInfo{
+				// An ordinary message, so the group's participant snapshot exists.
+				Key: &waCommon.MessageKey{
+					RemoteJID:   proto.String(testGroupJID.String()),
+					FromMe:      proto.Bool(false),
+					ID:          proto.String("hello"),
+					Participant: proto.String(testMemberJID.String()),
+				},
+				MessageTimestamp: proto.Uint64(uint64(at.Add(time.Minute).Unix())),
+				Message:          &waProto.Message{Conversation: proto.String("hello")},
+			}}},
+		}},
+	}}
+	var messagesStored, lastEvent atomic.Int64
+	a.handleHistorySync(context.Background(), SyncOptions{}, history, &messagesStored, &lastEvent, func(string, string) {})
+
+	ps, err := a.db.ListGroupParticipants(testGroupJID.String())
+	if err != nil {
+		t.Fatalf("ListGroupParticipants: %v", err)
+	}
+	labels := map[string]string{}
+	for _, p := range ps {
+		labels[p.UserJID] = p.Label
+	}
+	if labels[own] != "Coach" {
+		t.Fatalf("labels = %v, want Coach on the linked account %s", labels, own)
+	}
+}
