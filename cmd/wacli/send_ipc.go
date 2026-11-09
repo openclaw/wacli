@@ -80,6 +80,7 @@ type sendDelegateRequest struct {
 	TimeoutMS            int64    `json:"timeout_ms,omitempty"`
 	DeadlineUnixMS       int64    `json:"deadline_unix_ms,omitempty"`
 	RetryOnPhone         bool     `json:"retry_on_phone,omitempty"`
+	Group                *groupOp `json:"group,omitempty"`
 }
 
 type sendDelegateResponse struct {
@@ -106,6 +107,7 @@ type sendDelegateResponse struct {
 	Contact        *contactSaveResult   `json:"contact,omitempty"`
 	Presence       *app.PresenceState   `json:"presence,omitempty"`
 	Media          *mediaDownloadResult `json:"media,omitempty"`
+	Group          *groupOpResult       `json:"group,omitempty"`
 }
 
 type sendDelegateExecutor func(context.Context, sendDelegateRequest) (sendDelegateResponse, error)
@@ -290,9 +292,10 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDele
 		_ = json.NewEncoder(conn).Encode(resp)
 		return
 	}
-	if req.Kind == chatStateKind || req.Kind == contactsSaveKind {
+	if req.Kind == chatStateKind || req.Kind == contactsSaveKind || req.Kind == groupOpKind {
 		// The app-state coordinator owns these writes; recovery must not hold
-		// the message-send queue (#454).
+		// the message-send queue (#454). Group administration puts no message
+		// in a chat either, so it is neither queued nor paced behind sends.
 		if requestCtx.Err() != nil {
 			_ = json.NewEncoder(conn).Encode(sendDelegateResponse{OK: false, Error: "request deadline passed before dispatch; it was not sent"})
 			return
@@ -421,6 +424,8 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 		return executeDelegatedChatState(ctx, a, req)
 	case contactsSaveKind:
 		return executeDelegatedContactsSave(ctx, a, req)
+	case groupOpKind:
+		return executeDelegatedGroup(ctx, a.WA(), dbGroupStore{db: a.DB(), resolver: a.WA()}, req)
 	default:
 		return sendDelegateResponse{}, fmt.Errorf("unsupported send kind %q", req.Kind)
 	}

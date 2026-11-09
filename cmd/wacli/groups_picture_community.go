@@ -1,12 +1,9 @@
 package main
 
 import (
-	"context"
 	"fmt"
-	"os"
 	"strings"
 
-	"github.com/openclaw/wacli/internal/out"
 	"github.com/spf13/cobra"
 )
 
@@ -57,39 +54,7 @@ func newGroupsRemovePictureCmd(flags *rootFlags) *cobra.Command {
 }
 
 func runGroupPicture(flags *rootFlags, jidStr string, imgBytes []byte) error {
-	gjid, err := parseGroupJID(jidStr)
-	if err != nil {
-		return err
-	}
-	ctx, cancel := withTimeout(context.Background(), flags)
-	defer cancel()
-
-	a, lk, err := newApp(ctx, flags, true, false)
-	if err != nil {
-		return err
-	}
-	defer closeApp(a, lk)
-
-	if err := a.EnsureAuthed(ctx); err != nil {
-		return err
-	}
-	if err := a.Connect(ctx, false, nil); err != nil {
-		return err
-	}
-
-	pictureID, err := a.WA().SetGroupPhoto(ctx, gjid, imgBytes)
-	if err != nil {
-		return fmt.Errorf("set group picture: %w", err)
-	}
-	if flags.asJSON {
-		return out.WriteJSON(os.Stdout, map[string]any{"jid": gjid.String(), "picture_id": pictureID})
-	}
-	if imgBytes == nil {
-		fmt.Fprintln(os.Stdout, "Group picture removed")
-		return nil
-	}
-	fmt.Fprintf(os.Stdout, "Group picture updated (id: %s)\n", pictureID)
-	return nil
+	return runGroupCommand(flags, groupOp{Action: groupActionPicture, JID: jidStr, Image: imgBytes}, true)
 }
 
 // newGroupsLinkCmd builds `groups link` (link=true) or `groups unlink` (link=false):
@@ -109,53 +74,17 @@ func newGroupsLinkCmd(flags *rootFlags, link bool) *cobra.Command {
 			if strings.TrimSpace(parentStr) == "" {
 				return fmt.Errorf("--parent is required (community parent group JID)")
 			}
-			child, err := parseGroupJID(jidStr)
-			if err != nil {
+			if _, err := parseGroupJID(jidStr); err != nil {
 				return err
 			}
-			parent, err := parseGroupJID(parentStr)
-			if err != nil {
+			if _, err := parseGroupJID(parentStr); err != nil {
 				return fmt.Errorf("--parent: %w", err)
 			}
-			if err := flags.requireWritable(); err != nil {
-				return err
+			action := groupActionLink
+			if !link {
+				action = groupActionUnlink
 			}
-			ctx, cancel := withTimeout(context.Background(), flags)
-			defer cancel()
-
-			a, lk, err := newApp(ctx, flags, true, false)
-			if err != nil {
-				return err
-			}
-			defer closeApp(a, lk)
-
-			if err := a.EnsureAuthed(ctx); err != nil {
-				return err
-			}
-			if err := a.Connect(ctx, false, nil); err != nil {
-				return err
-			}
-
-			if link {
-				err = a.WA().LinkGroup(ctx, parent, child, hidden)
-			} else {
-				err = a.WA().UnlinkGroup(ctx, parent, child)
-			}
-			if err != nil {
-				return fmt.Errorf("%s group: %w", use, err)
-			}
-			if info, err := a.WA().GetGroupInfo(ctx, child); err == nil && info != nil {
-				_ = persistGroupInfo(ctx, a.DB(), a.WA(), info)
-			}
-			if flags.asJSON {
-				res := map[string]any{"jid": child.String(), "parent": parent.String(), "linked": link}
-				if link {
-					res["hidden"] = hidden
-				}
-				return out.WriteJSON(os.Stdout, res)
-			}
-			fmt.Fprintln(os.Stdout, "OK")
-			return nil
+			return runGroupCommand(flags, groupOp{Action: action, JID: jidStr, Parent: parentStr, Hidden: hidden}, true)
 		},
 	}
 	cmd.Flags().StringVar(&jidStr, "jid", "", "group JID (…@g.us)")
