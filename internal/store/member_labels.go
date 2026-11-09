@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS group_member_labels (
     group_jid TEXT NOT NULL,
     user_jid TEXT NOT NULL,
     label TEXT NOT NULL, -- empty when the member cleared it
-    label_at INTEGER NOT NULL, -- time of the newest evidence, 0 when unknown
+    label_at_ms INTEGER NOT NULL, -- newest evidence, Unix milliseconds, 0 when unknown
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (group_jid, user_jid)
 );
@@ -52,19 +52,22 @@ func (d *DB) RecordGroupMemberLabel(p RecordGroupMemberLabelParams) error {
 	if groupJID == "" || userJID == "" {
 		return fmt.Errorf("group and user JID are required")
 	}
+	// Milliseconds, not the store's usual seconds: WhatsApp dates label
+	// changes to the millisecond, and two changes within one second must
+	// still resolve to the later one.
 	var at int64
 	if !p.At.IsZero() {
-		at = unix(p.At)
+		at = p.At.UnixMilli()
 	}
 	_, err := d.sql.Exec(`
-		INSERT INTO group_member_labels(group_jid, user_jid, label, label_at, updated_at)
+		INSERT INTO group_member_labels(group_jid, user_jid, label, label_at_ms, updated_at)
 		VALUES(?, ?, ?, ?, ?)
 		ON CONFLICT(group_jid, user_jid) DO UPDATE SET
 			label = excluded.label,
-			label_at = excluded.label_at,
+			label_at_ms = excluded.label_at_ms,
 			updated_at = excluded.updated_at
-		WHERE excluded.label_at > group_member_labels.label_at
-			OR (excluded.label_at = group_member_labels.label_at AND excluded.label > group_member_labels.label)
+		WHERE excluded.label_at_ms > group_member_labels.label_at_ms
+			OR (excluded.label_at_ms = group_member_labels.label_at_ms AND excluded.label > group_member_labels.label)
 	`, groupJID, userJID, strings.TrimSpace(p.Label), at, unix(nowUTC()))
 	if err != nil {
 		return fmt.Errorf("record group member label: %w", err)
@@ -83,7 +86,7 @@ func (d *DB) groupMemberLabels(groupJID string) (map[string]groupMemberLabel, er
 		return out, nil
 	}
 	rows, err := d.readQuery().Query(`
-		SELECT user_jid, label, label_at FROM group_member_labels
+		SELECT user_jid, label, label_at_ms FROM group_member_labels
 		WHERE group_jid = ? AND label <> ''
 	`, groupJID)
 	if err != nil {
@@ -98,7 +101,7 @@ func (d *DB) groupMemberLabels(groupJID string) (map[string]groupMemberLabel, er
 		}
 		l := groupMemberLabel{label: label}
 		if at > 0 {
-			l.at = fromUnix(at)
+			l.at = time.UnixMilli(at).UTC()
 		}
 		out[user] = l
 	}
@@ -107,16 +110,16 @@ func (d *DB) groupMemberLabels(groupJID string) (map[string]groupMemberLabel, er
 
 func migrateLIDGroupMemberLabelsToPN(tx *sql.Tx, lidJID, pnJID string) error {
 	if _, err := tx.Exec(`
-		INSERT INTO group_member_labels(group_jid, user_jid, label, label_at, updated_at)
-		SELECT group_jid, ?, label, label_at, updated_at
+		INSERT INTO group_member_labels(group_jid, user_jid, label, label_at_ms, updated_at)
+		SELECT group_jid, ?, label, label_at_ms, updated_at
 		FROM group_member_labels
 		WHERE user_jid = ?
 		ON CONFLICT(group_jid, user_jid) DO UPDATE SET
 			label = excluded.label,
-			label_at = excluded.label_at,
+			label_at_ms = excluded.label_at_ms,
 			updated_at = excluded.updated_at
-		WHERE excluded.label_at > group_member_labels.label_at
-			OR (excluded.label_at = group_member_labels.label_at AND excluded.label > group_member_labels.label)
+		WHERE excluded.label_at_ms > group_member_labels.label_at_ms
+			OR (excluded.label_at_ms = group_member_labels.label_at_ms AND excluded.label > group_member_labels.label)
 	`, pnJID, lidJID); err != nil {
 		return fmt.Errorf("merge lid group member labels: %w", err)
 	}

@@ -202,3 +202,58 @@ func TestOlderStoreGetsMemberLabelTable(t *testing.T) {
 	recordLabel(t, reopened, labelUser, "Coach", labelDay(2))
 	requireLabel(t, reopened, labelUser, "Coach", labelDay(2))
 }
+
+// WhatsApp dates label changes to the millisecond. Two changes within one
+// second must resolve to the later one in either arrival order, including a
+// clear right after a set.
+func TestMemberLabelOrderKeepsMilliseconds(t *testing.T) {
+	second := time.UnixMilli(1767225600000).UTC()
+	early, late := second.Add(100*time.Millisecond), second.Add(900*time.Millisecond)
+	cases := []struct {
+		name         string
+		first, later labelObservation
+		want         string
+	}{
+		{"newer label wins", labelObservation{"Z", early}, labelObservation{"A", late}, "A"},
+		{"clear after set wins", labelObservation{"Coach", early}, labelObservation{"", late}, ""},
+	}
+	for _, tc := range cases {
+		for _, order := range [][]labelObservation{{tc.first, tc.later}, {tc.later, tc.first}} {
+			db := openTestDB(t)
+			seedLabelGroup(t, db, labelUser)
+			for _, o := range order {
+				recordLabel(t, db, labelUser, o.label, o.at)
+			}
+			p := participantLabel(t, db, labelUser)
+			if p.Label != tc.want {
+				t.Fatalf("%s, order %+v: label = %q, want %q", tc.name, order, p.Label, tc.want)
+			}
+			if tc.want != "" && (p.LabelUpdatedAt == nil || !p.LabelUpdatedAt.Equal(late)) {
+				t.Fatalf("%s: label_updated_at = %v, want %v", tc.name, p.LabelUpdatedAt, late)
+			}
+		}
+	}
+}
+
+// Merging a hidden-user identity keeps the later label even within a second.
+func TestMigrateLIDToPNKeepsMillisecondOrder(t *testing.T) {
+	second := time.UnixMilli(1767225600000).UTC()
+	lid := "999123456789@lid"
+	for _, lidIsLater := range []bool{true, false} {
+		db := openTestDB(t)
+		seedLabelGroup(t, db, labelUser)
+		pnAt, lidAt, want := second.Add(900*time.Millisecond), second.Add(100*time.Millisecond), "A"
+		if lidIsLater {
+			pnAt, lidAt, want = second.Add(100*time.Millisecond), second.Add(900*time.Millisecond), "Z"
+		}
+		pnLabel, lidLabel := "A", "Z"
+		recordLabel(t, db, labelUser, pnLabel, pnAt)
+		recordLabel(t, db, lid, lidLabel, lidAt)
+		if err := db.MigrateLIDToPN(lid, labelUser); err != nil {
+			t.Fatalf("MigrateLIDToPN: %v", err)
+		}
+		if p := participantLabel(t, db, labelUser); p.Label != want {
+			t.Fatalf("lid later = %v: label = %q, want %q", lidIsLater, p.Label, want)
+		}
+	}
+}

@@ -119,7 +119,7 @@ CREATE TABLE IF NOT EXISTS group_member_labels (
     group_jid TEXT NOT NULL,
     user_jid TEXT NOT NULL,
     label TEXT NOT NULL, -- empty when the member cleared it
-    label_at INTEGER NOT NULL, -- time of the newest evidence, 0 when unknown
+    label_at_ms INTEGER NOT NULL, -- newest evidence, Unix milliseconds, 0 when unknown
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (group_jid, user_jid)
 );
