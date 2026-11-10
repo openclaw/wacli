@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Messages: keep the raw vCard of every shared contact card (`message_contacts`, migration 34) so the `type` and `waid` of each `TEL` survive, and read a `TEL;waid=…:` whose value is empty as that number instead of dropping the card's phone. Cards received before this version have no stored vCard; only their display text remains.
+
 ## 0.26.0 - 2026-11-05
 
 **Highlights:** fresh own replies mark chats read, broadcast sync avoids long stalls, business attachments and M4A audio arrive intact, and networking security fixes.

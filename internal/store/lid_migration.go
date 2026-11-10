@@ -129,6 +129,9 @@ func (d *DB) MigrateLIDToPN(lidJID, pnJID string) error {
 	if err := migrateLIDMessageLocationsToPN(tx, lidJID, pnJID); err != nil {
 		return err
 	}
+	if err := migrateLIDMessageContactsToPN(tx, lidJID, pnJID); err != nil {
+		return err
+	}
 	if err := migrateLIDMessageReceiptsToPN(tx, lidJID, pnJID); err != nil {
 		return err
 	}
@@ -553,6 +556,37 @@ func migrateLIDMessageLocationsToPN(tx *sql.Tx, lidJID, pnJID string) error {
 		)
 	`); err != nil {
 		return fmt.Errorf("suppress destination-only purged locations: %w", err)
+	}
+	return nil
+}
+
+func migrateLIDMessageContactsToPN(tx *sql.Tx, lidJID, pnJID string) error {
+	if _, err := tx.Exec(`
+		INSERT INTO message_contacts(chat_jid, msg_id, position, display_name, vcard)
+		SELECT ?, msg_id, position, display_name, vcard
+		FROM message_contacts
+		WHERE chat_jid = ?
+			AND NOT EXISTS (
+				SELECT 1 FROM message_payload_purges p
+				WHERE p.chat_jid IN (?, ?) AND p.msg_id = message_contacts.msg_id
+			)
+		ON CONFLICT(chat_jid, msg_id, position) DO UPDATE SET
+			display_name = COALESCE(NULLIF(excluded.display_name, ''), message_contacts.display_name),
+			vcard = excluded.vcard
+	`, pnJID, lidJID, lidJID, pnJID); err != nil {
+		return fmt.Errorf("migrate lid message contacts: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM message_contacts WHERE chat_jid = ?`, lidJID); err != nil {
+		return fmt.Errorf("delete migrated lid message contacts: %w", err)
+	}
+	if _, err := tx.Exec(`
+		DELETE FROM message_contacts
+		WHERE EXISTS (
+			SELECT 1 FROM message_payload_purges p
+			WHERE p.chat_jid = message_contacts.chat_jid AND p.msg_id = message_contacts.msg_id
+		)
+	`); err != nil {
+		return fmt.Errorf("suppress destination-only purged contacts: %w", err)
 	}
 	return nil
 }

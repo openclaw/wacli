@@ -204,6 +204,9 @@ func (d *DB) DeleteGroupLocalData(jid string) (err error) {
 	if err = q.DeleteMessageLocationsForChat(ctx, jid); err != nil {
 		return err
 	}
+	if _, err = tx.Exec(`DELETE FROM message_contacts WHERE chat_jid = ?`, jid); err != nil {
+		return err
+	}
 	if err = q.DeleteStarredForChat(ctx, jid); err != nil {
 		return err
 	}
