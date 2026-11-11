@@ -52,6 +52,29 @@ func (a *App) markChatReadWithReceipts(ctx context.Context, jid types.JID, throu
 		}
 		return 0, "", a.db.ClearChatUnreadMarker(chatJID)
 	}
+	sent, receipt, err := a.sendReadReceipts(ctx, jid, msgs)
+	if err != nil {
+		return sent, receipt, err
+	}
+	ids := make([]string, 0, len(msgs))
+	for _, m := range msgs {
+		ids = append(ids, m.MsgID)
+	}
+	clearUnread := a.db.ClearChatUnreadThrough
+	if throughID != "" {
+		// A marker-only arrival after selection must stay pending even when
+		// its counter has not advanced by the time receipt transport finishes.
+		clearUnread = a.db.ClearChatUnreadThroughPreservingMarker
+	}
+	if err := clearUnread(chatJID, msgs[len(msgs)-1].Timestamp, ids); err != nil {
+		return sent, receipt, fmt.Errorf("receipts sent, but updating local unread state failed: %w", err)
+	}
+	return sent, receipt, nil
+}
+
+// sendReadReceipts dispatches receipts for exactly msgs, batched by sender, and
+// reports how many were sent before any failure.
+func (a *App) sendReadReceipts(ctx context.Context, jid types.JID, msgs []store.MessageInfo) (int, types.ReceiptType, error) {
 	isGroup := jid.Server == types.GroupServer
 	batches, err := readReceiptBatches(msgs, isGroup)
 	if err != nil {
@@ -80,20 +103,44 @@ func (a *App) markChatReadWithReceipts(ctx context.Context, jid types.JID, throu
 		}
 		sent += len(batch.ids)
 	}
-	ids := make([]string, 0, len(msgs))
-	for _, m := range msgs {
-		ids = append(ids, m.MsgID)
-	}
-	clearUnread := a.db.ClearChatUnreadThrough
-	if throughID != "" {
-		// A marker-only arrival after selection must stay pending even when
-		// its counter has not advanced by the time receipt transport finishes.
-		clearUnread = a.db.ClearChatUnreadThroughPreservingMarker
-	}
-	if err := clearUnread(chatJID, msgs[len(msgs)-1].Timestamp, ids); err != nil {
-		return sent, receipt, fmt.Errorf("receipts sent, but updating local unread state failed: %w", err)
-	}
 	return sent, receipt, nil
+}
+
+// MarkChatMessagesReadWithReceipts acknowledges exactly the given stored
+// incoming messages, which must be the chat's oldest unread messages, so no
+// unread message before them is skipped and nothing else is acknowledged. The
+// local unread count is lowered only when nothing else changed the chat while
+// the receipts were sent; settled reports whether it was.
+func (a *App) MarkChatMessagesReadWithReceipts(ctx context.Context, jid types.JID, ids []string) (sent int, receipt types.ReceiptType, settled bool, err error) {
+	if len(ids) == 0 || len(ids) > maxReadReceiptMessages {
+		return 0, "", false, fmt.Errorf("--message-id takes 1 to %d message IDs", maxReadReceiptMessages)
+	}
+	chatJID := canonicalJIDString(a.canonicalStoreJID(ctx, jid))
+	msgs, snap, err := func() ([]store.MessageInfo, store.ExactReceiptSnapshot, error) {
+		a.unreadMu.Lock()
+		defer a.unreadMu.Unlock()
+		// Send nothing if the caller gave up while this waited.
+		if err := ctx.Err(); err != nil {
+			return nil, store.ExactReceiptSnapshot{}, err
+		}
+		return a.db.ReadReceiptCandidatesExact(chatJID, ids)
+	}()
+	if err != nil {
+		return 0, "", false, fmt.Errorf("select messages to acknowledge in %s: %w", chatJID, err)
+	}
+	sent, receipt, err = a.sendReadReceipts(ctx, jid, msgs)
+	if err != nil {
+		return sent, receipt, false, err
+	}
+	settled, err = func() (bool, error) {
+		a.unreadMu.Lock()
+		defer a.unreadMu.Unlock()
+		return a.db.SettleExactReceipts(chatJID, snap)
+	}()
+	if err != nil {
+		return sent, receipt, false, fmt.Errorf("receipts sent, but updating local unread state failed: %w", err)
+	}
+	return sent, receipt, settled, nil
 }
 
 func readReceiptBatches(msgs []store.MessageInfo, isGroup bool) ([]readReceiptBatch, error) {

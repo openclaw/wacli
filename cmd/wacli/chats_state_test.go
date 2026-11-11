@@ -120,6 +120,11 @@ func (f *orderedMarkReadApp) MarkChatReadWithReceipts(_ context.Context, chat ty
 	return f.receipts, kind, f.receiptErr
 }
 
+func (f *orderedMarkReadApp) MarkChatMessagesReadWithReceipts(_ context.Context, chat types.JID, ids []string) (int, types.ReceiptType, bool, error) {
+	f.steps = append(f.steps, "exact "+chat.String()+" "+strings.Join(ids, ","))
+	return len(ids), types.ReceiptType("unknown"), true, f.receiptErr
+}
+
 func (f *orderedMarkReadApp) MarkChatRead(_ context.Context, chat types.JID, read bool) error {
 	f.steps = append(f.steps, fmt.Sprintf("mark %s read=%t", chat, read))
 	return nil

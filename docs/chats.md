@@ -15,7 +15,7 @@ wacli chats pin --chat CHAT [--pick N]
 wacli chats unpin --chat CHAT [--pick N]
 wacli chats mute --chat CHAT [--duration DURATION] [--pick N]
 wacli chats unmute --chat CHAT [--pick N]
-wacli chats mark-read --chat CHAT [--pick N] [--through-message-id ID] [--receipts]
+wacli chats mark-read --chat CHAT [--pick N] [--through-message-id ID] [--receipts [--message-id ID]...]
 wacli chats mark-unread --chat CHAT [--pick N]
 wacli chats cleanup [--days N] [--jid JID] [--dry-run] [--confirm]
 ```
@@ -55,6 +55,8 @@ Use `wacli chats mark-read --chat CHAT --receipts` to send receipts for stored u
 
 Add `--through-message-id ID` to send receipts only for the current unread selection at or before that inbound message. The 100-message cap, group sender batching, and read-receipt privacy setting still apply. Repeat with the same ID to finish a capped selection; newer messages remain unread. Both direct execution and delegation honor this cutoff. Older sync processes reject the separate bounded request without falling back to an unbounded read; restart `wacli sync` after upgrading.
 
+Use `--receipts --message-id ID` (repeatable, up to 100) to acknowledge exactly those stored inbound messages and nothing else. Together they must be the chat's oldest unread messages, so a receipt never skips an older unread message: an unknown, outgoing, reaction, deleted, already-read or out-of-order ID fails before anything is sent, as does a chat with only a manual unread marker, or a message without readable content (`(message)`) between the last read message and the newest requested one, because it may be unread. Receipts are sent for exactly those IDs. The local unread count is then lowered to the newer messages only if the requested messages are still exactly what follows the last read message, by stored row, and the count still matches; otherwise it is kept, because a message that arrived or changed meanwhile could not be told apart from an acknowledged one. JSON output adds `unread_settled` (`true` or `false`). This settles wacli's local state only. How the phone and other linked devices apply the receipts is up to them: they may treat a receipt as covering earlier messages in the chat, including messages wacli has not stored. Repeat with the oldest unread IDs to acknowledge more. It cannot be combined with `--through-message-id`. Older sync processes reject the separate request without any fallback; restart `wacli sync` after upgrading.
+
 Receipt mode does not wait for app-state recovery, so it can run while the primary phone cannot provide an app-state snapshot. It works directly or through a same-store `sync --follow` process. Restart older sync processes after upgrading: the separate receipt request is rejected by an older daemon before it changes the chat.
 
 Each call handles at most 100 messages, starting with the oldest messages in the current unread selection. Repeat the command for larger counts; unsent messages and arrivals during dispatch remain unread. Reactions, outgoing messages, content-free placeholders, and deleted messages are excluded before the limit. Group messages are batched by sender. Missing group sender identities or an unread count larger than a nonempty eligible local history fail before dispatch; sync the missing history first. A marker-only chat uses its latest eligible incoming message.
@@ -79,6 +81,7 @@ wacli chats mute --chat "+1 555 123 4567" --duration 8h
 wacli chats mark-read --chat family --pick 1
 wacli chats mark-read --chat family --pick 1 --receipts --json
 wacli chats mark-read --chat family --pick 1 --through-message-id HANDLED_MESSAGE_ID
+wacli chats mark-read --chat family --pick 1 --receipts --message-id READ_MESSAGE_ID --json
 wacli chats cleanup --days 365 --dry-run
 ```
 
