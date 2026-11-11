@@ -162,6 +162,9 @@ type App struct {
 	heartbeatLast             atomic.Int64
 	groupInfo                 groupInfoCache
 	presenceWatch             presenceWatch
+	// unreadMu keeps exact read receipts from selecting or settling between
+	// storing a live message and counting it as unread.
+	unreadMu sync.Mutex
 }
 
 func New(opts Options) (*App, error) {

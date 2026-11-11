@@ -444,6 +444,13 @@ func (f *fakeDelegatedMarkReadApp) MarkChatReadWithReceipts(_ context.Context, c
 	return f.receipts, types.ReceiptType("unknown"), nil
 }
 
+func (f *fakeDelegatedMarkReadApp) MarkChatMessagesReadWithReceipts(_ context.Context, chat types.JID, ids []string) (int, types.ReceiptType, bool, error) {
+	if f.receiptCalls != nil {
+		f.receiptCalls <- chat
+	}
+	return len(ids), types.ReceiptType("unknown"), true, nil
+}
+
 func (f *fakeDelegatedMarkReadApp) MarkChatRead(_ context.Context, chat types.JID, read bool) error {
 	f.calls <- delegatedMarkReadCall{chat: chat, read: read}
 	return nil

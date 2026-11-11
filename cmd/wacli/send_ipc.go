@@ -70,6 +70,7 @@ type sendDelegateRequest struct {
 	Read                 *bool    `json:"read,omitempty"`
 	Receipts             bool     `json:"receipts,omitempty"`
 	ThroughMessageID     string   `json:"through_message_id,omitempty"`
+	MessageIDs           []string `json:"message_ids,omitempty"`
 	Phones               []string `json:"phones,omitempty"`
 	FirstName            string   `json:"first_name,omitempty"`
 	AccountWide          bool     `json:"account_wide,omitempty"`
@@ -102,6 +103,7 @@ type sendDelegateResponse struct {
 	Action         string               `json:"action,omitempty"`
 	Receipts       *int                 `json:"receipts,omitempty"`
 	ReceiptType    string               `json:"receipt_type,omitempty"`
+	UnreadSettled  *bool                `json:"unread_settled,omitempty"`
 	Contacts       []contactCheckResult `json:"contacts,omitempty"`
 	Contact        *contactSaveResult   `json:"contact,omitempty"`
 	Presence       *app.PresenceState   `json:"presence,omitempty"`
@@ -410,6 +412,8 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 		return executeDelegatedMarkRead(ctx, a, req)
 	case markReadThroughKind:
 		return executeDelegatedMarkRead(ctx, a, req)
+	case markReadIDsKind:
+		return executeDelegatedMarkRead(ctx, a, req)
 	case markReadReceiptsKind:
 		// Its own kind, so daemons without receipt support reject it here
 		// instead of marking the chat read and dropping the unread count.
@@ -432,6 +436,7 @@ type delegatedMarkReadApp interface {
 	MarkChatReadThrough(context.Context, types.JID, string) error
 	MarkChatReadWithReceipts(context.Context, types.JID) (int, types.ReceiptType, error)
 	MarkChatReadWithReceiptsThrough(context.Context, types.JID, string) (int, types.ReceiptType, error)
+	MarkChatMessagesReadWithReceipts(context.Context, types.JID, []string) (int, types.ReceiptType, bool, error)
 }
 
 func executeDelegatedMarkRead(ctx context.Context, a delegatedMarkReadApp, req sendDelegateRequest) (sendDelegateResponse, error) {
@@ -449,6 +454,16 @@ func executeDelegatedMarkRead(ctx context.Context, a delegatedMarkReadApp, req s
 	} else if req.ThroughMessageID != "" {
 		return sendDelegateResponse{}, fmt.Errorf("explicit read boundary requires send kind %q", markReadThroughKind)
 	}
+	if req.Kind == markReadIDsKind {
+		if !read || !req.Receipts {
+			return sendDelegateResponse{}, fmt.Errorf("exact message acknowledgment requires read=true and receipts")
+		}
+		if err := validateExactReadIDs(req.MessageIDs, true, req.ThroughMessageID); err != nil {
+			return sendDelegateResponse{}, err
+		}
+	} else if len(req.MessageIDs) > 0 {
+		return sendDelegateResponse{}, fmt.Errorf("exact message IDs require send kind %q", markReadIDsKind)
+	}
 	toJID, err := resolveRecipient(a, req.To, recipientOptions{pick: req.Pick, asJSON: true})
 	if err != nil {
 		return sendDelegateResponse{}, err
@@ -456,6 +471,13 @@ func executeDelegatedMarkRead(ctx context.Context, a delegatedMarkReadApp, req s
 	// Receipt mode never enters app-state recovery.
 	var receipts *int
 	var receiptType string
+	if req.Kind == markReadIDsKind {
+		n, kind, settled, err := a.MarkChatMessagesReadWithReceipts(ctx, toJID, req.MessageIDs)
+		if err != nil {
+			return sendDelegateResponse{}, err
+		}
+		return sendDelegateResponse{OK: true, Chat: toJID.String(), Action: "mark-read", Receipts: &n, ReceiptType: string(kind), UnreadSettled: &settled}, nil
+	}
 	if req.Receipts {
 		n, kind, err := markReadReceipts(ctx, a, toJID, req.ThroughMessageID)
 		if err != nil {

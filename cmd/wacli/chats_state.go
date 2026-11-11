@@ -18,6 +18,7 @@ type chatStateOptions struct {
 	pick             int
 	receipts         bool
 	throughMessageID string
+	messageIDs       []string
 }
 
 func newChatsArchiveCmd(flags *rootFlags, archive bool) *cobra.Command {
@@ -103,7 +104,15 @@ func newChatsMarkReadCmd(flags *rootFlags, read bool) *cobra.Command {
 			if cmd.Flags().Changed("through-message-id") && (strings.TrimSpace(opts.throughMessageID) == "" || opts.throughMessageID != strings.TrimSpace(opts.throughMessageID)) {
 				return fmt.Errorf("--through-message-id requires an exact nonempty message ID")
 			}
+			if cmd.Flags().Changed("message-id") {
+				if err := validateExactReadIDs(opts.messageIDs, opts.receipts, opts.throughMessageID); err != nil {
+					return err
+				}
+			}
 			delegate := sendDelegateRequest{Kind: markReadDelegateKind(opts.receipts, opts.throughMessageID), Read: &read, Receipts: opts.receipts, ThroughMessageID: opts.throughMessageID}
+			if len(opts.messageIDs) > 0 {
+				delegate = sendDelegateRequest{Kind: markReadIDsKind, Read: &read, Receipts: true, MessageIDs: opts.messageIDs}
+			}
 			return runChatState(flags, opts, use, delegate, func(ctx context.Context, a chatStateApp, jid types.JID) error {
 				if opts.throughMessageID != "" {
 					return a.MarkChatReadThrough(ctx, jid, opts.throughMessageID)
@@ -116,6 +125,7 @@ func newChatsMarkReadCmd(flags *rootFlags, read bool) *cobra.Command {
 	if read {
 		cmd.Flags().StringVar(&opts.throughMessageID, "through-message-id", "", "mark read only through this exact stored inbound message ID")
 		cmd.Flags().BoolVar(&opts.receipts, "receipts", false, "send read receipts for up to 100 unread messages without waiting for app-state recovery; follows your read-receipt privacy setting")
+		cmd.Flags().StringArrayVar(&opts.messageIDs, "message-id", nil, "with --receipts, acknowledge exactly this stored inbound message (repeatable, up to 100); together they must be the chat's oldest unread messages")
 	}
 	return cmd
 }
@@ -134,6 +144,9 @@ type chatStateApp interface {
 type chatStateReceipts struct {
 	count int
 	kind  string
+	// settled is set for exact message IDs: whether the local unread count was
+	// lowered, or kept because the chat changed while receipts were sent.
+	settled *bool
 }
 
 func (r chatStateReceipts) senderNotified() *bool {
@@ -148,6 +161,7 @@ const (
 	markReadKind         = "mark_read"
 	markReadReceiptsKind = "mark_read_receipts"
 	markReadThroughKind  = "mark_read_through"
+	markReadIDsKind      = "mark_read_ids"
 	chatStateKind        = "chat_state"
 )
 
@@ -170,6 +184,37 @@ func markReadDelegateKind(receipts bool, throughID string) string {
 		return markReadReceiptsKind
 	}
 	return markReadKind
+}
+
+// validateExactReadIDs checks --message-id before anything is sent.
+func validateExactReadIDs(ids []string, receipts bool, throughID string) error {
+	if !receipts {
+		return fmt.Errorf("--message-id requires --receipts")
+	}
+	if throughID != "" {
+		return fmt.Errorf("--message-id and --through-message-id are mutually exclusive")
+	}
+	if len(ids) == 0 || len(ids) > 100 {
+		return fmt.Errorf("--message-id takes 1 to 100 message IDs")
+	}
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		if strings.TrimSpace(id) == "" || id != strings.TrimSpace(id) {
+			return fmt.Errorf("--message-id requires exact nonempty message IDs")
+		}
+		if seen[id] {
+			return fmt.Errorf("--message-id %q is repeated", id)
+		}
+		seen[id] = true
+	}
+	return nil
+}
+
+func explainExactReadDelegateError(err error) error {
+	if err == nil || !strings.Contains(err.Error(), "unsupported send kind") || !strings.Contains(err.Error(), markReadIDsKind) {
+		return err
+	}
+	return fmt.Errorf("the running sync process does not support --message-id and left the chat unread; restart `wacli sync` after upgrading, then run this again: %w", err)
 }
 
 func explainReadBoundaryDelegateError(err error) error {
@@ -215,6 +260,9 @@ func runChatState(flags *rootFlags, opts chatStateOptions, action string, delega
 				if delegate.Kind == markReadThroughKind {
 					return explainReadBoundaryDelegateError(delegateErr)
 				}
+				if delegate.Kind == markReadIDsKind {
+					return explainExactReadDelegateError(delegateErr)
+				}
 				if delegate.Kind == chatStateKind {
 					return explainChatStateDelegateError(delegateErr, action)
 				}
@@ -223,6 +271,12 @@ func runChatState(flags *rootFlags, opts chatStateOptions, action string, delega
 			receipts, err := delegatedReceipts(resp, opts.receipts)
 			if err != nil {
 				return err
+			}
+			if receipts != nil && len(opts.messageIDs) > 0 {
+				if resp.UnreadSettled == nil {
+					return fmt.Errorf("the running sync process did not report whether local unread state was settled for %s; restart `wacli sync` after upgrading", resp.Chat)
+				}
+				receipts.settled = resp.UnreadSettled
 			}
 			return writeChatStateResult(flags, action, resp.Chat, receipts)
 		}
@@ -253,7 +307,13 @@ func runChatState(flags *rootFlags, opts chatStateOptions, action string, delega
 	}
 	// Receipt mode owns its local read boundary and bypasses app-state recovery.
 	var receipts *chatStateReceipts
-	if opts.receipts {
+	if len(opts.messageIDs) > 0 {
+		n, kind, settled, err := a.MarkChatMessagesReadWithReceipts(ctx, jid, opts.messageIDs)
+		if err != nil {
+			return err
+		}
+		receipts = &chatStateReceipts{count: n, kind: string(kind), settled: &settled}
+	} else if opts.receipts {
 		n, kind, err := markReadReceipts(ctx, a, jid, opts.throughMessageID)
 		if err != nil {
 			return err
@@ -295,6 +355,9 @@ func writeChatStateResult(flags *rootFlags, action, chat string, receipts *chatS
 				result["receipt"] = receipts.kind
 				result["sender_notified"] = receipts.senderNotified()
 			}
+			if receipts.settled != nil {
+				result["unread_settled"] = *receipts.settled
+			}
 		}
 		return out.WriteJSON(os.Stdout, result)
 	}
@@ -309,6 +372,9 @@ func writeChatStateResult(flags *rootFlags, action, chat string, receipts *chatS
 		note = fmt.Sprintf(", sent as %s: your read-receipt privacy setting keeps them from the sender", receipts.kind)
 	} else if receipts.count > 0 {
 		note = ", sender notification unknown; WhatsApp applies your privacy setting"
+	}
+	if receipts.settled != nil && !*receipts.settled {
+		note += "; local unread count kept because the chat changed while sending"
 	}
 	fmt.Fprintf(os.Stdout, "%s: %s (read receipts: %d%s)\n", action, chat, receipts.count, note)
 	return nil

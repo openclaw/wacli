@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Chats: `mark-read --receipts --message-id ID` sends read receipts for exactly the given oldest unread messages and lowers the local unread count only while those messages are still exactly what follows the last read message, so messages that arrive or change while receipts are in flight stay unread locally. How the phone and other linked devices apply the receipts is up to them.
+
 ## 0.26.0 - 2026-11-05
 
 **Highlights:** fresh own replies mark chats read, broadcast sync avoids long stalls, business attachments and M4A audio arrive intact, and networking security fixes.

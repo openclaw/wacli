@@ -653,11 +653,8 @@ func (a *App) handleLiveSyncMessage(ctx context.Context, opts SyncOptions, v *ev
 			}()
 		}
 	}
-	if err := a.storeParsedMessageForSync(ctx, pm, storeOptions, limits...); err == nil {
+	if err := a.storeAndCountLiveMessage(ctx, opts, pm, storeOptions, incrementUnread, limits...); err == nil {
 		stored = true
-		if incrementUnread {
-			a.incrementLiveUnread(ctx, pm)
-		}
 		a.emitSyncProgress(messagesStored.Add(1))
 		if enqueueWebhook != nil {
 			enqueueWebhook(pm)
@@ -854,6 +851,24 @@ func (a *App) storeHistoryCallLogRecords(ctx context.Context, v *events.HistoryS
 			)
 		}
 	}
+}
+
+// storeAndCountLiveMessage stores a live message and raises its chat's unread
+// count as one step for exact read receipts, which select and settle by that
+// count.
+func (a *App) storeAndCountLiveMessage(ctx context.Context, opts SyncOptions, pm wa.ParsedMessage, storeOptions messageStoreOptions, count bool, limits ...*syncStorageLimits) error {
+	a.unreadMu.Lock()
+	defer a.unreadMu.Unlock()
+	if err := a.storeParsedMessageForSync(ctx, pm, storeOptions, limits...); err != nil {
+		return err
+	}
+	if count {
+		if opts.afterLiveStore != nil {
+			opts.afterLiveStore()
+		}
+		a.incrementLiveUnread(ctx, pm)
+	}
+	return nil
 }
 
 func (a *App) incrementLiveUnread(ctx context.Context, pm wa.ParsedMessage) {
