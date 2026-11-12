@@ -349,13 +349,23 @@ func normalizeSendMediaTypeOverride(override string) (string, error) {
 	}
 }
 
-func newImageMessage(up whatsmeow.UploadResponse, mimeType, caption string, data []byte) (*waProto.ImageMessage, error) {
+// decodeSendImageConfig reads the dimensions an image message needs and
+// rejects data that cannot be sent as an image.
+func decodeSendImageConfig(data []byte) (image.Config, error) {
 	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
-		return nil, fmt.Errorf("invalid image data: %w", err)
+		return image.Config{}, fmt.Errorf("invalid image data: %w", err)
 	}
 	if cfg.Width <= 0 || cfg.Height <= 0 {
-		return nil, fmt.Errorf("invalid image dimensions: %dx%d", cfg.Width, cfg.Height)
+		return image.Config{}, fmt.Errorf("invalid image dimensions: %dx%d", cfg.Width, cfg.Height)
+	}
+	return cfg, nil
+}
+
+func newImageMessage(up whatsmeow.UploadResponse, mimeType, caption string, data []byte) (*waProto.ImageMessage, error) {
+	cfg, err := decodeSendImageConfig(data)
+	if err != nil {
+		return nil, err
 	}
 
 	msg := &waProto.ImageMessage{

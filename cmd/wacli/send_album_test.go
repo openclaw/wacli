@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"image"
 	"image/png"
 	"os"
@@ -24,7 +25,10 @@ type fakeAlbumWA struct {
 
 func (f *fakeAlbumWA) SendProtoMessage(_ context.Context, to types.JID, msg *waProto.Message) (types.MessageID, error) {
 	f.wireTarget = to
-	id := f.ids[len(f.sent)]
+	id := types.MessageID(fmt.Sprintf("SENT%d", len(f.sent)+1))
+	if len(f.sent) < len(f.ids) {
+		id = f.ids[len(f.sent)]
+	}
 	f.sent = append(f.sent, msg)
 	return id, nil
 }
@@ -88,6 +92,16 @@ func TestSendAlbumLinksEveryItemToTheAlbumHeader(t *testing.T) {
 	if _, err := db.GetMessage(to.String(), "IMG2"); err != nil {
 		t.Fatalf("album item not persisted: %v", err)
 	}
+	stored, err := db.GetMessage(to.String(), "ALBUM")
+	if err != nil {
+		t.Fatalf("album header not persisted under the returned id: %v", err)
+	}
+	if !stored.FromMe || stored.Text != "[Album: 3 images]" {
+		t.Fatalf("stored album header = %+v", stored)
+	}
+	if res.storeWarning != nil {
+		t.Fatalf("unexpected store warning: %v", res.storeWarning)
+	}
 }
 
 func TestSendAlbumRejectsBadInputBeforeSending(t *testing.T) {
@@ -95,6 +109,10 @@ func TestSendAlbumRejectsBadInputBeforeSending(t *testing.T) {
 	img := writeAlbumImage(t, dir, "a.png")
 	doc := filepath.Join(dir, "notes.txt")
 	if err := os.WriteFile(doc, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	broken := filepath.Join(dir, "broken.jpg")
+	if err := os.WriteFile(broken, []byte("not really a jpeg"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	tooMany := make([]string, maxAlbumFiles+1)
@@ -111,6 +129,7 @@ func TestSendAlbumRejectsBadInputBeforeSending(t *testing.T) {
 		{name: "one file", to: user, files: []string{img}, want: "at least"},
 		{name: "too many", to: user, files: tooMany, want: "at most"},
 		{name: "document", to: user, files: []string{img, doc}, want: "images or videos"},
+		{name: "undecodable image", to: user, files: []string{img, broken}, want: "broken.jpg: invalid image data"},
 		{name: "missing", to: user, files: []string{img, filepath.Join(dir, "missing.png")}, want: "missing.png"},
 		{name: "channel", to: types.NewJID("123", types.NewsletterServer), files: []string{img, img}, want: "channels"},
 	} {

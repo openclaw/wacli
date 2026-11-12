@@ -501,18 +501,22 @@ func extractAlbum(m *waProto.Message, pm *ParsedMessage) {
 		return
 	}
 	if pm.Text == "" {
-		imgs := album.GetExpectedImageCount()
-		vids := album.GetExpectedVideoCount()
-		switch {
-		case imgs > 0 && vids > 0:
-			pm.Text = fmt.Sprintf("[Album: %d images, %d videos]", imgs, vids)
-		case imgs > 0:
-			pm.Text = fmt.Sprintf("[Album: %d images]", imgs)
-		case vids > 0:
-			pm.Text = fmt.Sprintf("[Album: %d videos]", vids)
-		default:
-			pm.Text = "[Album]"
-		}
+		pm.Text = AlbumText(album.GetExpectedImageCount(), album.GetExpectedVideoCount())
+	}
+}
+
+// AlbumText is the history text for an album header, shared by received
+// albums and albums this client sends.
+func AlbumText(imgs, vids uint32) string {
+	switch {
+	case imgs > 0 && vids > 0:
+		return fmt.Sprintf("[Album: %d images, %d videos]", imgs, vids)
+	case imgs > 0:
+		return fmt.Sprintf("[Album: %d images]", imgs)
+	case vids > 0:
+		return fmt.Sprintf("[Album: %d videos]", vids)
+	default:
+		return "[Album]"
 	}
 }
 

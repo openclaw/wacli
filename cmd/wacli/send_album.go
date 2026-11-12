@@ -12,6 +12,7 @@ import (
 	"github.com/openclaw/wacli/internal/app"
 	"github.com/openclaw/wacli/internal/out"
 	"github.com/openclaw/wacli/internal/store"
+	"github.com/openclaw/wacli/internal/wa"
 	"github.com/spf13/cobra"
 	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waE2E"
@@ -59,6 +60,11 @@ func albumMediaCounts(files []string) (uint32, uint32, error) {
 		}
 		switch mediaType {
 		case "image":
+			// Decode now: an image the item send would reject must not
+			// leave a header and a partial album behind.
+			if _, err := decodeSendImageConfig(data); err != nil {
+				return 0, 0, fmt.Errorf("%s: %w", filepath.Base(f), err)
+			}
 			images++
 		case "video":
 			videos++
@@ -82,6 +88,7 @@ func sendAlbum(ctx context.Context, a albumSendApp, reconnect func(context.Conte
 		return sendAlbumOutcome{}, err
 	}
 
+	sentAt := time.Now().UTC()
 	parentID, err := runSendOperation(ctx, reconnect, func(ctx context.Context) (types.MessageID, error) {
 		return a.WA().SendProtoMessage(ctx, to, &waE2E.Message{AlbumMessage: &waE2E.AlbumMessage{
 			ExpectedImageCount: proto.Uint32(images),
@@ -97,7 +104,7 @@ func sendAlbum(ctx context.Context, a albumSendApp, reconnect func(context.Conte
 		ID:        proto.String(parentID),
 	}
 
-	res := sendAlbumOutcome{id: parentID}
+	res := sendAlbumOutcome{id: parentID, storeWarning: storeSentAlbumHeader(ctx, a, to, parentID, sentAt, wa.AlbumText(images, videos))}
 	for i, f := range files {
 		itemCaption := ""
 		if i == 0 {
@@ -116,6 +123,33 @@ func sendAlbum(ctx context.Context, a albumSendApp, reconnect func(context.Conte
 		}
 	}
 	return res, nil
+}
+
+// storeSentAlbumHeader records the accepted header so the ID the command
+// returns can be looked up like any other sent message. The send already
+// succeeded, so a failure here is a warning, not an error.
+func storeSentAlbumHeader(ctx context.Context, a albumSendApp, to types.JID, id string, now time.Time, text string) error {
+	storedChat := to.ToNonAD()
+	if to.Server == types.HiddenUserServer {
+		storedChat = canonicalOutboundChat(ctx, a.WA(), to)
+	}
+	chatName := a.WA().ResolveChatName(ctx, storedChat, "")
+	var storeErr error
+	if err := a.DB().UpsertChat(storedChat.String(), chatKindFromJID(storedChat), chatName, now); err != nil {
+		storeErr = fmt.Errorf("chat update: %w", err)
+	}
+	if err := a.DB().UpsertMessage(store.UpsertMessageParams{
+		ChatJID:    storedChat.String(),
+		ChatName:   chatName,
+		MsgID:      id,
+		SenderName: "me",
+		Timestamp:  now,
+		FromMe:     true,
+		Text:       text,
+	}); err != nil {
+		storeErr = errors.Join(storeErr, fmt.Errorf("message update: %w", err))
+	}
+	return storeErr
 }
 
 func absAlbumFiles(files []string) []string {
