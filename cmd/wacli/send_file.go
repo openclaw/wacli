@@ -27,6 +27,8 @@ import (
 	"github.com/openclaw/wacli/internal/wa"
 	"go.mau.fi/whatsmeow"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
+	"go.mau.fi/whatsmeow/proto/waCommon"
+	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"google.golang.org/protobuf/proto"
 )
@@ -55,6 +57,9 @@ type sendFileOptions struct {
 	ptt           bool
 	// maxSize is the upload cap in bytes; 0 means maxSendFileSize.
 	maxSize int64
+	// albumParent, when set, links this media message to a previously sent
+	// AlbumMessage so WhatsApp clients render the batch as one album.
+	albumParent *waCommon.MessageKey
 }
 
 type voiceNoteMetadata struct {
@@ -175,6 +180,14 @@ func sendFile(ctx context.Context, a interface {
 		}
 	}
 	attachSendFileReplyContext(msg, replyContext)
+	if opts.albumParent != nil {
+		msg.MessageContextInfo = &waE2E.MessageContextInfo{
+			MessageAssociation: &waE2E.MessageAssociation{
+				AssociationType:  waE2E.MessageAssociation_MEDIA_ALBUM.Enum(),
+				ParentMessageKey: opts.albumParent,
+			},
+		}
+	}
 
 	var id types.MessageID
 	if isNewsletter {
@@ -336,13 +349,23 @@ func normalizeSendMediaTypeOverride(override string) (string, error) {
 	}
 }
 
-func newImageMessage(up whatsmeow.UploadResponse, mimeType, caption string, data []byte) (*waProto.ImageMessage, error) {
+// decodeSendImageConfig reads the dimensions an image message needs and
+// rejects data that cannot be sent as an image.
+func decodeSendImageConfig(data []byte) (image.Config, error) {
 	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
-		return nil, fmt.Errorf("invalid image data: %w", err)
+		return image.Config{}, fmt.Errorf("invalid image data: %w", err)
 	}
 	if cfg.Width <= 0 || cfg.Height <= 0 {
-		return nil, fmt.Errorf("invalid image dimensions: %dx%d", cfg.Width, cfg.Height)
+		return image.Config{}, fmt.Errorf("invalid image dimensions: %dx%d", cfg.Width, cfg.Height)
+	}
+	return cfg, nil
+}
+
+func newImageMessage(up whatsmeow.UploadResponse, mimeType, caption string, data []byte) (*waProto.ImageMessage, error) {
+	cfg, err := decodeSendImageConfig(data)
+	if err != nil {
+		return nil, err
 	}
 
 	msg := &waProto.ImageMessage{

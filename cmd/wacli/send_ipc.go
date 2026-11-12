@@ -45,6 +45,7 @@ type sendDelegateRequest struct {
 	EphemeralDuration    string   `json:"ephemeral_duration,omitempty"`
 	EphemeralDurationSet bool     `json:"ephemeral_duration_set,omitempty"`
 	File                 string   `json:"file,omitempty"`
+	Files                []string `json:"files,omitempty"`
 	Filename             string   `json:"filename,omitempty"`
 	Caption              string   `json:"caption,omitempty"`
 	MIME                 string   `json:"mime,omitempty"`
@@ -95,6 +96,8 @@ type sendDelegateResponse struct {
 	Selected       []string             `json:"selected,omitempty"`
 	SelectedOption *selectOption        `json:"selected_option,omitempty"`
 	File           map[string]string    `json:"file,omitempty"`
+	IDs            []string             `json:"ids,omitempty"`
+	Files          []map[string]string  `json:"files,omitempty"`
 	StoreWarning   string               `json:"store_warning,omitempty"`
 	PreviewWarning string               `json:"preview_warning,omitempty"`
 	ThumbWarning   string               `json:"thumbnail_warning,omitempty"`
@@ -390,6 +393,8 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 		return executeDelegatedFile(ctx, a, req)
 	case "sticker":
 		return executeDelegatedSticker(ctx, a, req)
+	case "album":
+		return executeDelegatedAlbum(ctx, a, req)
 	case "react":
 		return executeDelegatedReact(ctx, a, req)
 	case "location":
@@ -728,6 +733,10 @@ func writeDelegatedSendOutput(flags *rootFlags, kind string, resp sendDelegateRe
 		if resp.StoreWarning != "" {
 			body["store_warning"] = resp.StoreWarning
 		}
+		if kind == "album" {
+			body["ids"] = resp.IDs
+			body["files"] = resp.Files
+		}
 		if kind == "react" {
 			body["target"] = resp.Target
 			body["reaction"] = resp.Reaction
@@ -749,6 +758,8 @@ func writeDelegatedSendOutput(flags *rootFlags, kind string, resp sendDelegateRe
 	switch kind {
 	case "file":
 		fmt.Fprintf(os.Stdout, "Sent %s to %s (id %s)\n", resp.File["name"], resp.To, resp.ID)
+	case "album":
+		fmt.Fprintf(os.Stdout, "Sent album of %d to %s (id %s)\n", len(resp.IDs), resp.To, resp.ID)
 	case "sticker":
 		fmt.Fprintf(os.Stdout, "Sent sticker to %s (id %s)\n", resp.To, resp.ID)
 	case "location":
