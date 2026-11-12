@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Send: `wacli send album` sends 2-30 images/videos as one WhatsApp album (album header plus linked items) instead of separate messages, directly or through a running `sync --follow`.
+
 ## 0.26.0 - 2026-11-05
 
 **Highlights:** fresh own replies mark chats read, broadcast sync avoids long stalls, business attachments and M4A audio arrive intact, and networking security fixes.

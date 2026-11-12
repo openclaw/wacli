@@ -27,6 +27,8 @@ import (
 	"github.com/openclaw/wacli/internal/wa"
 	"go.mau.fi/whatsmeow"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
+	"go.mau.fi/whatsmeow/proto/waCommon"
+	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"google.golang.org/protobuf/proto"
 )
@@ -55,6 +57,9 @@ type sendFileOptions struct {
 	ptt           bool
 	// maxSize is the upload cap in bytes; 0 means maxSendFileSize.
 	maxSize int64
+	// albumParent, when set, links this media message to a previously sent
+	// AlbumMessage so WhatsApp clients render the batch as one album.
+	albumParent *waCommon.MessageKey
 }
 
 type voiceNoteMetadata struct {
@@ -175,6 +180,14 @@ func sendFile(ctx context.Context, a interface {
 		}
 	}
 	attachSendFileReplyContext(msg, replyContext)
+	if opts.albumParent != nil {
+		msg.MessageContextInfo = &waE2E.MessageContextInfo{
+			MessageAssociation: &waE2E.MessageAssociation{
+				AssociationType:  waE2E.MessageAssociation_MEDIA_ALBUM.Enum(),
+				ParentMessageKey: opts.albumParent,
+			},
+		}
+	}
 
 	var id types.MessageID
 	if isNewsletter {

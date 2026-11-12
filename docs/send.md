@@ -13,6 +13,7 @@ Generic connection errors do not automatically start a fresh send: a disconnect 
 ```bash
 wacli send text --to RECIPIENT --message TEXT [--message-escapes] [--pick N] [--mention USER] [--no-preview] [--allow-self] [--ephemeral] [--ephemeral-duration DURATION] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
 wacli send file --to RECIPIENT --file PATH [--pick N] [--caption TEXT] [--filename NAME] [--mime TYPE] [--as auto|document|audio|image|video] [--ptt] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
+wacli send album --to RECIPIENT --file PATH --file PATH [--file PATH ...] [--pick N] [--caption TEXT] [--post-send-wait 2s]
 wacli send sticker --to RECIPIENT --file PATH [--pick N] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
 wacli send voice --to RECIPIENT --file PATH [--pick N] [--mime TYPE] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
 wacli send location --to RECIPIENT --latitude LAT --longitude LNG [--name TEXT] [--pick N] [--post-send-wait 2s]
@@ -27,7 +28,7 @@ wacli polls list [--chat RECIPIENT] [--limit N] [--json]
 
 ## Recipients
 
-- `send text`, `send file`, `send sticker`, `send voice`, and `send location` accept a JID, phone number, or synced contact/group/chat name.
+- `send text`, `send file`, `send album`, `send sticker`, `send voice`, and `send location` accept a JID, phone number, or synced contact/group/chat name.
 - Channel JIDs use `...@newsletter`; `send text` and `send file` can target channels when the authenticated account has posting permission.
 - If a name matches multiple recipients, interactive terminals prompt.
 - In scripts, use `--pick N` to choose a displayed match.
@@ -116,6 +117,7 @@ wacli polls list [--chat RECIPIENT] [--limit N] [--json]
 - Quoted file replies and `--ptt` voice-note mode are not supported for channel sends.
 - `send sticker` requires 512x512 WebP input. Static stickers are capped at 100 KiB; animated stickers are capped at 500 KiB and are sent with animation metadata.
 - `send voice` is a shortcut for `send file --ptt`.
+- `send album` sends 2-30 images and/or videos as one WhatsApp album: an album header announcing the counts, then each file as a normal image or video message linked to it, in `--file` order. `--caption` goes on the first item. Every file is checked (exists, within `WACLI_MEDIA_ROOTS` when set, image or video) before anything is sent; if a later item fails, the error says how many were already sent. Channels and status are not supported. A running `sync --follow` handles album sends only after it is restarted on a version that has `send album`.
 - Voice notes require OGG/Opus audio (`audio/ogg; codecs=opus`).
 - When available, `ffprobe` sets voice-note duration and `ffmpeg` generates the 64-sample waveform from decoded PCM audio.
 - Waveform decoding is capped at 2 MiB (about 131 seconds). Longer voice notes use that initial segment for the waveform; the complete audio file and its full duration are still sent. Failed decodes omit the optional waveform.
@@ -133,6 +135,7 @@ wacli send text --to "Family" --message "hey @15551234567" --mention +1555123456
 wacli send text --to 1234567890 --message "replying" --reply-to ABC123
 wacli send file --to 1234567890 --file ./pic.jpg --caption "hi"
 wacli send file --to 1234567890 --file /tmp/report --filename report.pdf
+wacli send album --to 1234567890 --file ./1.jpg --file ./2.jpg --file ./clip.mp4 --caption "weekend"
 wacli send sticker --to 1234567890 --file ./sticker-512.webp
 wacli send voice --to 1234567890 --file ./voice.ogg
 wacli send location --to 1234567890 --latitude 51.4779 --longitude -0.0015 --name "Royal Observatory"
