@@ -5,6 +5,8 @@
 - Sync: settle the upgrade replay for Keep chats archived after one complete `regular_low` snapshot, so stores whose snapshot has no preference mutation or omits a locally archived chat no longer request a full replay (and, on known-broken collections, a phone snapshot) on every start. A snapshot whose mutation failed to persist does not settle; the kept replay applies the original action first. Thanks @nicolasbiondic (#502).
 - Sync: recover the upgrade's missing **Keep chats archived** metadata from a background phone snapshot instead of a full `regular_low` replay, which with the SDK's full sync discards local collection state when the server's snapshot fails verification. No replay intent is recorded for it; until the phone answers with a newer snapshot, archived chats stay archived and incremental sync continues; the request is repeated at most once every six hours.
 
+- Dependencies: refresh eligible WhatsApp, SQLite, Go support and SQL tooling modules, pnpm, Node build tooling, GoReleaser, and the vulnerability scanner after the 48-hour cooldown; retain Go 1.27.0 and Node 24 minimums.
+
 - Calls: preserve call history and caller identities when hidden-user chats are reconciled with phone-number chats. Thanks @rsampayo (#571).
 
 - Security: build with Go 1.27.4 to fix GO-2026-6859 while retaining the Go 1.27.0 source minimum. Thanks @artemgetmann (#568).

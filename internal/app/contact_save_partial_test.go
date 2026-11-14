@@ -102,7 +102,7 @@ func encodeContactPatch(t *testing.T, proc *appstate.Processor, keyID []byte, fr
 // incremental fetch will return it again. The failed save must keep its
 // recovery intent. (Round-4 review, codex-astra and codex-sol.)
 func TestSaveContactFailedSendAfterPartialDecodeKeepsDebt(t *testing.T) {
-	for _, failure := range []string{"later hash mismatch", "later key missing"} {
+	for _, failure := range []string{"later skipped-version hash mismatch", "later key missing"} {
 		t.Run(failure, func(t *testing.T) {
 			a, f := newContactSaveTestApp(t)
 			f.hasLocalAppState = true
@@ -116,9 +116,10 @@ func TestSaveContactFailedSendAfterPartialDecodeKeepsDebt(t *testing.T) {
 			initial := appstate.HashState{Version: 10}
 			other := types.NewJID("15550002222", types.DefaultUserServer)
 			first := encodeContactPatch(t, proc, keyID, initial, 11, other, "Grace Hopper", "Grace")
-			bad := proto.Clone(first).(*waServerSync.SyncdPatch)
-			bad.Version = &waServerSync.SyncdVersion{Version: proto.Uint64(12)}
-			bad.SnapshotMAC = bytes.Repeat([]byte{0xff}, 32)
+			// A valid MAC now permits contiguous LTHash mismatches in the SDK.
+			// Skip a version and sign against missing state to exercise the
+			// hash failure that still requires a full replay.
+			bad := encodeContactPatch(t, proc, keyID, appstate.HashState{Version: 12}, 13, testContactPN, "Ada Lovelace", "Ada")
 			wantErr := appstate.ErrMismatchingLTHash
 			if failure == "later key missing" {
 				bad.KeyID = &waServerSync.KeyId{ID: []byte{99, 99, 99, 99}}
