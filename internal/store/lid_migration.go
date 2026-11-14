@@ -196,14 +196,16 @@ func (d *DB) LIDMigrationPurgedMedia(lidJID, pnJID string) ([]MessageLocalMedia,
 
 func migrateLIDChatToPN(tx *sql.Tx, lidJID, pnJID string) error {
 	if _, err := tx.Exec(`
-		INSERT INTO chats(jid, kind, name, last_message_ts, unread, unread_count)
+		INSERT INTO chats(jid, kind, name, last_message_ts, unread, unread_count, read_through_ts, read_through_rowid)
 		SELECT
 			?,
 			CASE WHEN kind = '' OR kind = 'unknown' THEN 'dm' ELSE kind END,
 			name,
 			last_message_ts,
 			CASE WHEN COALESCE(unread, 0) != 0 THEN 1 ELSE 0 END,
-			COALESCE(unread_count, 0)
+			COALESCE(unread_count, 0),
+			read_through_ts,
+			0
 		FROM chats
 		WHERE jid = ?
 		ON CONFLICT(jid) DO UPDATE SET
@@ -225,7 +227,10 @@ func migrateLIDChatToPN(tx *sql.Tx, lidJID, pnJID string) error {
 			END,
 			last_message_ts = max(COALESCE(chats.last_message_ts, 0), COALESCE(excluded.last_message_ts, 0)),
 			unread = CASE WHEN COALESCE(chats.unread, 0) != 0 OR COALESCE(excluded.unread, 0) != 0 THEN 1 ELSE 0 END,
-			unread_count = COALESCE(chats.unread_count, 0) + COALESCE(excluded.unread_count, 0)
+			unread_count = COALESCE(chats.unread_count, 0) + COALESCE(excluded.unread_count, 0),
+			read_through_rowid = CASE WHEN excluded.read_through_ts > chats.read_through_ts
+				THEN 0 ELSE chats.read_through_rowid END,
+			read_through_ts = MAX(chats.read_through_ts, excluded.read_through_ts)
 	`, pnJID, lidJID); err != nil {
 		return fmt.Errorf("merge lid chat into pn chat: %w", err)
 	}
