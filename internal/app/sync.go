@@ -570,6 +570,15 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage, optio
 			return err
 		}
 	}
+	if len(pm.Contacts) > 0 {
+		cards := make([]store.MessageContact, len(pm.Contacts))
+		for i, card := range pm.Contacts {
+			cards[i] = store.MessageContact{DisplayName: card.DisplayName, VCard: card.VCard}
+		}
+		if err := a.db.ReplaceMessageContacts(chatJID, pm.ID, cards); err != nil {
+			return err
+		}
+	}
 	if pm.Call != nil {
 		pm.Call.Chat = pm.Chat
 		if pm.Call.SenderJID == "" {

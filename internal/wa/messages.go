@@ -33,6 +33,13 @@ type Location struct {
 	IsLive    bool
 }
 
+// ContactCard is one card shared in a contact message, with the vCard as
+// WhatsApp sent it.
+type ContactCard struct {
+	DisplayName string
+	VCard       string
+}
+
 type Button struct {
 	Type         string `json:"type"`
 	DisplayText  string `json:"display_text"`
@@ -81,6 +88,7 @@ type ParsedMessage struct {
 	Buttons          []Button
 	Media            *Media
 	Location         *Location
+	Contacts         []ContactCard
 	Poll             *Poll
 	PollVote         *PollVoteRef
 	PollAdd          *PollAddOptionRef

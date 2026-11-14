@@ -47,6 +47,7 @@ var schemaMigrations = []migration{
 	{version: 31, name: "content-free message change journal", up: migrateChanges},
 	{version: 32, name: "message receipt retrieval revisions", up: migrateReceiptRetrieval},
 	{version: 33, name: "ordered chat auto-unarchive", up: migrateChatAutoUnarchive},
+	{version: 40, name: "message contact cards", up: migrateMessageContacts},
 }
 
 func migratePlaceholderChatActivity(d *DB) error {
@@ -107,6 +108,32 @@ func migrateMessageLocations(d *DB) error {
 		);
 	`); err != nil {
 		return fmt.Errorf("create message_locations table: %w", err)
+	}
+	return nil
+}
+
+// migrateMessageContacts keeps the raw vCard of each card of a contact message.
+// The display text of a contact message loses the type and waid of every TEL
+// and the whole card when it has no usable number, so consumers that need the
+// WhatsApp number read it from here.
+func migrateMessageContacts(d *DB) error {
+	if _, err := d.sql.Exec(`
+		CREATE TABLE IF NOT EXISTS message_contacts (
+			chat_jid TEXT NOT NULL,
+			msg_id TEXT NOT NULL,
+			position INTEGER NOT NULL,
+			display_name TEXT,
+			vcard TEXT NOT NULL,
+			PRIMARY KEY (chat_jid, msg_id, position)
+		);
+	`); err != nil {
+		return fmt.Errorf("create message_contacts table: %w", err)
+	}
+	for _, op := range []string{"INSERT", "UPDATE", "DELETE"} {
+		name := "retrieval_message_contacts_" + strings.ToLower(op)
+		if _, err := d.sql.Exec(`CREATE TRIGGER IF NOT EXISTS ` + name + ` AFTER ` + op + ` ON message_contacts BEGIN UPDATE retrieval_state SET revision=revision+1 WHERE id=1; END`); err != nil {
+			return fmt.Errorf("create %s: %w", name, err)
+		}
 	}
 	return nil
 }

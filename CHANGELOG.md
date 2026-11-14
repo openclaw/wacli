@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Messages: keep the raw vCard of every shared contact card (`message_contacts`, migration 40) so the `type` and `waid` of each `TEL` survive, and read a `TEL;waid=…:` whose value is empty as that number instead of dropping the card's phone. Cards received before this version have no stored vCard; only their display text remains.
+
 - Dependencies: refresh eligible WhatsApp, SQLite, Go support and SQL tooling modules, pnpm, Node build tooling, GoReleaser, and the vulnerability scanner after the 48-hour cooldown; retain Go 1.27.0 and Node 24 minimums.
 
 - Calls: preserve call history and caller identities when hidden-user chats are reconciled with phone-number chats. Thanks @rsampayo (#571).
