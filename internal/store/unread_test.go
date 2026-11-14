@@ -200,3 +200,27 @@ func TestClearEmptyUnreadPreservesAnArrivalAfterReceiptSelection(t *testing.T) {
 		}
 	}
 }
+
+func TestClearChatUnreadThroughApproximateKeepsNoReadPosition(t *testing.T) {
+	db := openTestDB(t)
+	if err := db.UpsertChat(ownReadChat, "dm", "Chat", ownReadBase); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetChatUnreadCount(ownReadChat, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.ClearChatUnreadThroughApproximate(ownReadChat, ownReadBase.Add(time.Hour), false); err != nil {
+		t.Fatal(err)
+	}
+	var ts, row int64
+	if err := db.sql.QueryRow(`SELECT read_through_ts, read_through_rowid FROM chats WHERE jid = ?`, ownReadChat).Scan(&ts, &row); err != nil {
+		t.Fatal(err)
+	}
+	if ts != 0 || row != 0 {
+		t.Fatalf("approximate read persisted position %d/%d", ts, row)
+	}
+	c, err := db.GetChat(ownReadChat)
+	if err != nil || c.UnreadCount != 0 || c.Unread {
+		t.Fatalf("approximate read did not clear unread: %+v, %v", c, err)
+	}
+}

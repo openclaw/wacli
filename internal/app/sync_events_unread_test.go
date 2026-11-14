@@ -185,3 +185,24 @@ func TestLiveSyncPlaceholderUpgradeDoesNotCountOwnMessagesOrReactions(t *testing
 		})
 	}
 }
+
+func TestApproximateReceiptTimeIsNotDurableReadEvidence(t *testing.T) {
+	a := newTestApp(t)
+	a.wa = newFakeWA()
+	at := time.Date(2024, 3, 1, 12, 0, 0, 0, time.UTC)
+	chat := types.NewJID("123", types.DefaultUserServer)
+	seedReceiptChat(t, a, chat, "dm", []store.UpsertMessageParams{{MsgID: "known"}}, 1)
+	a.handleReceiptPersistenceEvent(t.Context(), &events.Receipt{MessageSource: types.MessageSource{Chat: chat, IsFromMe: true}, Type: types.ReceiptTypeRead, Timestamp: at.Add(5 * time.Minute), MessageIDs: []types.MessageID{"not-stored"}})
+	c, err := a.db.GetChat(chat.String())
+	if err != nil || c.UnreadCount != 0 || c.Unread {
+		t.Fatalf("receipt did not clear unread: %+v, %v", c, err)
+	}
+	var stored, last atomic.Int64
+	conv := &waHistorySync.Conversation{ID: proto.String(chat.String()), UnreadCount: proto.Uint32(1)}
+	conv.Messages = []*waHistorySync.HistorySyncMsg{{Message: &waWeb.WebMessageInfo{Key: &waCommon.MessageKey{ID: proto.String("older-unread"), FromMe: proto.Bool(false)}, MessageTimestamp: proto.Uint64(uint64(at.Add(4 * time.Minute).Unix())), Message: &waE2E.Message{Conversation: proto.String("still unread")}}}}
+	a.handleHistorySync(t.Context(), SyncOptions{}, &events.HistorySync{Data: &waHistorySync.HistorySync{Conversations: []*waHistorySync.Conversation{conv}}}, &stored, &last, nil)
+	c, err = a.db.GetChat(chat.String())
+	if err != nil || c.UnreadCount != 1 || !c.Unread {
+		t.Fatalf("approximate receipt time suppressed history unread: %+v, %v", c, err)
+	}
+}

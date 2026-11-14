@@ -467,9 +467,9 @@ func readByThisAccountElsewhere(evt *events.Receipt) bool {
 func (a *App) handleReceiptEvent(ctx context.Context, evt *events.Receipt) {
 	chat := a.canonicalStoreJID(ctx, evt.Chat)
 	chatJID := canonicalJIDString(chat)
-	through, ids, err := a.receiptReadPosition(chatJID, evt)
+	through, ids, exact, err := a.receiptReadPosition(chatJID, evt)
 	if err == nil {
-		err = a.clearChatUnreadFromEvent(chatJID, through, ids)
+		err = a.clearChatUnreadFromEvent(chatJID, through, ids, exact)
 	}
 	if err != nil {
 		a.emitWarning(
