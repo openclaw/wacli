@@ -214,6 +214,25 @@ func TestSemanticUnreadRealTransport(t *testing.T) {
 					}
 					return true
 				}
+				readSelf := func(id string) {
+					t.Helper()
+					t.Logf("WIRE peer -> App.Sync: read-self receipt for %s; read-at time is newer than both messages, stored ID still bounds the read", id)
+					if err := peer.write(ctx, waBinary.Node{Tag: "receipt", Attrs: waBinary.Attrs{
+						"from": chat, "id": id, "type": "read-self", "t": base.Add(10 * time.Minute).Unix(),
+					}}); err != nil {
+						t.Fatal(err)
+					}
+					for _, ch := range []<-chan string{seenRead, acked} {
+						select {
+						case got := <-ch:
+							if got != id {
+								t.Fatalf("incoming receipt runtime/ack ID=%s, want %s", got, id)
+							}
+						case <-ctx.Done():
+							t.Fatal("incoming receipt runtime/ack timed out")
+						}
+					}
+				}
 				event := &waE2E.Message{EventMessage: &waE2E.EventMessage{Name: proto.String("Synthetic meeting"), StartTime: proto.Int64(base.Add(time.Hour).Unix())}}
 				switch scenario {
 				case "kinds":
@@ -245,9 +264,8 @@ func TestSemanticUnreadRealTransport(t *testing.T) {
 					state("first semantic-only delivery", 1, 1)
 					send("replay-event", 0, event)
 					state("duplicate before reading counts once", 1, 1)
-					if receipt("replay-event", 1) {
-						state("read semantic-only message", 1, 0)
-					}
+					readSelf("replay-event")
+					state("read semantic-only message through App.Sync", 1, 0)
 					send("replay-event", 0, event)
 					state("duplicate after reading cannot resurrect unread", 1, 0)
 				case "bounded":
@@ -270,22 +288,7 @@ func TestSemanticUnreadRealTransport(t *testing.T) {
 					send("sync-older-text", 0, &waE2E.Message{Conversation: proto.String("Synthetic sync boundary")})
 					send("sync-later-event", 60, event)
 					state("before incoming bounded read-self receipt", 2, 2)
-					t.Log("WIRE peer -> App.Sync: read-self receipt for sync-older-text; read-at time is newer than both messages, stored ID still bounds the read")
-					if err := peer.write(ctx, waBinary.Node{Tag: "receipt", Attrs: waBinary.Attrs{
-						"from": chat, "id": "sync-older-text", "type": "read-self", "t": base.Add(10 * time.Minute).Unix(),
-					}}); err != nil {
-						t.Fatal(err)
-					}
-					for _, ch := range []<-chan string{seenRead, acked} {
-						select {
-						case got := <-ch:
-							if got != "sync-older-text" {
-								t.Fatalf("incoming receipt runtime/ack ID=%s", got)
-							}
-						case <-ctx.Done():
-							t.Fatal("incoming receipt runtime/ack timed out")
-						}
-					}
+					readSelf("sync-older-text")
 					state("App.Sync bounded recount preserves later semantic-only event", 2, 1)
 				}
 			})
