@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Lists: persist WhatsApp List/Business label definitions and chat membership events; add read-only `lists list` (`labels list`) and `chats list --list ID_OR_NAME`, with explicit unknown completeness and LID/phone membership reconciliation. Message memberships and favorites/system-list filtering remain out of scope.
+
 - Dependencies: refresh eligible WhatsApp, SQLite, Go support and SQL tooling modules, pnpm, Node build tooling, GoReleaser, and the vulnerability scanner after the 48-hour cooldown; retain Go 1.27.0 and Node 24 minimums.
 
 - Calls: preserve call history and caller identities when hidden-user chats are reconciled with phone-number chats. Thanks @rsampayo (#571).
