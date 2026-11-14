@@ -47,6 +47,10 @@ func TestLiveSyncStoresPollCreation(t *testing.T) {
 	if messagesStored.Load() != 1 {
 		t.Fatalf("messagesStored = %d", messagesStored.Load())
 	}
+	message, err := a.db.GetMessage(chat.String(), "POLL-1")
+	if err != nil || message.Kind != "poll" || message.MediaType != "" {
+		t.Fatalf("semantic poll projection: %+v, %v", message, err)
+	}
 	poll, err := a.db.GetPoll(chat.String(), "POLL-1")
 	if err != nil {
 		t.Fatalf("GetPoll: %v", err)
@@ -732,4 +736,45 @@ func contains(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+// Contacts and events that history sync delivers inside an ephemeral or
+// view-once envelope keep their kind and text, like wrapped polls do.
+func TestHistorySyncStoresWrappedContactsAndEventsWithKind(t *testing.T) {
+	a := newTestApp(t)
+	a.wa = newFakeWA()
+
+	chat := types.JID{User: "555", Server: types.DefaultUserServer}
+	at := time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)
+	contact := &waProto.ContactMessage{DisplayName: proto.String("Alice"), Vcard: proto.String("BEGIN:VCARD\nVERSION:3.0\nFN:Alice\nTEL;waid=15550000001:+1 555 000 0001\nEND:VCARD")}
+	wrapped := map[string]*waProto.Message{
+		"CONTACT-EPH": {EphemeralMessage: &waProto.FutureProofMessage{Message: &waProto.Message{ContactMessage: contact}}},
+		"CONTACTS-VO": {ViewOnceMessage: &waProto.FutureProofMessage{Message: &waProto.Message{ContactsArrayMessage: &waProto.ContactsArrayMessage{DisplayName: proto.String("2 contacts"), Contacts: []*waProto.ContactMessage{contact, contact}}}}},
+		"EVENT-EPH":   {EphemeralMessage: &waProto.FutureProofMessage{Message: &waProto.Message{EventMessage: &waProto.EventMessage{Name: proto.String("Workshop"), StartTime: proto.Int64(at.Unix())}}}},
+	}
+	want := map[string]string{"CONTACT-EPH": "contact", "CONTACTS-VO": "contacts", "EVENT-EPH": "event"}
+	var msgs []*waHistorySync.HistorySyncMsg
+	for id, m := range wrapped {
+		msgs = append(msgs, &waHistorySync.HistorySyncMsg{Message: &waWeb.WebMessageInfo{
+			Key:              &waCommon.MessageKey{RemoteJID: proto.String(chat.String()), FromMe: proto.Bool(false), ID: proto.String(id), Participant: proto.String(chat.String())},
+			MessageTimestamp: proto.Uint64(uint64(at.Unix())),
+			Message:          m,
+		}})
+	}
+	history := &events.HistorySync{Data: &waHistorySync.HistorySync{
+		SyncType:      waHistorySync.HistorySync_FULL.Enum(),
+		Conversations: []*waHistorySync.Conversation{{ID: proto.String(chat.String()), Messages: msgs}},
+	}}
+	var stored, last atomic.Int64
+	a.handleHistorySync(context.Background(), SyncOptions{}, history, &stored, &last, func(string, string) {})
+
+	for id, kind := range want {
+		msg, err := a.db.GetMessage(chat.String(), id)
+		if err != nil {
+			t.Fatalf("GetMessage %s: %v", id, err)
+		}
+		if msg.Kind != kind || msg.MediaType != "" {
+			t.Fatalf("%s: kind %q media %q, want kind %q and no media", id, msg.Kind, msg.MediaType, kind)
+		}
+	}
 }

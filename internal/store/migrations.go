@@ -47,6 +47,63 @@ var schemaMigrations = []migration{
 	{version: 31, name: "content-free message change journal", up: migrateChanges},
 	{version: 32, name: "message receipt retrieval revisions", up: migrateReceiptRetrieval},
 	{version: 33, name: "ordered chat auto-unarchive", up: migrateChatAutoUnarchive},
+	// 34-36 are taken by open proposals (stickers, ad referrals, lists). The
+	// column is also re-checked by ensureCurrentSchema, so a store whose row 37
+	// belongs to another migration still gets it.
+	{version: 37, name: "messages semantic kind", up: migrateMessageKind},
+}
+
+// migrateMessageKind adds the nullable messages.kind column (poll, poll_vote,
+// poll_update, contact, contacts, event). It is additive: media_type and the
+// body keep their meaning for older readers, and existing rows stay NULL
+// rather than being guessed from their text. The change journal's update
+// trigger lists every column, so it is rebuilt to notice kind changes too.
+func migrateMessageKind(d *DB) error {
+	exists, err := d.tableExists("messages")
+	if err != nil || !exists {
+		return err
+	}
+	has, err := d.tableHasColumn("messages", "kind")
+	if err != nil {
+		return err
+	}
+	if !has {
+		if _, err := d.sql.Exec(`ALTER TABLE messages ADD COLUMN kind TEXT`); err != nil {
+			return fmt.Errorf("add messages.kind column: %w", err)
+		}
+	}
+	return refreshMessageChangeTriggers(d, "kind")
+}
+
+// refreshMessageChangeTriggers rebuilds the message change triggers when the
+// update trigger does not compare column yet (it was created before the
+// column existed). A store without the change journal has nothing to rebuild,
+// and the triggers write to it, so they are left alone there.
+func refreshMessageChangeTriggers(d *DB, column string) error {
+	journal, err := d.tableExists("message_changes")
+	if err != nil || !journal {
+		return err
+	}
+	var triggerSQL sql.NullString
+	err = d.sql.QueryRow(`SELECT sql FROM sqlite_master WHERE type='trigger' AND name='retrieval_messages_update'`).Scan(&triggerSQL)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect message change triggers: %w", err)
+	}
+	if strings.Contains(triggerSQL.String, "old."+column+" IS NOT new."+column) {
+		return nil
+	}
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := createMessageChangeTriggers(tx); err != nil {
+		return fmt.Errorf("rebuild message change triggers: %w", err)
+	}
+	return tx.Commit()
 }
 
 func migratePlaceholderChatActivity(d *DB) error {
@@ -510,6 +567,9 @@ func (d *DB) ensureCurrentSchema() error {
 	}
 	if err := migrateChatAutoUnarchive(d); err != nil {
 		return fmt.Errorf("ensure chat auto-unarchive state: %w", err)
+	}
+	if err := migrateMessageKind(d); err != nil {
+		return fmt.Errorf("ensure message kind column: %w", err)
 	}
 	return nil
 }

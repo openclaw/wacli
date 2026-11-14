@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Messages: record the semantic kind of polls, poll votes and updates, contact cards and events in a new nullable `messages.kind` column (migration 37, also re-checked on every writable open) and expose it as `kind` in JSON and `Kind` in webhooks, without touching `media_type`; revoked messages read as `revoked`. Older stores stay readable read-only. Thanks @nicolasbiondic.
+
 - Dependencies: refresh eligible WhatsApp, SQLite, Go support and SQL tooling modules, pnpm, Node build tooling, GoReleaser, and the vulnerability scanner after the 48-hour cooldown; retain Go 1.27.0 and Node 24 minimums.
 
 - Calls: preserve call history and caller identities when hidden-user chats are reconciled with phone-number chats. Thanks @rsampayo (#571).

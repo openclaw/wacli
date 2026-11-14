@@ -226,6 +226,10 @@ func TestPersistOutboundVotePreservesUnread(t *testing.T) {
 			if err != nil || !c.Unread || c.UnreadCount != count {
 				t.Fatalf("vote acknowledged chat: %+v, %v", c, err)
 			}
+			m, err := a.DB().GetMessage(chat.String(), "vote")
+			if err != nil || m.Kind != "poll_vote" {
+				t.Fatalf("vote lost semantic kind: %+v, %v", m, err)
+			}
 		})
 	}
 }
