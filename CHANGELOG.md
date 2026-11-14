@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Quick replies prerequisite (#541): add standalone WhatsApp Business `quick-replies list|create|edit|delete`, independent full-sync coverage and guarded `app-state resync regular` (migration 38, with a collision guard). Writes and resync delegate outside the send queue; known-broken full syncs always refuse. Capture regular send-result/409 batches synchronously through the SDK primitives so delayed echoes cannot undo newer edits/deletions; device clocks never arbitrate state. Its standalone scope does not include Lists or chat-label management.
+
 - App state: capture regular send-result and 409-conflict batches synchronously through the existing SDK primitives, so detached echoes cannot overwrite a later quick reply, list edit, deletion or membership removal.
 
 - Lists: persist WhatsApp List/Business label definitions and chat membership events; add read-only `lists list` (`labels list`) and `chats list --list ID_OR_NAME`, with explicit unknown completeness and LID/phone membership reconciliation. Message memberships and favorites/system-list filtering remain out of scope.
