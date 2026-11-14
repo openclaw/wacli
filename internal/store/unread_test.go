@@ -1,7 +1,10 @@
 package store
 
 import (
+	"fmt"
 	"path/filepath"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 )
@@ -222,5 +225,78 @@ func TestClearChatUnreadThroughApproximateKeepsNoReadPosition(t *testing.T) {
 	c, err := db.GetChat(ownReadChat)
 	if err != nil || c.UnreadCount != 0 || c.Unread {
 		t.Fatalf("approximate read did not clear unread: %+v, %v", c, err)
+	}
+}
+
+func chatsSchema(t *testing.T, db *DB) string {
+	t.Helper()
+	rows, err := db.sql.Query(`SELECT name, type, "notnull", COALESCE(dflt_value, ''), pk FROM pragma_table_info('chats') ORDER BY cid`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var name, typ, dflt string
+		var notNull, pk int
+		if err := rows.Scan(&name, &typ, &notNull, &dflt, &pk); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, fmt.Sprint(name, typ, notNull, dflt, pk))
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(out) // ALTER TABLE appends columns; order is not part of the shape.
+	return strings.Join(out, "\n")
+}
+
+func TestReadPositionMigrationIsVersionedAndIdempotent(t *testing.T) {
+	fresh, err := Open(filepath.Join(t.TempDir(), "wacli.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := chatsSchema(t, fresh)
+	var recorded int
+	if err := fresh.sql.QueryRow(`SELECT count(*) FROM schema_migrations WHERE version = 39 AND name = 'local chat read positions'`).Scan(&recorded); err != nil || recorded != 1 {
+		t.Fatalf("fresh store did not record migration 39: %d, %v", recorded, err)
+	}
+	if err := fresh.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Fork builds recorded 34..38 for unrelated schema; this migration must
+	// still run, and must tolerate a shape that is already present.
+	for _, shapePresent := range []bool{true, false} {
+		t.Run(fmt.Sprint("shapePresent=", shapePresent), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "wacli.db")
+			db, err := Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			statements := []string{`DELETE FROM schema_migrations WHERE version = 39`}
+			for v := 34; v <= 38; v++ {
+				statements = append(statements, fmt.Sprintf(`INSERT OR IGNORE INTO schema_migrations(version, name, applied_at) VALUES(%d, 'fork %d', 1)`, v, v))
+			}
+			if !shapePresent {
+				statements = append(statements, `ALTER TABLE chats DROP COLUMN read_through_ts`, `ALTER TABLE chats DROP COLUMN read_through_rowid`)
+			}
+			for _, statement := range statements {
+				if _, err := db.sql.Exec(statement); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := db.Close(); err != nil {
+				t.Fatal(err)
+			}
+			db, err = Open(path)
+			if err != nil {
+				t.Fatalf("Open recorded-through-38 store: %v", err)
+			}
+			defer db.Close()
+			if got := chatsSchema(t, db); got != want {
+				t.Fatalf("chats schema differs from a fresh store:\n%s\nwant:\n%s", got, want)
+			}
+		})
 	}
 }
