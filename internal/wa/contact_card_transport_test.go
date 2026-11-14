@@ -35,9 +35,9 @@ import (
 )
 
 const (
-	contactTransportWaidOnly = "BEGIN:VCARD\nVERSION:3.0\nN:Prueba;Ana;;;\nFN:Ana Prueba\nTEL;type=CELL;waid=5551230101:\nEND:VCARD"
-	contactTransportExtra    = "BEGIN:VCARD\nVERSION:3.0\nFN:Beto Ejemplo\nitem1.TEL;type=CELL;type=VOICE;type=pref;waid=5551230102:+55 51 2301 02\nEND:VCARD"
-	contactTransportSecond   = "BEGIN:VCARD\nVERSION:3.0\nFN:Carla Demo\nTEL;type=WORK;waid=5551230103:\nEND:VCARD"
+	contactTransportWaidOnly = "BEGIN:VCARD\nVERSION:3.0\nN:Prueba;Ana;;;\nFN:Ana Prueba\nTEL;type=CELL;waid=550101:\nEND:VCARD"
+	contactTransportExtra    = "BEGIN:VCARD\nVERSION:3.0\nFN:Beto Ejemplo\nitem1.TEL;type=CELL;type=VOICE;type=pref;waid=550102:+55 0102\nEND:VCARD"
+	contactTransportSecond   = "BEGIN:VCARD\nVERSION:3.0\nFN:Carla Demo\nTEL;type=WORK;waid=550103:\nEND:VCARD"
 )
 
 // Real App.Sync -> whatsmeow -> Noise XX/WebSocket -> in-process peer, with
@@ -57,7 +57,7 @@ func TestContactCardsRealTransport(t *testing.T) {
 	cert := ownTransportCertificate(t, root, static)
 	dir := t.TempDir()
 	wa.PairedSessionStoreAt(t, filepath.Join(dir, "session.db"))
-	chat := types.NewJID("5551230000", types.DefaultUserServer)
+	chat := types.NewJID("proofchat", types.DefaultUserServer)
 	base := time.Unix(1700000000, 0)
 	cardMessage := &waE2E.Message{ContactMessage: &waE2E.ContactMessage{DisplayName: proto.String("Ana Prueba"), Vcard: proto.String(contactTransportWaidOnly)}}
 	arrayMessage := &waE2E.Message{ContactsArrayMessage: &waE2E.ContactsArrayMessage{DisplayName: proto.String("2 contacts"), Contacts: []*waE2E.ContactMessage{
@@ -102,8 +102,8 @@ func TestContactCardsRealTransport(t *testing.T) {
 		}
 		defer a.Close()
 		for id, want := range map[string]string{
-			"contact-1": "Contact: Ana Prueba (+5551230101)",
-			"contact-2": "Contacts:\nContact: Beto Ejemplo (+55 51 2301 02)\nContact: Carla Demo (+5551230103)",
+			"contact-1": "Contact: Ana Prueba (+550101)",
+			"contact-2": "Contacts:\nContact: Beto Ejemplo (+55 0102)\nContact: Carla Demo (+550103)",
 		} {
 			m, err := a.DB().GetMessage(chat.String(), id)
 			if err != nil {
@@ -158,7 +158,7 @@ func TestContactCardsRealTransport(t *testing.T) {
 		if err != nil {
 			t.Fatalf("CLI: %v", err)
 		}
-		if !strings.Contains(string(output), "(+5551230101)") {
+		if !strings.Contains(string(output), "(+550101)") {
 			t.Errorf("CLI output lacks the waid-only number")
 		}
 	} else {
