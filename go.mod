@@ -2,7 +2,7 @@ module github.com/openclaw/wacli
 
 go 1.27.0
 
-toolchain go1.27.3
+toolchain go1.27.4
 
 require (
 	github.com/Microsoft/go-winio v0.6.4
