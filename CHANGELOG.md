@@ -8,6 +8,10 @@
 - Labels and quick replies: add `lists create|edit|delete` (`labels ...`), `chats label add|remove` and `quick-replies list|create|edit|delete`, sent as `regular` app-state patches after a pre-write sync and delegated to a running `sync --follow` like archiving. Quick replies seen during sync are now stored (migration 38). New label IDs are only guessed after a full sync was observed (otherwise pass `--id`); LID-only chats cannot be labeled yet.
 - Quick replies: send action version 3, track reply-aware full-sync coverage independently of older Lists stores, and add delegated `app-state resync regular` using existing recovery debt. Known-broken full syncs always refuse and point to primary recovery; there is no force override. Label writes reject retired/non-numeric IDs and duplicate renames, preserve absent colors and mute-until values, and report the patched phone JID; shortcut conflicts fail closed. Definitions, memberships and replies follow ordered app-state persistence rather than device clocks.
 
+- Calls: preserve call history and caller identities when hidden-user chats are reconciled with phone-number chats. Thanks @rsampayo (#571).
+
+- Security: build with Go 1.27.4 to fix GO-2026-6859 while retaining the Go 1.27.0 source minimum. Thanks @artemgetmann (#568).
+
 ## 0.26.0 - 2026-11-05
 
 **Highlights:** fresh own replies mark chats read, broadcast sync avoids long stalls, business attachments and M4A audio arrive intact, and networking security fixes.
