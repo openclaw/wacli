@@ -40,6 +40,10 @@ type GroupParticipant struct {
 	UserJID   string    `json:"user_jid"`
 	Role      string    `json:"role"`
 	UpdatedAt time.Time `json:"updated_at"`
+	// Label is the newest label seen for the member in this group, and
+	// LabelUpdatedAt the time of that evidence when it was dated.
+	Label          string     `json:"label,omitempty"`
+	LabelUpdatedAt *time.Time `json:"label_updated_at,omitempty"`
 }
 
 type MediaDownloadInfo struct {

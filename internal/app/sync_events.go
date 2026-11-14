@@ -619,6 +619,9 @@ func (a *App) handleLiveSyncMessage(ctx context.Context, opts SyncOptions, v *ev
 	if pm.ReactionToID != "" && pm.ReactionEmoji == "" && v.Message != nil && v.Message.GetEncReactionMessage() != nil {
 		a.decryptEncryptedReaction(ctx, &pm, v)
 	}
+	if a.handleMemberLabelChange(ctx, pm) {
+		return
+	}
 	// Protocol retries can share an ID with decoded content. Preserve useful
 	// payloads so a later retry cannot look like a first unread transition.
 	// An explicit empty edit is a content update, not a protocol retry.
@@ -758,6 +761,7 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 			continue
 		}
 		a.storeHistoryUnreadCount(ctx, chatID, conv)
+		a.recordHistoryMemberLabels(ctx, chatID, conv)
 		var pendingPolls []historyPollSideEffect
 		for _, m := range conv.Messages {
 			lastEvent.Store(nowUTC().UnixNano())
@@ -801,6 +805,9 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 				} else {
 					a.decryptEncryptedReaction(ctx, &pm, evt)
 				}
+			}
+			if a.handleMemberLabelChange(ctx, pm) {
+				continue
 			}
 			storedPM := pm
 			storedPM.UnhandledPayload = ""
