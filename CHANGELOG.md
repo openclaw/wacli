@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Quick replies prerequisite (#541): add standalone WhatsApp Business `quick-replies list|create|edit|delete`, independent full-sync coverage and guarded `app-state resync regular` (migration 38, with a collision guard). Writes and resync delegate outside the send queue; known-broken full syncs always refuse. Capture regular send-result/409 batches synchronously through the SDK primitives so delayed echoes cannot undo newer edits/deletions; device clocks never arbitrate state. Its standalone scope does not include Lists or chat-label management.
+
+- App state: capture regular send-result and 409-conflict batches synchronously through the existing SDK primitives, so detached echoes cannot overwrite a later quick reply, list edit, deletion or membership removal.
+
+- Lists: persist WhatsApp List/Business label definitions and chat membership events; add read-only `lists list` (`labels list`) and `chats list --list ID_OR_NAME`, with explicit unknown completeness and LID/phone membership reconciliation. Message memberships and favorites/system-list filtering remain out of scope.
+- Labels and quick replies: add `lists create|edit|delete` (`labels ...`), `chats label add|remove` and `quick-replies list|create|edit|delete`, sent as `regular` app-state patches after a pre-write sync and delegated to a running `sync --follow` like archiving. Quick replies seen during sync are now stored (migration 38). New label IDs are only guessed after a full sync was observed (otherwise pass `--id`); LID-only chats cannot be labeled yet.
+- Quick replies: send action version 3, track reply-aware full-sync coverage independently of older Lists stores, and add delegated `app-state resync regular` using existing recovery debt. Known-broken full syncs always refuse and point to primary recovery; there is no force override. Label writes reject retired/non-numeric IDs and duplicate renames, preserve absent colors and mute-until values, and report the patched phone JID; shortcut conflicts fail closed. Definitions, memberships and replies follow ordered app-state persistence rather than device clocks.
+
 - Dependencies: refresh eligible WhatsApp, SQLite, Go support and SQL tooling modules, pnpm, Node build tooling, GoReleaser, and the vulnerability scanner after the 48-hour cooldown; retain Go 1.27.0 and Node 24 minimums.
 
 - Calls: preserve call history and caller identities when hidden-user chats are reconciled with phone-number chats. Thanks @rsampayo (#571).

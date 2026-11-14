@@ -11,6 +11,7 @@ import (
 
 type ChatListFilter struct {
 	Query    string
+	ListID   string
 	Limit    int
 	Archived *bool
 	Pinned   *bool
@@ -55,6 +56,18 @@ func (d *DB) ListChatsFiltered(f ChatListFilter) ([]Chat, error) {
 	}
 	q := `SELECT jid, kind, COALESCE(name,''), COALESCE(last_message_ts,0), COALESCE(archived,0), COALESCE(pinned,0), COALESCE(muted_until,0), COALESCE(unread,0), COALESCE(unread_count,0) FROM chats WHERE 1=1`
 	var args []any
+	if f.ListID != "" {
+		exists, err := d.tableExists("chat_lists")
+		if err != nil {
+			return nil, err
+		}
+		if !exists {
+			return []Chat{}, nil
+		}
+		q += ` AND EXISTS (SELECT 1 FROM chat_lists cl JOIN lists l ON l.id=cl.list_id
+			WHERE cl.chat_jid=chats.jid AND cl.list_id=? AND cl.labeled=1 AND l.deleted=0)`
+		args = append(args, f.ListID)
+	}
 	if strings.TrimSpace(f.Query) != "" {
 		q += ` AND (LOWER(name) LIKE LOWER(?) ESCAPE '\' OR LOWER(jid) LIKE LOWER(?) ESCAPE '\')`
 		needle := likeContains(f.Query)
