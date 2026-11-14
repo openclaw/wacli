@@ -65,7 +65,7 @@ import (
 // fields, the phone UI, a real Business account. The peer is a model of the
 // stanzas, not the service. Synthetic identifiers only; no run may be parallel
 // (SDK trust root and socket URL are process-wide).
-func TestBusinessProfileThroughRunningOwnerRealTransport(t *testing.T) {
+func TestProfileBusinessViaOwner(t *testing.T) {
 	root := keys.NewKeyPair()
 	prevRoot := whatsmeow.WACertPubKey
 	whatsmeow.WACertPubKey = *root.Pub
@@ -119,7 +119,7 @@ func TestBusinessProfileThroughRunningOwnerRealTransport(t *testing.T) {
 	} else {
 		t.Logf("OWNER holds the store lock: a second opener is refused (lock contention=%v), so the CLI can only delegate", lock.IsLocked(err))
 	}
-	linked := "5551230001@s.whatsapp.net"
+	linked := "ownerline@s.whatsapp.net"
 
 	invocations := 0
 	cli := func(label string, args ...string) (string, string, error) {
@@ -260,13 +260,13 @@ func prepareStore(t *testing.T, ctx context.Context, dir string) {
 		t.Fatal(err)
 	}
 	device := container.NewDevice()
-	device.ID = &types.JID{User: "5551230001", Device: 7, Server: types.DefaultUserServer}
+	device.ID = &types.JID{User: "ownerline", Device: 7, Server: types.DefaultUserServer}
 	device.Account = &waAdv.ADVSignedDeviceIdentity{Details: []byte{1}, AccountSignature: make([]byte, 64), AccountSignatureKey: make([]byte, 32), DeviceSignature: make([]byte, 64)}
 	if err := device.Save(ctx); err != nil {
 		t.Fatal(err)
 	}
 	_ = container.Close()
-	t.Log("STORE synthetic paired device 5551230001:7 saved in session.db (pairing itself is not exercised)")
+	t.Log("STORE synthetic paired device ownerline:7 saved in session.db (pairing itself is not exercised)")
 }
 
 func migrationCount(t *testing.T, path string) int {
@@ -597,7 +597,7 @@ func TestCatalogListCursorsOverTLS(t *testing.T) {
 
 	list := func(args ...string) bizCatalogPage {
 		t.Helper()
-		args = append([]string{"--json", "catalog", "list", "--jid", "5551230002"}, args...)
+		args = append([]string{"--json", "catalog", "list", "--jid", "catalogshop@s.whatsapp.net"}, args...)
 		t.Logf("$ wacli %s   # empty scratch store, no session", strings.Join(args, " "))
 		stdout, stderr, err := runCLI(t, append([]string{"--store", t.TempDir()}, args...))
 		if err != nil {
