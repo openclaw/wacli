@@ -276,6 +276,6 @@ func sendPresenceWithRetry(ctx context.Context, reconnect func(context.Context) 
 		// Repeating a presence state does not create a second chat message.
 		// Keep its prior reconnect behavior without weakening send uncertainty.
 		return isRetryableSendError(err) || (err != nil && strings.Contains(strings.ToLower(err.Error()), "not connected"))
-	})
+	}, sendAttemptTimeout)
 	return err
 }
