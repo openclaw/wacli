@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Profile: `profile picture-info` asks a running `sync --follow` process over its delegation socket when the store is locked, on the live connection and outside the send queue, and integrations can send the same `profile_picture_info` request with stable error codes (`not_set`, `hidden`, `invalid_jid`, `timeout`, `unavailable`, `lookup_failed`). Thanks @nicolasbiondic.
+
 - Dependencies: refresh eligible WhatsApp, SQLite, Go support and SQL tooling modules, pnpm, Node build tooling, GoReleaser, and the vulnerability scanner after the 48-hour cooldown; retain Go 1.27.0 and Node 24 minimums.
 
 - Calls: preserve call history and caller identities when hidden-user chats are reconciled with phone-number chats. Thanks @rsampayo (#571).
