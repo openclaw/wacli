@@ -80,6 +80,10 @@ type sendDelegateRequest struct {
 	TimeoutMS            int64    `json:"timeout_ms,omitempty"`
 	DeadlineUnixMS       int64    `json:"deadline_unix_ms,omitempty"`
 	RetryOnPhone         bool     `json:"retry_on_phone,omitempty"`
+
+	// Business profile (kinds business_profile_get/set).
+	JID             string                        `json:"jid,omitempty"`
+	BusinessProfile *businessProfileUpdateRequest `json:"business_profile,omitempty"`
 }
 
 type sendDelegateResponse struct {
@@ -106,6 +110,9 @@ type sendDelegateResponse struct {
 	Contact        *contactSaveResult   `json:"contact,omitempty"`
 	Presence       *app.PresenceState   `json:"presence,omitempty"`
 	Media          *mediaDownloadResult `json:"media,omitempty"`
+
+	BusinessProfile    *wa.BusinessProfileFull   `json:"business_profile,omitempty"`
+	BusinessProfileSet *businessProfileSetResult `json:"business_profile_set,omitempty"`
 }
 
 type sendDelegateExecutor func(context.Context, sendDelegateRequest) (sendDelegateResponse, error)
@@ -290,7 +297,7 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDele
 		_ = json.NewEncoder(conn).Encode(resp)
 		return
 	}
-	if req.Kind == chatStateKind || req.Kind == contactsSaveKind {
+	if req.Kind == chatStateKind || req.Kind == contactsSaveKind || req.Kind == businessProfileSetKind {
 		// The app-state coordinator owns these writes; recovery must not hold
 		// the message-send queue (#454).
 		if requestCtx.Err() != nil {
@@ -301,7 +308,7 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDele
 		writeDelegateResult(conn, requestCtx, req, resp, err)
 		return
 	}
-	if req.Kind == presenceSubscribeKind {
+	if req.Kind == presenceSubscribeKind || req.Kind == businessProfileGetKind {
 		// Watching presence puts nothing in a chat, and it may wait for an
 		// answer: it neither queues behind sends nor takes a paced send slot,
 		// but it keeps the same budget.
@@ -421,6 +428,10 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 		return executeDelegatedChatState(ctx, a, req)
 	case contactsSaveKind:
 		return executeDelegatedContactsSave(ctx, a, req)
+	case businessProfileGetKind:
+		return executeBusinessProfileGet(ctx, a.WA(), req)
+	case businessProfileSetKind:
+		return executeBusinessProfileSet(ctx, a.WA(), req)
 	default:
 		return sendDelegateResponse{}, fmt.Errorf("unsupported send kind %q", req.Kind)
 	}
