@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/mail"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+	_ "time/tzdata" // Windows has no IANA zoneinfo; hours validation needs one.
 	"unicode/utf8"
 
 	"github.com/openclaw/wacli/internal/out"
@@ -415,14 +417,7 @@ When "wacli sync" owns the store, the update runs through that process.`,
 			if flags.asJSON {
 				return out.WriteJSON(os.Stdout, resp.BusinessProfileSet)
 			}
-			fmt.Fprintln(os.Stdout, "Business profile updated.")
-			if resp.BusinessProfileSet.Profile != nil {
-				return writeBusinessProfile(flags, resp.BusinessProfileSet.Profile)
-			}
-			if resp.BusinessProfileSet.ProfileError != "" {
-				fmt.Fprintf(os.Stdout, "Could not re-read the profile: %s\n", sanitize(resp.BusinessProfileSet.ProfileError))
-			}
-			return nil
+			return writeBusinessProfileSetHuman(flags, os.Stderr, resp.BusinessProfileSet)
 		},
 	}
 	cmd.Flags().StringVar(&description, "description", "", "business description (max 512 characters; \"\" clears)")
@@ -433,6 +428,17 @@ When "wacli sync" owns the store, the update runs through that process.`,
 	cmd.Flags().StringArrayVar(&hours, "hours", nil, "weekly hours entry: day=HH:MM-HH:MM | day=open_24h | day=appointment_only (repeatable; unlisted days are closed)")
 	cmd.Flags().BoolVar(&hoursClosed, "hours-closed", false, "close every day of the week (requires --hours-timezone)")
 	return cmd
+}
+
+func writeBusinessProfileSetHuman(flags *rootFlags, stderr io.Writer, res *businessProfileSetResult) error {
+	fmt.Fprintln(os.Stdout, "Business profile updated.")
+	if res.Profile != nil {
+		return writeBusinessProfile(flags, res.Profile)
+	}
+	if res.ProfileError != "" {
+		fmt.Fprintf(stderr, "Could not re-read the profile: %s\nThe update was accepted; run `wacli profile business get` to check the profile.\n", sanitize(res.ProfileError))
+	}
+	return nil
 }
 
 func writeBusinessProfile(flags *rootFlags, profile *wa.BusinessProfileFull) error {

@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"net"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -302,5 +304,41 @@ func TestCatalogListReadOnlyWithoutSessionAsksForJID(t *testing.T) {
 	err := execute([]string{"--store", t.TempDir(), "--read-only", "--json", "catalog", "list"})
 	if err == nil || !strings.Contains(err.Error(), "not linked") {
 		t.Fatalf("expected a not-linked refusal, got %v", err)
+	}
+}
+
+func TestBusinessProfileSetRereadWarningGoesToStderrWithRecovery(t *testing.T) {
+	var stderr bytes.Buffer
+	var err error
+	stdout := captureRootStdout(t, func() {
+		err = writeBusinessProfileSetHuman(&rootFlags{}, &stderr, &businessProfileSetResult{Updated: true, ProfileError: "slow"})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stdout, "re-read") || !strings.Contains(stdout, "Business profile updated.") {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	if !strings.Contains(stderr.String(), "Could not re-read the profile: slow") || !strings.Contains(stderr.String(), "wacli profile business get") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestBusinessHoursTimeZoneDoesNotNeedSystemZoneinfo(t *testing.T) {
+	t.Setenv("ZONEINFO", "")
+	if err := validateBusinessHours(wa.BusinessHoursUpdate{TimeZone: "America/Lima", Days: []wa.BusinessHoursDay{{DayOfWeek: "mon", Mode: "open_24h"}}}); err != nil {
+		t.Fatal(err)
+	}
+	// The host may have zoneinfo, so also prove the binary embeds the data.
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("go tool not available")
+	}
+	deps, err := exec.Command(goBin, "list", "-deps", ".").Output()
+	if err != nil {
+		t.Skipf("go list: %v", err)
+	}
+	if !bytes.Contains(deps, []byte("\ntime/tzdata\n")) {
+		t.Fatal("time/tzdata is not linked into cmd/wacli; Windows builds cannot validate --hours-timezone")
 	}
 }
