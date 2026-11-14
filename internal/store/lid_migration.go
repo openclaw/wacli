@@ -16,8 +16,8 @@ type MessageLocalMedia struct {
 	LocalPath string
 }
 
-// HistoricalLIDJIDs returns distinct hidden-user JIDs stored in chat, group,
-// message, poll, and receipt identity columns. A recipient that only ever
+// HistoricalLIDJIDs returns distinct hidden-user JIDs stored in chat, group, list,
+// message, poll, receipt, and call identity columns. A recipient that only ever
 // reported on a message, never sending one, appears nowhere else, and an
 // identity nobody discovers is never migrated. The app layer resolves these
 // through whatsmeow.
@@ -50,6 +50,8 @@ func (d *DB) HistoricalLIDJIDs() ([]string, error) {
 		SELECT recipient_jid FROM message_receipts WHERE recipient_jid GLOB '*@lid'
 		UNION
 		SELECT chat_jid FROM chat_lists WHERE chat_jid GLOB '*@lid'
+		UNION
+		SELECT sender_jid FROM call_events WHERE sender_jid GLOB '*@lid'
 		ORDER BY 1
 	`)
 	if err != nil {
@@ -138,6 +140,9 @@ func (d *DB) MigrateLIDToPN(lidJID, pnJID string) error {
 		return err
 	}
 	if err := migrateLIDPollsToPN(tx, lidJID, pnJID); err != nil {
+		return err
+	}
+	if err := migrateLIDCallEventsToPN(tx, lidJID, pnJID); err != nil {
 		return err
 	}
 	if err := deleteLIDChat(tx, lidJID); err != nil {
@@ -558,6 +563,50 @@ func migrateLIDMessageLocationsToPN(tx *sql.Tx, lidJID, pnJID string) error {
 		)
 	`); err != nil {
 		return fmt.Errorf("suppress destination-only purged locations: %w", err)
+	}
+	return nil
+}
+
+// migrateLIDCallEventsToPN carries call history across with its chat.
+// call_events references chats(jid) ON DELETE CASCADE, so without this step
+// deleteLIDChat would silently delete every call recorded while only the
+// hidden-user identity was known. A call already recorded under the
+// phone-number chat (same call, event and time) keeps its own values and only
+// fills what it lacks from the hidden-user row, as UpsertCallEvent merges.
+// The caller is the same person under both identities, so sender_jid is
+// rewritten in every chat, groups included.
+func migrateLIDCallEventsToPN(tx *sql.Tx, lidJID, pnJID string) error {
+	if _, err := tx.Exec(`
+		INSERT INTO call_events(
+			chat_jid, chat_name, sender_jid, sender_name, call_id, msg_id, event_type,
+			direction, media, outcome, reason, call_type, duration_secs, ts, participants
+		)
+		SELECT ?2, chat_name,
+			CASE WHEN sender_jid = ?1 THEN ?2 ELSE sender_jid END,
+			sender_name, call_id, msg_id, event_type,
+			direction, media, outcome, reason, call_type, duration_secs, ts, participants
+		FROM call_events
+		WHERE chat_jid = ?1
+		ON CONFLICT(chat_jid, call_id, event_type, ts) DO UPDATE SET
+			chat_name=COALESCE(NULLIF(call_events.chat_name,''), excluded.chat_name),
+			sender_jid=COALESCE(NULLIF(call_events.sender_jid,''), excluded.sender_jid),
+			sender_name=COALESCE(NULLIF(call_events.sender_name,''), excluded.sender_name),
+			msg_id=COALESCE(NULLIF(call_events.msg_id,''), excluded.msg_id),
+			direction=COALESCE(NULLIF(call_events.direction,''), excluded.direction),
+			media=COALESCE(NULLIF(call_events.media,''), excluded.media),
+			outcome=COALESCE(NULLIF(call_events.outcome,''), excluded.outcome),
+			reason=COALESCE(NULLIF(call_events.reason,''), excluded.reason),
+			call_type=COALESCE(NULLIF(call_events.call_type,''), excluded.call_type),
+			duration_secs=CASE WHEN call_events.duration_secs > 0 THEN call_events.duration_secs ELSE excluded.duration_secs END,
+			participants=COALESCE(NULLIF(call_events.participants,''), excluded.participants)
+	`, lidJID, pnJID); err != nil {
+		return fmt.Errorf("migrate lid call events: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM call_events WHERE chat_jid = ?`, lidJID); err != nil {
+		return fmt.Errorf("delete migrated lid call events: %w", err)
+	}
+	if _, err := tx.Exec(`UPDATE call_events SET sender_jid = ? WHERE sender_jid = ?`, pnJID, lidJID); err != nil {
+		return fmt.Errorf("rewrite lid call senders: %w", err)
 	}
 	return nil
 }
