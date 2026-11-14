@@ -537,6 +537,7 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage, optio
 		QuotedMsgID:              pm.ReplyToID,
 		QuotedSenderJID:          a.canonicalStoreJIDString(ctx, pm.ReplyToSenderJID),
 		Buttons:                  waButtonsToStore(pm.Buttons),
+		AdReferral:               waAdReferralToStore(pm.AdReferral),
 		IsForwarded:              pm.IsForwarded,
 		ForwardingScore:          pm.ForwardingScore,
 		ReactionToID:             pm.ReactionToID,
@@ -668,6 +669,14 @@ func (a *App) deleteParsedCallEvents(ctx context.Context, deleted wa.ParsedCallD
 		Direction: deleted.Direction,
 	})
 	return err
+}
+
+func waAdReferralToStore(ref *wa.AdReferral) *store.AdReferral {
+	if ref == nil {
+		return nil
+	}
+	out := store.AdReferral(*ref)
+	return &out
 }
 
 func waButtonsToStore(buttons []wa.Button) []store.Button {

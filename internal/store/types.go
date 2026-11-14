@@ -69,6 +69,20 @@ type Button struct {
 	Index        int    `json:"index,omitempty"`
 }
 
+type AdReferral struct {
+	SourceType       string `json:"source_type,omitempty"`
+	SourceID         string `json:"source_id,omitempty"`
+	SourceURL        string `json:"source_url,omitempty"`
+	SourceApp        string `json:"source_app,omitempty"`
+	Title            string `json:"title,omitempty"`
+	Body             string `json:"body,omitempty"`
+	MediaType        string `json:"media_type,omitempty"`
+	CtwaClid         string `json:"ctwa_clid,omitempty"`
+	ConversionSource string `json:"conversion_source,omitempty"`
+	EntryPointSource string `json:"entry_point_source,omitempty"`
+	EntryPointApp    string `json:"entry_point_app,omitempty"`
+}
+
 type Message struct {
 	rank            float64
 	ChatJID         string
@@ -80,9 +94,10 @@ type Message struct {
 	FromMe          bool
 	Text            string
 	DisplayText     string
-	QuotedMsgID     string   `json:"quoted_msg_id,omitempty"`
-	QuotedSenderJID string   `json:"quoted_sender_jid,omitempty"`
-	Buttons         []Button `json:",omitempty"`
+	QuotedMsgID     string      `json:"quoted_msg_id,omitempty"`
+	QuotedSenderJID string      `json:"quoted_sender_jid,omitempty"`
+	Buttons         []Button    `json:",omitempty"`
+	AdReferral      *AdReferral `json:"ad_referral,omitempty"`
 	IsForwarded     bool
 	ForwardingScore uint32
 	ReactionToID    string

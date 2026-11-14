@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Messages: keep Click-to-WhatsApp ad referrals (ad ID, source, headline, media type, click ID) and expose them as `ad_referral` in message JSON, sync webhook payloads, and a `messages show` line. Each text field is capped at 1024 bytes and thumbnails are not stored. Thanks @nicolasbiondic (#473).
+
 - Dependencies: refresh eligible WhatsApp, SQLite, Go support and SQL tooling modules, pnpm, Node build tooling, GoReleaser, and the vulnerability scanner after the 48-hour cooldown; retain Go 1.27.0 and Node 24 minimums.
 
 - Calls: preserve call history and caller identities when hidden-user chats are reconciled with phone-number chats. Thanks @rsampayo (#571).
