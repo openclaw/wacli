@@ -44,6 +44,8 @@ import (
 // logs the unread state and the persisted read position after every step,
 // reopens the store (second App.Sync) and replays the history.
 // Not proven: pairing/login, the remote service's history policy, the phone UI.
+const readTransportBase = 1700000000
+
 func TestReadPositionRealTransport(t *testing.T) {
 	// The exported SDK trust root is process-wide: never run this in parallel.
 	root := keys.NewKeyPair()
@@ -56,7 +58,7 @@ func TestReadPositionRealTransport(t *testing.T) {
 	wa.PairedSessionStoreAt(t, filepath.Join(dir, "session.db"))
 	chatA := types.NewJID("proofchat", types.DefaultUserServer)
 	chatB := types.NewJID("proofchatb", types.DefaultUserServer)
-	base := time.Unix(1700000000, 0)
+	base := time.Unix(readTransportBase, 0)
 	var incomingFrom, ownDevice, ownPrimary func(string, types.JID, time.Time, *waE2E.Message) waBinary.Node
 	text := func(s string) *waE2E.Message { return &waE2E.Message{Conversation: proto.String(s)} }
 	historyMsg := func(id string, at time.Time) *waHistorySync.HistorySyncMsg {
@@ -215,7 +217,11 @@ func (w *readTransportWire) state(chat types.JID, label string, unread bool, cou
 		defer raw.Close()
 		var ts, rowid int64
 		if err := raw.QueryRow(`SELECT read_through_ts, read_through_rowid FROM chats WHERE jid = ?`, chat.String()).Scan(&ts, &rowid); err == nil {
-			position = fmt.Sprintf("read_through_ts=%d read_through_rowid=%d", ts, rowid)
+			shown := "0"
+			if ts != 0 {
+				shown = fmt.Sprintf("base%+d", ts-readTransportBase)
+			}
+			position = fmt.Sprintf("read_through_ts=%s read_through_rowid=%d", shown, rowid)
 		}
 	}
 	w.t.Logf("STORE %s: %s: unread=%v unread_count=%d %s", chat.User, label, c.Unread, c.UnreadCount, position)
