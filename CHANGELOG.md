@@ -17,6 +17,10 @@
 - Dependencies: fix reachable HTML parsing vulnerabilities with x/net 0.62.0 and refresh eligible WhatsApp, SQL tooling, gRPC, YAML, and pnpm dependencies after the 48-hour cooldown, retaining Go 1.27.0 and Node 24 minimums.
 - CI: schedule weekly CodeQL main scans while retaining PR and manual analysis.
 
+- Groups: add `groups set-picture` / `groups remove-picture` to set or clear a group's picture, and `groups link` / `groups unlink` to add an existing group to a community (optionally `--hidden` from the community's group list; `groups info` shows `Hidden:`) or take it out (whatsmeow `SetGroupPhoto`, `LinkGroup`, `UnlinkGroup`).
+
+- Groups: while `sync --follow` runs, group administration (`create`, `info`, `refresh`, `rename`, `topic`/`description`, `participants`, `invite link`, `set-picture`/`remove-picture`, `link`/`unlink`) is delegated to it over the existing delegate socket instead of timing out on the store lock; `info --json` reports `Hidden` for community subgroups.
+
 ## 0.25.1 - 2026-10-26
 
 **Highlights:** reliable slow file and voice uploads, plus complete decoding of wrapped history and video notes.

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"time"
 
 	"github.com/openclaw/wacli/internal/out"
 	"github.com/spf13/cobra"
@@ -16,48 +15,7 @@ func newGroupsRefreshCmd(flags *rootFlags) *cobra.Command {
 		Use:   "refresh",
 		Short: "Fetch joined groups (live) and update local DB",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := flags.requireWritable(); err != nil {
-				return err
-			}
-			ctx, cancel := withTimeout(context.Background(), flags)
-			defer cancel()
-
-			a, lk, err := newApp(ctx, flags, true, false)
-			if err != nil {
-				return err
-			}
-			defer closeApp(a, lk)
-
-			if err := a.EnsureAuthed(ctx); err != nil {
-				return err
-			}
-			if err := a.Connect(ctx, false, nil); err != nil {
-				return err
-			}
-
-			gs, err := a.WA().GetJoinedGroups(ctx)
-			if err != nil {
-				return err
-			}
-			joined := map[string]bool{}
-			now := time.Now().UTC()
-			for _, g := range gs {
-				if g == nil {
-					continue
-				}
-				joined[g.JID.String()] = true
-				_ = persistGroupInfo(ctx, a.DB(), a.WA(), g)
-				_ = a.DB().UpsertChatMetadata(g.JID.String(), "group", g.GroupName.Name)
-			}
-			if err := a.DB().MarkGroupsMissingFrom(joined, now); err != nil {
-				return err
-			}
-
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{"groups": len(gs)})
-			}
-			fmt.Fprintf(os.Stdout, "Imported %d groups.\n", len(gs))
-			return nil
+			return runGroupCommand(flags, groupOp{Action: groupActionRefresh}, true)
 		},
 	}
 	return cmd
