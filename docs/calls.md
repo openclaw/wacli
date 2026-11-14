@@ -15,6 +15,7 @@ wacli calls list [--chat JID] [--asc] [--limit N] [--after DATE] [--before DATE]
 - Live WhatsApp call signaling events are stored separately from normal messages.
 - Historical WhatsApp call-log messages are stored as normal message rows and as structured `call_events` rows.
 - JSON output includes `chat_jid`, `call_id`, `event_type`, `direction`, `media`, `outcome`, `duration_secs`, `timestamp`, and participant metadata when WhatsApp provides it.
+- When sync resolves a hidden-user (LID) identity to a phone number, existing call events move to the phone-number chat and caller identities are updated, including group calls. Duplicate events retain the phone-number record and fill its missing metadata. This cannot restore call records already lost by an earlier version.
 - Time filters accept RFC3339 or `YYYY-MM-DD`.
 
 ## Examples
