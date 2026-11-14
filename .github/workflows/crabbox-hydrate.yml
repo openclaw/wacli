@@ -30,8 +30,8 @@ permissions:
   contents: read
 
 env:
-  NODE_VERSION: "26.12.1"
-  PNPM_VERSION: "12.16.1"
+  NODE_VERSION: "26.13.1"
+  PNPM_VERSION: "12.18.0"
 
 jobs:
   hydrate:
