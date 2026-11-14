@@ -226,6 +226,56 @@ func TestListsMuteColumnUpgradeSurvivesMigrationCollision(t *testing.T) {
 	}
 }
 
+// A store whose row 36 predates the ordering column (another build or an
+// earlier Lists prerequisite) gains it on the next writable open without
+// rewriting existing rows; read-only opens keep working without it.
+func TestListsAppliedOrderColumnUpgradeSurvivesMigrationCollision(t *testing.T) {
+	version := listsMigrationVersion(t)
+	path := filepath.Join(t.TempDir(), "wacli.db")
+	db := mustOpen(t, path)
+	at := time.Unix(100, 0)
+	pn := "123@s.whatsapp.net"
+	if err := db.UpsertChat(pn, "dm", "Existing", at); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertList(ListUpdate{ID: "7", Name: listPtr("Existing"), Timestamp: at}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetChatList(pn, "7", true, at.Add(time.Hour), true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.sql.Exec(`DROP INDEX idx_chat_lists_applied_order; ALTER TABLE chat_lists DROP COLUMN applied_order;
+		UPDATE schema_migrations SET name='foreign owner' WHERE version=?`, version); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	ro, err := OpenReadOnly(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertListChats(t, ro, "7", pn)
+	if has, err := ro.tableHasColumn("chat_lists", "applied_order"); err != nil || has {
+		t.Fatalf("read-only open migrated the schema: %t, %v", has, err)
+	}
+	ro.Close()
+	db = mustOpen(t, path)
+	defer db.Close()
+	if has, err := db.tableHasColumn("chat_lists", "applied_order"); err != nil || !has {
+		t.Fatalf("applied_order missing after writable open: %t, %v", has, err)
+	}
+	assertListChats(t, db, "7", pn)
+	// The legacy row carries no order; a later removal with a lower device
+	// clock still wins because it is the later accepted action.
+	if err := db.SetChatList(pn, "7", false, at, false); err != nil {
+		t.Fatal(err)
+	}
+	assertListChats(t, db, "7")
+	var owner string
+	if err := db.sql.QueryRow(`SELECT name FROM schema_migrations WHERE version=?`, version).Scan(&owner); err != nil || owner != "foreign owner" {
+		t.Fatalf("foreign migration changed: %q, %v", owner, err)
+	}
+}
+
 func TestListsMigrationPopulatedOlderStoreAndReadOnly(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "wacli.db")
 	db := mustOpen(t, path)
