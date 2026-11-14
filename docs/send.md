@@ -6,20 +6,26 @@ Read when: sending text, files, stickers, locations, polls, status broadcasts, q
 
 When `sync --follow` is already running for the same store, send commands delegate the send to that running process instead of opening a second WhatsApp session. This keeps scripts usable while continuous sync owns the store lock.
 
+By default, a fresh own reply acknowledges the chat locally (v0.26.0 behavior). Automation can pass `--keep-unread` to preserve the existing unread count and manual unread marker for humans. It does not make a read chat unread, send a mark-unread patch, or change read-receipt settings. The accepted message is still saved in history; its later echo or history replay is not a fresh reply and does not acknowledge the chat. Independent reads on another device still apply.
+
+`--keep-unread` works for text, file (including `--ptt`), voice, sticker, location, poll, select (buttons and lists), and react, both directly and through `sync --follow`. Reactions already preserve unread state. Status broadcasts also accept the flag, but use separate status storage and never acknowledge chats; status delegation remains unsupported.
+
+Delegated opt-in sends carry `keep_unread: true` and require IPC version 2. Older running owners reject the request before sending; the CLI tells you to upgrade wacli and restart `sync --follow`. There is no fallback that could mark the chat read. Sends without the flag omit the field and continue using version 1. A local history save failure still returns `store_warning`; without that saved row, a later own echo may be treated as fresh.
+
 Generic connection errors do not automatically start a fresh send: a disconnect can happen after a message frame was submitted but before its acknowledgement arrived. The outcome can therefore be uncertain. Inspect history before deciding whether to send again. Known preparation/lookup failures can still retry once; an ordinary message-acknowledgement timeout also does not trigger a fresh outer send. This policy does not establish recipient delivery or guarantee server-side deduplication.
 
 ## Commands
 
 ```bash
-wacli send text --to RECIPIENT --message TEXT [--message-escapes] [--pick N] [--mention USER] [--no-preview] [--allow-self] [--ephemeral] [--ephemeral-duration DURATION] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
-wacli send file --to RECIPIENT --file PATH [--pick N] [--caption TEXT] [--filename NAME] [--mime TYPE] [--as auto|document|audio|image|video] [--ptt] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
-wacli send sticker --to RECIPIENT --file PATH [--pick N] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
-wacli send voice --to RECIPIENT --file PATH [--pick N] [--mime TYPE] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
-wacli send location --to RECIPIENT --latitude LAT --longitude LNG [--name TEXT] [--pick N] [--post-send-wait 2s]
-wacli send react --to PHONE_OR_JID --id MSG_ID [--reaction TEXT] [--sender JID] [--post-send-wait 2s]
-wacli send poll --to RECIPIENT --question TEXT --option TEXT --option TEXT [--multi N] [--ephemeral] [--post-send-wait 2s]
-wacli send status [--message TEXT] [--file PATH] [--mime TYPE] [--background-color '#RRGGBB'] [--font N] [--post-send-wait 2s]
-wacli send select --to RECIPIENT --id MSG_ID (--label TEXT | --button-id ID | --index N) [--type list_row|quick_reply] [--pick N] [--sender JID] [--post-send-wait 2s]
+wacli send text --to RECIPIENT --message TEXT [--keep-unread] [--message-escapes] [--pick N] [--mention USER] [--no-preview] [--allow-self] [--ephemeral] [--ephemeral-duration DURATION] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
+wacli send file --to RECIPIENT --file PATH [--keep-unread] [--pick N] [--caption TEXT] [--filename NAME] [--mime TYPE] [--as auto|document|audio|image|video] [--ptt] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
+wacli send sticker --to RECIPIENT --file PATH [--keep-unread] [--pick N] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
+wacli send voice --to RECIPIENT --file PATH [--keep-unread] [--pick N] [--mime TYPE] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
+wacli send location --to RECIPIENT --latitude LAT --longitude LNG [--keep-unread] [--name TEXT] [--pick N] [--post-send-wait 2s]
+wacli send react --to PHONE_OR_JID --id MSG_ID [--keep-unread] [--reaction TEXT] [--sender JID] [--post-send-wait 2s]
+wacli send poll --to RECIPIENT --question TEXT --option TEXT --option TEXT [--keep-unread] [--multi N] [--ephemeral] [--post-send-wait 2s]
+wacli send status [--keep-unread] [--message TEXT] [--file PATH] [--mime TYPE] [--background-color '#RRGGBB'] [--font N] [--post-send-wait 2s]
+wacli send select --to RECIPIENT --id MSG_ID (--label TEXT | --button-id ID | --index N) [--keep-unread] [--type list_row|quick_reply] [--pick N] [--sender JID] [--post-send-wait 2s]
 wacli poll vote --to RECIPIENT --id MSG_ID --option TEXT [--option TEXT] [--sender JID] [--post-send-wait 2s]
 wacli poll show --to RECIPIENT --id MSG_ID [--json]
 wacli polls list [--chat RECIPIENT] [--limit N] [--json]

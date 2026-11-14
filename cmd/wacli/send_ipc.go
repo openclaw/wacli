@@ -20,8 +20,11 @@ import (
 )
 
 const (
-	sendDelegateVersion       = 1
-	sendDelegateResponseGrace = 5 * time.Second
+	sendDelegateVersion = 1
+	// Only opt-in sends require v2: v1 owners ignore unknown JSON fields.
+	// They must reject these requests before sending rather than drop the policy.
+	sendKeepUnreadDelegateVersion = 2
+	sendDelegateResponseGrace     = 5 * time.Second
 	// sendDelegateReplyMargin is reserved before the caller's deadline so a
 	// refusal can reach the caller before it gives up on the connection. An
 	// explicit "not sent" is only useful if it arrives.
@@ -41,6 +44,7 @@ type sendDelegateRequest struct {
 	ReplyToSender        string   `json:"reply_to_sender,omitempty"`
 	NoPreview            bool     `json:"no_preview,omitempty"`
 	AllowSelf            bool     `json:"allow_self,omitempty"`
+	KeepUnread           bool     `json:"keep_unread,omitempty"`
 	Ephemeral            bool     `json:"ephemeral,omitempty"`
 	EphemeralDuration    string   `json:"ephemeral_duration,omitempty"`
 	EphemeralDurationSet bool     `json:"ephemeral_duration_set,omitempty"`
@@ -112,6 +116,9 @@ type sendDelegateExecutor func(context.Context, sendDelegateRequest) (sendDelega
 
 func delegateSend(ctx context.Context, flags *rootFlags, req sendDelegateRequest) (sendDelegateResponse, error) {
 	req.Version = sendDelegateVersion
+	if req.KeepUnread {
+		req.Version = sendKeepUnreadDelegateVersion
+	}
 	req.TimeoutMS = durationMillis(flags.timeout)
 	storeDir, err := resolveStoreDir(flags)
 	if err != nil {
@@ -157,6 +164,9 @@ func delegateSend(ctx context.Context, flags *rootFlags, req sendDelegateRequest
 		return sendDelegateResponse{}, err
 	}
 	if !resp.OK {
+		if req.KeepUnread && strings.HasPrefix(resp.Error, "unsupported send delegate version") {
+			return sendDelegateResponse{}, fmt.Errorf("--keep-unread requires a newer sync owner; upgrade wacli and restart sync --follow (not sent): %s", resp.Error)
+		}
 		return sendDelegateResponse{}, errors.New(resp.Error)
 	}
 	return resp, nil
@@ -371,7 +381,7 @@ func writeDelegateResult(conn net.Conn, requestCtx context.Context, req sendDele
 }
 
 func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {
-	if req.Version != sendDelegateVersion {
+	if req.Version != sendDelegateVersion && (req.Version != sendKeepUnreadDelegateVersion || !req.KeepUnread) {
 		return sendDelegateResponse{}, fmt.Errorf("unsupported send delegate version %d", req.Version)
 	}
 	ctx, cancel := context.WithTimeout(parent, millisDuration(req.TimeoutMS, 5*time.Minute))
@@ -577,7 +587,7 @@ func executeDelegatedEdit(ctx context.Context, a *app.App, req sendDelegateReque
 	return sendDelegateResponse{OK: true, Sent: true, To: chatJID.String(), ID: string(sentID), Target: msg.MsgID}, nil
 }
 
-func executeDelegatedText(ctx context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {
+func executeDelegatedText(ctx context.Context, a outboundSendApp, req sendDelegateRequest) (sendDelegateResponse, error) {
 	ephemeral := textEphemeralOptions{
 		Enabled:     req.Ephemeral,
 		Duration:    req.EphemeralDuration,
@@ -605,7 +615,7 @@ func executeDelegatedText(ctx context.Context, a *app.App, req sendDelegateReque
 	}
 	preview, previewWarning := fetchLinkPreview(ctx, req.Message, req.NoPreview)
 	var thumbnailWarning string
-	msgID, storeErr, err := sendTextWithHistory(ctx, a, reconnectForSend(a), toJID, req.Message, req.ReplyTo, req.ReplyToSender, preview, mentionedJIDs, ephemeral, textSendOptions{allowSelf: req.AllowSelf, warn: func(msg string) { thumbnailWarning = msg }})
+	msgID, storeErr, err := sendTextWithHistory(ctx, a, reconnectForSend(a), toJID, req.Message, req.ReplyTo, req.ReplyToSender, preview, mentionedJIDs, ephemeral, textSendOptions{allowSelf: req.AllowSelf, keepUnread: req.KeepUnread, warn: func(msg string) { thumbnailWarning = msg }})
 	if err != nil {
 		return sendDelegateResponse{}, err
 	}
@@ -617,7 +627,7 @@ func executeDelegatedText(ctx context.Context, a *app.App, req sendDelegateReque
 	return resp, nil
 }
 
-func executeDelegatedFile(ctx context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {
+func executeDelegatedFile(ctx context.Context, a outboundSendApp, req sendDelegateRequest) (sendDelegateResponse, error) {
 	maxSize, err := resolveSendFileMaxSize(req.MaxSizeBytes)
 	if err != nil {
 		return sendDelegateResponse{}, err
@@ -636,6 +646,7 @@ func executeDelegatedFile(ctx context.Context, a *app.App, req sendDelegateReque
 	}
 	res, err := runFileSendOperation(ctx, reconnectForSend(a), req.File, func(ctx context.Context) (sendDelegateResponse, error) {
 		outcome, err := sendFile(ctx, a, toJID, req.File, sendFileOptions{
+			keepUnread:    req.KeepUnread,
 			filename:      req.Filename,
 			caption:       req.Caption,
 			mimeOverride:  req.MIME,
@@ -661,7 +672,7 @@ func executeDelegatedFile(ctx context.Context, a *app.App, req sendDelegateReque
 	return res, nil
 }
 
-func executeDelegatedSticker(ctx context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {
+func executeDelegatedSticker(ctx context.Context, a outboundSendApp, req sendDelegateRequest) (sendDelegateResponse, error) {
 	toJID, err := resolveRecipient(a, req.To, recipientOptions{pick: req.Pick, asJSON: true})
 	if err != nil {
 		return sendDelegateResponse{}, err
@@ -672,6 +683,7 @@ func executeDelegatedSticker(ctx context.Context, a *app.App, req sendDelegateRe
 	}
 	res, err := runSendOperation(ctx, reconnectForSend(a), func(ctx context.Context) (sendDelegateResponse, error) {
 		outcome, err := sendSticker(ctx, a, toJID, req.File, sendStickerOptions{
+			keepUnread:    req.KeepUnread,
 			replyTo:       req.ReplyTo,
 			replyToSender: req.ReplyToSender,
 		})
@@ -691,7 +703,7 @@ func executeDelegatedSticker(ctx context.Context, a *app.App, req sendDelegateRe
 	return res, nil
 }
 
-func executeDelegatedReact(ctx context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {
+func executeDelegatedReact(ctx context.Context, a outboundSendApp, req sendDelegateRequest) (sendDelegateResponse, error) {
 	chat, senderJID, err := reactionTarget(req.To, req.Sender)
 	if err != nil {
 		return sendDelegateResponse{}, err
@@ -707,7 +719,7 @@ func executeDelegatedReact(ctx context.Context, a *app.App, req sendDelegateRequ
 		return sendDelegateResponse{}, err
 	}
 	now := time.Now().UTC()
-	storeErr := upsertSentReaction(ctx, a.DB(), a.WA(), chat, sentID, req.ID, req.Reaction, now)
+	storeErr := upsertSentReaction(ctx, a.DB(), a.WA(), chat, sentID, req.ID, req.Reaction, now, req.KeepUnread)
 	waitForPostSendRetryReceipts(ctx, millisDuration(req.PostSendWaitMS, 0))
 	resp := sendDelegateResponse{OK: true, Sent: true, To: chat.String(), ID: string(sentID), Target: req.ID, Reaction: req.Reaction}
 	if storeErr != nil {
@@ -777,7 +789,7 @@ func writeDelegatedSendOutput(flags *rootFlags, kind string, resp sendDelegateRe
 	return nil
 }
 
-func warmupDelegatedRecipient(ctx context.Context, a *app.App, jid types.JID) types.JID {
+func warmupDelegatedRecipient(ctx context.Context, a interface{ WA() app.WAClient }, jid types.JID) types.JID {
 	return warmupRecipient(ctx, a.WA(), jid, os.Stderr)
 }
 

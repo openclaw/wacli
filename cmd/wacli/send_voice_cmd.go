@@ -12,12 +12,17 @@ import (
 )
 
 func newSendVoiceCmd(flags *rootFlags) *cobra.Command {
+	return newSendVoiceCmdWithApp(flags, openOutboundSendApp(flags))
+}
+
+func newSendVoiceCmdWithApp(flags *rootFlags, open outboundSendAppOpener) *cobra.Command {
 	var to string
 	var pick int
 	var filePath string
 	var mimeOverride string
 	var replyTo string
 	var replyToSender string
+	var keepUnread bool
 	postSendWait := postSendRetryReceiptWait
 
 	cmd := &cobra.Command{
@@ -37,13 +42,14 @@ func newSendVoiceCmd(flags *rootFlags) *cobra.Command {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
-			a, lk, err := newApp(ctx, flags, true, false)
+			a, close, err := open(ctx)
 			if err != nil {
 				delegateFile := filePath
 				if abs, absErr := filepath.Abs(filePath); absErr == nil {
 					delegateFile = abs
 				}
 				resp, delegated, delegateErr := tryDelegateSend(ctx, flags, err, sendDelegateRequest{
+					KeepUnread:     keepUnread,
 					Kind:           "voice",
 					To:             to,
 					Pick:           pick,
@@ -61,7 +67,7 @@ func newSendVoiceCmd(flags *rootFlags) *cobra.Command {
 				}
 				return err
 			}
-			defer closeApp(a, lk)
+			defer close()
 
 			if err := a.EnsureAuthed(ctx); err != nil {
 				return err
@@ -81,6 +87,7 @@ func newSendVoiceCmd(flags *rootFlags) *cobra.Command {
 
 			res, err := runFileSendOperation(ctx, reconnectForSend(a), filePath, func(ctx context.Context) (sendFileOutcome, error) {
 				return sendFile(ctx, a, toJID, filePath, sendFileOptions{
+					keepUnread:    keepUnread,
 					mimeOverride:  mimeOverride,
 					replyTo:       replyTo,
 					replyToSender: replyToSender,
@@ -111,6 +118,7 @@ func newSendVoiceCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().IntVar(&pick, "pick", 0, "when --to is ambiguous, pick the Nth match (1-indexed)")
 	cmd.Flags().StringVar(&filePath, "file", "", "path to OGG/Opus audio file")
 	cmd.Flags().StringVar(&mimeOverride, "mime", "", "override detected mime type")
+	cmd.Flags().BoolVar(&keepUnread, "keep-unread", false, "preserve the chat's unread state when sending")
 	cmd.Flags().StringVar(&replyTo, "reply-to", "", "message ID to quote/reply to")
 	cmd.Flags().StringVar(&replyToSender, "reply-to-sender", "", "sender JID of the quoted message (required for unsynced group replies)")
 	cmd.Flags().DurationVar(&postSendWait, "post-send-wait", postSendRetryReceiptWait, "keep the connection alive after send so retry receipts can be handled (0 disables)")

@@ -1,6 +1,8 @@
 package store
 
 import (
+	"fmt"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -156,4 +158,41 @@ func TestOwnPlaceholderLaterDecodedCountsOnce(t *testing.T) {
 	assertUnread(t, db, ownReadChat, true, 1)
 	storeMsg(t, db, UpsertMessageParams{MsgID: "own-1", Timestamp: ownReadBase.Add(time.Minute), FromMe: true, Text: "decoded"})
 	assertUnread(t, db, ownReadChat, false, 0)
+}
+
+func TestKeepUnreadOwnReplyEchoIsNotFreshAfterReopen(t *testing.T) {
+	for _, count := range []int{0, 3} {
+		t.Run(fmt.Sprintf("count=%d", count), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "wacli.db")
+			db, err := Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = db.Close() })
+			seedUnreadChat(t, db, ownReadChat, count, true)
+			own := UpsertMessageParams{ChatJID: ownReadChat, MsgID: "automatic", Timestamp: ownReadBase.Add(time.Minute), FromMe: true, Text: "automatic reply", SkipOwnReadMark: true}
+			storeMsg(t, db, own)
+			assertUnread(t, db, ownReadChat, true, count)
+			if err := db.Close(); err != nil {
+				t.Fatal(err)
+			}
+			reopened, err := Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			db = reopened
+			// The flag is not present in either a network echo or history replay.
+			// Freshness comes from the existing row, not an in-memory send option.
+			own.SkipOwnReadMark = false
+			for range 2 {
+				storeMsg(t, db, own)
+				assertUnread(t, db, ownReadChat, true, count)
+			}
+			// The opt-out is per send, not a sticky per-chat setting.
+			own.MsgID = "human-reply"
+			own.Timestamp = own.Timestamp.Add(time.Minute)
+			storeMsg(t, db, own)
+			assertUnread(t, db, ownReadChat, false, 0)
+		})
+	}
 }
