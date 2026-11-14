@@ -103,14 +103,18 @@ func (a *App) recoverAppStateCollection(ctx context.Context, name string, recove
 	recoveryCtx, cancelRecovery := context.WithTimeout(ctx, timeout)
 	defer cancelRecovery()
 	err = a.recoverMismatchingAppState(recoveryCtx, collection, generation, tracker, func(id types.MessageID) {
-		if a.eventsEnabled() {
-			a.emitEvent("app_state_recovery_requested", map[string]any{"name": name, "id": string(id)})
-		} else {
-			fmt.Fprintf(os.Stderr, "\rRequested app state %s recovery (id %s)\n", name, id)
-		}
+		a.reportAppStateRecoveryRequested(name, id)
 	})
 	if err != nil {
 		a.warnAppStateRecovery(name, err)
+	}
+}
+
+func (a *App) reportAppStateRecoveryRequested(name string, id types.MessageID) {
+	if a.eventsEnabled() {
+		a.emitEvent("app_state_recovery_requested", map[string]any{"name": name, "id": string(id)})
+	} else {
+		fmt.Fprintf(os.Stderr, "\rRequested app state %s recovery (id %s)\n", name, id)
 	}
 }
 
