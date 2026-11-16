@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Messages: keep the earliest timestamp of a message WhatsApp delivers again. A redelivery or retry of a stored message carried a later time and replaced the stored one, so an old message moved to the end of the conversation and looked new; the earliest timestamp seen now wins, a missing timestamp never replaces one, and edits, deletions and later content are handled as before.
+- Messages: keep the stored timestamp when a received message is delivered again with the same content. A redelivery or retry carries the time it was delivered at, which replaced the stored time and moved an old message to the end of its conversation. Messages sent by this account, changed content, edits and deletions resolve their timestamp as before.
 
 - Dependencies: refresh eligible WhatsApp, SQLite, Go support and SQL tooling modules, pnpm, Node build tooling, GoReleaser, and the vulnerability scanner after the 48-hour cooldown; retain Go 1.27.0 and Node 24 minimums.
 
