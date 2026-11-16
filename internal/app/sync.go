@@ -403,6 +403,34 @@ func (a *App) upsertMessageChat(pm wa.ParsedMessage, name string) error {
 	return a.db.UpsertChatMetadata(jid, chatKind(pm.Chat), name)
 }
 
+// chatPushName is the push name that may name pm's chat. On a message this
+// account sent it is the account's own, which says nothing about the chat.
+func chatPushName(pm wa.ParsedMessage) string {
+	if pm.FromMe {
+		return ""
+	}
+	return pm.PushName
+}
+
+// keepStoredChatName stops a message this account sent from replacing the name
+// stored for its chat with the bare JID that stands in when nothing names the
+// chat. A stored name that is the account's own push name, as earlier versions
+// wrote, is not kept.
+func (a *App) keepStoredChatName(pm wa.ParsedMessage, name string) string {
+	if !pm.FromMe || name != pm.Chat.String() {
+		return name
+	}
+	chat, err := a.db.GetChat(canonicalJIDString(pm.Chat))
+	if err != nil {
+		return name
+	}
+	stored := strings.TrimSpace(chat.Name)
+	if stored == "" || stored == strings.TrimSpace(pm.PushName) {
+		return name
+	}
+	return stored
+}
+
 type messageStoreOptions struct {
 	archiveIncoming          bool
 	archiveObservedMS        int64
@@ -431,7 +459,7 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage, optio
 			return err
 		}
 	} else {
-		chatName = a.wa.ResolveChatName(ctx, pm.Chat, pm.PushName)
+		chatName = a.keepStoredChatName(pm, a.wa.ResolveChatName(ctx, pm.Chat, chatPushName(pm)))
 		if pm.Chat != types.StatusBroadcastJID {
 			if err := a.upsertMessageChat(pm, chatName); err != nil {
 				return err
