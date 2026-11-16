@@ -109,6 +109,11 @@ type Message struct {
 	ReadBy      int
 	Snippet     string
 	rowID       int64
+
+	// Filled at read time from the quoted message in the store (not stored):
+	// who wrote it ("me" for the account) and what it says.
+	QuotedSenderName string `json:"quoted_sender_name,omitempty"`
+	QuotedText       string `json:"quoted_text,omitempty"`
 }
 
 type MessageInfo struct {
