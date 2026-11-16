@@ -4,11 +4,13 @@
 
 - Sync: stop naming a chat after this account's own push name. A message sent by this account (from the phone, another device or `wacli send`) carries the account's push name, which was used as the chat name whenever the contact store had no name for the chat, so customer chats ended up named after the account. Such messages now name a chat only from its contact, group or JID, and never replace a name already stored with the bare JID. Names already stored are not rewritten: a chat named after the account is renamed when a contact or an incoming message names it.
 
-- Dependencies: refresh eligible WhatsApp, SQLite, Go support and SQL tooling modules, pnpm, Node build tooling, GoReleaser, and the vulnerability scanner after the 48-hour cooldown; retain Go 1.27.0 and Node 24 minimums.
+## 0.26.1 - 2026-11-15
+
+**Highlights:** preserve call history and caller identities through chat reconciliation, and fix Go security vulnerabilities.
 
 - Calls: preserve call history and caller identities when hidden-user chats are reconciled with phone-number chats. Thanks @rsampayo (#571).
-
 - Security: build with Go 1.27.4 to fix GO-2026-6859 while retaining the Go 1.27.0 source minimum. Thanks @artemgetmann (#568).
+- Dependencies: refresh eligible WhatsApp, SQLite, Go support and SQL tooling modules, pnpm, Node build tooling, GoReleaser, and the vulnerability scanner after the 48-hour cooldown; retain Go 1.27.0 and Node 24 minimums.
 
 ## 0.26.0 - 2026-11-05
 
