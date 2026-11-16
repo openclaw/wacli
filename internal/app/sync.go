@@ -414,8 +414,9 @@ func chatPushName(pm wa.ParsedMessage) string {
 
 // keepStoredChatName stops a message this account sent from replacing the name
 // stored for its chat with the bare JID that stands in when nothing names the
-// chat. A stored name that is the account's own push name, as earlier versions
-// wrote, is not kept.
+// chat. The stored name is kept whatever it is: chats.name does not record where
+// a name came from, so a name equal to the account's push name may be a real
+// one, such as a group named like the account.
 func (a *App) keepStoredChatName(pm wa.ParsedMessage, name string) string {
 	if !pm.FromMe || name != pm.Chat.String() {
 		return name
@@ -424,11 +425,10 @@ func (a *App) keepStoredChatName(pm wa.ParsedMessage, name string) string {
 	if err != nil {
 		return name
 	}
-	stored := strings.TrimSpace(chat.Name)
-	if stored == "" || stored == strings.TrimSpace(pm.PushName) {
-		return name
+	if stored := strings.TrimSpace(chat.Name); stored != "" {
+		return stored
 	}
-	return stored
+	return name
 }
 
 type messageStoreOptions struct {
