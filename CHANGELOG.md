@@ -4,11 +4,13 @@
 
 - Messages: keep the stored timestamp when a received message is delivered again with the same content. A redelivery or retry carries the time it was delivered at, which replaced the stored time and moved an old message to the end of its conversation. Messages sent by this account, changed content, edits and deletions resolve their timestamp as before.
 
-- Dependencies: refresh eligible WhatsApp, SQLite, Go support and SQL tooling modules, pnpm, Node build tooling, GoReleaser, and the vulnerability scanner after the 48-hour cooldown; retain Go 1.27.0 and Node 24 minimums.
+## 0.26.1 - 2026-11-15
+
+**Highlights:** preserve call history and caller identities through chat reconciliation, and fix Go security vulnerabilities.
 
 - Calls: preserve call history and caller identities when hidden-user chats are reconciled with phone-number chats. Thanks @rsampayo (#571).
-
 - Security: build with Go 1.27.4 to fix GO-2026-6859 while retaining the Go 1.27.0 source minimum. Thanks @artemgetmann (#568).
+- Dependencies: refresh eligible WhatsApp, SQLite, Go support and SQL tooling modules, pnpm, Node build tooling, GoReleaser, and the vulnerability scanner after the 48-hour cooldown; retain Go 1.27.0 and Node 24 minimums.
 
 ## 0.26.0 - 2026-11-05
 
