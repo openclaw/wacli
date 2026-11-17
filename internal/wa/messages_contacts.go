@@ -126,3 +126,18 @@ func appendUnique(values []string, value string) []string {
 	}
 	return append(values, value)
 }
+
+// ContactDisplayText returns the history text stored for a contact card,
+// such as "Contact: Jane Doe (+1 555 0100)", so sent and synced cards match.
+func ContactDisplayText(contact *waProto.ContactMessage) string {
+	return contactDisplayText(contact)
+}
+
+// ContactDetails returns the display name (falling back to the vCard FN) and
+// the TEL values of a contact card.
+func ContactDetails(contact *waProto.ContactMessage) (string, []string) {
+	if contact == nil {
+		return "", nil
+	}
+	return contactDetails(contact)
+}

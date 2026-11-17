@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Send: add `send contact` to share a native WhatsApp contact card, built from `--name`, repeatable `--phone` and optional `--org` (with `waid` so recipients get the Message and Add contact buttons) or sent as-is from `--vcard FILE|-`; delegated through a running `sync --follow` and stored in local history right away.
+
 ## 0.26.1 - 2026-11-15
 
 **Highlights:** preserve call history and caller identities through chat reconciliation, and fix Go security vulnerabilities.
