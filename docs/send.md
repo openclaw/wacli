@@ -1,6 +1,6 @@
 # send
 
-Read when: sending text, files, stickers, locations, polls, status broadcasts, quoted replies, or reactions.
+Read when: sending text, files, stickers, locations, contact cards, polls, status broadcasts, quoted replies, or reactions.
 
 `wacli send` requires authentication, a live connection, and writable mode. Send attempts are bounded and retry once after reconnect for known stale-session/usync timeout failures. `Sent to ...` and JSON `sent: true` mean WhatsApp accepted the send request and returned a message ID; they do not confirm recipient delivery. After a successful send, wacli keeps the connection alive briefly so whatsmeow can handle retry receipts from devices that could not decrypt the first copy. Repeated send commands within 5 seconds print a stderr warning so tight loops make WhatsApp rate-limit/account-risk visible.
 
@@ -16,6 +16,7 @@ wacli send file --to RECIPIENT --file PATH [--pick N] [--caption TEXT] [--filena
 wacli send sticker --to RECIPIENT --file PATH [--pick N] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
 wacli send voice --to RECIPIENT --file PATH [--pick N] [--mime TYPE] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
 wacli send location --to RECIPIENT --latitude LAT --longitude LNG [--name TEXT] [--pick N] [--post-send-wait 2s]
+wacli send contact --to RECIPIENT (--name TEXT --phone NUMBER [--phone NUMBER] [--org TEXT] | --vcard FILE|- [--name TEXT]) [--pick N] [--post-send-wait 2s]
 wacli send react --to PHONE_OR_JID --id MSG_ID [--reaction TEXT] [--sender JID] [--post-send-wait 2s]
 wacli send poll --to RECIPIENT --question TEXT --option TEXT --option TEXT [--multi N] [--ephemeral] [--post-send-wait 2s]
 wacli send status [--message TEXT] [--file PATH] [--mime TYPE] [--background-color '#RRGGBB'] [--font N] [--post-send-wait 2s]
@@ -27,7 +28,7 @@ wacli polls list [--chat RECIPIENT] [--limit N] [--json]
 
 ## Recipients
 
-- `send text`, `send file`, `send sticker`, `send voice`, and `send location` accept a JID, phone number, or synced contact/group/chat name.
+- `send text`, `send file`, `send sticker`, `send voice`, `send location`, and `send contact` accept a JID, phone number, or synced contact/group/chat name.
 - Channel JIDs use `...@newsletter`; `send text` and `send file` can target channels when the authenticated account has posting permission.
 - If a name matches multiple recipients, interactive terminals prompt.
 - In scripts, use `--pick N` to choose a displayed match.
@@ -55,7 +56,7 @@ wacli polls list [--chat RECIPIENT] [--limit N] [--json]
 - Sent reactions are stored locally immediately under the canonical phone/LID chat, including reaction target and display text. Sent text replies also retain their quoted display text before the next sync.
 - For group reactions, pass `--sender` for the original message sender.
 - Use `--post-send-wait 0` to disable the retry-receipt grace window for latency-sensitive scripts.
-- If any send command (text, file, voice, sticker, status, react, poll, poll vote, select, or message forward) delivers a message but recording it in local history fails (disk full, locked store), the command still succeeds with the delivered id and prints a warning to stderr; JSON output carries the failure in `store_warning`, including for sends delegated to a running `sync --follow` process. Do not retry such a send — the recipient already has the message.
+- If any send command (text, file, voice, sticker, location, contact, status, react, poll, poll vote, select, or message forward) delivers a message but recording it in local history fails (disk full, locked store), the command still succeeds with the delivered id and prints a warning to stderr; JSON output carries the failure in `store_warning`, including for sends delegated to a running `sync --follow` process. Do not retry such a send — the recipient already has the message.
 
 ## Polls
 
@@ -103,6 +104,15 @@ wacli polls list [--chat RECIPIENT] [--limit N] [--json]
 - Coordinates are removed by `messages purge` and by the chat cleanup commands, on the same terms as any other retained message payload. See [store](store.md).
 - Locations synced before this table existed have no coordinates and cannot be backfilled.
 
+## Contact cards
+
+- `send contact` sends a native WhatsApp contact card (vCard), which recipients can open to message or save the contact.
+- Build the card with `--name` and one or more repeatable `--phone` values, plus an optional `--org`. Phone numbers must be in international format with the country code; they accept the same formatting as `--to` (spaces, dashes, dots, parentheses, one leading `+`) and must have 7-15 digits.
+- The built card is vCard 3.0 with `N`, `FN`, optional `ORG`, and one `TEL;type=CELL;waid=<digits>:+<digits>` line per number. The `waid` parameter is what makes WhatsApp show the Message and Add contact buttons.
+- Pass `--vcard FILE` (or `--vcard -` to read stdin) to send an existing card as-is, up to 64 KiB. It must hold exactly one card from `BEGIN:VCARD` to `END:VCARD`, and it cannot be combined with `--phone` or `--org`. The name shown on the message comes from `--name` when set, otherwise from the card's `FN` line. Numbers in a raw card get the buttons only if their `TEL` lines carry `waid=`.
+- A contact card carries no caption, mentions, or quoted reply.
+- Sent cards are stored in local history immediately with the same text sync gives a received card, such as `Contact: Jane Doe (+15550100)`, so they show up in `messages list` and search.
+
 ## Files
 
 - Set `WACLI_MEDIA_ROOTS` to a platform path-list of absolute directories (`:` on Unix, `;` on Windows) to confine which local files `send file`, `send voice`, `send sticker` and `send status --file` may upload. The file must resolve, symlinks included, to a path inside one of them; anything else is refused before the store is opened or a running `sync --follow` is asked to send. Unset or empty keeps the default of no restriction. Relative roots and nonempty lists without directories are errors; missing roots are skipped. Set the variable in both the invoking CLI and the `sync --follow` environment: the CLI checks before delegation, and an upgraded daemon enforces its own roots when it opens the upload. Restart sync after configuring this policy. Symlinked roots work; symlinks that escape all configured roots are refused. This is an upload guardrail, not an OS sandbox for a process that can change its own environment or the allowed files.
@@ -136,6 +146,8 @@ wacli send file --to 1234567890 --file /tmp/report --filename report.pdf
 wacli send sticker --to 1234567890 --file ./sticker-512.webp
 wacli send voice --to 1234567890 --file ./voice.ogg
 wacli send location --to 1234567890 --latitude 51.4779 --longitude -0.0015 --name "Royal Observatory"
+wacli send contact --to 1234567890 --name "Jane Doe" --phone "+1 555 0100" --org "Example Inc"
+wacli send contact --to "Family" --vcard ./jane.vcf
 wacli send react --to 1234567890 --id ABC123 --reaction "❤️"
 wacli send poll --to "Family" --question "Dinner?" --option "Pizza" --option "Sushi" --multi 1
 wacli send status --message "available today" --background-color '#1f7a8c' --font 1
