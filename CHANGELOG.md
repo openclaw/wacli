@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Messages: store Meta AI replies in `@bot` chats as their text instead of `(message)` placeholders, keep a reply's later edits on the original incoming message, and skip Meta AI's internal metadata updates.
+
 ## 0.26.1 - 2026-11-15
 
 **Highlights:** preserve call history and caller identities through chat reconciliation, and fix Go security vulnerabilities.

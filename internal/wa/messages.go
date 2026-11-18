@@ -1,6 +1,7 @@
 package wa
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
+	"go.mau.fi/whatsmeow/types/richresponse"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
@@ -309,7 +311,15 @@ func extractProtocolMutation(m *waProto.Message, pm *ParsedMessage) (*waProto.Me
 	}
 	switch protocol.GetType() {
 	case waProto.ProtocolMessage_MESSAGE_EDIT:
-		applyProtocolKey(protocol.GetKey(), pm)
+		// A direct bot's replacement addresses the user from the bot's side.
+		// Keep the incoming envelope's identity and use only the original message ID.
+		if !pm.FromMe && pm.Chat.Server == types.BotServer && pm.SenderJID == pm.Chat.String() {
+			if id := protocol.GetKey().GetID(); id != "" {
+				pm.ID = id
+			}
+		} else {
+			applyProtocolKey(protocol.GetKey(), pm)
+		}
 		pm.Edited = true
 		return protocol.GetEditedMessage(), true
 	case waProto.ProtocolMessage_REVOKE:
@@ -481,9 +491,40 @@ func extractPlainText(m *waProto.Message, pm *ParsedMessage) {
 		pm.Text = m.GetConversation()
 	case m.GetExtendedTextMessage() != nil:
 		pm.Text = m.GetExtendedTextMessage().GetText()
+	case m.GetRichResponseMessage() != nil:
+		pm.Text = richResponseText(m.GetRichResponseMessage())
 	case m.GetGroupInviteMessage() != nil:
 		pm.Text = groupInviteText(m.GetGroupInviteMessage())
 	}
+}
+
+func richResponseText(message *waE2E.AIRichResponseMessage) string {
+	var lines []string
+	var response richresponse.RichResponse
+	if data := message.GetUnifiedResponse().GetData(); len(data) != 0 && json.Unmarshal(data, &response) == nil {
+		for _, section := range response.Sections {
+			if section.Model == nil {
+				continue
+			}
+			for _, primitive := range section.Model.GetPrimitives() {
+				switch primitive.(type) {
+				case nil, *richresponse.GenAIBotThinkingStatusPrimitive, *richresponse.GenAIMetadataTextPrimitive:
+					continue
+				}
+				if text := strings.TrimSpace(primitive.String()); text != "" {
+					lines = append(lines, text)
+				}
+			}
+		}
+	}
+	if len(lines) == 0 {
+		for _, part := range message.GetSubmessages() {
+			if text := strings.TrimSpace(part.GetMessageText()); text != "" {
+				lines = append(lines, text)
+			}
+		}
+	}
+	return strings.Join(lines, "\n\n")
 }
 
 func clone(b []byte) []byte {

@@ -606,7 +606,7 @@ func (a *App) handleStarEvent(ctx context.Context, evt *events.Star) error {
 }
 
 func (a *App) handleLiveSyncMessage(ctx context.Context, opts SyncOptions, v *events.Message, messagesStored *atomic.Int64, enqueueMedia func(string, string), enqueueWebhook func(wa.ParsedMessage), limits ...*syncStorageLimits) {
-	if historySyncNotificationFromMessage(v) != nil {
+	if historySyncNotificationFromMessage(v) != nil || v.Message.GetProtocolMessage().GetType() == waE2E.ProtocolMessage_AI_METADATA_OPERATION {
 		return
 	}
 	observedArchiveMS, observedSettingMS, archiveDisabled := a.observedArchiveBoundary(ctx, v.Info.Chat)
@@ -769,6 +769,9 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 				continue
 			}
 			unwrapped := (&events.Message{RawMessage: m.Message.GetMessage()}).UnwrapRaw()
+			if unwrapped.Message.GetProtocolMessage().GetType() == waE2E.ProtocolMessage_AI_METADATA_OPERATION {
+				continue
+			}
 			if isSecretEdit(unwrapped.Message) {
 				evt, err := a.wa.ParseWebMessage(pm.Chat, m.Message)
 				if err != nil {
