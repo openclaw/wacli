@@ -76,6 +76,13 @@ type sendDelegateRequest struct {
 	Phonebook            bool     `json:"phonebook,omitempty"`
 	ChatStateAction      string   `json:"chat_state_action,omitempty"`
 	MuteDurationMS       int64    `json:"mute_duration_ms,omitempty"`
+	Users                []string `json:"users,omitempty"`
+	GroupAnnounceOnly    bool     `json:"group_announce_only,omitempty"`
+	GroupLocked          bool     `json:"group_locked,omitempty"`
+	GroupJoinApproval    bool     `json:"group_join_approval,omitempty"`
+	GroupCommunity       bool     `json:"group_community,omitempty"`
+	GroupLinkedParent    string   `json:"group_linked_parent,omitempty"`
+	GroupResetInvite     bool     `json:"group_reset_invite,omitempty"`
 	PostSendWaitMS       int64    `json:"post_send_wait_ms,omitempty"`
 	TimeoutMS            int64    `json:"timeout_ms,omitempty"`
 	DeadlineUnixMS       int64    `json:"deadline_unix_ms,omitempty"`
@@ -106,6 +113,8 @@ type sendDelegateResponse struct {
 	Contact        *contactSaveResult   `json:"contact,omitempty"`
 	Presence       *app.PresenceState   `json:"presence,omitempty"`
 	Media          *mediaDownloadResult `json:"media,omitempty"`
+	Group          *types.GroupInfo     `json:"group,omitempty"`
+	Link           string               `json:"link,omitempty"`
 }
 
 type sendDelegateExecutor func(context.Context, sendDelegateRequest) (sendDelegateResponse, error)
@@ -421,6 +430,13 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 		return executeDelegatedChatState(ctx, a, req)
 	case contactsSaveKind:
 		return executeDelegatedContactsSave(ctx, a, req)
+	case groupCreateKind:
+		// Group operations share the serialized send queue and its pacing:
+		// they are wire requests like sends, and the caller's deadline still
+		// bounds the wait (#551).
+		return executeDelegatedGroupCreate(ctx, a.WA(), a.DB(), req)
+	case groupInviteLinkKind:
+		return executeDelegatedGroupInviteLink(ctx, a.WA(), req)
 	default:
 		return sendDelegateResponse{}, fmt.Errorf("unsupported send kind %q", req.Kind)
 	}

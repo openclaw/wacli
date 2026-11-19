@@ -15,22 +15,13 @@ import (
 )
 
 func newGroupsCreateCmd(flags *rootFlags) *cobra.Command {
-	var name string
-	var users []string
-	var announceOnly bool
-	var locked bool
-	var joinApproval bool
-	var parent bool
-	var linkedParent string
+	var opts groupCreateOptions
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a group",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if strings.TrimSpace(name) == "" {
-				return fmt.Errorf("--name is required")
-			}
-			if parent && strings.TrimSpace(linkedParent) != "" {
-				return fmt.Errorf("--community and --linked-parent cannot be combined")
+			if err := opts.validate(); err != nil {
+				return err
 			}
 			if err := flags.requireWritable(); err != nil {
 				return err
@@ -40,6 +31,15 @@ func newGroupsCreateCmd(flags *rootFlags) *cobra.Command {
 
 			a, lk, err := newApp(ctx, flags, true, false)
 			if err != nil {
+				// A same-store `sync --follow` owns the lock and the connected
+				// session; it creates the group on our behalf (#551).
+				resp, delegated, delegateErr := tryDelegateSend(ctx, flags, err, opts.delegateRequest())
+				if delegated {
+					if delegateErr != nil {
+						return explainGroupDelegateError(delegateErr, groupCreateKind, "groups create")
+					}
+					return writeGroupCreateResult(flags, resp.Group)
+				}
 				return err
 			}
 			defer closeApp(a, lk)
@@ -51,51 +51,20 @@ func newGroupsCreateCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 
-			participants, err := parseGroupUserJIDs(users)
+			info, err := createGroup(ctx, a.WA(), a.DB(), opts)
 			if err != nil {
 				return err
 			}
-			var parentJID types.JID
-			if strings.TrimSpace(linkedParent) != "" {
-				parentJID, err = parseGroupJID(linkedParent)
-				if err != nil {
-					return fmt.Errorf("parse --linked-parent: %w", err)
-				}
-			}
-			info, err := a.WA().CreateGroup(ctx, wa.CreateGroupRequest{
-				Name:                   name,
-				Participants:           participants,
-				IsAnnounce:             announceOnly,
-				IsLocked:               locked,
-				IsJoinApprovalRequired: joinApproval,
-				IsParent:               parent,
-				LinkedParentJID:        parentJID,
-			})
-			if err != nil {
-				return err
-			}
-			if info != nil {
-				_ = persistGroupInfo(ctx, a.DB(), a.WA(), info)
-			}
-
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, info)
-			}
-			if info == nil {
-				fmt.Fprintln(os.Stdout, "OK")
-				return nil
-			}
-			fmt.Fprintf(os.Stdout, "JID: %s\nName: %s\n", info.JID.String(), sanitize(info.GroupName.Name))
-			return nil
+			return writeGroupCreateResult(flags, info)
 		},
 	}
-	cmd.Flags().StringVar(&name, "name", "", "group name")
-	cmd.Flags().StringSliceVar(&users, "user", nil, "initial participant phone number (+E164 and formatting ok) or JID (repeatable)")
-	cmd.Flags().BoolVar(&announceOnly, "announce-only", false, "only admins can send messages")
-	cmd.Flags().BoolVar(&locked, "locked", false, "only admins can edit group info")
-	cmd.Flags().BoolVar(&joinApproval, "join-approval", false, "require admin approval for new join requests")
-	cmd.Flags().BoolVar(&parent, "community", false, "create a community parent group")
-	cmd.Flags().StringVar(&linkedParent, "linked-parent", "", "community parent group JID for a new subgroup")
+	cmd.Flags().StringVar(&opts.name, "name", "", "group name")
+	cmd.Flags().StringSliceVar(&opts.users, "user", nil, "initial participant phone number (+E164 and formatting ok) or JID (repeatable)")
+	cmd.Flags().BoolVar(&opts.announceOnly, "announce-only", false, "only admins can send messages")
+	cmd.Flags().BoolVar(&opts.locked, "locked", false, "only admins can edit group info")
+	cmd.Flags().BoolVar(&opts.joinApproval, "join-approval", false, "require admin approval for new join requests")
+	cmd.Flags().BoolVar(&opts.community, "community", false, "create a community parent group")
+	cmd.Flags().StringVar(&opts.linkedParent, "linked-parent", "", "community parent group JID for a new subgroup")
 	return cmd
 }
 

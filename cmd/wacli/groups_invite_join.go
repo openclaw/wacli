@@ -39,34 +39,7 @@ func newGroupsInviteLinkGetCmd(flags *rootFlags) *cobra.Command {
 			if strings.TrimSpace(jidStr) == "" {
 				return fmt.Errorf("--jid is required")
 			}
-			ctx, cancel := withTimeout(context.Background(), flags)
-			defer cancel()
-
-			a, lk, err := newApp(ctx, flags, true, false)
-			if err != nil {
-				return err
-			}
-			defer closeApp(a, lk)
-
-			if err := a.EnsureAuthed(ctx); err != nil {
-				return err
-			}
-			if err := a.Connect(ctx, false, nil); err != nil {
-				return err
-			}
-			gjid, err := types.ParseJID(jidStr)
-			if err != nil {
-				return err
-			}
-			link, err := a.WA().GetGroupInviteLink(ctx, gjid, false)
-			if err != nil {
-				return err
-			}
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{"jid": gjid.String(), "link": link})
-			}
-			fmt.Fprintln(os.Stdout, link)
-			return nil
+			return runGroupsInviteLink(flags, jidStr, false)
 		},
 	}
 	cmd.Flags().StringVar(&jidStr, "jid", "", "group JID (…@g.us)")
@@ -85,38 +58,54 @@ func newGroupsInviteLinkRevokeCmd(flags *rootFlags) *cobra.Command {
 			if err := flags.requireWritable(); err != nil {
 				return err
 			}
-			ctx, cancel := withTimeout(context.Background(), flags)
-			defer cancel()
-
-			a, lk, err := newApp(ctx, flags, true, false)
-			if err != nil {
-				return err
-			}
-			defer closeApp(a, lk)
-
-			if err := a.EnsureAuthed(ctx); err != nil {
-				return err
-			}
-			if err := a.Connect(ctx, false, nil); err != nil {
-				return err
-			}
-			gjid, err := types.ParseJID(jidStr)
-			if err != nil {
-				return err
-			}
-			link, err := a.WA().GetGroupInviteLink(ctx, gjid, true)
-			if err != nil {
-				return err
-			}
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{"jid": gjid.String(), "link": link, "revoked": true})
-			}
-			fmt.Fprintln(os.Stdout, link)
-			return nil
+			return runGroupsInviteLink(flags, jidStr, true)
 		},
 	}
 	cmd.Flags().StringVar(&jidStr, "jid", "", "group JID (…@g.us)")
 	return cmd
+}
+
+func runGroupsInviteLink(flags *rootFlags, jidStr string, reset bool) error {
+	ctx, cancel := withTimeout(context.Background(), flags)
+	defer cancel()
+
+	a, lk, err := newApp(ctx, flags, true, false)
+	if err != nil {
+		if flags.isReadOnly() {
+			// `get` connects to WhatsApp, which read-only mode refuses; never
+			// hand it to a writable sync process instead.
+			return fmt.Errorf("read-only mode: command would connect to WhatsApp")
+		}
+		resp, delegated, delegateErr := tryDelegateSend(ctx, flags, err, sendDelegateRequest{
+			Kind:             groupInviteLinkKind,
+			To:               jidStr,
+			GroupResetInvite: reset,
+		})
+		if delegated {
+			if delegateErr != nil {
+				return explainGroupDelegateError(delegateErr, groupInviteLinkKind, "groups invite link")
+			}
+			return writeGroupInviteLinkResult(flags, resp.To, resp.Link, reset)
+		}
+		return err
+	}
+	defer closeApp(a, lk)
+
+	if err := a.EnsureAuthed(ctx); err != nil {
+		return err
+	}
+	if err := a.Connect(ctx, false, nil); err != nil {
+		return err
+	}
+	gjid, err := types.ParseJID(jidStr)
+	if err != nil {
+		return err
+	}
+	link, err := a.WA().GetGroupInviteLink(ctx, gjid, reset)
+	if err != nil {
+		return err
+	}
+	return writeGroupInviteLinkResult(flags, gjid.String(), link, reset)
 }
 
 func newGroupsJoinCmd(flags *rootFlags) *cobra.Command {
