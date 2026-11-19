@@ -54,6 +54,8 @@ wacli groups prune [--days N] [--left-only=false|--include-active] [--dry-run] [
 - Use `prune --dry-run` before deleting and `--confirm` only after reviewing the target list.
 - Participant users accept phone numbers with common formatting or JIDs.
 - Invite `revoke` resets the invite link.
+- While a same-store `sync --follow` process owns the store lock, `create`, `invite link get`, and `invite link revoke` are delegated to its connected session instead of failing on the lock. Output is unchanged, and a delegated `create` persists the new group in the follow process's store. They run in the follow process's serialized delegate queue with `--send-spacing` pacing, and the caller's `--timeout` bounds the wait; a request still queued at that deadline is refused and never runs later. If the reply times out after dispatch, check whether the group was created or the link reset before retrying.
+- `--read-only` and `WACLI_READONLY=1` still reject these commands before anything is delegated. Restart an older `sync --follow` process after upgrading; older daemons return an unsupported `group_create` or `group_invite_link` kind error. Other group commands still require the direct store lock.
 
 ## Examples
 
