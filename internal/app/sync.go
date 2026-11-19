@@ -68,6 +68,7 @@ type SyncOptions struct {
 	RefreshContacts     bool
 	RefreshGroups       bool
 	RefreshChannels     bool
+	RefreshStickers     bool
 	IdleExit            time.Duration // only used for bootstrap/once
 	MaxReconnect        time.Duration // max time to attempt reconnection before giving up (0 = unlimited)
 	StaleThreshold      time.Duration // force reconnect when keepalive failures last this long in follow mode (0 = disabled)
@@ -228,6 +229,15 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 			a.emitWarning(
 				"refresh_channels_failed",
 				fmt.Sprintf("warning: failed to refresh channels: %v", err),
+				map[string]any{"error": err.Error()},
+			)
+		}
+	}
+	if opts.RefreshStickers {
+		if err := a.RefreshFavoriteStickers(syncCtx); err != nil {
+			a.emitWarning(
+				"refresh_stickers_failed",
+				fmt.Sprintf("warning: failed to refresh stickers: %v", err),
 				map[string]any{"error": err.Error()},
 			)
 		}

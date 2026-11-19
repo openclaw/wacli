@@ -22,6 +22,7 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 	var refreshContacts bool
 	var refreshGroups bool
 	var refreshChannels bool
+	var refreshStickers bool
 	var webhookURL string
 	var webhookSecret string
 	var webhookAllowPrivate bool
@@ -114,6 +115,7 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 				RefreshContacts:     refreshContacts,
 				RefreshGroups:       refreshGroups,
 				RefreshChannels:     refreshChannels,
+				RefreshStickers:     refreshStickers,
 				IdleExit:            idleExit,
 				MaxReconnect:        maxReconnect,
 				StaleThreshold:      staleThreshold,
@@ -151,6 +153,7 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().BoolVar(&refreshContacts, "refresh-contacts", false, "refresh contacts from session store into local DB")
 	cmd.Flags().BoolVar(&refreshGroups, "refresh-groups", false, "refresh joined groups and participant snapshots (live)")
 	cmd.Flags().BoolVar(&refreshChannels, "refresh-channels", false, "refresh subscribed channels (live) into local DB")
+	cmd.Flags().BoolVar(&refreshStickers, "refresh-stickers", false, "replay app state in full to store favorite stickers saved before this store")
 	cmd.Flags().StringVar(&webhookURL, "webhook", "", "URL to POST live message JSON")
 	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "HMAC-SHA256 secret for X-Wacli-Signature header")
 	cmd.Flags().BoolVar(&webhookAllowPrivate, "webhook-allow-private", false, "allow webhook URLs that resolve to localhost or private networks")
