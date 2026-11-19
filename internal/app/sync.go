@@ -423,6 +423,11 @@ func ownMessageIsReply(pm wa.ParsedMessage) bool {
 func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage, options messageStoreOptions) error {
 	pm.Chat = a.canonicalStoreJID(ctx, pm.Chat)
 	chatJID := canonicalJIDString(pm.Chat)
+	a.recordMessageMemberLabel(ctx, pm)
+	if pm.MemberLabelChange {
+		// Only the sender's label changed: nothing to show as a message.
+		return nil
+	}
 	var chatName string
 	if pm.Chat.Server == types.GroupServer {
 		var err error

@@ -97,6 +97,12 @@ type ParsedMessage struct {
 	Edited           bool
 	Revoked          bool
 	Call             *ParsedCallEvent
+	// MemberLabel is the sender's label in this group as carried by the
+	// message, nil when the message carried none.
+	MemberLabel *MemberLabel
+	// MemberLabelChange marks a control message that only changes the
+	// sender's label; it has no content of its own.
+	MemberLabelChange bool
 	// UnhandledPayload names the populated waE2E.Message field when parsing
 	// extracted no content at all. Empty when the message was understood.
 	UnhandledPayload string
@@ -190,7 +196,7 @@ func (pm ParsedMessage) HasContent() bool {
 // discarding content. Field names come from the protobuf descriptor, so new
 // WhatsApp message types are reported without needing a code change here.
 func markUnhandledPayload(m *waProto.Message, pm *ParsedMessage) {
-	if m == nil || pm == nil || pm.HasContent() {
+	if m == nil || pm == nil || pm.HasContent() || pm.MemberLabelChange {
 		return
 	}
 	var names []string
@@ -288,6 +294,9 @@ func extractWAProto(m *waProto.Message, pm *ParsedMessage) *waProto.Message {
 		}
 		pm.ForwardingScore = ctx.GetForwardingScore()
 		pm.IsForwarded = ctx.GetIsForwarded() || pm.ForwardingScore > 0
+		if label := MemberLabelFromProto(ctx.GetMemberLabel()); label != nil {
+			pm.MemberLabel = label
+		}
 	}
 	return m
 }
@@ -322,6 +331,10 @@ func extractProtocolMutation(m *waProto.Message, pm *ParsedMessage) (*waProto.Me
 		pm.Media = nil
 		pm.Revoked = true
 		return nil, true
+	case waE2E.ProtocolMessage_GROUP_MEMBER_LABEL_CHANGE:
+		pm.MemberLabel = MemberLabelFromProto(protocol.GetMemberLabel())
+		pm.MemberLabelChange = pm.MemberLabel != nil
+		return nil, pm.MemberLabelChange
 	default:
 		return nil, false
 	}

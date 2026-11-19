@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/openclaw/wacli/internal/wa"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
+	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
@@ -263,5 +265,69 @@ func TestSyncWebhookIgnoresLinkPreviewAllowCIDRs(t *testing.T) {
 	}
 	if hits.Load() != 1 {
 		t.Fatalf("webhook server received %d requests, want 1", hits.Load())
+	}
+}
+
+// A member label change is a control message with no content: it is recorded
+// as the member's label but never posted to the message webhook, while the
+// ordinary message next to it is.
+func TestLiveSyncWebhookSkipsMemberLabelChange(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+	f.groups[testGroupJID] = testGroup("Team")
+
+	posted := make(chan string, 4)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct{ ID string }
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		posted <- body.ID
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	jobs := make(chan syncWebhookEvent, 4)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opts := SyncOptions{WebhookURL: srv.URL, WebhookAllowPrivate: true}
+	stopWebhook := a.runSyncWebhookWorker(ctx, opts, jobs)
+	enqueue := newSyncWebhookMessageEnqueuer(a.newSyncWebhookEnqueuer(ctx, jobs))
+
+	at := time.Date(2026, 11, 9, 19, 0, 0, 0, time.UTC)
+	feed := func(id string, msg *waProto.Message) {
+		var stored atomic.Int64
+		a.handleLiveSyncMessage(context.Background(), opts, &events.Message{
+			Info: types.MessageInfo{
+				MessageSource: types.MessageSource{Chat: testGroupJID, Sender: testMemberJID, IsGroup: true},
+				ID:            id,
+				Timestamp:     at,
+			},
+			Message: msg,
+		}, &stored, func(string, string) {}, enqueue)
+	}
+	feed("label-change", &waProto.Message{ProtocolMessage: &waProto.ProtocolMessage{
+		Type:        waE2E.ProtocolMessage_GROUP_MEMBER_LABEL_CHANGE.Enum(),
+		MemberLabel: &waE2E.MemberLabel{Label: proto.String("Coach"), LabelTimestamp: proto.Int64(at.Unix())},
+	}})
+	feed("text", &waProto.Message{Conversation: proto.String("hello")})
+	defer stopWebhook()
+
+	// The worker posts in order, so the first post shows whether the label
+	// change went out ahead of the text message.
+	select {
+	case id := <-posted:
+		if id != "text" {
+			t.Fatalf("first webhook post = %q, want the text message", id)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the text message webhook")
+	}
+	select {
+	case id := <-posted:
+		t.Fatalf("unexpected extra webhook post %q", id)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if got := memberLabelOf(t, a); got != "Coach" {
+		t.Fatalf("label = %q, want Coach", got)
 	}
 }

@@ -34,7 +34,12 @@ func newGroupsParticipantsListCmd(flags *rootFlags) *cobra.Command {
 
 This command does not connect to WhatsApp. The snapshot can be empty or stale.
 Run "wacli sync --once --refresh-groups" to fetch joined groups and replace
-their local participant snapshots.`,
+their local participant snapshots.
+
+LABEL is the member label shown under a member's name in this group: the newest
+one seen in a history sync, a label change, or one of the member's messages.
+Group info from WhatsApp does not carry labels, so a member who has not been
+seen yet shows none.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(group) == "" {
 				return fmt.Errorf("--jid is required")
@@ -58,13 +63,17 @@ their local participant snapshots.`,
 			}
 
 			w := newTableWriter(os.Stdout)
-			fmt.Fprintln(w, "USER JID\tROLE\tUPDATED")
+			fmt.Fprintln(w, "USER JID\tROLE\tLABEL\tUPDATED")
 			for _, p := range participants {
 				updated := "-"
 				if !p.UpdatedAt.IsZero() {
 					updated = p.UpdatedAt.Local().Format("2006-01-02 15:04:05")
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\n", p.UserJID, p.Role, updated)
+				label := p.Label
+				if label == "" {
+					label = "-"
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", p.UserJID, p.Role, label, updated)
 			}
 			return w.Flush()
 		},
