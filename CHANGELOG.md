@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Groups: delegate `groups create` and `groups invite link get`/`revoke` to a running `sync --follow`, so scripts can create groups and manage invite links without stopping sync; output is unchanged and the serialized queue keeps caller deadlines. Thanks @carlosrve (#551).
+- Groups: delegate `groups create` and `groups invite link get`/`revoke` to a running `sync --follow`, so scripts can create groups and manage invite links without stopping sync; output is unchanged and the serialized queue keeps caller deadlines. Thanks @carlosrve (#583).
 
 ## 0.26.1 - 2026-11-15
 
