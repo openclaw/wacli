@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Dependencies: refresh eligible WhatsApp, networking and SQL tooling modules, pnpm, GoReleaser and pinned CI actions after the 48-hour cooldown; retain Go 1.27.0 and Node 24 minimums.
 - Send: delegate text and media status broadcasts to a running sync process, preserving styling and captions while keeping the original command timeout (#584).
 - Sync: keep outgoing messages from naming chats after this account’s own push name, and preserve stored chat names when metadata is unavailable. Thanks @nicolasbiondic (#574).
 - Messages: retain the original timestamp and conversation order when an identical received message is redelivered, while preserving content-freshness checks. Thanks @nicolasbiondic (#573).
