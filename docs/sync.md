@@ -8,6 +8,8 @@ Startup repairs historical LID identities using indexed message lookups without 
 
 Broadcast-list chat names come from the local WhatsApp contact store, then the message's push name, then the list JID. Sync does not query group metadata for broadcast lists.
 
+A message sent by this account never names its chat from its push name, because that is the account's own: chat names come from the contact or group, then the JID, and a name already stored is never replaced by the bare JID. Names stored by earlier versions are not rewritten; a contact or an incoming message renames the chat.
+
 Remote logout stops sync and emits `logged_out`; it retains the existing successful-stop exit status. `auth status` and `doctor` remember the observed revocation until a confirmed login.
 
 ## Command
