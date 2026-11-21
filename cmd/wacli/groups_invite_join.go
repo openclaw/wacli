@@ -8,7 +8,6 @@ import (
 
 	"github.com/openclaw/wacli/internal/out"
 	"github.com/spf13/cobra"
-	"go.mau.fi/whatsmeow/types"
 )
 
 func newGroupsInviteCmd(flags *rootFlags) *cobra.Command {
@@ -39,34 +38,7 @@ func newGroupsInviteLinkGetCmd(flags *rootFlags) *cobra.Command {
 			if strings.TrimSpace(jidStr) == "" {
 				return fmt.Errorf("--jid is required")
 			}
-			ctx, cancel := withTimeout(context.Background(), flags)
-			defer cancel()
-
-			a, lk, err := newApp(ctx, flags, true, false)
-			if err != nil {
-				return err
-			}
-			defer closeApp(a, lk)
-
-			if err := a.EnsureAuthed(ctx); err != nil {
-				return err
-			}
-			if err := a.Connect(ctx, false, nil); err != nil {
-				return err
-			}
-			gjid, err := types.ParseJID(jidStr)
-			if err != nil {
-				return err
-			}
-			link, err := a.WA().GetGroupInviteLink(ctx, gjid, false)
-			if err != nil {
-				return err
-			}
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{"jid": gjid.String(), "link": link})
-			}
-			fmt.Fprintln(os.Stdout, link)
-			return nil
+			return runGroupCommand(flags, groupOp{Action: groupActionInviteLink, JID: jidStr}, false)
 		},
 	}
 	cmd.Flags().StringVar(&jidStr, "jid", "", "group JID (…@g.us)")
@@ -82,37 +54,7 @@ func newGroupsInviteLinkRevokeCmd(flags *rootFlags) *cobra.Command {
 			if strings.TrimSpace(jidStr) == "" {
 				return fmt.Errorf("--jid is required")
 			}
-			if err := flags.requireWritable(); err != nil {
-				return err
-			}
-			ctx, cancel := withTimeout(context.Background(), flags)
-			defer cancel()
-
-			a, lk, err := newApp(ctx, flags, true, false)
-			if err != nil {
-				return err
-			}
-			defer closeApp(a, lk)
-
-			if err := a.EnsureAuthed(ctx); err != nil {
-				return err
-			}
-			if err := a.Connect(ctx, false, nil); err != nil {
-				return err
-			}
-			gjid, err := types.ParseJID(jidStr)
-			if err != nil {
-				return err
-			}
-			link, err := a.WA().GetGroupInviteLink(ctx, gjid, true)
-			if err != nil {
-				return err
-			}
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{"jid": gjid.String(), "link": link, "revoked": true})
-			}
-			fmt.Fprintln(os.Stdout, link)
-			return nil
+			return runGroupCommand(flags, groupOp{Action: groupActionInviteLink, JID: jidStr, ResetInvite: true}, true)
 		},
 	}
 	cmd.Flags().StringVar(&jidStr, "jid", "", "group JID (…@g.us)")
