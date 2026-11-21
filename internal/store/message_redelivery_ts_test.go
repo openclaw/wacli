@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -182,6 +183,20 @@ func TestUpsertMessageStaleMediaReplayStillLosesToFresherMetadata(t *testing.T) 
 		return path, unavailable, time.Unix(ts, 0).UTC()
 	}
 
+	t.Run("identical copy advances freshness without moving display time", func(t *testing.T) {
+		db := openRedeliveryDB(t)
+		upsertRedelivery(t, db, media("/current", at(0)))
+		upsertRedelivery(t, db, media("/current", at(40)))
+		if err := db.MarkMediaUnavailable(ctx, redeliveryChat, "m1", at(41)); err != nil {
+			t.Fatal(err)
+		}
+		upsertRedelivery(t, db, media("/stale", at(20)))
+		path, unavailable, ts := readState(t, db)
+		if path != "/current" || !unavailable.Valid || !ts.Equal(at(0)) {
+			t.Fatalf("stale replay changed message: path=%q unavailable=%v ts=%s", path, unavailable.Valid, ts)
+		}
+	})
+
 	t.Run("old, fresh, old replay", func(t *testing.T) {
 		db := openRedeliveryDB(t)
 		upsertRedelivery(t, db, media("/old", at(0)))
@@ -213,4 +228,84 @@ func TestUpsertMessageStaleMediaReplayStillLosesToFresherMetadata(t *testing.T) 
 			t.Fatalf("after the stale replay: path %q, unavailable set %v, ts %s; want /fresh, set, %s", path, unavailable.Valid, ts, at(50))
 		}
 	})
+}
+
+func TestRedeliveryFreshnessSurvivesReopenAndIdentityMove(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "wacli.db")
+	db := mustOpen(t, path)
+	base := time.Unix(1700000000, 0).UTC()
+	p := redeliveryParams("m1", "current", base)
+	p.ChatJID = "123@lid"
+	if err := db.UpsertChat(p.ChatJID, "dm", "Alice", base); err != nil {
+		t.Fatal(err)
+	}
+	upsertRedelivery(t, db, p)
+	p.Timestamp = base.Add(time.Hour)
+	upsertRedelivery(t, db, p)
+	db.Close()
+	db = mustOpen(t, path)
+	defer db.Close()
+	if err := db.MigrateLIDToPN("123@lid", redeliveryChat); err != nil {
+		t.Fatal(err)
+	}
+	p.ChatJID = redeliveryChat
+	p.Timestamp = base.Add(time.Minute)
+	p.Text, p.DisplayText = "stale", "stale"
+	upsertRedelivery(t, db, p)
+	m, err := db.GetMessage(redeliveryChat, "m1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Text != "current" || !m.Timestamp.Equal(base) {
+		t.Fatalf("message after stale replay: %+v", m)
+	}
+}
+
+func TestRedeliveryMigrationPreservesLegacyRows(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "wacli.db")
+	db := mustOpen(t, path)
+	base := time.Unix(1700000000, 0).UTC()
+	p := redeliveryParams("m1", "current", base)
+	if err := db.UpsertChat(p.ChatJID, "dm", "Alice", base); err != nil {
+		t.Fatal(err)
+	}
+	upsertRedelivery(t, db, p)
+	if _, err := db.sql.Exec(`ALTER TABLE messages DROP COLUMN content_ts; DELETE FROM schema_migrations WHERE version = 40`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	db = mustOpen(t, path)
+	defer db.Close()
+	m, err := db.GetMessage(redeliveryChat, "m1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Text != "current" || !m.Timestamp.Equal(base) {
+		t.Fatalf("migration changed legacy row: %+v", m)
+	}
+	p.Timestamp = base.Add(-time.Minute)
+	p.Text, p.DisplayText = "stale", "stale"
+	upsertRedelivery(t, db, p)
+	m, err = db.GetMessage(redeliveryChat, "m1")
+	if err != nil || m.Text != "current" {
+		t.Fatalf("legacy freshness lost: %+v, %v", m, err)
+	}
+}
+
+func TestIdenticalRedeliveryDoesNotChangeRetrievalRevision(t *testing.T) {
+	db := openRedeliveryDB(t)
+	p := redeliveryParams("m1", "hello", time.Unix(1700000000, 0).UTC())
+	upsertRedelivery(t, db, p)
+	var before, after int64
+	if err := db.sql.QueryRow(`SELECT revision FROM retrieval_state WHERE id=1`).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	p.Timestamp = p.Timestamp.Add(time.Hour)
+	upsertRedelivery(t, db, p)
+	if err := db.sql.QueryRow(`SELECT revision FROM retrieval_state WHERE id=1`).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if after != before {
+		t.Fatalf("identical redelivery changed revision from %d to %d", before, after)
+	}
 }

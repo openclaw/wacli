@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Messages: keep the stored timestamp when a received message is delivered again with the same content. A redelivery or retry carries the time it was delivered at, which replaced the stored time and moved an old message to the end of its conversation. Messages sent by this account, changed content, edits and deletions resolve their timestamp as before.
+- Messages: retain the original timestamp and conversation order when an identical received message is redelivered, while preserving content-freshness checks. Thanks @nicolasbiondic (#573).
 
 ## 0.26.1 - 2026-11-15
 
