@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-- Sync: stop naming a chat after this account's own push name. A message sent by this account (from the phone, another device or `wacli send`) carries the account's push name, which was used as the chat name whenever the contact store had no name for the chat, so customer chats ended up named after the account. Such messages now name a chat only from its contact, group or JID, and never replace a name already stored with the bare JID. Names already stored are not rewritten: a chat named after the account is renamed when a contact or an incoming message names it.
+- Sync: keep outgoing messages from naming chats after this account’s own push name, and preserve stored chat names when metadata is unavailable. Thanks @nicolasbiondic (#574).
+- Messages: retain the original timestamp and conversation order when an identical received message is redelivered, while preserving content-freshness checks. Thanks @nicolasbiondic (#573).
 
 ## 0.26.1 - 2026-11-15
 
