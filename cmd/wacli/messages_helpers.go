@@ -78,6 +78,64 @@ func resolveMessageSenderNames(ctx context.Context, a *app.App, msgs []store.Mes
 }
 
 func resolveMessageSenderNamesInView(ctx context.Context, a *app.App, db *store.DB, msgs []store.Message) []store.Message {
+	return withQuotes(ctx, a, db, resolveSenderNamesInView(ctx, a, db, msgs))
+}
+
+// withQuotes fills each reply's quote, for every view and --json alike: sync
+// stored the quote without its author, and a media message as its placeholder
+// alone ("> Sent image"). Who wrote the quoted message and what it says come
+// from the original in the store ("me" for the account's own; a media
+// message's caption, a document's file name); without it, the quote sync
+// stored and the quoted sender's name (a contact's, else the number).
+func withQuotes(ctx context.Context, a *app.App, db *store.DB, msgs []store.Message) []store.Message {
+	names := map[string]string{}
+	name := func(jid string) string {
+		jid = strings.TrimSpace(jid)
+		if n, ok := names[jid]; ok || jid == "" {
+			return n
+		}
+		n := resolveSenderNamesInView(ctx, a, db, []store.Message{{SenderJID: jid}})[0].SenderName
+		if c, err := db.GetContact(jid); n == "" && err == nil {
+			if n = strings.TrimSpace(c.Alias); n == "" {
+				n = strings.TrimSpace(c.Name)
+			}
+		}
+		if n == "" {
+			n, _, _ = strings.Cut(jid, "@")
+		}
+		names[jid] = n
+		return n
+	}
+	for i := range msgs {
+		m := &msgs[i]
+		if strings.TrimSpace(m.QuotedMsgID) == "" {
+			continue
+		}
+		text, who := "", name(m.QuotedSenderJID)
+		if q, err := db.GetMessage(m.ChatJID, m.QuotedMsgID); err == nil {
+			if text = ownLine(q); text == "(message)" {
+				text = ""
+			}
+			switch {
+			case q.FromMe:
+				who = "me"
+			case strings.TrimSpace(q.SenderName) != "":
+				who = strings.TrimSpace(q.SenderName)
+			case strings.TrimSpace(q.SenderJID) != "":
+				who = name(q.SenderJID)
+			}
+		}
+		if text == "" {
+			text, _, _ = replyParts(*m)
+		}
+		if text != "" {
+			m.QuotedText, m.QuotedSenderName = text, who
+		}
+	}
+	return msgs
+}
+
+func resolveSenderNamesInView(ctx context.Context, a *app.App, db *store.DB, msgs []store.Message) []store.Message {
 	if len(msgs) == 0 || !messagesNeedSenderResolution(msgs) {
 		return msgs
 	}
