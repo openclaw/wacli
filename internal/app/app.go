@@ -56,6 +56,10 @@ type WAClient interface {
 	GetGroupInviteLink(ctx context.Context, group types.JID, reset bool) (string, error)
 	JoinGroupWithLink(ctx context.Context, code string) (types.JID, error)
 	LeaveGroup(ctx context.Context, group types.JID) error
+	SetGroupPhoto(ctx context.Context, jid types.JID, avatar []byte) (string, error)
+	LinkGroup(ctx context.Context, parent, child types.JID, hidden bool) error
+	GroupHidden(ctx context.Context, jid types.JID) (bool, error)
+	UnlinkGroup(ctx context.Context, parent, child types.JID) error
 
 	GetNewsletterInfoWithInvite(ctx context.Context, key string) (*types.NewsletterMetadata, error)
 	FollowNewsletter(ctx context.Context, jid types.JID) error

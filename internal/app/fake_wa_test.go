@@ -1135,3 +1135,35 @@ func (f *fakeWA) LinkedLID() string {
 func (f *fakeWA) DownloadRetriedMediaToFile(ctx context.Context, directPath string, fileHash, mediaKey []byte, fileLength uint64, mediaType, targetPath string) (int64, error) {
 	return f.DownloadMediaToFile(ctx, directPath, nil, fileHash, mediaKey, fileLength, mediaType, "", targetPath)
 }
+
+func (f *fakeWA) SetGroupPhoto(ctx context.Context, jid types.JID, avatar []byte) (string, error) {
+	if avatar == nil {
+		return "remove", nil
+	}
+	return "fake-picture-id", nil
+}
+
+func (f *fakeWA) GroupHidden(ctx context.Context, jid types.JID) (bool, error) {
+	return false, nil
+}
+
+func (f *fakeWA) LinkGroup(ctx context.Context, parent, child types.JID, hidden bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	g := f.groups[child]
+	if g == nil {
+		g = &types.GroupInfo{JID: child}
+		f.groups[child] = g
+	}
+	g.LinkedParentJID = parent
+	return nil
+}
+
+func (f *fakeWA) UnlinkGroup(ctx context.Context, parent, child types.JID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if g := f.groups[child]; g != nil {
+		g.LinkedParentJID = types.EmptyJID
+	}
+	return nil
+}

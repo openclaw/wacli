@@ -1,6 +1,6 @@
 # groups
 
-Read when: listing, refreshing, inspecting, renaming, joining, leaving, inviting, pruning stale local group rows, or managing group participants.
+Read when: listing, refreshing, inspecting, renaming, setting the picture of, linking to a community, joining, leaving, inviting, pruning stale local group rows, or managing group participants.
 
 `wacli groups` combines local group rows with live WhatsApp operations. Commands that mutate WhatsApp require writable mode.
 
@@ -18,6 +18,10 @@ wacli groups description --jid GROUP_JID --text TEXT
 wacli groups announce-only --jid GROUP_JID (--on|--off)
 wacli groups locked --jid GROUP_JID (--on|--off)
 wacli groups leave --jid GROUP_JID
+wacli groups set-picture --jid GROUP_JID IMAGE
+wacli groups remove-picture --jid GROUP_JID
+wacli groups link --jid GROUP_JID --parent COMMUNITY_JID [--hidden]
+wacli groups unlink --jid GROUP_JID --parent COMMUNITY_JID
 wacli groups participants add --jid GROUP_JID --user PHONE_OR_JID [--user ...]
 wacli groups participants remove --jid GROUP_JID --user PHONE_OR_JID [--user ...]
 wacli groups participants promote --jid GROUP_JID --user PHONE_OR_JID [--user ...]
@@ -48,6 +52,10 @@ wacli groups prune [--days N] [--left-only=false|--include-active] [--dry-run] [
 - `locked --on` makes group info editable only by admins; `--off` allows member edits again.
 - `requests` lists, approves, or rejects pending join requests for groups with join approval enabled.
 - `leave` marks the group left locally after WhatsApp confirms.
+- `set-picture` accepts JPEG or PNG and auto-resizes to at most 640 px, like `profile set-picture`. `remove-picture` clears it. Both need admin rights in the group.
+- `link` adds an existing group to a community as a subgroup; `unlink` takes it out. `--parent` is the community parent JID (`IsParent` in `list --json`). The group's local row is refreshed after WhatsApp confirms. `--hidden` leaves the group out of the community's group list (only its members see it); WhatsApp fixes visibility at link time, so to change it unlink and link again. `info` prints `Hidden:` for subgroups.
+- While a same-store `sync --follow` process is running, `create`, `info`, `refresh`, `rename`, `topic`/`description`, `participants add|remove|promote|demote`, `invite link get|revoke`, `set-picture`/`remove-picture` and `link`/`unlink` run on that process's connected session through its delegate socket instead of waiting for the store lock it holds. They skip the send queue and pacing (they put no message in a chat) but keep the caller's `--timeout`. Without a running sync they open the store themselves as before; if the lock is held by something that does not answer on the socket, the error names the lock. An older sync process answers with an unsupported `group` kind; the command says so and changes nothing. Restart `sync --follow` with this build to use it.
+- `info --json` adds `Hidden` (true/false) for subgroups linked to a community, or `HiddenError` when WhatsApp did not answer the visibility query.
 - `prune` only deletes local group/chat/message rows from `wacli.db`. It does not leave WhatsApp groups or delete anything from WhatsApp servers.
 - `prune` defaults to groups marked left locally. `--days N` limits left-group pruning to groups left more than `N` days ago.
 - `prune --include-active --days N` also targets active groups whose last known local message is older than `N` days. Groups with no known local activity timestamp are skipped.
@@ -69,6 +77,8 @@ wacli --read-only groups participants list --jid 123456789@g.us --json
 wacli groups participants add --jid 123456789@g.us --user "+1 (234) 567-8900"
 wacli groups requests approve --jid 123456789@g.us --user "+1 (234) 567-8900"
 wacli groups invite link get --jid 123456789@g.us
+wacli groups set-picture --jid 123456789@g.us ./avatar.png
+wacli groups link --jid 123456789@g.us --parent 987654321@g.us
 wacli groups join --code AbCdEfGhIjK
 wacli groups prune --dry-run
 ```

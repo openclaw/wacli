@@ -32,61 +32,16 @@ func newGroupsCreateCmd(flags *rootFlags) *cobra.Command {
 			if parent && strings.TrimSpace(linkedParent) != "" {
 				return fmt.Errorf("--community and --linked-parent cannot be combined")
 			}
-			if err := flags.requireWritable(); err != nil {
-				return err
-			}
-			ctx, cancel := withTimeout(context.Background(), flags)
-			defer cancel()
-
-			a, lk, err := newApp(ctx, flags, true, false)
-			if err != nil {
-				return err
-			}
-			defer closeApp(a, lk)
-
-			if err := a.EnsureAuthed(ctx); err != nil {
-				return err
-			}
-			if err := a.Connect(ctx, false, nil); err != nil {
-				return err
-			}
-
-			participants, err := parseGroupUserJIDs(users)
-			if err != nil {
-				return err
-			}
-			var parentJID types.JID
-			if strings.TrimSpace(linkedParent) != "" {
-				parentJID, err = parseGroupJID(linkedParent)
-				if err != nil {
-					return fmt.Errorf("parse --linked-parent: %w", err)
-				}
-			}
-			info, err := a.WA().CreateGroup(ctx, wa.CreateGroupRequest{
-				Name:                   name,
-				Participants:           participants,
-				IsAnnounce:             announceOnly,
-				IsLocked:               locked,
-				IsJoinApprovalRequired: joinApproval,
-				IsParent:               parent,
-				LinkedParentJID:        parentJID,
-			})
-			if err != nil {
-				return err
-			}
-			if info != nil {
-				_ = persistGroupInfo(ctx, a.DB(), a.WA(), info)
-			}
-
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, info)
-			}
-			if info == nil {
-				fmt.Fprintln(os.Stdout, "OK")
-				return nil
-			}
-			fmt.Fprintf(os.Stdout, "JID: %s\nName: %s\n", info.JID.String(), sanitize(info.GroupName.Name))
-			return nil
+			return runGroupCommand(flags, groupOp{
+				Action:       groupActionCreate,
+				Name:         name,
+				Users:        users,
+				AnnounceOnly: announceOnly,
+				Locked:       locked,
+				JoinApproval: joinApproval,
+				Community:    parent,
+				LinkedParent: linkedParent,
+			}, true)
 		},
 	}
 	cmd.Flags().StringVar(&name, "name", "", "group name")
@@ -109,39 +64,7 @@ func newGroupsTopicCmd(flags *rootFlags, use string) *cobra.Command {
 			if strings.TrimSpace(jidStr) == "" || !cmd.Flags().Changed("text") {
 				return fmt.Errorf("--jid and --text are required")
 			}
-			if err := flags.requireWritable(); err != nil {
-				return err
-			}
-			ctx, cancel := withTimeout(context.Background(), flags)
-			defer cancel()
-
-			a, lk, err := newApp(ctx, flags, true, false)
-			if err != nil {
-				return err
-			}
-			defer closeApp(a, lk)
-
-			if err := a.EnsureAuthed(ctx); err != nil {
-				return err
-			}
-			if err := a.Connect(ctx, false, nil); err != nil {
-				return err
-			}
-			gjid, err := parseGroupJID(jidStr)
-			if err != nil {
-				return err
-			}
-			if err := a.WA().SetGroupTopic(ctx, gjid, text); err != nil {
-				return err
-			}
-			if info, err := a.WA().GetGroupInfo(ctx, gjid); err == nil && info != nil {
-				_ = persistGroupInfo(ctx, a.DB(), a.WA(), info)
-			}
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{"jid": gjid.String(), "topic": text})
-			}
-			fmt.Fprintln(os.Stdout, "OK")
-			return nil
+			return runGroupCommand(flags, groupOp{Action: groupActionTopic, JID: jidStr, Text: text}, true)
 		},
 	}
 	cmd.Flags().StringVar(&jidStr, "jid", "", "group JID (…@g.us)")
