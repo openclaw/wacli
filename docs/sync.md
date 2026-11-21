@@ -39,11 +39,11 @@ wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--stale-t
 - If neither storage cap is configured, sync prints one warning because WhatsApp history can grow the local database substantially.
 - `WACLI_SYNC_MAX_MESSAGES` and `WACLI_SYNC_MAX_DB_SIZE` apply the same caps to `auth` bootstrap sync and `sync`.
 - After `sync --follow` finishes startup and opens its local delegate transport, these commands for the same store are delegated to it so they do not fail on the store lock:
-  - `send text`, `send file`, `send sticker`, `send voice`, `send react`, `send location`, `send poll`, and `send select`.
+  - `send text`, `send file`, `send sticker`, `send voice`, `send status`, `send react`, `send location`, `send poll`, and `send select`.
   - `poll vote`, `presence typing`, `presence paused`, and `messages edit`.
   - `chats mark-read`, `chats mark-unread`, `chats archive`, `chats unarchive`, `chats pin`, `chats unpin`, `chats mute`, and `chats unmute`.
   - `contacts check` and `contacts save`.
-- `send status` is not delegated and still requires the direct store lock.
+- Restart `sync --follow` after upgrading to enable newly supported commands such as `send status`; an older process rejects unsupported requests without sending.
 - After connecting, sync fetches WhatsApp chat app-state deltas (`regular_high` and `regular_low`) so starred, delete-for-me, mute, archive, pin, and mark-read changes made while `wacli` was offline are caught up instead of relying only on live push notifications.
 - Sync also retains WhatsApp's **Keep chats archived** preference and orders automatic unarchives against archive actions. Upgraded stores recover missing preferences and archive timestamps through a full `regular_low` replay or phone recovery snapshot; until those are known, archived chats stay archived.
 - Sync imports messages sent from your other linked devices into the destination chat with `from_me=true`, so local history covers both incoming and outgoing conversation sides.
