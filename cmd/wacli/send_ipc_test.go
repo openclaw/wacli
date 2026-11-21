@@ -329,6 +329,122 @@ func TestSendFileDelegatesMediaAsThroughSendSocketWhenStoreLocked(t *testing.T) 
 	}
 }
 
+func TestSendDelegateRequestDecodesVoiceMetadata(t *testing.T) {
+	levels := make([]string, voiceWaveformSamples)
+	for i := range levels {
+		levels[i] = fmt.Sprint(i)
+	}
+	// The shape a socket client such as Postmaster sends: waveform is a JSON
+	// array of numbers, not base64.
+	raw := `{"version":1,"kind":"voice","to":"15550000001@s.whatsapp.net","file":"/srv/outbox/voice-note.ogg",` +
+		`"filename":"voice-note.ogg","mime":"audio/ogg; codecs=opus","seconds":24,` +
+		`"waveform":[` + strings.Join(levels, ",") + `],"timeout_ms":120000,"post_send_wait_ms":2000}`
+	var req sendDelegateRequest
+	if err := json.Unmarshal([]byte(raw), &req); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	opts, err := delegatedSendFileOptions(req)
+	if err != nil {
+		t.Fatalf("delegatedSendFileOptions: %v", err)
+	}
+	if !opts.ptt || opts.voice.seconds != 24 || len(opts.voice.waveform) != voiceWaveformSamples || opts.voice.waveform[63] != 63 {
+		t.Fatalf("options = %+v", opts)
+	}
+
+	var bare sendDelegateRequest
+	if err := json.Unmarshal([]byte(`{"version":1,"kind":"voice","file":"/x.ogg"}`), &bare); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if bare.Seconds != nil || bare.Waveform != nil {
+		t.Fatalf("absent fields decoded as %v and %v", bare.Seconds, bare.Waveform)
+	}
+	encoded, err := json.Marshal(bare)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	if strings.Contains(string(encoded), "seconds") || strings.Contains(string(encoded), "waveform") {
+		t.Fatalf("absent fields encoded: %s", encoded)
+	}
+}
+
+func TestDelegatedSendFileOptionsRefusesMalformedVoiceMetadata(t *testing.T) {
+	seconds := int64(0)
+	for _, tc := range []struct {
+		name string
+		req  sendDelegateRequest
+		want string
+	}{
+		{name: "zero seconds", req: sendDelegateRequest{Kind: "voice", Seconds: &seconds}, want: "seconds must be a whole number from 1"},
+		{name: "short waveform", req: sendDelegateRequest{Kind: "file", PTT: true, Waveform: []int{50}}, want: "waveform must have exactly 64 levels, got 1"},
+		{name: "plain file", req: sendDelegateRequest{Kind: "file", Waveform: testVoiceWaveform()}, want: "waveform only apply to a voice note"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := delegatedSendFileOptions(tc.req); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestExecuteDelegatedSendRefusesMalformedVoiceMetadataBeforeAppUse(t *testing.T) {
+	// A nil app panics on use: an answer proves the refusal came first.
+	_, err := executeDelegatedSend(context.Background(), nil, sendDelegateRequest{
+		Version:  sendDelegateVersion,
+		Kind:     "voice",
+		To:       "15551234567",
+		File:     "/tmp/voice.ogg",
+		Waveform: append(testVoiceWaveform()[:10], 101),
+	})
+	if err == nil || !strings.Contains(err.Error(), "waveform must have exactly 64 levels, got 11") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestSendVoiceDelegatesVoiceMetadataThroughSendSocketWhenStoreLocked(t *testing.T) {
+	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
+	storeDir := shortPresenceDelegateStoreDir(t)
+	lk, err := lock.Acquire(storeDir)
+	if err != nil {
+		t.Fatalf("lock store: %v", err)
+	}
+	defer lk.Release()
+
+	server := startPresenceDelegateTestSocket(t, storeDir, func(req sendDelegateRequest) sendDelegateResponse {
+		return sendDelegateResponse{
+			OK: true, Sent: true, To: "123@s.whatsapp.net", ID: "sent-id",
+			VoiceWarning: "voice note waveform not measured: ffmpeg is not installed",
+		}
+	})
+	defer server.stop()
+
+	levels := make([]string, voiceWaveformSamples)
+	for i, level := range testVoiceWaveform() {
+		levels[i] = fmt.Sprint(level)
+	}
+	stdout, stderr, err := runPresenceDelegateHelper(t, []string{
+		"--store", storeDir, "--timeout", "750ms",
+		"send", "voice", "--to", "123@s.whatsapp.net", "--file", "voice.ogg",
+		"--seconds", "24", "--waveform", strings.Join(levels, ","), "--post-send-wait", "25ms",
+	})
+	if err != nil {
+		t.Fatalf("send voice failed: %v stdout=%q stderr=%q", err, stdout, stderr)
+	}
+
+	req := server.nextRequest(t)
+	if req.Kind != "voice" || req.Seconds == nil || *req.Seconds != 24 {
+		t.Fatalf("delegate kind/seconds = %q/%v", req.Kind, req.Seconds)
+	}
+	if fmt.Sprint(req.Waveform) != fmt.Sprint(testVoiceWaveform()) {
+		t.Fatalf("delegate waveform = %v", req.Waveform)
+	}
+	if !strings.Contains(stdout, "Sent voice note to 123@s.whatsapp.net (id sent-id)") {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	if !strings.Contains(stderr, "warning: voice note waveform not measured: ffmpeg is not installed") {
+		t.Fatalf("stderr %q does not pass on the daemon's voice warning", stderr)
+	}
+}
+
 func TestExecuteDelegatedSendAcceptsEditKind(t *testing.T) {
 	// Reaching app use proves the daemon dispatcher recognized the edit kind.
 	defer func() { _ = recover() }()

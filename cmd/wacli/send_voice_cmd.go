@@ -18,6 +18,7 @@ func newSendVoiceCmd(flags *rootFlags) *cobra.Command {
 	var mimeOverride string
 	var replyTo string
 	var replyToSender string
+	var voice voiceNoteFlags
 	postSendWait := postSendRetryReceiptWait
 
 	cmd := &cobra.Command{
@@ -26,6 +27,11 @@ func newSendVoiceCmd(flags *rootFlags) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if to == "" || filePath == "" {
 				return fmt.Errorf("--to and --file are required")
+			}
+			seconds, waveform := voice.given(cmd)
+			voiceMeta, err := parseVoiceNoteMetadata(seconds, waveform, true)
+			if err != nil {
+				return err
 			}
 			if err := flags.requireWritable(); err != nil {
 				return err
@@ -51,6 +57,8 @@ func newSendVoiceCmd(flags *rootFlags) *cobra.Command {
 					MIME:           mimeOverride,
 					ReplyTo:        replyTo,
 					ReplyToSender:  replyToSender,
+					Seconds:        seconds,
+					Waveform:       waveform,
 					PostSendWaitMS: durationMillis(postSendWait),
 				})
 				if delegated {
@@ -85,11 +93,13 @@ func newSendVoiceCmd(flags *rootFlags) *cobra.Command {
 					replyTo:       replyTo,
 					replyToSender: replyToSender,
 					ptt:           true,
+					voice:         voiceMeta,
 				})
 			})
 			if err != nil {
 				return err
 			}
+			warnVoiceNoteMetadata(os.Stderr, res.voiceWarning)
 			warnSendStoreFailure(os.Stderr, res.id, res.storeWarning)
 
 			waitForPostSendRetryReceipts(ctx, postSendWait)
@@ -113,6 +123,7 @@ func newSendVoiceCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().StringVar(&mimeOverride, "mime", "", "override detected mime type")
 	cmd.Flags().StringVar(&replyTo, "reply-to", "", "message ID to quote/reply to")
 	cmd.Flags().StringVar(&replyToSender, "reply-to-sender", "", "sender JID of the quoted message (required for unsynced group replies)")
+	voice.register(cmd)
 	cmd.Flags().DurationVar(&postSendWait, "post-send-wait", postSendRetryReceiptWait, "keep the connection alive after send so retry receipts can be handled (0 disables)")
 	return cmd
 }

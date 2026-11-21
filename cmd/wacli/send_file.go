@@ -55,6 +55,9 @@ type sendFileOptions struct {
 	ptt           bool
 	// maxSize is the upload cap in bytes; 0 means maxSendFileSize.
 	maxSize int64
+	// voice is a voice note's length and waveform as the caller measured
+	// them. A part left zero is probed from the file with ffprobe or ffmpeg.
+	voice voiceNoteMetadata
 }
 
 type voiceNoteMetadata struct {
@@ -62,15 +65,57 @@ type voiceNoteMetadata struct {
 	waveform []byte
 }
 
+// parseVoiceNoteMetadata checks a voice note's length and waveform as a caller
+// gives them (the send request's seconds and waveform, or --seconds and
+// --waveform). Either may be absent (nil) and is then probed from the file at
+// send time; one that is present and malformed is refused, naming its field.
+func parseVoiceNoteMetadata(seconds *int64, waveform []int, ptt bool) (voiceNoteMetadata, error) {
+	if seconds == nil && waveform == nil {
+		return voiceNoteMetadata{}, nil
+	}
+	if !ptt {
+		var given []string
+		if seconds != nil {
+			given = append(given, "seconds")
+		}
+		if waveform != nil {
+			given = append(given, "waveform")
+		}
+		return voiceNoteMetadata{}, fmt.Errorf("%s only apply to a voice note (send voice, --ptt, or kind voice)", strings.Join(given, " and "))
+	}
+	var meta voiceNoteMetadata
+	if seconds != nil {
+		if *seconds < 1 || *seconds > math.MaxUint32 {
+			return voiceNoteMetadata{}, fmt.Errorf("seconds must be a whole number from 1 to %d, got %d", uint32(math.MaxUint32), *seconds)
+		}
+		meta.seconds = uint32(*seconds)
+	}
+	if waveform != nil {
+		if len(waveform) != voiceWaveformSamples {
+			return voiceNoteMetadata{}, fmt.Errorf("waveform must have exactly %d levels, got %d", voiceWaveformSamples, len(waveform))
+		}
+		meta.waveform = make([]byte, voiceWaveformSamples)
+		for i, level := range waveform {
+			if level < 0 || level > voiceWaveformMax {
+				return voiceNoteMetadata{}, fmt.Errorf("waveform[%d] is %d; each level must be 0..%d", i, level, voiceWaveformMax)
+			}
+			meta.waveform[i] = byte(level)
+		}
+	}
+	return meta, nil
+}
+
 // sendFileOutcome is the result of a completed file send. storeWarning is
 // non-nil when WhatsApp accepted the message but recording it in local
 // history failed; callers must surface the warning without discarding the
 // delivered ID, since reporting a hard error would invite automation to
-// retry an already-delivered message.
+// retry an already-delivered message. voiceWarning says which of a voice
+// note's length and waveform could not be measured and so was left out.
 type sendFileOutcome struct {
 	id           string
 	meta         map[string]string
 	storeWarning error
+	voiceWarning string
 }
 
 func sendFile(ctx context.Context, a interface {
@@ -82,6 +127,9 @@ func sendFile(ctx context.Context, a interface {
 		return sendFileOutcome{}, err
 	}
 	opts.mediaAs = mediaAs
+	if !opts.ptt && (opts.voice.seconds != 0 || opts.voice.waveform != nil) {
+		return sendFileOutcome{}, fmt.Errorf("a voice note's seconds and waveform need voice-note mode")
+	}
 
 	maxSize, err := resolveSendFileMaxSize(opts.maxSize)
 	if err != nil {
@@ -136,8 +184,9 @@ func sendFile(ctx context.Context, a interface {
 	now := time.Now().UTC()
 	msg := &waProto.Message{}
 	voiceMeta := voiceNoteMetadata{}
+	var voiceWarning string
 	if opts.ptt {
-		voiceMeta = loadVoiceNoteMetadata(ctx, filePath)
+		voiceMeta, voiceWarning = completeVoiceNoteMetadata(ctx, filePath, opts.voice)
 	}
 
 	switch mediaType {
@@ -253,6 +302,7 @@ func sendFile(ctx context.Context, a interface {
 			"ptt":       strconv.FormatBool(opts.ptt),
 		},
 		storeWarning: storeErr,
+		voiceWarning: voiceWarning,
 	}, nil
 }
 
@@ -536,34 +586,80 @@ func isOggOpusMIME(mimeType string) bool {
 	return mediaType == "audio/ogg" && strings.Contains(codecs, "opus")
 }
 
-func loadVoiceNoteMetadata(ctx context.Context, filePath string) voiceNoteMetadata {
-	return voiceNoteMetadata{
-		seconds:  probeAudioSeconds(ctx, filePath),
-		waveform: probeAudioWaveform(ctx, filePath),
+// completeVoiceNoteMetadata fills in what the caller left out of a voice note's
+// length and waveform from the file itself, with ffprobe and ffmpeg. A part the
+// caller gave is used as given and never probed. A probe that fails leaves its
+// part out of the message, which WhatsApp accepts, and the returned warning
+// says why.
+func completeVoiceNoteMetadata(ctx context.Context, filePath string, given voiceNoteMetadata) (voiceNoteMetadata, string) {
+	meta := given
+	var warnings []string
+	if meta.seconds == 0 {
+		seconds, err := probeAudioSeconds(ctx, filePath)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("voice note length not measured: %v", err))
+		}
+		meta.seconds = seconds
 	}
+	if meta.waveform == nil {
+		waveform, err := probeAudioWaveform(ctx, filePath)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("voice note waveform not measured: %v", err))
+		}
+		meta.waveform = waveform
+	}
+	return meta, strings.Join(warnings, "; ")
 }
 
-func probeAudioSeconds(ctx context.Context, filePath string) uint32 {
+// probeError names the probe that failed, says plainly when it is not
+// installed, as in an image without ffmpeg, and adds the first line it wrote
+// to stderr.
+func probeError(tool string, err error, stderr *probeStderr) error {
+	if errors.Is(err, exec.ErrNotFound) {
+		return fmt.Errorf("%s is not installed", tool)
+	}
+	if detail, _, _ := strings.Cut(strings.TrimSpace(string(stderr.head)), "\n"); detail != "" {
+		return fmt.Errorf("%s: %w: %s", tool, err, detail)
+	}
+	return fmt.Errorf("%s: %w", tool, err)
+}
+
+// probeStderr keeps the start of what a probe writes to stderr, enough for
+// its first error line, and drops the rest.
+type probeStderr struct{ head []byte }
+
+func (w *probeStderr) Write(p []byte) (int, error) {
+	if room := 512 - len(w.head); room > 0 {
+		w.head = append(w.head, p[:min(room, len(p))]...)
+	}
+	return len(p), nil
+}
+
+func probeAudioSeconds(ctx context.Context, filePath string) (uint32, error) {
 	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	out, err := exec.CommandContext(probeCtx, "ffprobe",
+	cmd := exec.CommandContext(probeCtx, "ffprobe",
 		"-v", "error",
 		"-show_entries", "format=duration",
 		"-of", "default=noprint_wrappers=1:nokey=1",
 		filePath,
-	).Output()
+	)
+	var stderr probeStderr
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
 	if err != nil {
-		return 0
+		return 0, probeError("ffprobe", err, &stderr)
 	}
-	seconds, err := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
+	text := strings.TrimSpace(string(out))
+	seconds, err := strconv.ParseFloat(text, 64)
 	if err != nil || seconds <= 0 {
-		return 0
+		return 0, fmt.Errorf("ffprobe gave no positive duration (%q)", text)
 	}
-	return uint32(math.Ceil(seconds))
+	return uint32(math.Ceil(seconds)), nil
 }
 
-func probeAudioWaveform(ctx context.Context, filePath string) []byte {
+func probeAudioWaveform(ctx context.Context, filePath string) ([]byte, error) {
 	probeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
@@ -579,12 +675,14 @@ func probeAudioWaveform(ctx context.Context, filePath string) []byte {
 		"-fs", strconv.Itoa(maxWaveformPCMBytes),
 		"-",
 	)
+	var stderr probeStderr
+	cmd.Stderr = &stderr
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil
+		return nil, probeError("ffmpeg", err, &stderr)
 	}
 	if err := cmd.Start(); err != nil {
-		return nil
+		return nil, probeError("ffmpeg", err, &stderr)
 	}
 	out, err := io.ReadAll(io.LimitReader(stdout, int64(maxWaveformPCMBytes)))
 	reachedLimit := len(out) == maxWaveformPCMBytes
@@ -594,10 +692,15 @@ func probeAudioWaveform(ctx context.Context, filePath string) []byte {
 	waitErr := cmd.Wait()
 	// Killing the decoder at the byte limit is expected; other failures must
 	// not turn a partial decode into a valid waveform.
-	if err != nil || len(out) == 0 || (!reachedLimit && waitErr != nil) {
-		return nil
+	switch {
+	case err != nil:
+		return nil, probeError("ffmpeg", err, &stderr)
+	case !reachedLimit && waitErr != nil:
+		return nil, probeError("ffmpeg", waitErr, &stderr)
+	case len(out) == 0:
+		return nil, fmt.Errorf("ffmpeg decoded no audio")
 	}
-	return waveformFromPCM16LE(out)
+	return waveformFromPCM16LE(out), nil
 }
 
 func waveformFromPCM16LE(data []byte) []byte {

@@ -511,6 +511,15 @@ func warnLinkPreviewSkipped(w io.Writer, msg string) {
 	fmt.Fprintf(w, "warning: %s (%s)\n", out.SanitizeHuman(msg), linkPreviewSkippedHint)
 }
 
+// warnVoiceNoteMetadata reports on the human channel what a sent voice note
+// went without.
+func warnVoiceNoteMetadata(w io.Writer, msg string) {
+	if msg == "" {
+		return
+	}
+	fmt.Fprintf(w, "warning: %s\n", out.SanitizeHuman(msg))
+}
+
 func decodeMessageEscapes(s string) (string, error) {
 	var b strings.Builder
 	b.Grow(len(s))

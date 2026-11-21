@@ -20,6 +20,7 @@ import (
 
 	"github.com/openclaw/wacli/internal/fsutil"
 	"github.com/openclaw/wacli/internal/wa"
+	"github.com/spf13/cobra"
 	"go.mau.fi/whatsmeow"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow/types"
@@ -199,10 +200,105 @@ func TestSendFileCommandValidatesMediaOptionsBeforeStore(t *testing.T) {
 
 func TestSendVoiceCommandExposesSharedSendFlags(t *testing.T) {
 	cmd := newSendVoiceCmd(&rootFlags{})
-	for _, name := range []string{"to", "pick", "file", "mime", "reply-to", "reply-to-sender", "post-send-wait"} {
+	for _, name := range []string{"to", "pick", "file", "mime", "reply-to", "reply-to-sender", "seconds", "waveform", "post-send-wait"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Fatalf("missing --%s flag", name)
 		}
+	}
+}
+
+func TestParseVoiceNoteMetadata(t *testing.T) {
+	int64p := func(v int64) *int64 { return &v }
+	withLevel := func(i, level int) []int {
+		levels := testVoiceWaveform()
+		levels[i] = level
+		return levels
+	}
+	for _, tc := range []struct {
+		name         string
+		seconds      *int64
+		waveform     []int
+		ptt          bool
+		wantSeconds  uint32
+		wantWaveform bool
+		wantErr      string
+	}{
+		{name: "neither given", ptt: true},
+		{name: "neither given outside voice notes"},
+		{name: "both", seconds: int64p(24), waveform: testVoiceWaveform(), ptt: true, wantSeconds: 24, wantWaveform: true},
+		{name: "seconds alone", seconds: int64p(1), ptt: true, wantSeconds: 1},
+		{name: "waveform alone", waveform: testVoiceWaveform(), ptt: true, wantWaveform: true},
+		{name: "zero seconds", seconds: int64p(0), ptt: true, wantErr: "seconds must be a whole number from 1 to 4294967295, got 0"},
+		{name: "negative seconds", seconds: int64p(-3), ptt: true, wantErr: "seconds must be a whole number from 1 to 4294967295, got -3"},
+		{name: "seconds beyond the message field", seconds: int64p(1 << 32), ptt: true, wantErr: "got 4294967296"},
+		{name: "short waveform", waveform: []int{1, 2, 3}, ptt: true, wantErr: "waveform must have exactly 64 levels, got 3"},
+		{name: "empty waveform", waveform: []int{}, ptt: true, wantErr: "waveform must have exactly 64 levels, got 0"},
+		{name: "long waveform", waveform: append(testVoiceWaveform(), 0), ptt: true, wantErr: "got 65"},
+		{name: "level above 100", waveform: withLevel(5, 101), ptt: true, wantErr: "waveform[5] is 101; each level must be 0..100"},
+		{name: "negative level", waveform: withLevel(63, -1), ptt: true, wantErr: "waveform[63] is -1"},
+		{name: "seconds on a plain file", seconds: int64p(3), wantErr: "seconds only apply to a voice note"},
+		{name: "waveform on a plain file", waveform: testVoiceWaveform(), wantErr: "waveform only apply to a voice note"},
+		{name: "both on a plain file", seconds: int64p(3), waveform: testVoiceWaveform(), wantErr: "seconds and waveform only apply to a voice note"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseVoiceNoteMetadata(tc.seconds, tc.waveform, tc.ptt)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("error = %v, want %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseVoiceNoteMetadata: %v", err)
+			}
+			if got.seconds != tc.wantSeconds {
+				t.Fatalf("seconds = %d, want %d", got.seconds, tc.wantSeconds)
+			}
+			if !tc.wantWaveform {
+				if got.waveform != nil {
+					t.Fatalf("waveform = %v, want none", got.waveform)
+				}
+				return
+			}
+			for i, level := range tc.waveform {
+				if got.waveform[i] != byte(level) {
+					t.Fatalf("waveform[%d] = %d, want %d", i, got.waveform[i], level)
+				}
+			}
+		})
+	}
+}
+
+func TestSendVoiceCommandsValidateVoiceMetadataBeforeStore(t *testing.T) {
+	short := "--waveform=1,2,3"
+	for _, tc := range []struct {
+		name string
+		cmd  func(*rootFlags) *cobra.Command
+		args []string
+		want string
+	}{
+		{name: "voice short waveform", cmd: newSendVoiceCmd, args: []string{short}, want: "waveform must have exactly 64 levels, got 3"},
+		{name: "voice zero seconds", cmd: newSendVoiceCmd, args: []string{"--seconds", "0"}, want: "seconds must be a whole number from 1"},
+		{name: "voice level out of range", cmd: newSendVoiceCmd, args: []string{"--waveform", strings.Repeat("0,", 63) + "101"}, want: "waveform[63] is 101"},
+		{name: "file seconds without ptt", cmd: newSendFileCmd, args: []string{"--seconds", "3"}, want: "seconds only apply to a voice note"},
+		{name: "file ptt short waveform", cmd: newSendFileCmd, args: []string{"--ptt", short}, want: "waveform must have exactly 64 levels"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			storeDir := t.TempDir()
+			cmd := tc.cmd(&rootFlags{storeDir: storeDir})
+			cmd.SetArgs(append([]string{"--to", "15551234567", "--file", "missing.ogg"}, tc.args...))
+			err := cmd.Execute()
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("command error = %v, want %q", err, tc.want)
+			}
+			entries, err := os.ReadDir(storeDir)
+			if err != nil {
+				t.Fatalf("read store directory: %v", err)
+			}
+			if len(entries) != 0 {
+				t.Fatalf("invalid command opened store: %v", entries)
+			}
+		})
 	}
 }
 
@@ -353,10 +449,13 @@ func TestProbeAudioMetadataWithFFmpeg(t *testing.T) {
 		t.Skipf("ffmpeg could not generate Opus fixture: %v", err)
 	}
 
-	if seconds := probeAudioSeconds(context.Background(), path); seconds != 1 {
-		t.Fatalf("seconds = %d, want 1", seconds)
+	if seconds, err := probeAudioSeconds(context.Background(), path); err != nil || seconds != 1 {
+		t.Fatalf("seconds = %d (%v), want 1", seconds, err)
 	}
-	waveform := probeAudioWaveform(context.Background(), path)
+	waveform, err := probeAudioWaveform(context.Background(), path)
+	if err != nil {
+		t.Fatalf("probeAudioWaveform: %v", err)
+	}
 	if len(waveform) != voiceWaveformSamples {
 		t.Fatalf("waveform length = %d, want %d", len(waveform), voiceWaveformSamples)
 	}
@@ -383,7 +482,10 @@ func TestProbeAudioWaveformCapsFFmpegStdout(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := probeAudioWaveform(context.Background(), input)
+	got, err := probeAudioWaveform(context.Background(), input)
+	if err != nil {
+		t.Fatalf("probeAudioWaveform: %v", err)
+	}
 	full := patternedWaveformPCM(testWaveformPCMCap, testWaveformPCMCap*2)
 	want := waveformFromPCM16LE(full[:testWaveformPCMCap])
 	uncapped := waveformFromPCM16LE(full)
@@ -403,12 +505,18 @@ func TestProbeAudioWaveformShortDecodeExitStatus(t *testing.T) {
 		t.Run(strconv.Itoa(exitCode), func(t *testing.T) {
 			installFakeFFmpegPCMWriter(t, 512, 1024)
 			t.Setenv("FAKE_FFMPEG_EXIT", strconv.Itoa(exitCode))
-			got := probeAudioWaveform(context.Background(), "voice.ogg")
+			got, err := probeAudioWaveform(context.Background(), "voice.ogg")
 			if exitCode != 0 {
 				if got != nil {
 					t.Fatal("failed decoder returned a waveform from partial PCM")
 				}
+				if err == nil || !strings.Contains(err.Error(), "ffmpeg: exit status 1") {
+					t.Fatalf("failed decoder error = %v, want ffmpeg's exit status", err)
+				}
 				return
+			}
+			if err != nil {
+				t.Fatalf("probeAudioWaveform: %v", err)
 			}
 			if want := waveformFromPCM16LE(patternedWaveformPCM(512, 1024)); !bytes.Equal(got, want) {
 				t.Fatalf("short waveform = %v, want %v", got, want)
