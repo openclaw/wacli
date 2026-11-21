@@ -52,6 +52,10 @@ var schemaMigrations = []migration{
 
 // Zero leaves legacy rows' existing timestamp as their freshness watermark.
 func migrateMessageContentTimestamp(d *DB) error {
+	exists, err := d.tableExists("messages")
+	if err != nil || !exists {
+		return err
+	}
 	return addMessageColumnIfMissing(d, "content_ts", `ALTER TABLE messages ADD COLUMN content_ts INTEGER NOT NULL DEFAULT 0`)
 }
 
