@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Messages: retain the original timestamp and conversation order when an identical received message is redelivered, while preserving content-freshness checks. Thanks @nicolasbiondic (#573).
+
 ## 0.26.1 - 2026-11-15
 
 **Highlights:** preserve call history and caller identities through chat reconciliation, and fix Go security vulnerabilities.

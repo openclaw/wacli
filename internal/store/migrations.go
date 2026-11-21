@@ -47,6 +47,16 @@ var schemaMigrations = []migration{
 	{version: 31, name: "content-free message change journal", up: migrateChanges},
 	{version: 32, name: "message receipt retrieval revisions", up: migrateReceiptRetrieval},
 	{version: 33, name: "ordered chat auto-unarchive", up: migrateChatAutoUnarchive},
+	{version: 40, name: "message content freshness timestamp", up: migrateMessageContentTimestamp},
+}
+
+// Zero leaves legacy rows' existing timestamp as their freshness watermark.
+func migrateMessageContentTimestamp(d *DB) error {
+	exists, err := d.tableExists("messages")
+	if err != nil || !exists {
+		return err
+	}
+	return addMessageColumnIfMissing(d, "content_ts", `ALTER TABLE messages ADD COLUMN content_ts INTEGER NOT NULL DEFAULT 0`)
 }
 
 func migratePlaceholderChatActivity(d *DB) error {
@@ -463,6 +473,9 @@ func (d *DB) ensureSchema() error {
 }
 
 func (d *DB) ensureCurrentSchema() error {
+	if err := migrateMessageContentTimestamp(d); err != nil {
+		return err
+	}
 	// Keep idempotent DDL guards here, not in query/write paths. This catches
 	// local stores from interrupted or pre-release migrations where a version
 	// row exists but the expected object does not.
