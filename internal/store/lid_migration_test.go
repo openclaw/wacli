@@ -460,6 +460,131 @@ func TestMigrateLIDToPNPreservesButtons(t *testing.T) {
 	}
 }
 
+func TestMigrateLIDToPNPreservesAdReferral(t *testing.T) {
+	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	pn := "15551234567@s.whatsapp.net"
+	lid := "999123456789@lid"
+	want := &AdReferral{
+		SourceType: "ad",
+		SourceID:   "120212345678901234",
+		SourceURL:  "https://example.com/ad",
+		Title:      "Spring sneaker drop",
+		Body:       "Limited stock this week",
+		CtwaClid:   "ctwa-clid-token",
+	}
+	kept := &AdReferral{SourceType: "post", SourceID: "existing-dest-source"}
+
+	tests := []struct {
+		name         string
+		destReferral *AdReferral // nil: no pn row before migration
+		destExists   bool
+		wantReferral *AdReferral
+	}{
+		{name: "moved to a new phone row", destExists: false, wantReferral: want},
+		{name: "merged into phone row without referral", destExists: true, wantReferral: want},
+		{name: "phone row with referral keeps its own", destExists: true, destReferral: kept, wantReferral: kept},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			db := openTestDB(t)
+			if err := db.UpsertChat(lid, "dm", "Alice", base); err != nil {
+				t.Fatalf("UpsertChat lid: %v", err)
+			}
+			if err := db.UpsertMessage(UpsertMessageParams{
+				ChatJID:    lid,
+				MsgID:      "ctwa1",
+				SenderJID:  lid,
+				Timestamp:  base,
+				Text:       "Hello! I want more information",
+				AdReferral: want,
+			}); err != nil {
+				t.Fatalf("UpsertMessage lid: %v", err)
+			}
+			if tc.destExists {
+				if err := db.UpsertChat(pn, "dm", "Alice", base); err != nil {
+					t.Fatalf("UpsertChat pn: %v", err)
+				}
+				if err := db.UpsertMessage(UpsertMessageParams{
+					ChatJID:    pn,
+					MsgID:      "ctwa1",
+					SenderJID:  pn,
+					Timestamp:  base,
+					Text:       "Hello! I want more information",
+					AdReferral: tc.destReferral,
+				}); err != nil {
+					t.Fatalf("UpsertMessage pn: %v", err)
+				}
+			}
+
+			if err := db.MigrateLIDToPN(lid, pn); err != nil {
+				t.Fatalf("MigrateLIDToPN: %v", err)
+			}
+
+			msg, err := db.GetMessage(pn, "ctwa1")
+			if err != nil {
+				t.Fatalf("GetMessage after migration: %v", err)
+			}
+			if msg.AdReferral == nil {
+				t.Fatalf("expected ad referral after migration, got nil: %+v", msg)
+			}
+			if *msg.AdReferral != *tc.wantReferral {
+				t.Fatalf("ad referral after migration = %+v, want %+v", *msg.AdReferral, *tc.wantReferral)
+			}
+		})
+	}
+}
+
+func TestMigrateLIDToPNScrubsAdReferralOnPurgedAlias(t *testing.T) {
+	db := openTestDB(t)
+	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	pn := "15551234567@s.whatsapp.net"
+	lid := "999123456789@lid"
+	for _, chat := range []string{pn, lid} {
+		if err := db.UpsertChat(chat, "dm", "Alice", base); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID: lid, MsgID: "ctwa-purged", Timestamp: base, Text: "lid payload",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID: pn, MsgID: "ctwa-purged", Timestamp: base, Text: "pn payload",
+		AdReferral: &AdReferral{SourceID: "120212345678901234", CtwaClid: "ctwa-clid-token"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.MarkMessageRevoked(lid, "ctwa-purged"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.PurgeMessage(lid, "ctwa-purged"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.MigrateLIDToPN(lid, pn); err != nil {
+		t.Fatal(err)
+	}
+
+	msg, err := db.GetMessage(pn, "ctwa-purged")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg.PayloadPurgedAt == nil {
+		t.Fatalf("expected purge suppression after migration: %+v", msg)
+	}
+	if msg.AdReferral != nil {
+		t.Fatalf("ad referral survived alias purge: %+v", msg.AdReferral)
+	}
+	var stored sql.NullString
+	if err := db.sql.QueryRow(`SELECT ad_referral FROM messages WHERE chat_jid = ? AND msg_id = ?`, pn, "ctwa-purged").Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.Valid {
+		t.Fatalf("messages.ad_referral not NULL after alias purge")
+	}
+}
+
 func TestMigrateLIDToPNPreservesMessageReceipts(t *testing.T) {
 	db := openTestDB(t)
 	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
