@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Commands: store what WhatsApp delivers to a command that connects by itself (no `sync --follow` running): incoming messages, own messages from other devices, edits, reactions, receipts, calls, history chunks and app-state changes are stored before they are acknowledged, so a later sync no longer finds them gone (#580).
+- Commands: a command that connects by itself (no `sync --follow` running) now stores what WhatsApp delivers to it through sync's handler, so a later sync no longer finds it gone (#580). Messages and history chunks are stored before their receipt is sent; receipts, calls and app-state changes, which whatsmeow acknowledges on arrival, are stored as they are handled. The message whatsmeow is still decrypting when the command closes its connection (1:1 or group) can still be lost, without a warning. At exit the command waits for an item still being stored up to 10 s and not past its `--timeout`; what is cut short is lost and reported.
 - Dependencies: refresh eligible WhatsApp, networking and SQL tooling modules, pnpm, GoReleaser and pinned CI actions after the 48-hour cooldown; retain Go 1.27.0 and Node 24 minimums.
 - Send: delegate text and media status broadcasts to a running sync process, preserving styling and captions while keeping the original command timeout (#584).
 - Sync: keep outgoing messages from naming chats after this account’s own push name, and preserve stored chat names when metadata is unavailable. Thanks @nicolasbiondic (#574).
