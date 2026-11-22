@@ -39,6 +39,7 @@ func newChatsCmd(flags *rootFlags) *cobra.Command {
 
 func newChatsListCmd(flags *rootFlags) *cobra.Command {
 	var query string
+	var list string
 	var limit int
 	var archived, noArchived bool
 	var pinned, noPinned bool
@@ -78,6 +79,13 @@ func newChatsListCmd(flags *rootFlags) *cobra.Command {
 				Muted:    boolFilter(muted, noMuted),
 				Unread:   boolFilter(unread, noUnread),
 			}
+			if cmd.Flags().Changed("list") {
+				filter.ListID, err = a.DB().ResolveList(list)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintln(os.Stderr, "List filter uses observed memberships only; completeness is unknown (see `wacli lists list --json`).")
+			}
 			chats, err := a.DB().ListChatsFiltered(filter)
 			if err != nil {
 				return err
@@ -102,6 +110,7 @@ func newChatsListCmd(flags *rootFlags) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&query, "query", "", "search query")
+	cmd.Flags().StringVar(&list, "list", "", "filter observed WhatsApp list memberships by exact ID or name (completeness unknown)")
 	cmd.Flags().IntVar(&limit, "limit", 50, "limit")
 	cmd.Flags().BoolVar(&archived, "archived", false, "show only archived chats")
 	cmd.Flags().BoolVar(&noArchived, "no-archived", false, "exclude archived chats")
