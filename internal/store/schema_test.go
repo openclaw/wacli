@@ -65,6 +65,16 @@ func TestOpenCreatesExpectedSchema(t *testing.T) {
 		}
 	}
 
+	messageContactCols, err := tableColumns(db.sql, "message_contacts")
+	if err != nil {
+		t.Fatalf("message_contacts tableColumns: %v", err)
+	}
+	for _, want := range []string{"chat_jid", "msg_id", "position", "display_name", "vcard"} {
+		if !messageContactCols[want] {
+			t.Fatalf("expected message_contacts column %q to exist", want)
+		}
+	}
+
 	callCols, err := tableColumns(db.sql, "call_events")
 	if err != nil {
 		t.Fatalf("call_events tableColumns: %v", err)

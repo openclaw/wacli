@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Messages: keep the raw vCard of every shared contact card (`message_contacts`, migration 41) so the `type` and `waid` of each `TEL` survive, and read a `TEL;waid=…:` whose value is empty as that number instead of dropping the card's phone. Cards received before this version have no stored vCard; only their display text remains.
 - Dependencies: refresh eligible WhatsApp, networking and SQL tooling modules, pnpm, GoReleaser and pinned CI actions after the 48-hour cooldown; retain Go 1.27.0 and Node 24 minimums.
 - Send: delegate text and media status broadcasts to a running sync process, preserving styling and captions while keeping the original command timeout (#584).
 - Sync: keep outgoing messages from naming chats after this account’s own push name, and preserve stored chat names when metadata is unavailable. Thanks @nicolasbiondic (#574).

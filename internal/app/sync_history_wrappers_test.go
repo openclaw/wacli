@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -147,6 +148,10 @@ func TestHistoryPayloadsThroughCLI(t *testing.T) {
 	}
 	var stored, lastEvent atomic.Int64
 	a.handleHistorySync(context.Background(), SyncOptions{}, historySyncOf(chat, messages...), &stored, &lastEvent, func(string, string) {})
+	cards, err := a.db.GetMessageContacts(chat.String(), "contact")
+	if err != nil || len(cards) != 1 || !strings.Contains(cards[0].VCard, "item1.TEL:+1 555 000 0002") {
+		t.Fatalf("stored contact cards = %+v, err = %v", cards, err)
+	}
 	h := newRetrievalCLI(t, a)
 	wants := []map[string]string{
 		{"Text": "synthetic wrapped needle"},

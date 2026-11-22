@@ -11,11 +11,29 @@ import (
 func extractContactText(m *waProto.Message, pm *ParsedMessage) {
 	if contact := m.GetContactMessage(); contact != nil {
 		pm.Text = contactDisplayText(contact)
+		pm.Contacts = contactCards(contact)
 		return
 	}
 	if contacts := m.GetContactsArrayMessage(); contacts != nil {
 		pm.Text = contactsArrayDisplayText(contacts)
+		pm.Contacts = contactCards(contacts.GetContacts()...)
 	}
+}
+
+// contactCards keeps the raw vCard of each shared card, in order, so the type
+// and waid of every TEL stay readable. Cards without a vCard are dropped.
+func contactCards(contacts ...*waProto.ContactMessage) []ContactCard {
+	var cards []ContactCard
+	for _, contact := range contacts {
+		if contact == nil || strings.TrimSpace(contact.GetVcard()) == "" {
+			continue
+		}
+		cards = append(cards, ContactCard{
+			DisplayName: strings.TrimSpace(contact.GetDisplayName()),
+			VCard:       contact.GetVcard(),
+		})
+	}
+	return cards
 }
 
 func contactDisplayText(contact *waProto.ContactMessage) string {
@@ -61,6 +79,9 @@ func contactDetails(contact *waProto.ContactMessage) (string, []string) {
 		}
 		field := vCardPropertyName(key)
 		value = unescapeVCardValue(strings.TrimSpace(value))
+		if field == "TEL" {
+			value = vCardTelValue(key, value)
+		}
 		if value == "" {
 			continue
 		}
@@ -74,6 +95,21 @@ func contactDetails(contact *waProto.ContactMessage) (string, []string) {
 		}
 	}
 	return name, phones
+}
+
+// vCardTelValue is the number of a TEL line. WhatsApp can send the number
+// only as the waid parameter (`TEL;waid=51999999999:`), with an empty value.
+func vCardTelValue(key, value string) string {
+	if value != "" {
+		return value
+	}
+	for _, param := range strings.Split(key, ";")[1:] {
+		name, digits, ok := strings.Cut(strings.TrimSpace(param), "=")
+		if ok && strings.EqualFold(name, "waid") && digits != "" && strings.Trim(digits, "0123456789") == "" {
+			return "+" + digits
+		}
+	}
+	return ""
 }
 
 // vCardPropertyName returns the upper-cased property name without parameters
