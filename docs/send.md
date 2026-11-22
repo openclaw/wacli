@@ -6,6 +6,15 @@ Read when: sending text, files, stickers, locations, polls, status broadcasts, q
 
 When `sync --follow` is already running for the same store, send commands delegate the send to that running process instead of opening a second WhatsApp session. This keeps scripts usable while continuous sync owns the store lock.
 
+When no sync is running, a send (like any command that connects) opens its own session, and WhatsApp delivers to it what arrived for this device while it was offline. The command stores it the way sync does, without posting webhooks or downloading media:
+
+- Messages and history chunks are stored before their receipt is sent, so what the command acknowledges is in `wacli.db` when it exits. What it has not received stays queued for the next connection.
+- Receipts, calls and app-state changes, and channel messages, are acknowledged by whatsmeow on arrival, before wacli sees them, and are stored as they are handled.
+- Not covered: when the command closes its connection, whatsmeow keeps decrypting the message it was handling (1:1 or group) and hands it over after the command has closed its store. That one message is lost without a warning: its copy, delivered again later, no longer decrypts.
+- At exit the command waits for anything still being stored, such as a history chunk, up to 10 s and not past its own `--timeout` (2 s with `--timeout 0`); its own cleanup does not wait longer. What is cut short is lost and reported (`oneshot_store_incomplete`); the command then exits without waiting for it. Retrying the command does not recover it. Keeping `wacli sync --follow` running prevents it: commands then hand their work to it instead of connecting by themselves. A store failure is reported as `oneshot_store_failed`; that is not recovered by retrying either, and fixing what keeps `wacli.db` from being written (disk space, permissions) prevents it.
+- These lines, and sync's own warnings for what it stores (for example `undecryptable_message`, or the history-sync lines), go to stderr; stdout carries only the command's result.
+- The `--max-messages` and `--max-db-size` caps of `sync` do not apply to what a one-shot command stores.
+
 Generic connection errors do not automatically start a fresh send: a disconnect can happen after a message frame was submitted but before its acknowledgement arrived. The outcome can therefore be uncertain. Inspect history before deciding whether to send again. Known preparation/lookup failures can still retry once; an ordinary message-acknowledgement timeout also does not trigger a fresh outer send. This policy does not establish recipient delivery or guarantee server-side deduplication.
 
 ## Commands

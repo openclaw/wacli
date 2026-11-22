@@ -79,6 +79,7 @@ type SyncOptions struct {
 	WebhookAllowPrivate bool
 	WebhookEvents       SyncWebhookEventSet // nil = messages only
 	afterHistorySync    func(*events.HistorySync)
+	oneShot             bool // the handler stores for a command's own connection (oneShotStore)
 }
 
 type SyncResult struct {
@@ -86,6 +87,10 @@ type SyncResult struct {
 }
 
 func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
+	// Commands this process runs for others connect through App.Connect; the
+	// sync handler already stores what arrives (see oneShotStore).
+	a.syncRunning.Add(1)
+	defer a.syncRunning.Add(-1)
 	status := a.beginSyncStatus()
 	defer a.endSyncStatus(status)
 

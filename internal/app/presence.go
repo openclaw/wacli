@@ -96,7 +96,7 @@ func (a *App) WatchPresence(ctx context.Context, jid types.JID, wait time.Durati
 	// goes in first. WhatsApp may address it to the user's LID.
 	answers := make(chan PresenceState, 1)
 	if wait > 0 {
-		handlerID := a.wa.AddEventHandler(func(evt any) {
+		handlerID := a.addEventHandler(func(evt any) {
 			p, ok := evt.(*events.Presence)
 			if !ok || a.canonicalStoreJID(ctx, p.From) != target {
 				return
@@ -106,7 +106,7 @@ func (a *App) WatchPresence(ctx context.Context, jid types.JID, wait time.Durati
 			default:
 			}
 		})
-		defer a.wa.RemoveEventHandler(handlerID)
+		defer a.removeEventHandler(a.wa, handlerID)
 	}
 	if err := a.wa.SubscribePresence(ctx, jid); err != nil {
 		return nil, fmt.Errorf("subscribe to presence of %s: %w", jid, err)

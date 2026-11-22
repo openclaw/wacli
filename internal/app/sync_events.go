@@ -72,6 +72,9 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 		if opts.Mode == SyncModeFollow && syncActivityEvent(evt) {
 			a.writeHeartbeat()
 		}
+		if opts.oneShot && !a.oneShotStores(evt) {
+			return
+		}
 
 		// Recover from panics so unexpected message structures do not crash the
 		// process. Include event type, stack trace, and a running counter.
@@ -921,7 +924,9 @@ func (a *App) storeHistoryUnreadCount(ctx context.Context, chatID string, conv *
 }
 
 func (a *App) emitSyncProgress(total int64) {
-	if total <= 0 || total%25 != 0 {
+	// Without a running Sync the caller is a one-shot command's store, whose
+	// output is the command's own (see oneShotStore).
+	if total <= 0 || total%25 != 0 || a.syncRunning.Load() == 0 {
 		return
 	}
 	a.emitOrPrint("progress", map[string]any{"messages_synced": total}, "\rSynced %d messages...", total)
