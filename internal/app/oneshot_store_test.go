@@ -124,8 +124,9 @@ func TestOneShotConnectionReportsWhatItCouldNotStore(t *testing.T) {
 	_ = a.db.Close() // every write fails from here on
 	f.emit(oneShotIncoming("m-unstored", time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)))
 	a.Close()
-	if !strings.Contains(evbuf.String(), `"code":"oneshot_store_failed"`) {
-		t.Fatalf("no oneshot_store_failed warning after a delivered message failed to store:\n%s", evbuf.String())
+	if text := evbuf.String(); !strings.Contains(text, `"code":"oneshot_store_failed"`) ||
+		!strings.Contains(text, "retrying this command does not recover them") || !strings.Contains(text, "disk space, permissions") {
+		t.Fatalf("no oneshot_store_failed warning saying the loss is final and what prevents it, after a delivered message failed to store:\n%s", evbuf.String())
 	}
 }
 
@@ -265,7 +266,8 @@ func TestOneShotExitWaitEndsAtTheCommandDeadline(t *testing.T) {
 		t.Fatalf("the wait at exit took %s; it must end at the command's deadline (300ms after connecting)", waited)
 	}
 	s.finish(a)
-	if !strings.Contains(evbuf.String(), `"code":"oneshot_store_incomplete"`) || !strings.Contains(evbuf.String(), "will not deliver it again") {
+	if text := evbuf.String(); !strings.Contains(text, `"code":"oneshot_store_incomplete"`) || !strings.Contains(text, "will not deliver it again") ||
+		!strings.Contains(text, "retrying this command does not recover it") || !strings.Contains(text, "keep `wacli sync --follow` running") {
 		t.Fatalf("no oneshot_store_incomplete warning saying the cut-short event is lost:\n%s", evbuf.String())
 	}
 }

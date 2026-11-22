@@ -171,12 +171,12 @@ func (s *oneShotStore) finish(a *App) {
 			queued = ", and app-state writes were still queued"
 		}
 		a.emitWarning("oneshot_store_incomplete",
-			fmt.Sprintf("warning: the connection closed while an incoming event was still being stored (waited %s)%s; what was not stored is not in wacli.db and WhatsApp will not deliver it again", s.waitedFor.Round(time.Millisecond), queued),
-			map[string]any{"waited_ms": s.waitedFor.Milliseconds(), "app_state_queued": s.appStateQueued})
+			fmt.Sprintf("warning: the connection closed while an incoming event was still being stored (waited %s)%s; what was not stored is not in wacli.db and WhatsApp will not deliver it again, so retrying this command does not recover it. To prevent it, keep `wacli sync --follow` running: commands then hand their work to it instead of connecting by themselves", s.waitedFor.Round(time.Millisecond), queued),
+			map[string]any{"waited_ms": s.waitedFor.Milliseconds(), "app_state_queued": s.appStateQueued, "next": "keep `wacli sync --follow` running"})
 	}
 	if s.limits.persistenceFailed.Load() {
 		a.emitWarning("oneshot_store_failed",
-			"warning: WhatsApp delivered messages or events to this command that could not be stored in wacli.db; they were acknowledged and will not be delivered again. Check the store (disk space, permissions) before the next command or sync.",
-			nil)
+			"warning: WhatsApp delivered messages or events to this command that could not be stored in wacli.db; they were acknowledged and will not be delivered again, so retrying this command does not recover them. To prevent it, fix what keeps wacli.db from being written (disk space, permissions) before the next command or sync.",
+			map[string]any{"next": "fix what keeps wacli.db from being written (disk space, permissions)"})
 	}
 }
