@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Messages: record the semantic kind of polls, poll votes and updates, contact cards and events in a new nullable `messages.kind` column (migration 37, also re-checked on every writable open) and expose it as `kind` in JSON and `Kind` in webhooks, without touching `media_type`; revoked messages read as `revoked`. Older stores stay readable read-only. Thanks @nicolasbiondic.
 - Dependencies: refresh eligible WhatsApp, networking and SQL tooling modules, pnpm, GoReleaser and pinned CI actions after the 48-hour cooldown; retain Go 1.27.0 and Node 24 minimums.
 - Send: delegate text and media status broadcasts to a running sync process, preserving styling and captions while keeping the original command timeout (#584).
 - Sync: keep outgoing messages from naming chats after this account’s own push name, and preserve stored chat names when metadata is unavailable. Thanks @nicolasbiondic (#574).

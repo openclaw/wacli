@@ -293,7 +293,7 @@ func (d *DB) ReadView(read func(*DB) error) error {
 		return err
 	}
 	defer tx.Rollback()
-	view := &DB{path: d.path, sql: d.sql, q: d.q.WithTx(tx), ftsEnabled: d.ftsEnabled, receiptsEnabled: d.receiptsEnabled, readRows: tx}
+	view := &DB{path: d.path, sql: d.sql, q: d.q.WithTx(tx), ftsEnabled: d.ftsEnabled, receiptsEnabled: d.receiptsEnabled, kindEnabled: d.kindEnabled, readRows: tx}
 	if err = read(view); err != nil {
 		return err
 	}

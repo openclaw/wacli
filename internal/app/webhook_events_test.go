@@ -633,3 +633,23 @@ func TestGlobalPresenceIsNeverForwarded(t *testing.T) {
 	})
 	rec.expectSilence(t)
 }
+
+func TestMessageWebhookPayloadCarriesSemanticKind(t *testing.T) {
+	a := newTestApp(t)
+	for kind, want := range map[string]bool{"poll": true, "contact": true, "": false} {
+		got, err := json.Marshal(a.newSyncWebhookEventPayload(context.Background(), syncWebhookEvent{
+			Kind:    SyncWebhookEventMessage,
+			Message: wa.ParsedMessage{ID: "m-" + kind, Text: "x", Kind: kind},
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]any
+		if err := json.Unmarshal(got, &fields); err != nil {
+			t.Fatal(err)
+		}
+		if value, ok := fields["Kind"]; ok != want || (want && value != kind) {
+			t.Fatalf("kind %q: payload %s", kind, got)
+		}
+	}
+}

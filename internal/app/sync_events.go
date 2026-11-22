@@ -890,7 +890,7 @@ func liveUnreadPlaceholder(m store.Message) bool {
 		!m.FromMe && !m.Edited && !m.Revoked && !m.DeletedForMe &&
 		m.DeletedAt == nil && m.PayloadPurgedAt == nil &&
 		m.ReactionToID == "" && m.ReactionEmoji == "" &&
-		m.MediaType == "" && len(m.Buttons) == 0
+		m.Kind == "" && m.MediaType == "" && len(m.Buttons) == 0
 }
 
 func (a *App) storeHistoryUnreadCount(ctx context.Context, chatID string, conv *waHistorySync.Conversation) {
