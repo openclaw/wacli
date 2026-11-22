@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/openclaw/wacli/internal/lock"
 	"github.com/openclaw/wacli/internal/sqliteutil"
 	"github.com/openclaw/wacli/internal/store"
 	"go.mau.fi/libsignal/ecc"
@@ -89,12 +90,14 @@ func TestOneShotSendStoresOfflineBacklogRealTransport(t *testing.T) {
 		env.readReceipt("sent-earlier", t0.Add(6*time.Second)),
 		env.incoming("in-4", t0.Add(6*time.Second), backlogText("third message from the contact")),
 	)
+	env.logHeld("before the command")
 
 	stdout, _, err := env.cli("one-shot send while no sync runs", "--json", "send", "text", "--to", contact.User, "--message", "sent by the one-shot")
 	if err != nil {
 		t.Fatalf("send text: %v", err)
 	}
 	sentID := backlogSentID(t, stdout)
+	env.logStoreAtExit("`send text`")
 	env.requireAcknowledgedStored("after `send text` exited")
 	if left := env.peer.held(); len(left) != 0 {
 		t.Fatalf("the stand-in still holds %v: the one-shot connection did not acknowledge its whole backlog", left)
@@ -126,11 +129,14 @@ func TestOneShotSendStoresOfflineBacklogRealTransport(t *testing.T) {
 		env.incoming("in-3", t0.Add(7*time.Second), backlogText("arrived after the one-shot")),
 		env.incoming("in-4", t0.Add(40*time.Minute), backlogText("third message from the contact")),
 	)
+	env.logHeld("before the later sync (in-4 again, as a replay)")
 	if _, _, err := env.cli("later sync", "sync", "--once", "--idle-exit", "1s", "--presence-mode", "quiet"); err != nil {
 		t.Fatalf("sync --once: %v", err)
 	}
 	env.requireAcknowledgedStored("after `sync --once` exited")
 	want := []string{"sent-earlier", "in-1", "own-1", "in-2", "in-react", "in-4", "in-3", sentID}
+	env.logStoreRows("after the later `sync --once`", want)
+	env.logHeld("at the end")
 	if got := env.order(); !slices.Equal(got, want) {
 		t.Fatalf("messages after the later sync = %v, want %v (each once, in time order)", got, want)
 	}
@@ -154,21 +160,26 @@ func TestOneShotFailedSendKeepsAcknowledgedBacklogRealTransport(t *testing.T) {
 		env.fromOwnDevice("own-1", t0.Add(time.Second), backlogText("reply typed on the phone")),
 	)
 	env.peer.holdAfterSend(env.incoming("in-late", t0.Add(2*time.Second), backlogText("arrived as the send failed")))
+	env.logHeld("before the command")
 
 	if _, stderr, err := env.cli("one-shot send that the server rejects", "send", "text", "--to", env.contact.User, "--message", "rejected", "--post-send-wait", "0"); err == nil {
 		t.Fatalf("send text succeeded; the stand-in rejected it (stderr: %s)", stderr)
 	}
+	env.logStoreAtExit("the failed `send text`")
 	env.requireAcknowledgedStored("after the failed `send text` exited")
 	late := "left queued for the next sync"
 	if slices.Contains(env.peer.acknowledged(), "in-late") {
 		late = "stored and acknowledged by the one-shot"
 	}
 	t.Logf("CHECK failed command: in-1 and own-1 acknowledged and stored; in-late %s", late)
+	env.logHeld("before the later sync")
 
 	if _, _, err := env.cli("later sync", "sync", "--once", "--idle-exit", "1s", "--presence-mode", "quiet"); err != nil {
 		t.Fatalf("sync --once: %v", err)
 	}
 	env.requireAcknowledgedStored("after `sync --once` exited")
+	env.logStoreRows("after the later `sync --once`", []string{"in-1", "own-1", "in-late"})
+	env.logHeld("at the end")
 	if got, want := env.order(), []string{"in-1", "own-1", "in-late"}; !slices.Equal(got, want) {
 		t.Fatalf("messages after the later sync = %v, want %v", got, want)
 	}
@@ -302,17 +313,33 @@ func (e *backlogEnv) sender(from types.JID) func(string, types.JID, time.Time, *
 }
 
 func (e *backlogEnv) incoming(id string, at time.Time, msg *waE2E.Message) *backlogItem {
-	return &backlogItem{id: id, class: "message", node: e.sender(e.contact)(id, e.contact, at, msg)}
+	return &backlogItem{id: id, class: "message", kind: backlogKind("incoming", msg), node: e.sender(e.contact)(id, e.contact, at, msg)}
+}
+
+// backlogKind says in words what a backlog message is.
+func backlogKind(from string, msg *waE2E.Message) string {
+	pm := msg.GetProtocolMessage()
+	switch {
+	case pm.GetHistorySyncNotification() != nil:
+		return "history chunk from the phone"
+	case pm != nil && pm.GetType() == waE2E.ProtocolMessage_MESSAGE_EDIT:
+		return from + " edit of " + pm.GetKey().GetID()
+	case pm != nil && pm.GetType() == waE2E.ProtocolMessage_REVOKE:
+		return from + " revoke of " + pm.GetKey().GetID()
+	case msg.GetReactionMessage() != nil:
+		return from + " reaction to " + msg.GetReactionMessage().GetKey().GetID()
+	}
+	return from + " message"
 }
 
 func (e *backlogEnv) fromOwnDevice(id string, at time.Time, msg *waE2E.Message) *backlogItem {
 	other := *e.device.ID
 	other.Device = 1
-	return &backlogItem{id: id, class: "message", node: e.sender(other)(id, e.contact, at, msg)}
+	return &backlogItem{id: id, class: "message", kind: backlogKind("own (sent from another device)", msg), node: e.sender(other)(id, e.contact, at, msg)}
 }
 
 func (e *backlogEnv) readReceipt(msgID string, at time.Time) *backlogItem {
-	return &backlogItem{id: msgID, class: "receipt", node: waBinary.Node{Tag: "receipt", Attrs: waBinary.Attrs{"id": msgID, "from": e.contact, "type": "read", "t": at.Unix()}}}
+	return &backlogItem{id: msgID, class: "receipt", kind: "read receipt for our message", node: waBinary.Node{Tag: "receipt", Attrs: waBinary.Attrs{"id": msgID, "from": e.contact, "type": "read", "t": at.Unix()}}}
 }
 
 func backlogText(text string) *waE2E.Message {
@@ -344,6 +371,7 @@ func backlogReaction(chat types.JID, target, emoji string) *waE2E.Message {
 
 func (e *backlogEnv) cli(label string, args ...string) (string, string, error) {
 	e.t.Helper()
+	e.logNoSyncProcess()
 	e.t.Logf("$ wacli %s   # %s", strings.Join(args, " "), label)
 	stdout, stderr, err := backlogRunCLI(e.t, append([]string{"--store", e.dir}, args...))
 	for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {
@@ -486,6 +514,164 @@ func (e *backlogEnv) appliedMutation(id string, rows map[string]backlogRow) bool
 	return false
 }
 
+// The trace: what the stand-in holds, what the store holds, in plain words.
+
+// describeItems lists items by id and kind; a long run of one kind is shown
+// as its count and first and last id.
+func describeItems(items []*backlogItem) string {
+	if len(items) == 0 {
+		return "nothing"
+	}
+	if len(items) <= 12 {
+		parts := make([]string, 0, len(items))
+		for _, item := range items {
+			parts = append(parts, fmt.Sprintf("%s %s (%s)", item.class, item.id, item.kind))
+		}
+		return strings.Join(parts, ", ")
+	}
+	var parts []string
+	for i := 0; i < len(items); {
+		j := i
+		for j+1 < len(items) && items[j+1].kind == items[i].kind {
+			j++
+		}
+		parts = append(parts, fmt.Sprintf("%d × %s (%s … %s)", j-i+1, items[i].kind, items[i].id, items[j].id))
+		i = j + 1
+	}
+	return strings.Join(parts, ", ")
+}
+
+func (e *backlogEnv) logHeld(when string) {
+	e.t.Helper()
+	e.peer.mu.Lock()
+	held := append([]*backlogItem(nil), e.peer.queue...)
+	later := append([]*backlogItem(nil), e.peer.afterSend...)
+	e.peer.mu.Unlock()
+	e.t.Logf("STAND-IN holds %d item(s) for the device %s: %s", len(held), when, describeItems(held))
+	if len(later) > 0 {
+		e.t.Logf("STAND-IN will also deliver %d item(s) right after it answers the send: %s", len(later), describeItems(later))
+	}
+}
+
+// logNoSyncProcess states, and checks, that no sync process owns the store:
+// the lock is free and there is no send socket, so a command connects by
+// itself.
+func (e *backlogEnv) logNoSyncProcess() {
+	e.t.Helper()
+	if _, err := os.Stat(filepath.Join(e.dir, ".send.sock")); err == nil {
+		e.t.Fatal("a send socket exists: a sync process would take the command")
+	}
+	l, err := lock.Acquire(e.dir)
+	if err != nil {
+		e.t.Fatalf("the store lock is held: %v", err)
+	}
+	_ = l.Release()
+	e.t.Log("STORE no sync process owns the store (lock free, no send socket): the command connects to WhatsApp by itself")
+}
+
+// logStoreAtExit says, for every item the device acknowledged, what wacli.db
+// holds for it now that the command has exited (its socket is closed).
+func (e *backlogEnv) logStoreAtExit(command string) {
+	e.t.Helper()
+	rows := e.messages()
+	acked := e.peer.acknowledgedItems()
+	e.t.Logf("STORE when %s exited (its socket closed): %d item(s) acknowledged to the stand-in", command, len(acked))
+	for i, item := range acked {
+		if i == 20 && len(acked) > 21 {
+			e.t.Logf("STORE   … and %d more acknowledged item(s), each checked the same way", len(acked)-20)
+			break
+		}
+		e.t.Logf("STORE   %s %s (%s): %s", item.class, item.id, item.kind, e.storedAs(item, rows))
+	}
+}
+
+func (e *backlogEnv) storedAs(item *backlogItem, rows map[string]backlogRow) string {
+	if item.class == "receipt" {
+		if status := e.receiptStatus(item.id); status != "" {
+			return "stored as receipt status " + status
+		}
+		return "NOT in wacli.db"
+	}
+	if r, ok := rows[item.id]; ok {
+		return fmt.Sprintf("stored (from_me=%v text=%q edited=%v revoked=%v reaction=%q ts=%d)", r.fromMe, r.text, r.edited, r.revoked, r.reaction, r.ts)
+	}
+	if e.appliedMutation(item.id, rows) {
+		return "applied to the message it changes"
+	}
+	return "NOT in wacli.db"
+}
+
+// logStoreRows lists what wacli.db holds after a later sync, per chat in the
+// order a chat view shows it (time, then insertion), says whether any message
+// id is stored more than once, and whether the ids in want appear in that
+// order (for the exit tests, the order the stand-in held them). It only
+// reads and logs; the tests' own checks follow it.
+func (e *backlogEnv) logStoreRows(when string, want []string) {
+	e.t.Helper()
+	db := e.openStore()
+	defer db.Close()
+	rows, err := db.Query(`SELECT chat_jid, msg_id FROM messages ORDER BY ts, rowid`)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	var chats []string
+	byChat := map[string][]string{}
+	pos := map[string]int{}
+	for rows.Next() {
+		var chat, id string
+		if err := rows.Scan(&chat, &id); err != nil {
+			e.t.Fatal(err)
+		}
+		if _, ok := byChat[chat]; !ok {
+			chats = append(chats, chat)
+		}
+		byChat[chat] = append(byChat[chat], id)
+		if _, ok := pos[id]; !ok {
+			pos[id] = len(pos)
+		}
+	}
+	rows.Close()
+	var twice []string
+	dup, err := db.Query(`SELECT msg_id FROM messages GROUP BY msg_id HAVING COUNT(*) > 1`)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	for dup.Next() {
+		var id string
+		if err := dup.Scan(&id); err != nil {
+			e.t.Fatal(err)
+		}
+		twice = append(twice, id)
+	}
+	dup.Close()
+	for _, chat := range chats {
+		ids := byChat[chat]
+		shown := ids
+		if len(ids) > 24 {
+			shown = append(append(append([]string(nil), ids[:10]...), fmt.Sprintf("… %d more …", len(ids)-20)), ids[len(ids)-10:]...)
+		}
+		e.t.Logf("STORE %s, chat %s: %d message(s) in time order: %s", when, chat, len(ids), strings.Join(shown, ", "))
+	}
+	e.t.Logf("STORE %s: message ids stored more than once: %d %v", when, len(twice), twice)
+	if len(want) == 0 {
+		return
+	}
+	inOrder, last, present := true, -1, 0
+	for _, id := range want {
+		p, ok := pos[id]
+		if !ok {
+			continue
+		}
+		present++
+		if p < last {
+			inOrder = false
+			e.t.Logf("STORE %s: %s is stored before an item expected ahead of it", when, id)
+		}
+		last = p
+	}
+	e.t.Logf("STORE %s: %d of the %d expected id(s) are stored; they are in the expected order: %v", when, present, len(want), inOrder)
+}
+
 // backlogRoute makes the process-wide default transport (which whatsmeow
 // clones when a client is built) dial only host, at the local TLS server,
 // trusting only its certificate. Restored on cleanup.
@@ -539,6 +725,7 @@ var backlogContactLID = types.NewJID("88880000001", types.HiddenUserServer)
 type backlogItem struct {
 	id    string
 	class string // "message": acknowledged by a receipt; "receipt": by an ack
+	kind  string // what it is, in words, for the trace
 	node  waBinary.Node
 }
 
@@ -679,7 +866,7 @@ func (p *backlogPeer) serve(w http.ResponseWriter, r *http.Request) {
 	for {
 		node, err := noise.read(p.ctx)
 		if err != nil {
-			p.t.Logf("PEER conn#%d: closed (%v)", connID, err)
+			p.t.Logf("PEER conn#%d: the device closed the socket (%v)", connID, err)
 			return
 		}
 		switch node.Tag {
@@ -706,7 +893,7 @@ func (p *backlogPeer) serve(w http.ResponseWriter, r *http.Request) {
 			}
 		case "receipt":
 			kind := fmt.Sprint(node.Attrs["type"])
-			p.t.Logf("PEER conn#%d <- receipt id=%v type=%s", connID, node.Attrs["id"], kind)
+			p.t.Logf("PEER conn#%d <- delivery receipt (type %s) for %v: the device acknowledged it", connID, kind, node.Attrs["id"])
 			if kind == "retry" {
 				p.t.Errorf("device asked for a retry of %v: the synthetic ciphertext did not decrypt", node.Attrs["id"])
 				continue
@@ -717,7 +904,7 @@ func (p *backlogPeer) serve(w http.ResponseWriter, r *http.Request) {
 			}
 		case "ack":
 			if node.Attrs["class"] == "receipt" {
-				p.t.Logf("PEER conn#%d <- ack class=receipt id=%v", connID, node.Attrs["id"])
+				p.t.Logf("PEER conn#%d <- ack for the receipt %v: the device acknowledged it", connID, node.Attrs["id"])
 				p.acknowledge("receipt", fmt.Sprint(node.Attrs["id"]))
 			}
 		case "message":
@@ -748,7 +935,7 @@ func (p *backlogPeer) serve(w http.ResponseWriter, r *http.Request) {
 				// rest queued, as a server would.
 				p.hold(late...)
 				for _, item := range late {
-					p.t.Logf("PEER conn#%d -> %s %s (delivered right after the send was answered)", connID, item.class, item.id)
+					p.t.Logf("PEER conn#%d -> %s %s (%s; delivered right after the send was answered)", connID, item.class, item.id, item.kind)
 					if err := noise.write(p.ctx, item.node); err != nil {
 						return
 					}
@@ -776,10 +963,10 @@ func (p *backlogPeer) deliver(connID int, noise *backlogNoise) []*backlogItem {
 			receipts++
 		}
 	}
-	p.t.Logf("PEER conn#%d -> offline backlog: %d message(s), %d receipt(s)", connID, messages, receipts)
+	p.t.Logf("PEER conn#%d -> offline backlog for the device: %d message(s), %d receipt(s)", connID, messages, receipts)
 	_ = noise.write(p.ctx, waBinary.Node{Tag: "ib", Content: []waBinary.Node{{Tag: "offline_preview", Attrs: waBinary.Attrs{"count": len(items), "message": messages, "receipt": receipts, "notification": 0, "appdata": 0}}}})
 	for _, item := range items {
-		p.t.Logf("PEER conn#%d -> %s %s", connID, item.class, item.id)
+		p.t.Logf("PEER conn#%d -> %s %s (%s)", connID, item.class, item.id, item.kind)
 		if err := noise.write(p.ctx, item.node); err != nil {
 			return items
 		}
@@ -1016,11 +1203,15 @@ func backlogExitTest(t *testing.T, sender func(*backlogEnv) func(string, time.Ti
 			for i := atLogin; i < atLogin+afterSend; i++ {
 				env.peer.holdAfterSend(item(i))
 			}
+			env.logHeld("before the command")
+			env.logNoSyncProcess()
 			stdout, stderr, err := backlogRunCLI(t, []string{"--store", env.dir, "--json", "send", "text", "--to", env.contact.User, "--message", "sent while the backlog arrives", "--post-send-wait", "0"})
 			if err != nil {
 				t.Fatalf("send text: %v (stderr %s)", err, stderr)
 			}
 			backlogSentID(t, stdout) // stdout stays one JSON document
+			t.Logf("  one-shot stdout| %s", strings.TrimSpace(stdout))
+			env.logStoreAtExit("`send text`")
 			for _, line := range strings.Split(strings.TrimSpace(stderr), "\n") {
 				if line != "" {
 					t.Logf("  one-shot stderr| %s", line)
@@ -1037,9 +1228,12 @@ func backlogExitTest(t *testing.T, sender func(*backlogEnv) func(string, time.Ti
 				t.Fatalf("acknowledged to the server but not in wacli.db when the command exited: %v", unstored)
 			}
 			afterOneShot := len(rows)
+			env.logHeld("before the later sync")
 			if _, _, err := backlogRunCLI(t, []string{"--store", env.dir, "sync", "--once", "--idle-exit", "1s", "--presence-mode", "quiet"}); err != nil {
 				t.Fatalf("sync --once: %v", err)
 			}
+			env.logStoreRows("after the later `sync --once`", ids)
+			env.logHeld("at the end")
 			rows = env.messages()
 			held := map[string]bool{}
 			for _, id := range env.peer.held() {
@@ -1111,7 +1305,7 @@ func (e *backlogEnv) groupSender(group types.JID) func(id string, at time.Time) 
 		if err != nil {
 			e.t.Fatal(err)
 		}
-		return &backlogItem{id: msgID, class: "message", node: waBinary.Node{Tag: "message", Attrs: waBinary.Attrs{
+		return &backlogItem{id: msgID, class: "message", kind: "incoming group message", node: waBinary.Node{Tag: "message", Attrs: waBinary.Attrs{
 			"id": msgID, "from": group, "participant": e.contact, "type": "text", "t": at.Unix(),
 		}, Content: []waBinary.Node{{Tag: "enc", Attrs: waBinary.Attrs{"v": "2", "type": "skmsg"}, Content: encrypted.SignedSerialize()}}}}
 	}
