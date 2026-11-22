@@ -127,7 +127,7 @@ func (a *App) storeGroupChat(ctx context.Context, pm wa.ParsedMessage) (string, 
 			}
 			ans = nil
 		}
-		name := groupChatName(pm.Chat, info, pm.PushName)
+		name := a.keepStoredChatName(pm, groupChatName(pm.Chat, info, chatPushName(pm)))
 		err := a.upsertMessageChat(pm, name)
 		if err == nil && ans != nil && info != nil && !ans.stored {
 			if a.storeGroupInfo(ctx, info) == nil {
