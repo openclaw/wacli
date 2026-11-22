@@ -89,6 +89,7 @@ type Message struct {
 	SenderJid          sql.NullString
 	SenderName         sql.NullString
 	Ts                 int64
+	ContentTs          int64
 	FromMe             int64
 	Text               sql.NullString
 	DisplayText        sql.NullString

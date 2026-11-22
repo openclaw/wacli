@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/openclaw/wacli/internal/app"
 	"github.com/openclaw/wacli/internal/out"
 	"github.com/openclaw/wacli/internal/store"
 	"github.com/spf13/cobra"
@@ -25,122 +27,62 @@ type statusMessageSender interface {
 	SendProtoMessage(ctx context.Context, to types.JID, msg *waProto.Message) (types.MessageID, error)
 }
 
-func newSendStatusCmd(flags *rootFlags) *cobra.Command {
-	var message string
-	var backgroundColor string
-	var font int32
-	var fontSet bool
-	var filePath string
-	var mimeOverride string
-	var postSendWait = postSendRetryReceiptWait
+const sendStatusKind = "status"
 
+func newSendStatusCmd(flags *rootFlags) *cobra.Command {
+	var message, backgroundColor, filePath, mimeOverride string
+	var font int32
+	postSendWait := postSendRetryReceiptWait
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Send a status broadcast",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			filePath = strings.TrimSpace(filePath)
-			if strings.TrimSpace(message) == "" && filePath == "" {
-				return fmt.Errorf("--message or --file is required")
-			}
 			if err := flags.requireWritable(); err != nil {
 				return err
 			}
-			if filePath != "" {
-				if err := checkOutboundMediaPath(filePath); err != nil {
-					return err
-				}
+			req := sendDelegateRequest{
+				Kind: sendStatusKind, Message: message, File: strings.TrimSpace(filePath),
+				MIME: mimeOverride, StatusBackground: backgroundColor,
+				PostSendWaitMS: durationMillis(postSendWait),
 			}
 			if cmd.Flags().Changed("font") {
-				fontSet = true
+				req.StatusFont = &font
 			}
-			var fontPtr *int32
-			if fontSet {
-				fontPtr = &font
-			}
-			var msg *waProto.Message
-			var err error
-			if filePath == "" {
-				msg, err = buildStatusTextMessage(message, statusTextOptions{BackgroundColor: backgroundColor, Font: fontPtr})
-				if err != nil {
-					return err
-				}
+			if err := validateStatusRequest(req); err != nil {
+				return err
 			}
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
-
 			a, lk, err := newApp(ctx, flags, true, false)
 			if err != nil {
+				if req.File != "" {
+					absolute, absErr := filepath.Abs(req.File)
+					if absErr != nil {
+						return absErr
+					}
+					req.File = absolute
+				}
+				resp, delegated, delegateErr := tryDelegateSend(ctx, flags, err, req)
+				if delegated {
+					if delegateErr != nil {
+						return delegateErr
+					}
+					return writeStatusSendOutput(flags, resp)
+				}
 				return err
 			}
 			defer closeApp(a, lk)
-
 			if err := a.EnsureAuthed(ctx); err != nil {
 				return err
 			}
 			if err := a.Connect(ctx, false, nil); err != nil {
 				return err
 			}
-			if err := warnRapidSendIfNeeded(a.StoreDir(), time.Now().UTC(), os.Stderr); err != nil {
-				return err
-			}
-
-			if filePath != "" {
-				res, err := sendFile(ctx, a, types.StatusBroadcastJID, filePath, sendFileOptions{
-					caption:      message,
-					mimeOverride: mimeOverride,
-				})
-				if err != nil {
-					return err
-				}
-				warnSendStoreFailure(os.Stderr, res.id, res.storeWarning)
-				waitForPostSendRetryReceipts(ctx, postSendWait)
-				if flags.asJSON {
-					return out.WriteJSON(os.Stdout, addStoreWarning(map[string]any{
-						"sent":      true,
-						"to":        types.StatusBroadcastJID.String(),
-						"id":        res.id,
-						"media":     res.meta["media"],
-						"mime_type": res.meta["mime_type"],
-					}, res.storeWarning))
-				}
-				fmt.Fprintf(os.Stdout, "Sent status (id %s)\n", res.id)
-				return nil
-			}
-
-			msgID, err := runSendOperation(ctx, reconnectForSend(a), func(ctx context.Context) (types.MessageID, error) {
-				return sendStatusTextMessage(ctx, a.WA(), msg)
-			})
+			resp, err := executeDelegatedStatus(ctx, a, req)
 			if err != nil {
 				return err
 			}
-
-			now := time.Now().UTC()
-			chat := types.StatusBroadcastJID
-			var storedFont int32
-			if fontPtr != nil {
-				storedFont = *fontPtr
-			}
-			storeErr := a.DB().UpsertStatusMessage(store.UpsertStatusMessageParams{
-				MsgID:           string(msgID),
-				Timestamp:       now,
-				FromMe:          true,
-				Text:            message,
-				BackgroundColor: backgroundColor,
-				Font:            storedFont,
-			})
-			warnSendStoreFailure(os.Stderr, string(msgID), storeErr)
-
-			waitForPostSendRetryReceipts(ctx, postSendWait)
-
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, addStoreWarning(map[string]any{
-					"sent": true,
-					"to":   chat.String(),
-					"id":   msgID,
-				}, storeErr))
-			}
-			fmt.Fprintf(os.Stdout, "Sent status (id %s)\n", msgID)
-			return nil
+			return writeStatusSendOutput(flags, resp)
 		},
 	}
 	cmd.Flags().StringVar(&message, "message", "", "status text or media caption")
@@ -152,10 +94,102 @@ func newSendStatusCmd(flags *rootFlags) *cobra.Command {
 	return cmd
 }
 
+func validateStatusRequest(req sendDelegateRequest) error {
+	if strings.TrimSpace(req.Message) == "" && req.File == "" {
+		return fmt.Errorf("--message or --file is required")
+	}
+	if req.File != "" {
+		return checkOutboundMediaPath(req.File)
+	}
+	_, err := buildStatusTextMessage(req.Message, statusTextOptions{BackgroundColor: req.StatusBackground, Font: req.StatusFont})
+	return err
+}
+
+func executeDelegatedStatus(ctx context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {
+	if err := validateStatusRequest(req); err != nil {
+		return sendDelegateResponse{}, err
+	}
+	if err := warnRapidSendIfNeeded(a.StoreDir(), time.Now().UTC(), os.Stderr); err != nil {
+		return sendDelegateResponse{}, err
+	}
+	operation := func(ctx context.Context) (sendDelegateResponse, error) { return sendStatus(ctx, a, req) }
+	var resp sendDelegateResponse
+	var err error
+	if req.File != "" {
+		resp, err = runFileSendOperation(ctx, reconnectForSend(a), req.File, operation)
+	} else {
+		resp, err = runSendOperation(ctx, reconnectForSend(a), operation)
+	}
+	if err != nil {
+		return sendDelegateResponse{}, err
+	}
+	waitForPostSendRetryReceipts(ctx, millisDuration(req.PostSendWaitMS, 0))
+	return resp, nil
+}
+
+type statusSendApp interface {
+	WA() app.WAClient
+	DB() *store.DB
+}
+
+func sendStatus(ctx context.Context, a statusSendApp, req sendDelegateRequest) (sendDelegateResponse, error) {
+	if err := validateStatusRequest(req); err != nil {
+		return sendDelegateResponse{}, err
+	}
+	resp := sendDelegateResponse{OK: true, Sent: true, To: types.StatusBroadcastJID.String()}
+	if req.File != "" {
+		res, err := sendFile(ctx, a, types.StatusBroadcastJID, req.File, sendFileOptions{caption: req.Message, mimeOverride: req.MIME})
+		if err != nil {
+			return sendDelegateResponse{}, err
+		}
+		resp.ID, resp.File = res.id, res.meta
+		if res.storeWarning != nil {
+			resp.StoreWarning = res.storeWarning.Error()
+		}
+		return resp, nil
+	}
+	msg, err := buildStatusTextMessage(req.Message, statusTextOptions{BackgroundColor: req.StatusBackground, Font: req.StatusFont})
+	if err != nil {
+		return sendDelegateResponse{}, err
+	}
+	id, err := sendStatusTextMessage(ctx, a.WA(), msg)
+	if err != nil {
+		return sendDelegateResponse{}, err
+	}
+	resp.ID = string(id)
+	var font int32
+	if req.StatusFont != nil {
+		font = *req.StatusFont
+	}
+	if err := a.DB().UpsertStatusMessage(store.UpsertStatusMessageParams{
+		MsgID: string(id), Timestamp: time.Now().UTC(), FromMe: true,
+		Text: req.Message, BackgroundColor: req.StatusBackground, Font: font,
+	}); err != nil {
+		resp.StoreWarning = err.Error()
+	}
+	return resp, nil
+}
+
+func writeStatusSendOutput(flags *rootFlags, resp sendDelegateResponse) error {
+	warnSendStoreFailureMsg(os.Stderr, resp.ID, resp.StoreWarning)
+	if flags.asJSON {
+		body := map[string]any{"sent": resp.Sent, "to": resp.To, "id": resp.ID}
+		if resp.File != nil {
+			body["media"], body["mime_type"] = resp.File["media"], resp.File["mime_type"]
+		}
+		if resp.StoreWarning != "" {
+			body["store_warning"] = resp.StoreWarning
+		}
+		return out.WriteJSON(os.Stdout, body)
+	}
+	fmt.Fprintf(os.Stdout, "Sent status (id %s)\n", resp.ID)
+	return nil
+}
+
 func buildStatusTextMessage(text string, opts statusTextOptions) (*waProto.Message, error) {
 	ext := &waProto.ExtendedTextMessage{Text: proto.String(text)}
 	if strings.TrimSpace(opts.BackgroundColor) != "" {
-		color, err := parseStatusBackgroundColor(opts.BackgroundColor)
+		color, err := parseStatusBackground(opts.BackgroundColor)
 		if err != nil {
 			return nil, err
 		}
@@ -167,7 +201,7 @@ func buildStatusTextMessage(text string, opts statusTextOptions) (*waProto.Messa
 	return &waProto.Message{ExtendedTextMessage: ext}, nil
 }
 
-func parseStatusBackgroundColor(s string) (uint32, error) {
+func parseStatusBackground(s string) (uint32, error) {
 	s = strings.TrimSpace(strings.TrimPrefix(s, "#"))
 	if len(s) == 6 {
 		s = "ff" + s

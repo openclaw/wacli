@@ -51,6 +51,16 @@ var schemaMigrations = []migration{
 	// column is also re-checked by ensureCurrentSchema, so a store whose row 37
 	// belongs to another migration still gets it.
 	{version: 37, name: "messages semantic kind", up: migrateMessageKind},
+	{version: 40, name: "message content freshness timestamp", up: migrateMessageContentTimestamp},
+}
+
+// Zero leaves legacy rows' existing timestamp as their freshness watermark.
+func migrateMessageContentTimestamp(d *DB) error {
+	exists, err := d.tableExists("messages")
+	if err != nil || !exists {
+		return err
+	}
+	return addMessageColumnIfMissing(d, "content_ts", `ALTER TABLE messages ADD COLUMN content_ts INTEGER NOT NULL DEFAULT 0`)
 }
 
 // migrateMessageKind adds the nullable messages.kind column (poll, poll_vote,
@@ -520,6 +530,9 @@ func (d *DB) ensureSchema() error {
 }
 
 func (d *DB) ensureCurrentSchema() error {
+	if err := migrateMessageContentTimestamp(d); err != nil {
+		return err
+	}
 	// Keep idempotent DDL guards here, not in query/write paths. This catches
 	// local stores from interrupted or pre-release migrations where a version
 	// row exists but the expected object does not.
