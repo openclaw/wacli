@@ -35,6 +35,8 @@ Read when: you need the user-facing command map, global flags, store model, or l
 - [contacts](contacts.md) - search contacts and manage local aliases/tags.
 - [contacts import-system](contacts-import-system.md) - import macOS Contacts names into local contact metadata.
 - [chats](chats.md) - list, show, filter, and manage known chat state.
+- [lists / labels](chats.md#whatsapp-lists-and-business-labels) - read observed WhatsApp List definitions and filter chat memberships, with unknown completeness; [create, edit, delete and assign labels](chats.md#writing-labels-and-quick-replies).
+- [quick-replies](chats.md#writing-labels-and-quick-replies) - list and manage WhatsApp Business quick replies.
 - [groups](groups.md) - refresh, inspect, rename, leave, join, invite, and manage participants.
 - [store](store.md) - inspect local store stats and prune stale local rows.
 - [channels](channels.md) - list, inspect, join, leave, and send to WhatsApp Channels.

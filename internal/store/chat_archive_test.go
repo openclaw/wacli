@@ -135,7 +135,7 @@ func TestChatArchiveUpgradeAndRestart(t *testing.T) {
 		"ALTER TABLE chats DROP COLUMN archive_cleared_ms",
 		"ALTER TABLE chats DROP COLUMN archive_setting_min_ms",
 		"DROP TABLE chat_archive_setting",
-		"DELETE FROM schema_migrations WHERE version=33",
+		"DELETE FROM schema_migrations WHERE name='ordered chat auto-unarchive'",
 	} {
 		if _, err := db.sql.Exec(statement); err != nil {
 			t.Fatal(err)

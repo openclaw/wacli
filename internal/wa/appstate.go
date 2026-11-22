@@ -38,10 +38,19 @@ func (c *Client) HasLocalAppState(ctx context.Context, name string) (bool, error
 }
 
 func (c *Client) sendAppStateWithBoundary(ctx context.Context, patch appstate.PatchInfo, beforeApply func()) ([]any, error) {
-	// Reserve wacli persistence before whatsmeow can advance app state. The
-	// durable recovery intent remains after return because canonical sends
-	// dispatch their resulting events asynchronously.
+	// Reserve persistence before SDK state advances. Regular writes return
+	// their complete result batch under this boundary, never in detached SDK
+	// dispatch goroutines. Other collections retain their existing behavior.
 	beforeApply()
+	if patch.Type == appstate.WAPatchRegular {
+		c.mu.Lock()
+		cli := c.client
+		c.mu.Unlock()
+		if cli == nil || !cli.IsConnected() {
+			return nil, fmt.Errorf("not connected")
+		}
+		return sendRegularAppState(ctx, sdkRegularAppStateSender{cli: cli}, patch)
+	}
 	return nil, c.SendAppState(ctx, patch)
 }
 
