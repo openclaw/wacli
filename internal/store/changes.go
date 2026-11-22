@@ -65,7 +65,7 @@ func migrateChanges(d *DB) error {
 			rows.Close()
 			return err
 		}
-		if name == "edited_ts" || name == "deleted_at" {
+		if name == "edited_ts" || name == "content_ts" || name == "deleted_at" {
 			continue
 		}
 		fields = append(fields, "old."+name+" IS NOT new."+name)

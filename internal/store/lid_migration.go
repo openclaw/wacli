@@ -302,7 +302,7 @@ func migrateLIDMessagesToPN(tx *sql.Tx, lidJID, pnJID string) error {
 
 	if _, err := tx.Exec(`
 		INSERT INTO messages(
-			chat_jid, chat_name, msg_id, sender_jid, sender_name, ts, from_me, text, display_text,
+			chat_jid, chat_name, msg_id, sender_jid, sender_name, ts, content_ts, from_me, text, display_text,
 			quoted_msg_id, quoted_sender_jid,
 			is_forwarded, forwarding_score, reaction_to_id, reaction_emoji,
 			media_type, media_caption, filename, mime_type, direct_path,
@@ -316,6 +316,7 @@ func migrateLIDMessagesToPN(tx *sql.Tx, lidJID, pnJID string) error {
 			CASE WHEN sender_jid = ? THEN ? ELSE sender_jid END,
 			sender_name,
 			ts,
+			content_ts,
 			from_me,
 			text,
 			display_text,
@@ -354,6 +355,7 @@ func migrateLIDMessagesToPN(tx *sql.Tx, lidJID, pnJID string) error {
 			sender_jid = COALESCE(NULLIF(messages.sender_jid, ''), excluded.sender_jid),
 			sender_name = COALESCE(NULLIF(messages.sender_name, ''), excluded.sender_name),
 			ts = CASE WHEN messages.deleted_at IS NOT NULL OR excluded.deleted_at IS NOT NULL THEN messages.ts WHEN excluded.edited != 0 THEN messages.ts WHEN messages.edited != 0 AND excluded.edited = 0 THEN excluded.ts ELSE max(messages.ts, excluded.ts) END,
+			content_ts = max(messages.ts, messages.content_ts, excluded.ts, excluded.content_ts),
 			from_me = messages.from_me,
 			text = CASE WHEN messages.deleted_at IS NOT NULL OR excluded.deleted_at IS NOT NULL THEN COALESCE(NULLIF(messages.text, ''), excluded.text) WHEN excluded.edited != 0 AND (messages.edited = 0 OR excluded.edited_ts > messages.edited_ts) THEN excluded.text WHEN messages.edited != 0 AND excluded.edited = 0 THEN messages.text ELSE COALESCE(NULLIF(messages.text, ''), excluded.text) END,
 			display_text = CASE WHEN messages.deleted_at IS NOT NULL OR excluded.deleted_at IS NOT NULL THEN COALESCE(NULLIF(messages.display_text, ''), excluded.display_text) WHEN excluded.edited != 0 AND (messages.edited = 0 OR excluded.edited_ts > messages.edited_ts) THEN excluded.display_text WHEN messages.edited != 0 AND excluded.edited = 0 THEN messages.display_text ELSE COALESCE(NULLIF(messages.display_text, ''), excluded.display_text) END,
