@@ -23,6 +23,11 @@ wacli messages forward --chat JID --id MSG_ID --to RECIPIENT [--pick N] [--post-
 
 ## Pagination and freshness
 
+Identical redeliveries of received messages keep their original stored timestamp
+and conversation order. A separate internal timestamp still rejects older
+content replays. Existing rows keep their timestamps when the store is upgraded;
+messages already reordered by an older version are not rewritten.
+
 `list`, `search`, and `export` accept `--cursor TOKEN`. Repeat the original
 query and filters; `--limit` can change. List defaults to newest first, export
 to oldest first, and FTS search to relevance. Limits of zero or less retain the
@@ -71,7 +76,7 @@ remote tombstones retain their existing WhatsApp reason; payload purge emits
 
 The journal has no text, captions, media, filenames, or credentials. Fetch current
 state with existing reads. Intermediate content versions cannot be reconstructed.
-Stored message columns are meaningful, excluding the internal edit-order timestamp
+Stored message columns are meaningful, excluding internal edit-order and content-freshness timestamps
 and changes to an already-recorded deletion time. Identical stored values produce
 no journal entry. Sync/history/backfill, local sends, edits, deletion, cleanup, and
 identity normalization share atomic SQLite mutation triggers. Rollback exposes

@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS messages (
     sender_jid TEXT,
     sender_name TEXT,
     ts INTEGER NOT NULL,
+    content_ts INTEGER NOT NULL DEFAULT 0,
     from_me INTEGER NOT NULL,
     text TEXT,
     display_text TEXT,
