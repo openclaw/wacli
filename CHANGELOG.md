@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Quick replies: add standalone WhatsApp Business `quick-replies list|create|edit|delete`, independent full-sync coverage and guarded `app-state resync regular` (migration 38, with a collision guard). Writes and resync delegate outside the send queue; known-broken full syncs always refuse. Capture regular send-result/409 batches synchronously through the SDK primitives so delayed echoes cannot undo newer edits/deletions; device clocks never arbitrate state. No Lists or chat-label management is included.
 - Dependencies: refresh eligible WhatsApp, networking and SQL tooling modules, pnpm, GoReleaser and pinned CI actions after the 48-hour cooldown; retain Go 1.27.0 and Node 24 minimums.
 - Send: delegate text and media status broadcasts to a running sync process, preserving styling and captions while keeping the original command timeout (#584).
 - Sync: keep outgoing messages from naming chats after this account’s own push name, and preserve stored chat names when metadata is unavailable. Thanks @nicolasbiondic (#574).
