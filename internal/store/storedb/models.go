@@ -28,15 +28,17 @@ type CallEvent struct {
 }
 
 type Chat struct {
-	Jid           string
-	Kind          string
-	Name          sql.NullString
-	LastMessageTs sql.NullInt64
-	Archived      int64
-	Pinned        int64
-	MutedUntil    int64
-	Unread        int64
-	UnreadCount   int64
+	Jid              string
+	Kind             string
+	Name             sql.NullString
+	LastMessageTs    sql.NullInt64
+	Archived         int64
+	Pinned           int64
+	MutedUntil       int64
+	Unread           int64
+	UnreadCount      int64
+	ReadThroughTs    int64
+	ReadThroughRowid int64
 }
 
 type Contact struct {

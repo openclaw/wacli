@@ -13,16 +13,24 @@ import (
 // persisted before local completion or replayed after restart. Their events do
 // not carry the originating CLI flags, so preserve an existing marker whenever
 // newer readable rows remain. Timestamp-only events keep their legacy behavior.
-func (a *App) clearChatUnreadFromEvent(chat string, through time.Time, ids []string) error {
+func (a *App) clearChatUnreadFromEvent(chat string, through time.Time, ids []string, exact bool) error {
+	preserve := false
 	for _, id := range ids {
 		if strings.TrimSpace(id) != "" {
-			return a.db.ClearChatUnreadThroughPreservingMarker(chat, through, ids)
+			preserve = true
+			break
 		}
+	}
+	if !exact {
+		return a.db.ClearChatUnreadThroughApproximate(chat, through, preserve)
+	}
+	if preserve {
+		return a.db.ClearChatUnreadThroughPreservingMarker(chat, through, ids)
 	}
 	return a.db.ClearChatUnreadThrough(chat, through, ids)
 }
 
-func markChatAsReadPosition(evt *events.MarkChatAsRead) (time.Time, []string) {
+func markChatAsReadPosition(evt *events.MarkChatAsRead) (time.Time, []string, bool) {
 	r := evt.Action.GetMessageRange()
 	ts := r.GetLastMessageTimestamp()
 	var ids []string
@@ -35,12 +43,12 @@ func markChatAsReadPosition(evt *events.MarkChatAsRead) (time.Time, []string) {
 		}
 	}
 	if ts > 0 {
-		return time.Unix(ts, 0), ids
+		return time.Unix(ts, 0), ids, true
 	}
-	return evt.Timestamp, ids
+	return evt.Timestamp, ids, false
 }
 
-func (a *App) receiptReadPosition(chat string, evt *events.Receipt) (time.Time, []string, error) {
+func (a *App) receiptReadPosition(chat string, evt *events.Receipt) (time.Time, []string, bool, error) {
 	var through time.Time
 	ids := make([]string, 0, len(evt.MessageIDs))
 	for _, id := range evt.MessageIDs {
@@ -50,16 +58,17 @@ func (a *App) receiptReadPosition(chat string, evt *events.Receipt) (time.Time, 
 			continue
 		}
 		if err != nil {
-			return time.Time{}, nil, err
+			return time.Time{}, nil, false, err
 		}
 		if m.Timestamp.After(through) {
 			through = m.Timestamp
 		}
 	}
 	// The receipt timestamp is a read-at time, not a message boundary. Use it
-	// only when none of the named messages are available locally.
+	// only when none of the named messages are available locally, and never
+	// as durable read evidence.
 	if through.IsZero() {
-		through = evt.Timestamp
+		return evt.Timestamp, ids, false, nil
 	}
-	return through, ids, nil
+	return through, ids, true, nil
 }

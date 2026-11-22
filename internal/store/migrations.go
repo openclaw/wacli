@@ -47,6 +47,7 @@ var schemaMigrations = []migration{
 	{version: 31, name: "content-free message change journal", up: migrateChanges},
 	{version: 32, name: "message receipt retrieval revisions", up: migrateReceiptRetrieval},
 	{version: 33, name: "ordered chat auto-unarchive", up: migrateChatAutoUnarchive},
+	{version: 39, name: "local chat read positions", up: migrateChatReadPositions},
 	{version: 40, name: "message content freshness timestamp", up: migrateMessageContentTimestamp},
 }
 

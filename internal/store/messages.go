@@ -171,7 +171,7 @@ func (d *DB) UpsertMessage(p UpsertMessageParams) error {
 		return err
 	}
 	if markRead {
-		if err := clearChatUnreadThrough(tx, p.ChatJID, p.Timestamp, []string{p.MsgID}, true); err != nil {
+		if err := clearChatUnreadThrough(tx, p.ChatJID, p.Timestamp, []string{p.MsgID}, true, true); err != nil {
 			return err
 		}
 	}

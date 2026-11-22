@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Preserve local read positions across restarts so stale history snapshots do not restore unread counters after a fresh own reply or an account read event. No additional receipts are sent.
 - Dependencies: refresh eligible WhatsApp, networking and SQL tooling modules, pnpm, GoReleaser and pinned CI actions after the 48-hour cooldown; retain Go 1.27.0 and Node 24 minimums.
 - Send: delegate text and media status broadcasts to a running sync process, preserving styling and captions while keeping the original command timeout (#584).
 - Sync: keep outgoing messages from naming chats after this account’s own push name, and preserve stored chat names when metadata is unavailable. Thanks @nicolasbiondic (#574).
