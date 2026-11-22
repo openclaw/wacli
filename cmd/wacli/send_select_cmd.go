@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openclaw/wacli/internal/app"
 	"github.com/openclaw/wacli/internal/out"
 	"github.com/openclaw/wacli/internal/store"
 	"github.com/openclaw/wacli/internal/wa"
@@ -32,6 +31,7 @@ type selectSender interface {
 }
 
 type selectRequest struct {
+	KeepUnread   bool
 	Label        string
 	ButtonID     string
 	Index        int
@@ -60,6 +60,10 @@ type selectResult struct {
 }
 
 func newSendSelectCmd(flags *rootFlags) *cobra.Command {
+	return newSendSelectCmdWithApp(flags, openOutboundSendApp(flags))
+}
+
+func newSendSelectCmdWithApp(flags *rootFlags, open outboundSendAppOpener) *cobra.Command {
 	var to string
 	var pick int
 	var msgID string
@@ -68,6 +72,7 @@ func newSendSelectCmd(flags *rootFlags) *cobra.Command {
 	var index int
 	var typ string
 	var senderOverride string
+	var keepUnread bool
 	postSendWait := postSendRetryReceiptWait
 
 	cmd := &cobra.Command{
@@ -78,6 +83,7 @@ func newSendSelectCmd(flags *rootFlags) *cobra.Command {
 				return fmt.Errorf("--to and --id are required")
 			}
 			req := selectRequest{
+				KeepUnread:   keepUnread,
 				Label:        label,
 				ButtonID:     buttonID,
 				Index:        index,
@@ -96,9 +102,10 @@ func newSendSelectCmd(flags *rootFlags) *cobra.Command {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
-			a, lk, err := newApp(ctx, flags, true, false)
+			a, close, err := open(ctx)
 			if err != nil {
 				resp, delegated, delegateErr := tryDelegateSend(ctx, flags, err, sendDelegateRequest{
+					KeepUnread:     keepUnread,
 					Kind:           "button_list_select",
 					To:             to,
 					Pick:           pick,
@@ -118,7 +125,7 @@ func newSendSelectCmd(flags *rootFlags) *cobra.Command {
 				}
 				return err
 			}
-			defer closeApp(a, lk)
+			defer close()
 
 			if err := a.EnsureAuthed(ctx); err != nil {
 				return err
@@ -153,6 +160,7 @@ func newSendSelectCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().IntVar(&index, "index", 0, "select the Nth selectable option (1-indexed)")
 	cmd.Flags().StringVar(&typ, "type", "", "filter selectable options by type: list_row or quick_reply")
 	cmd.Flags().StringVar(&senderOverride, "sender", "", "JID of the original message sender when the local store has no sender")
+	cmd.Flags().BoolVar(&keepUnread, "keep-unread", false, "preserve the chat's unread state when sending")
 	cmd.Flags().DurationVar(&postSendWait, "post-send-wait", postSendRetryReceiptWait, "keep the connection alive after send so retry receipts can be handled (0 disables)")
 	return cmd
 }
@@ -182,7 +190,7 @@ func validateSelectRequest(req selectRequest) error {
 	}
 }
 
-func sendButtonListSelection(ctx context.Context, a *app.App, chat types.JID, targetID string, req selectRequest) (selectResult, error) {
+func sendButtonListSelection(ctx context.Context, a outboundSendApp, chat types.JID, targetID string, req selectRequest) (selectResult, error) {
 	target, chatJID, err := loadSelectTargetMessage(ctx, a, chat, targetID)
 	if err != nil {
 		return selectResult{}, err
@@ -205,7 +213,7 @@ func sendButtonListSelection(ctx context.Context, a *app.App, chat types.JID, ta
 		return selectResult{}, err
 	}
 	now := time.Now().UTC()
-	storeErr := persistOutboundSelection(ctx, a, chat, chatJID, string(sentID), selected, now)
+	storeErr := persistOutboundSelection(ctx, a, chat, chatJID, string(sentID), selected, now, req.KeepUnread)
 	waitForPostSendRetryReceipts(ctx, req.PostSendWait)
 	res := selectResult{
 		Sent:     true,
@@ -224,7 +232,7 @@ func sendSelectProto(ctx context.Context, sender selectSender, to types.JID, msg
 	return sender.SendProtoMessage(ctx, to, msg)
 }
 
-func loadSelectTargetMessage(ctx context.Context, a *app.App, chat types.JID, msgID string) (store.Message, string, error) {
+func loadSelectTargetMessage(ctx context.Context, a outboundSendApp, chat types.JID, msgID string) (store.Message, string, error) {
 	var lastErr error = sql.ErrNoRows
 	for _, chatJID := range pollChatJIDCandidates(ctx, a, chat) {
 		msg, err := a.DB().GetMessage(chatJID, msgID)
@@ -452,8 +460,12 @@ func resolveSelectSender(chat types.JID, target store.Message, override string) 
 	return types.JID{}, nil
 }
 
-func persistOutboundSelection(ctx context.Context, a *app.App, chat types.JID, chatJID, msgID string, selected selectOption, now time.Time) error {
-	if strings.TrimSpace(chatJID) == "" {
+func persistOutboundSelection(ctx context.Context, a outboundSendApp, chat types.JID, chatJID, msgID string, selected selectOption, now time.Time, keepUnread bool) error {
+	if keepUnread {
+		// The quoted target may still live under a historical LID alias, but
+		// the outbound row must share the canonical key used by its echo.
+		chatJID = canonicalOutboundChat(ctx, a.WA(), chat).String()
+	} else if strings.TrimSpace(chatJID) == "" {
 		chatJID = primaryPollChatJID(ctx, a, chat)
 	}
 	chatName := a.WA().ResolveChatName(ctx, chat, "")
@@ -462,24 +474,26 @@ func persistOutboundSelection(ctx context.Context, a *app.App, chat types.JID, c
 		storeErr = fmt.Errorf("chat update: %w", err)
 	}
 	if err := a.DB().UpsertMessage(store.UpsertMessageParams{
-		ChatJID:    chatJID,
-		ChatName:   chatName,
-		MsgID:      msgID,
-		SenderName: "me",
-		Timestamp:  now,
-		FromMe:     true,
-		Text:       "Selected: " + selected.DisplayText,
+		SkipOwnReadMark: keepUnread,
+		ChatJID:         chatJID,
+		ChatName:        chatName,
+		MsgID:           msgID,
+		SenderName:      "me",
+		Timestamp:       now,
+		FromMe:          true,
+		Text:            "Selected: " + selected.DisplayText,
 	}); err != nil {
 		storeErr = errors.Join(storeErr, fmt.Errorf("message update: %w", err))
 	}
 	return storeErr
 }
 
-func executeDelegatedButtonListSelect(ctx context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {
+func executeDelegatedButtonListSelect(ctx context.Context, a outboundSendApp, req sendDelegateRequest) (sendDelegateResponse, error) {
 	if strings.TrimSpace(req.To) == "" || strings.TrimSpace(req.ID) == "" {
 		return sendDelegateResponse{}, fmt.Errorf("send select requires --to and --id")
 	}
 	selectReq := selectRequest{
+		KeepUnread:   req.KeepUnread,
 		Label:        req.Label,
 		ButtonID:     req.ButtonID,
 		Index:        req.SelectIndex,

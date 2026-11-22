@@ -74,7 +74,7 @@ func TestUpsertSentReactionSurfacesStoreFailure(t *testing.T) {
 	chat := types.NewJID("15550000001", types.DefaultUserServer)
 	now := time.Now().UTC()
 
-	if err := upsertSentReaction(context.Background(), db, fakeTextResolver{}, chat, "R1", "T1", "👍", now); err != nil {
+	if err := upsertSentReaction(context.Background(), db, fakeTextResolver{}, chat, "R1", "T1", "👍", now, false); err != nil {
 		t.Fatalf("healthy store: %v", err)
 	}
 	if _, err := db.GetMessage(chat.String(), "R1"); err != nil {
@@ -84,7 +84,7 @@ func TestUpsertSentReactionSurfacesStoreFailure(t *testing.T) {
 	if err := db.Close(); err != nil {
 		t.Fatalf("close store: %v", err)
 	}
-	if err := upsertSentReaction(context.Background(), db, fakeTextResolver{}, chat, "R2", "T1", "👍", now); err == nil {
+	if err := upsertSentReaction(context.Background(), db, fakeTextResolver{}, chat, "R2", "T1", "👍", now, false); err == nil {
 		t.Fatal("expected store error after close")
 	}
 }
@@ -99,7 +99,7 @@ func TestPersistOutboundTextSurfacesStoreFailure(t *testing.T) {
 	chat := types.NewJID("15550000001", types.DefaultUserServer)
 	now := time.Now().UTC()
 
-	if err := persistOutboundTextWith(context.Background(), db, fakeTextResolver{}, chat, "TX1", "hello", now); err != nil {
+	if err := persistOutboundTextWith(context.Background(), db, fakeTextResolver{}, chat, "TX1", "hello", now, false); err != nil {
 		t.Fatalf("healthy store: %v", err)
 	}
 	if _, err := db.GetMessage(chat.String(), "TX1"); err != nil {
@@ -109,7 +109,7 @@ func TestPersistOutboundTextSurfacesStoreFailure(t *testing.T) {
 	if err := db.Close(); err != nil {
 		t.Fatalf("close store: %v", err)
 	}
-	if err := persistOutboundTextWith(context.Background(), db, fakeTextResolver{}, chat, "TX2", "hello", now); err == nil {
+	if err := persistOutboundTextWith(context.Background(), db, fakeTextResolver{}, chat, "TX2", "hello", now, false); err == nil {
 		t.Fatal("expected store error after close")
 	}
 }

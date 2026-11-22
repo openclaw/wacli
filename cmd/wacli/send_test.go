@@ -215,7 +215,7 @@ func TestPersistOutboundTextCanonicalizesSelfLIDToPN(t *testing.T) {
 		t.Fatalf("UpsertMessage inbound: %v", err)
 	}
 
-	persistOutboundTextWith(context.Background(), db, outboundTextResolverStub{lid: lid, pn: pn}, lid, "outbound-id", "self-test", now)
+	persistOutboundTextWith(context.Background(), db, outboundTextResolverStub{lid: lid, pn: pn}, lid, "outbound-id", "self-test", now, false)
 
 	stored, err := db.GetMessage(pn.String(), "outbound-id")
 	if err != nil {
@@ -336,7 +336,7 @@ func TestUpsertSentReactionStoresDisplayText(t *testing.T) {
 	}
 
 	resolver := fakeTextResolver{}
-	upsertSentReaction(context.Background(), db, resolver, chat, "react1", "target", "👍", now)
+	upsertSentReaction(context.Background(), db, resolver, chat, "react1", "target", "👍", now, false)
 
 	msg, err := db.GetMessage(chat.String(), "react1")
 	if err != nil {
@@ -373,7 +373,7 @@ func TestUpsertSentReactionCanonicalizesLIDChat(t *testing.T) {
 		t.Fatalf("UpsertMessage target: %v", err)
 	}
 
-	if err := upsertSentReaction(context.Background(), db, resolver, lid, "react1", "target", "🌺", now); err != nil {
+	if err := upsertSentReaction(context.Background(), db, resolver, lid, "react1", "target", "🌺", now, false); err != nil {
 		t.Fatalf("upsertSentReaction: %v", err)
 	}
 	msg, err := db.GetMessage(pn.String(), "react1")
@@ -878,7 +878,7 @@ func TestSendTextMessageKeepsPlainTextFastPathWithoutEphemeral(t *testing.T) {
 	}
 	// Exercise the same successful-send persistence path as `send text`, then
 	// observe its journal and message state through real read-only subprocesses.
-	if err = persistOutboundTextWith(context.Background(), db, fakeTextResolver{}, chat, string(id), "hello", time.Unix(1700000000, 0)); err != nil {
+	if err = persistOutboundTextWith(context.Background(), db, fakeTextResolver{}, chat, string(id), "hello", time.Unix(1700000000, 0), false); err != nil {
 		t.Fatal(err)
 	}
 	bin := filepath.Join(t.TempDir(), "wacli")

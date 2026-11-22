@@ -40,6 +40,10 @@ func newSendCmd(flags *rootFlags) *cobra.Command {
 }
 
 func newSendTextCmd(flags *rootFlags) *cobra.Command {
+	return newSendTextCmdWithApp(flags, openOutboundSendApp(flags))
+}
+
+func newSendTextCmdWithApp(flags *rootFlags, open outboundSendAppOpener) *cobra.Command {
 	var to string
 	var pick int
 	var message string
@@ -48,6 +52,7 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 	var replyToSender string
 	var noPreview bool
 	var allowSelf bool
+	var keepUnread bool
 	var ephemeral bool
 	var ephemeralDuration string
 	var messageEscapes bool
@@ -82,9 +87,10 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
-			a, lk, err := newApp(ctx, flags, true, false)
+			a, close, err := open(ctx)
 			if err != nil {
 				resp, delegated, delegateErr := tryDelegateSend(ctx, flags, err, sendDelegateRequest{
+					KeepUnread:           keepUnread,
 					Kind:                 "text",
 					To:                   to,
 					Pick:                 pick,
@@ -107,7 +113,7 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 				}
 				return err
 			}
-			defer closeApp(a, lk)
+			defer close()
 
 			if err := a.EnsureAuthed(ctx); err != nil {
 				return err
@@ -135,7 +141,7 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 			}
 
 			preview, previewWarning := fetchLinkPreview(ctx, message, noPreview)
-			msgID, storeErr, err := sendTextWithHistory(ctx, a, reconnectForSend(a), toJID, message, replyTo, replyToSender, preview, mentionedJIDs, ephemeralOpts, textSendOptions{allowSelf: allowSelf, warn: func(msg string) { warnLinkPreviewThumbnail(os.Stderr, msg) }})
+			msgID, storeErr, err := sendTextWithHistory(ctx, a, reconnectForSend(a), toJID, message, replyTo, replyToSender, preview, mentionedJIDs, ephemeralOpts, textSendOptions{allowSelf: allowSelf, keepUnread: keepUnread, warn: func(msg string) { warnLinkPreviewThumbnail(os.Stderr, msg) }})
 			if err != nil {
 				return err
 			}
@@ -165,6 +171,7 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().StringVar(&replyToSender, "reply-to-sender", "", "sender JID of the quoted message (required for unsynced group replies)")
 	cmd.Flags().BoolVar(&noPreview, "no-preview", false, "disable automatic link previews for the first URL in text")
 	cmd.Flags().BoolVar(&allowSelf, "allow-self", false, "allow sending to the linked account itself (delivery is not guaranteed)")
+	cmd.Flags().BoolVar(&keepUnread, "keep-unread", false, "preserve the chat's unread state when sending")
 	cmd.Flags().BoolVar(&ephemeral, "ephemeral", false, "send with the disappearing-message timer for this chat")
 	cmd.Flags().StringVar(&ephemeralDuration, "ephemeral-duration", "", "disappearing-message timer override (for example 24h, 7d, 90d, 168h)")
 	cmd.Flags().BoolVar(&messageEscapes, "message-escapes", false, `interpret backslash escapes in --message (\n, \r, \t, \\, \")`)
@@ -218,7 +225,7 @@ func outboundTextDisplayText(text string, quote *waProto.ContextInfo) string {
 	return fmt.Sprintf("> %s\n%s", quoted, base)
 }
 
-func persistOutboundTextWith(ctx context.Context, db *store.DB, resolver outboundTextResolver, chat types.JID, msgID, text string, now time.Time, contexts ...*waProto.ContextInfo) error {
+func persistOutboundTextWith(ctx context.Context, db *store.DB, resolver outboundTextResolver, chat types.JID, msgID, text string, now time.Time, keepUnread bool, contexts ...*waProto.ContextInfo) error {
 	chat = canonicalOutboundChat(ctx, resolver, chat)
 	var quote *waProto.ContextInfo
 	if len(contexts) > 0 {
@@ -230,6 +237,7 @@ func persistOutboundTextWith(ctx context.Context, db *store.DB, resolver outboun
 		storeErr = fmt.Errorf("chat update: %w", err)
 	}
 	if err := db.UpsertMessage(store.UpsertMessageParams{
+		SkipOwnReadMark: keepUnread,
 		ChatJID:         chat.String(),
 		ChatName:        chatName,
 		MsgID:           msgID,
@@ -252,6 +260,25 @@ type sendTextApp interface {
 	DB() *store.DB
 }
 
+// outboundSendApp lets send execution use the same transport in direct and
+// delegated paths. No session is opened by the persistence helpers themselves.
+type outboundSendApp interface {
+	sendTextApp
+	StoreDir() string
+	LocalResolver() (app.LocalResolver, error)
+	EnsureAuthed(context.Context) error
+	Connect(context.Context, bool, func(string)) error
+}
+
+type outboundSendAppOpener func(context.Context) (outboundSendApp, func(), error)
+
+func openOutboundSendApp(flags *rootFlags) outboundSendAppOpener {
+	return func(ctx context.Context) (outboundSendApp, func(), error) {
+		a, lk, err := newApp(ctx, flags, true, false)
+		return a, func() { closeApp(a, lk) }, err
+	}
+}
+
 type textMessageSender interface {
 	SendText(ctx context.Context, to types.JID, text string) (types.MessageID, error)
 	SendProtoMessage(ctx context.Context, to types.JID, msg *waProto.Message) (types.MessageID, error)
@@ -269,7 +296,8 @@ type textEphemeralOptions struct {
 }
 
 type textSendOptions struct {
-	allowSelf bool
+	allowSelf  bool
+	keepUnread bool
 	// Capture the context constructed for the accepted native message. History
 	// must not reconstruct its participant from flags or a second store lookup.
 	replyContext **waProto.ContextInfo

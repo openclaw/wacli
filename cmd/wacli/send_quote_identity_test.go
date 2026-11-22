@@ -30,7 +30,7 @@ func TestPersistQuoteIdentityLeavesNativeContextUntouched(t *testing.T) {
 		QuotedMessage: &waProto.Message{Conversation: proto.String("original")},
 	}
 	before := proto.Clone(quote)
-	if err := persistOutboundTextWith(context.Background(), db, resolver, pn, "accepted", "reply", time.Now(), quote); err != nil {
+	if err := persistOutboundTextWith(context.Background(), db, resolver, pn, "accepted", "reply", time.Now(), false, quote); err != nil {
 		t.Fatal(err)
 	}
 	if !proto.Equal(quote, before) {

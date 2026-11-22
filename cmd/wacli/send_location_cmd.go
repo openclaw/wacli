@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openclaw/wacli/internal/app"
 	"github.com/openclaw/wacli/internal/out"
 	"github.com/openclaw/wacli/internal/store"
 	"github.com/spf13/cobra"
@@ -32,17 +31,23 @@ type locationMessageSender interface {
 }
 
 type locationOptions struct {
-	Latitude  float64
-	Longitude float64
-	Name      string
+	KeepUnread bool
+	Latitude   float64
+	Longitude  float64
+	Name       string
 }
 
 func newSendLocationCmd(flags *rootFlags) *cobra.Command {
+	return newSendLocationCmdWithApp(flags, openOutboundSendApp(flags))
+}
+
+func newSendLocationCmdWithApp(flags *rootFlags, open outboundSendAppOpener) *cobra.Command {
 	var to string
 	var pick int
 	var latitude float64
 	var longitude float64
 	var name string
+	var keepUnread bool
 	postSendWait := postSendRetryReceiptWait
 
 	cmd := &cobra.Command{
@@ -62,6 +67,7 @@ func newSendLocationCmd(flags *rootFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			opts.KeepUnread = keepUnread
 			if err := flags.requireWritable(); err != nil {
 				return err
 			}
@@ -69,9 +75,10 @@ func newSendLocationCmd(flags *rootFlags) *cobra.Command {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
-			a, lk, err := newApp(ctx, flags, true, false)
+			a, close, err := open(ctx)
 			if err != nil {
 				resp, delegated, delegateErr := tryDelegateSend(ctx, flags, err, sendDelegateRequest{
+					KeepUnread:     keepUnread,
 					Kind:           "location",
 					To:             to,
 					Pick:           pick,
@@ -88,7 +95,7 @@ func newSendLocationCmd(flags *rootFlags) *cobra.Command {
 				}
 				return err
 			}
-			defer closeApp(a, lk)
+			defer close()
 
 			if err := a.EnsureAuthed(ctx); err != nil {
 				return err
@@ -134,6 +141,7 @@ func newSendLocationCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().Float64Var(&latitude, "latitude", 0, "latitude in decimal degrees (-90 to 90)")
 	cmd.Flags().Float64Var(&longitude, "longitude", 0, "longitude in decimal degrees (-180 to 180)")
 	cmd.Flags().StringVar(&name, "name", "", "optional place name shown on the pin")
+	cmd.Flags().BoolVar(&keepUnread, "keep-unread", false, "preserve the chat's unread state when sending")
 	cmd.Flags().DurationVar(&postSendWait, "post-send-wait", postSendRetryReceiptWait, "keep the connection alive after send so retry receipts can be handled (0 disables)")
 	return cmd
 }
@@ -169,7 +177,7 @@ func sendLocationMessage(ctx context.Context, sender locationMessageSender, to t
 	return sender.SendProtoMessage(ctx, to, buildLocationMessage(opts))
 }
 
-func persistOutboundLocation(ctx context.Context, a *app.App, chat types.JID, msgID string, opts locationOptions, now time.Time) error {
+func persistOutboundLocation(ctx context.Context, a sendTextApp, chat types.JID, msgID string, opts locationOptions, now time.Time) error {
 	return persistOutboundLocationWith(ctx, a.DB(), a.WA(), chat, msgID, opts, now)
 }
 
@@ -181,15 +189,16 @@ func persistOutboundLocationWith(ctx context.Context, db *store.DB, resolver out
 		storeErr = fmt.Errorf("chat update: %w", err)
 	}
 	if err := db.UpsertMessage(store.UpsertMessageParams{
-		ChatJID:     chat.String(),
-		ChatName:    chatName,
-		MsgID:       msgID,
-		SenderJID:   "",
-		SenderName:  "me",
-		Timestamp:   now,
-		FromMe:      true,
-		DisplayText: locationDisplayText,
-		MediaType:   locationMediaType,
+		SkipOwnReadMark: opts.KeepUnread,
+		ChatJID:         chat.String(),
+		ChatName:        chatName,
+		MsgID:           msgID,
+		SenderJID:       "",
+		SenderName:      "me",
+		Timestamp:       now,
+		FromMe:          true,
+		DisplayText:     locationDisplayText,
+		MediaType:       locationMediaType,
 	}); err != nil {
 		storeErr = errors.Join(storeErr, fmt.Errorf("message update: %w", err))
 	}
@@ -205,11 +214,12 @@ func persistOutboundLocationWith(ctx context.Context, db *store.DB, resolver out
 	return storeErr
 }
 
-func executeDelegatedLocation(ctx context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {
+func executeDelegatedLocation(ctx context.Context, a outboundSendApp, req sendDelegateRequest) (sendDelegateResponse, error) {
 	opts, err := validateLocationOptions(req.Latitude, req.Longitude, req.Name, true, true)
 	if err != nil {
 		return sendDelegateResponse{}, err
 	}
+	opts.KeepUnread = req.KeepUnread
 	toJID, err := resolveRecipient(a, req.To, recipientOptions{pick: req.Pick, asJSON: true})
 	if err != nil {
 		return sendDelegateResponse{}, err

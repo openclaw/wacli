@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openclaw/wacli/internal/app"
 	"github.com/openclaw/wacli/internal/out"
 	"github.com/openclaw/wacli/internal/store"
 	"github.com/spf13/cobra"
@@ -31,12 +30,17 @@ type outboundPollIdentityResolver interface {
 }
 
 func newSendPollCmd(flags *rootFlags) *cobra.Command {
+	return newSendPollCmdWithApp(flags, openOutboundSendApp(flags))
+}
+
+func newSendPollCmdWithApp(flags *rootFlags, open outboundSendAppOpener) *cobra.Command {
 	var to string
 	var pick int
 	var question string
 	var options []string
 	var multi int
 	var ephemeral bool
+	var keepUnread bool
 	postSendWait := postSendRetryReceiptWait
 
 	cmd := &cobra.Command{
@@ -57,9 +61,10 @@ func newSendPollCmd(flags *rootFlags) *cobra.Command {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
-			a, lk, err := newApp(ctx, flags, true, false)
+			a, close, err := open(ctx)
 			if err != nil {
 				resp, delegated, delegateErr := tryDelegateSend(ctx, flags, err, sendDelegateRequest{
+					KeepUnread:     keepUnread,
 					Kind:           "poll",
 					To:             to,
 					Pick:           pick,
@@ -77,7 +82,7 @@ func newSendPollCmd(flags *rootFlags) *cobra.Command {
 				}
 				return err
 			}
-			defer closeApp(a, lk)
+			defer close()
 
 			if err := a.EnsureAuthed(ctx); err != nil {
 				return err
@@ -101,7 +106,7 @@ func newSendPollCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 
-			storeErr := persistOutboundPoll(ctx, a, toJID, string(msgID), question, cleaned, uint32(multi), time.Now().UTC())
+			storeErr := persistOutboundPoll(ctx, a, toJID, string(msgID), question, cleaned, uint32(multi), time.Now().UTC(), keepUnread)
 			warnSendStoreFailure(os.Stderr, string(msgID), storeErr)
 			waitForPostSendRetryReceipts(ctx, postSendWait)
 
@@ -125,6 +130,7 @@ func newSendPollCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().StringArrayVar(&options, "option", nil, "poll option (repeat for each option, 2-12 total)")
 	cmd.Flags().IntVar(&multi, "multi", 1, "maximum number of options a voter may pick (1 = single-select)")
 	cmd.Flags().BoolVar(&ephemeral, "ephemeral", false, "wrap the poll in EphemeralMessage for disappearing-message chats")
+	cmd.Flags().BoolVar(&keepUnread, "keep-unread", false, "preserve the chat's unread state when sending")
 	cmd.Flags().DurationVar(&postSendWait, "post-send-wait", postSendRetryReceiptWait, "keep the connection alive after send so retry receipts can be handled (0 disables)")
 	return cmd
 }
@@ -168,21 +174,25 @@ func sendPollMessage(ctx context.Context, sender pollSender, to types.JID, quest
 	return sender.SendPoll(ctx, to, question, options, multi, ephemeral)
 }
 
-func persistOutboundPoll(ctx context.Context, a *app.App, chat types.JID, msgID, question string, options []string, selectable uint32, now time.Time) error {
+func persistOutboundPoll(ctx context.Context, a outboundSendApp, chat types.JID, msgID, question string, options []string, selectable uint32, now time.Time, keepUnread bool) error {
 	chatJID := primaryPollChatJID(ctx, a, chat)
+	if keepUnread {
+		chatJID = canonicalOutboundChat(ctx, a.WA(), chat).String()
+	}
 	chatName := a.WA().ResolveChatName(ctx, chat, "")
 	var storeErr error
 	if err := a.DB().UpsertChat(chatJID, chatKindFromJID(chat), chatName, now); err != nil {
 		storeErr = fmt.Errorf("chat update: %w", err)
 	}
 	if err := a.DB().UpsertMessage(store.UpsertMessageParams{
-		ChatJID:    chatJID,
-		ChatName:   chatName,
-		MsgID:      msgID,
-		SenderName: "me",
-		Timestamp:  now,
-		FromMe:     true,
-		Text:       "Poll: " + question,
+		SkipOwnReadMark: keepUnread,
+		ChatJID:         chatJID,
+		ChatName:        chatName,
+		MsgID:           msgID,
+		SenderName:      "me",
+		Timestamp:       now,
+		FromMe:          true,
+		Text:            "Poll: " + question,
 	}); err != nil {
 		storeErr = errors.Join(storeErr, fmt.Errorf("message update: %w", err))
 	}
@@ -223,7 +233,7 @@ func outboundPollSenderJID(ctx context.Context, wa outboundPollIdentityResolver,
 	return lid.String()
 }
 
-func executeDelegatedPoll(ctx context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {
+func executeDelegatedPoll(ctx context.Context, a outboundSendApp, req sendDelegateRequest) (sendDelegateResponse, error) {
 	cleaned, err := validatePollOptions(req.Question, req.Options, req.Selectable)
 	if err != nil {
 		return sendDelegateResponse{}, err
@@ -242,7 +252,7 @@ func executeDelegatedPoll(ctx context.Context, a *app.App, req sendDelegateReque
 	if err != nil {
 		return sendDelegateResponse{}, err
 	}
-	storeErr := persistOutboundPoll(ctx, a, toJID, string(msgID), req.Question, cleaned, uint32(req.Selectable), time.Now().UTC())
+	storeErr := persistOutboundPoll(ctx, a, toJID, string(msgID), req.Question, cleaned, uint32(req.Selectable), time.Now().UTC(), req.KeepUnread)
 	waitForPostSendRetryReceipts(ctx, millisDuration(req.PostSendWaitMS, 0))
 	resp := sendDelegateResponse{
 		OK:       true,

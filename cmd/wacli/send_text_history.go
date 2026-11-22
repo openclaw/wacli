@@ -22,6 +22,6 @@ func sendTextWithHistory(ctx context.Context, a sendTextApp, reconnect func(cont
 	if err != nil {
 		return "", nil, err
 	}
-	storeErr := persistOutboundTextWith(ctx, a.DB(), a.WA(), to, string(id), text, time.Now().UTC(), replyContext)
+	storeErr := persistOutboundTextWith(ctx, a.DB(), a.WA(), to, string(id), text, time.Now().UTC(), options.keepUnread, replyContext)
 	return id, storeErr, nil
 }

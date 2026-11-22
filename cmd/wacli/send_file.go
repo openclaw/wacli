@@ -46,6 +46,7 @@ const maxWaveformPCMBytes = 2 << 20 // 2 MiB of 8 kHz s16le is ~131s of PCM
 const sendMediaTypeAuto = "auto"
 
 type sendFileOptions struct {
+	keepUnread    bool
 	filename      string
 	caption       string
 	mimeOverride  string
@@ -220,6 +221,7 @@ func sendFile(ctx context.Context, a interface {
 			storeErr = fmt.Errorf("chat update: %w", err)
 		}
 		if err := a.DB().UpsertMessage(store.UpsertMessageParams{
+			SkipOwnReadMark: opts.keepUnread,
 			ChatJID:         storedChat.String(),
 			ChatName:        chatName,
 			MsgID:           id,

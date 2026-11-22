@@ -16,10 +16,15 @@ import (
 )
 
 func newSendReactCmd(flags *rootFlags) *cobra.Command {
+	return newSendReactCmdWithApp(flags, openOutboundSendApp(flags))
+}
+
+func newSendReactCmdWithApp(flags *rootFlags, open outboundSendAppOpener) *cobra.Command {
 	var to string
 	var msgID string
 	var emoji string
 	var sender string
+	var keepUnread bool
 	postSendWait := postSendRetryReceiptWait
 
 	cmd := &cobra.Command{
@@ -36,9 +41,10 @@ func newSendReactCmd(flags *rootFlags) *cobra.Command {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
-			a, lk, err := newApp(ctx, flags, true, false)
+			a, close, err := open(ctx)
 			if err != nil {
 				resp, delegated, delegateErr := tryDelegateSend(ctx, flags, err, sendDelegateRequest{
+					KeepUnread:     keepUnread,
 					Kind:           "react",
 					To:             to,
 					ID:             msgID,
@@ -54,7 +60,7 @@ func newSendReactCmd(flags *rootFlags) *cobra.Command {
 				}
 				return err
 			}
-			defer closeApp(a, lk)
+			defer close()
 
 			if err := a.EnsureAuthed(ctx); err != nil {
 				return err
@@ -79,7 +85,7 @@ func newSendReactCmd(flags *rootFlags) *cobra.Command {
 			}
 
 			now := time.Now().UTC()
-			storeErr := upsertSentReaction(ctx, a.DB(), a.WA(), chat, sentID, msgID, emoji, now)
+			storeErr := upsertSentReaction(ctx, a.DB(), a.WA(), chat, sentID, msgID, emoji, now, keepUnread)
 			warnSendStoreFailure(os.Stderr, string(sentID), storeErr)
 
 			waitForPostSendRetryReceipts(ctx, postSendWait)
@@ -106,6 +112,7 @@ func newSendReactCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().StringVar(&msgID, "id", "", "target message ID")
 	cmd.Flags().StringVar(&emoji, "reaction", "\U0001f44d", "reaction emoji (pass an empty string to remove)")
 	cmd.Flags().StringVar(&sender, "sender", "", "message sender JID (required for group messages)")
+	cmd.Flags().BoolVar(&keepUnread, "keep-unread", false, "preserve the chat's unread state when sending")
 	cmd.Flags().DurationVar(&postSendWait, "post-send-wait", postSendRetryReceiptWait, "keep the connection alive after send so retry receipts can be handled (0 disables)")
 	return cmd
 }
@@ -128,7 +135,7 @@ func reactionTarget(to, sender string) (types.JID, types.JID, error) {
 	return chat, senderJID, nil
 }
 
-func upsertSentReaction(ctx context.Context, db *store.DB, resolver outboundTextResolver, chat types.JID, sentID types.MessageID, targetID, emoji string, now time.Time) error {
+func upsertSentReaction(ctx context.Context, db *store.DB, resolver outboundTextResolver, chat types.JID, sentID types.MessageID, targetID, emoji string, now time.Time, keepUnread bool) error {
 	if db == nil || chat.IsEmpty() || sentID == "" {
 		return nil
 	}
@@ -139,15 +146,16 @@ func upsertSentReaction(ctx context.Context, db *store.DB, resolver outboundText
 		storeErr = fmt.Errorf("chat update: %w", err)
 	}
 	if err := db.UpsertMessage(store.UpsertMessageParams{
-		ChatJID:       chat.String(),
-		ChatName:      chatName,
-		MsgID:         string(sentID),
-		SenderName:    "me",
-		Timestamp:     now,
-		FromMe:        true,
-		DisplayText:   sentReactionDisplayText(db, chat.String(), targetID, emoji),
-		ReactionToID:  targetID,
-		ReactionEmoji: emoji,
+		SkipOwnReadMark: keepUnread,
+		ChatJID:         chat.String(),
+		ChatName:        chatName,
+		MsgID:           string(sentID),
+		SenderName:      "me",
+		Timestamp:       now,
+		FromMe:          true,
+		DisplayText:     sentReactionDisplayText(db, chat.String(), targetID, emoji),
+		ReactionToID:    targetID,
+		ReactionEmoji:   emoji,
 	}); err != nil {
 		storeErr = errors.Join(storeErr, fmt.Errorf("message update: %w", err))
 	}
