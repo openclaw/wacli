@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Profile: `profile business get` reads the full WhatsApp Business profile (description, websites, hours, categories) and `profile business set` updates description, address, email, websites and weekly hours with WhatsApp Web's delta mutation, validating WhatsApp's limits first. Both delegate to the running `wacli sync` through the send socket (kinds `business_profile_get`, `business_profile_set`) and stay outside the message-send queue. `catalog list` reads a business catalog page (id, name, price, sale price, currency, images, hidden, review status) with the public HTTPS query WhatsApp Web uses, since WhatsApp no longer answers the `w:biz:catalog` IQ; it needs no session and works with `--read-only`.
 - Dependencies: refresh eligible WhatsApp, networking and SQL tooling modules, pnpm, GoReleaser and pinned CI actions after the 48-hour cooldown; retain Go 1.27.0 and Node 24 minimums.
 - Send: delegate text and media status broadcasts to a running sync process, preserving styling and captions while keeping the original command timeout (#584).
 - Sync: keep outgoing messages from naming chats after this account’s own push name, and preserve stored chat names when metadata is unavailable. Thanks @nicolasbiondic (#574).

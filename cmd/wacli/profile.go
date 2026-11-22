@@ -291,6 +291,8 @@ func newProfileBusinessCmd(flags *rootFlags) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&targetRaw, "jid", "", "target JID or phone number")
+	cmd.AddCommand(newProfileBusinessGetCmd(flags))
+	cmd.AddCommand(newProfileBusinessSetCmd(flags))
 	return cmd
 }
 

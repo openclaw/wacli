@@ -109,6 +109,8 @@ type WAClient interface {
 	SetProfileName(ctx context.Context, name string) error
 	SendAppStatePatch(ctx context.Context, patch appstate.PatchInfo, beforeApply func()) ([]any, error)
 	GetBusinessProfile(ctx context.Context, jid types.JID) (*types.BusinessProfile, error)
+	GetBusinessProfileFull(ctx context.Context, jid types.JID) (*wa.BusinessProfileFull, error)
+	UpdateBusinessProfile(ctx context.Context, update wa.BusinessProfileUpdate) error
 }
 
 type Options struct {

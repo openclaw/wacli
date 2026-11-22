@@ -86,7 +86,7 @@ Write commands take a per-store lock. After a `sync --follow` process finishes s
 | [`send`](docs/send.md), [`media`](docs/media.md) | Send text and files or download synced media. |
 | [`contacts`](docs/contacts.md), [`chats`](docs/chats.md) | Find people and manage local or remote chat state. |
 | [`groups`](docs/groups.md), [`channels`](docs/channels.md) | Inspect and manage groups, communities, and channels. |
-| [`profile`](docs/profile.md), [`presence`](docs/presence.md) | Manage profile details and chat presence. |
+| [`profile`](docs/profile.md), [`presence`](docs/presence.md) | Manage profile details (including the WhatsApp Business profile and catalog) and chat presence. |
 | [`store`](docs/store.md), [`doctor`](docs/doctor.md) | Inspect local storage and diagnose the setup. |
 
 The complete documentation is at [wacli.sh](https://wacli.sh), or run `wacli help <command>` for the installed command reference.

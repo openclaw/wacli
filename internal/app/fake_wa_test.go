@@ -1116,6 +1116,14 @@ func (f *fakeWA) GetBusinessProfile(ctx context.Context, jid types.JID) (*types.
 	return &types.BusinessProfile{JID: jid}, nil
 }
 
+func (f *fakeWA) GetBusinessProfileFull(ctx context.Context, jid types.JID) (*wa.BusinessProfileFull, error) {
+	return &wa.BusinessProfileFull{JID: jid.String()}, nil
+}
+
+func (f *fakeWA) UpdateBusinessProfile(ctx context.Context, update wa.BusinessProfileUpdate) error {
+	return nil
+}
+
 func (f *fakeWA) LinkedJID() string {
 	if !f.IsAuthed() {
 		return ""
