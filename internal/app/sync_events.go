@@ -72,6 +72,9 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 		if opts.Mode == SyncModeFollow && syncActivityEvent(evt) {
 			a.writeHeartbeat()
 		}
+		if opts.oneShot && !a.oneShotStores(evt) {
+			return
+		}
 
 		// Recover from panics so unexpected message structures do not crash the
 		// process. Include event type, stack trace, and a running counter.

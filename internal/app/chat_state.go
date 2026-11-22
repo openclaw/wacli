@@ -51,10 +51,12 @@ func (a *App) AddChatStatePersistenceHandler(ctx context.Context) (func(), error
 			a.warnEmptyAppStateKey(v)
 		}
 	})
+	a.chatStatePersisters.Add(1)
 	var once sync.Once
 	return func() {
 		once.Do(func() {
 			waClient.RemoveEventHandler(handlerID)
+			a.chatStatePersisters.Add(-1)
 		})
 	}, nil
 }

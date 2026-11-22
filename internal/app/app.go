@@ -162,6 +162,11 @@ type App struct {
 	heartbeatLast             atomic.Int64
 	groupInfo                 groupInfoCache
 	presenceWatch             presenceWatch
+	// Storage for a connection opened without sync (see oneShotStore).
+	// Guarded by waMu.
+	oneShot             *oneShotStore
+	syncRunning         atomic.Int32
+	chatStatePersisters atomic.Int32
 }
 
 func New(opts Options) (*App, error) {
@@ -238,10 +243,12 @@ func (a *App) Close() {
 			waClient.RemoveEventHandler(sessionHandler)
 		}
 	}
+	oneShot := a.fenceOneShotStore()
 	// A completed command frontier may hand later ready tasks to a background
 	// drainer. Keep SQLite open until that drainer has finished every write.
 	a.appStateRecoveryWorkers.Wait()
 	_ = a.appStatePersist.waitIdle(context.Background())
+	oneShot.finish(a)
 	if sessionResolver != nil {
 		_ = sessionResolver.Close()
 	}
@@ -334,6 +341,7 @@ func (a *App) Connect(ctx context.Context, allowQR bool, qrWriter func(string)) 
 	if err := a.sessionState.prepareConnect(a.wa.IsConnected); err != nil {
 		return err
 	}
+	a.startOneShotStore(ctx)
 	if err := a.wa.Connect(ctx, wa.ConnectOptions{
 		AllowQR:  allowQR,
 		OnQRCode: qrWriter,
