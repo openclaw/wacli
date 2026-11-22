@@ -91,7 +91,7 @@ wacli polls list [--chat RECIPIENT] [--limit N] [--json]
 
 ## Status broadcasts
 
-- `send status` posts to WhatsApp's `status@broadcast` target.
+- `send status` posts to WhatsApp's `status@broadcast` target. Text and media statuses delegate to a running `sync --follow` for the same store, sharing its send queue and timeout budget. Restart sync after upgrading so it recognizes status requests.
 - `--message` or `--file` is required.
 - Text statuses use `--message`; media statuses use `--file` and can use `--message` as the caption.
 - Text statuses accept `--background-color` as `#RRGGBB` or `#AARRGGBB`.

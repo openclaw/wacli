@@ -3,12 +3,18 @@
 ## Unreleased
 
 - Send: add `--keep-unread` to preserve chat unread counts and manual markers for automated replies, including delegated sends and later echo/history replay. Opt-in delegation fails closed on older sync owners with an upgrade/restart hint; sends without the flag keep v0.26.0 behavior.
+- Dependencies: refresh eligible WhatsApp, networking and SQL tooling modules, pnpm, GoReleaser and pinned CI actions after the 48-hour cooldown; retain Go 1.27.0 and Node 24 minimums.
+- Send: delegate text and media status broadcasts to a running sync process, preserving styling and captions while keeping the original command timeout (#584).
+- Sync: keep outgoing messages from naming chats after this account’s own push name, and preserve stored chat names when metadata is unavailable. Thanks @nicolasbiondic (#574).
+- Messages: retain the original timestamp and conversation order when an identical received message is redelivered, while preserving content-freshness checks. Thanks @nicolasbiondic (#573).
 
-- Dependencies: refresh eligible WhatsApp, SQLite, Go support and SQL tooling modules, pnpm, Node build tooling, GoReleaser, and the vulnerability scanner after the 48-hour cooldown; retain Go 1.27.0 and Node 24 minimums.
+## 0.26.1 - 2026-11-15
+
+**Highlights:** preserve call history and caller identities through chat reconciliation, and fix Go security vulnerabilities.
 
 - Calls: preserve call history and caller identities when hidden-user chats are reconciled with phone-number chats. Thanks @rsampayo (#571).
-
 - Security: build with Go 1.27.4 to fix GO-2026-6859 while retaining the Go 1.27.0 source minimum. Thanks @artemgetmann (#568).
+- Dependencies: refresh eligible WhatsApp, SQLite, Go support and SQL tooling modules, pnpm, Node build tooling, GoReleaser, and the vulnerability scanner after the 48-hour cooldown; retain Go 1.27.0 and Node 24 minimums.
 
 ## 0.26.0 - 2026-11-05
 
