@@ -89,21 +89,11 @@ func TestSemanticKindContextNeighbors(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if legacy {
-				if _, err := db.sql.Exec(`DROP TRIGGER retrieval_messages_update; ALTER TABLE messages DROP COLUMN kind; DELETE FROM schema_migrations WHERE version=37`); err != nil {
-					t.Fatal(err)
-				}
-			}
-			db.Close()
-			db, err := OpenReadOnly(path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer db.Close()
-			if err := db.ReadView(func(view *DB) error {
-				messages, err := view.MessageContext(chat, "target", 1, 1)
+			assertNeighbors := func(source *DB, legacy bool) {
+				t.Helper()
+				messages, err := source.MessageContext(chat, "target", 1, 1)
 				if err != nil {
-					return err
+					t.Fatal(err)
 				}
 				if len(messages) != 3 {
 					t.Fatalf("got %d messages", len(messages))
@@ -116,6 +106,22 @@ func TestSemanticKindContextNeighbors(t *testing.T) {
 						t.Errorf("neighbor %d kind = %q, want %q", i, messages[i].Kind, want)
 					}
 				}
+			}
+			// The writable store reads neighbors outside a read view too.
+			assertNeighbors(db, false)
+			if legacy {
+				if _, err := db.sql.Exec(`DROP TRIGGER retrieval_messages_update; ALTER TABLE messages DROP COLUMN kind; DELETE FROM schema_migrations WHERE version=37`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			db.Close()
+			db, err := OpenReadOnly(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			if err := db.ReadView(func(view *DB) error {
+				assertNeighbors(view, legacy)
 				return nil
 			}); err != nil {
 				t.Fatal(err)
@@ -332,19 +338,6 @@ func TestSemanticKindThroughReadView(t *testing.T) {
 	}
 	if got := kindsByID(page.Messages); got["poll"] != "poll" || got["card"] != "contact" {
 		t.Fatalf("page kinds = %v", got)
-	}
-}
-
-func TestSemanticKindOfContextNeighbors(t *testing.T) {
-	db := mustOpen(t, filepath.Join(t.TempDir(), "wacli.db"))
-	chat := "123@s.whatsapp.net"
-	seedKinds(t, db, chat, time.Now().Add(-time.Hour))
-	msgs, err := db.MessageContext(chat, "text", 5, 5)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := kindsByID(msgs); len(msgs) != 3 || got["poll"] != "poll" || got["card"] != "contact" || got["text"] != "" {
-		t.Fatalf("context kinds = %v", got)
 	}
 }
 
