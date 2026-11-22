@@ -2,6 +2,7 @@ package wa
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"go.mau.fi/whatsmeow"
@@ -53,12 +54,16 @@ func (c *Client) SetProfilePicture(ctx context.Context, avatar []byte) (string, 
 	return pictureID, nil
 }
 
+// ErrNotConnected reports that the client has no live connection right now,
+// for example while sync is reconnecting.
+var ErrNotConnected = errors.New("not connected")
+
 func (c *Client) GetProfilePictureInfo(ctx context.Context, jid types.JID, preview bool, existingID string) (*types.ProfilePictureInfo, error) {
 	c.mu.Lock()
 	cli := c.client
 	c.mu.Unlock()
 	if cli == nil || !cli.IsConnected() {
-		return nil, fmt.Errorf("not connected")
+		return nil, ErrNotConnected
 	}
 	return cli.GetProfilePictureInfo(ctx, jid, &whatsmeow.GetProfilePictureParams{
 		Preview:    preview,

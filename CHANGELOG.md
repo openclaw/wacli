@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Profile: `profile picture-info` asks a running `sync --follow` process over its delegation socket when the store is locked, on the live connection and outside the send queue, and integrations can send the same `profile_picture_info` request with stable error codes (`not_set`, `hidden`, `invalid_jid`, `timeout`, `unavailable`, `lookup_failed`). Thanks @nicolasbiondic.
 - Dependencies: refresh eligible WhatsApp, networking and SQL tooling modules, pnpm, GoReleaser and pinned CI actions after the 48-hour cooldown; retain Go 1.27.0 and Node 24 minimums.
 - Send: delegate text and media status broadcasts to a running sync process, preserving styling and captions while keeping the original command timeout (#584).
 - Sync: keep outgoing messages from naming chats after this account’s own push name, and preserve stored chat names when metadata is unavailable. Thanks @nicolasbiondic (#574).
