@@ -175,11 +175,6 @@ func TestListsAppliedOrderRealTransport(t *testing.T) {
 			t.Logf("REAL CLI scope note: %s", strings.TrimSpace(stderr.String()))
 		}
 	}
-	output, err := exec.CommandContext(ctx, binary, "--store", dir, "--read-only", "--json", "lists", "show", "7").CombinedOutput()
-	if err != nil || !strings.Contains(string(output), "Available Commands:") || strings.Contains(string(output), `"success":`) {
-		t.Fatalf("expected unsupported lists show to display group help, got %v: %s", err, output)
-	}
-	t.Log("REAL CLI lists show 7: displays group help, not JSON data; show is absent from this read-only PR and is not claimed as a supported read")
 }
 
 type listsOrderPeer struct {

@@ -9,12 +9,18 @@
 - Lists: persist WhatsApp List/Business label definitions and chat membership events; add read-only `lists list` (`labels list`) and `chats list --list ID_OR_NAME`, with explicit unknown completeness and LID/phone membership reconciliation. Message memberships and favorites/system-list filtering remain out of scope.
 - Labels and quick replies: add `lists create|edit|delete` (`labels ...`), `chats label add|remove` and `quick-replies list|create|edit|delete`, sent as `regular` app-state patches after a pre-write sync and delegated to a running `sync --follow` like archiving. Quick replies seen during sync are now stored (migration 38). New label IDs are only guessed after a full sync was observed (otherwise pass `--id`); LID-only chats cannot be labeled yet.
 - Quick replies: send action version 3, track reply-aware full-sync coverage independently of older Lists stores, and add delegated `app-state resync regular` using existing recovery debt. Known-broken full syncs always refuse and point to primary recovery; there is no force override. Label writes reject retired/non-numeric IDs and duplicate renames, preserve absent colors and mute-until values, and report the patched phone JID; shortcut conflicts fail closed. Definitions, memberships and replies follow ordered app-state persistence rather than device clocks.
+- Dependencies: refresh eligible WhatsApp, networking and SQL tooling modules, pnpm, GoReleaser and pinned CI actions after the 48-hour cooldown; retain Go 1.27.0 and Node 24 minimums.
+- Send: delegate text and media status broadcasts to a running sync process, preserving styling and captions while keeping the original command timeout (#584).
+- Sync: keep outgoing messages from naming chats after this account’s own push name, and preserve stored chat names when metadata is unavailable. Thanks @nicolasbiondic (#574).
+- Messages: retain the original timestamp and conversation order when an identical received message is redelivered, while preserving content-freshness checks. Thanks @nicolasbiondic (#573).
 
-- Dependencies: refresh eligible WhatsApp, SQLite, Go support and SQL tooling modules, pnpm, Node build tooling, GoReleaser, and the vulnerability scanner after the 48-hour cooldown; retain Go 1.27.0 and Node 24 minimums.
+## 0.26.1 - 2026-11-15
+
+**Highlights:** preserve call history and caller identities through chat reconciliation, and fix Go security vulnerabilities.
 
 - Calls: preserve call history and caller identities when hidden-user chats are reconciled with phone-number chats. Thanks @rsampayo (#571).
-
 - Security: build with Go 1.27.4 to fix GO-2026-6859 while retaining the Go 1.27.0 source minimum. Thanks @artemgetmann (#568).
+- Dependencies: refresh eligible WhatsApp, SQLite, Go support and SQL tooling modules, pnpm, Node build tooling, GoReleaser, and the vulnerability scanner after the 48-hour cooldown; retain Go 1.27.0 and Node 24 minimums.
 
 ## 0.26.0 - 2026-11-05
 
