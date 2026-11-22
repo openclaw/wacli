@@ -12,9 +12,9 @@ Generic connection errors do not automatically start a fresh send: a disconnect 
 
 ```bash
 wacli send text --to RECIPIENT --message TEXT [--message-escapes] [--pick N] [--mention USER] [--no-preview] [--allow-self] [--ephemeral] [--ephemeral-duration DURATION] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
-wacli send file --to RECIPIENT --file PATH [--pick N] [--caption TEXT] [--filename NAME] [--mime TYPE] [--as auto|document|audio|image|video] [--ptt] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
+wacli send file --to RECIPIENT --file PATH [--pick N] [--caption TEXT] [--filename NAME] [--mime TYPE] [--as auto|document|audio|image|video] [--ptt [--seconds N] [--waveform L1,...,L64]] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
 wacli send sticker --to RECIPIENT --file PATH [--pick N] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
-wacli send voice --to RECIPIENT --file PATH [--pick N] [--mime TYPE] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
+wacli send voice --to RECIPIENT --file PATH [--pick N] [--mime TYPE] [--seconds N] [--waveform L1,...,L64] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
 wacli send location --to RECIPIENT --latitude LAT --longitude LNG [--name TEXT] [--pick N] [--post-send-wait 2s]
 wacli send react --to PHONE_OR_JID --id MSG_ID [--reaction TEXT] [--sender JID] [--post-send-wait 2s]
 wacli send poll --to RECIPIENT --question TEXT --option TEXT --option TEXT [--multi N] [--ephemeral] [--post-send-wait 2s]
@@ -117,8 +117,10 @@ wacli polls list [--chat RECIPIENT] [--limit N] [--json]
 - `send sticker` requires 512x512 WebP input. Static stickers are capped at 100 KiB; animated stickers are capped at 500 KiB and are sent with animation metadata.
 - `send voice` is a shortcut for `send file --ptt`.
 - Voice notes require OGG/Opus audio (`audio/ogg; codecs=opus`).
-- When available, `ffprobe` sets voice-note duration and `ffmpeg` generates the 64-sample waveform from decoded PCM audio.
-- Waveform decoding is capped at 2 MiB (about 131 seconds). Longer voice notes use that initial segment for the waveform; the complete audio file and its full duration are still sent. Failed decodes omit the optional waveform.
+- A voice note carries its length and a 64-sample waveform. A caller that measured them passes `--seconds N` (whole seconds, at least 1) and `--waveform L1,...,L64` (exactly 64 comma-separated levels, each 0..100); each one given is sent as given and its probe is not run, so a voice note goes out whole on a host without ffmpeg. They apply only to voice notes (`send voice`, `send file --ptt`); a malformed value, or one on any other file, is refused before the store is opened or anything is uploaded, naming the field.
+- Delegated sends carry the same two as `seconds` (an integer) and `waveform` (a JSON array of 64 integers) on the `file` or `voice` request; a socket client sends them there. The daemon checks them as the CLI does and refuses a malformed request with an error naming the field.
+- Each one not given is measured from the file: `ffprobe` sets the duration and `ffmpeg` generates the waveform from decoded PCM audio. When a probe fails, or the tool is not installed, the voice note is sent without that part and a `warning: voice note length not measured: …` or `warning: voice note waveform not measured: …` line is printed to stderr; for a delegated send it is also printed by the `sync --follow` process and returned to the sender as `voice_warning`.
+- Waveform decoding is capped at 2 MiB (about 131 seconds). Longer voice notes use that initial segment for the waveform; the complete audio file and its full duration are still sent.
 
 ## Examples
 
@@ -135,6 +137,7 @@ wacli send file --to 1234567890 --file ./pic.jpg --caption "hi"
 wacli send file --to 1234567890 --file /tmp/report --filename report.pdf
 wacli send sticker --to 1234567890 --file ./sticker-512.webp
 wacli send voice --to 1234567890 --file ./voice.ogg
+wacli send voice --to 1234567890 --file ./voice.ogg --seconds 24 --waveform "$LEVELS"
 wacli send location --to 1234567890 --latitude 51.4779 --longitude -0.0015 --name "Royal Observatory"
 wacli send react --to 1234567890 --id ABC123 --reaction "❤️"
 wacli send poll --to "Family" --question "Dinner?" --option "Pizza" --option "Sushi" --multi 1
