@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"fmt"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -205,6 +206,22 @@ func TestOneShotStoreLeavesAppStateToChatStatePersister(t *testing.T) {
 	f.emit(&wa.AppStateKeyUnavailable{KeyID: []byte{0xAB}})
 	if n := strings.Count(evbuf.String(), `"code":"app_state_key_unavailable"`); n != 1 {
 		t.Fatalf("app-state warnings = %d, want 1 (handled once):\n%s", n, evbuf.String())
+	}
+}
+
+// A one-shot command prints no sync progress for what it stores: the line
+// has no newline and would be glued to the command's next stderr line.
+func TestOneShotConnectionPrintsNoSyncProgress(t *testing.T) {
+	a, f, evbuf := oneShotTestApp(t)
+	at := time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
+	for i := range 25 {
+		f.emit(oneShotIncoming(fmt.Sprintf("m-%02d", i), at.Add(time.Duration(i)*time.Second)))
+	}
+	if n, err := a.db.CountMessages(); err != nil || n != 25 {
+		t.Fatalf("messages stored = %d, %v; want 25", n, err)
+	}
+	if strings.Contains(evbuf.String(), `"event":"progress"`) {
+		t.Fatalf("one-shot connection emitted sync progress:\n%s", evbuf.String())
 	}
 }
 
