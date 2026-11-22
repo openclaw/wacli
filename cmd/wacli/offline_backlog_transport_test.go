@@ -561,6 +561,12 @@ type backlogPeer struct {
 	// answerAtOnce answers the outgoing message as soon as it arrives, as
 	// WhatsApp does, instead of after the device acknowledged the backlog.
 	answerAtOnce bool
+	// deliverFirst, when set, delivers the backlog before answering the
+	// device's `active` IQ and waits that long before the answer, so the
+	// backlog is being handled before the command gets past its login.
+	deliverFirst time.Duration
+	// beforeDeliver, when set, runs once just before the backlog is written.
+	beforeDeliver func()
 }
 
 func newBacklogPeer(t *testing.T, ctx context.Context, static *keys.KeyPair, cert []byte) *backlogPeer {
@@ -686,10 +692,16 @@ func (p *backlogPeer) serve(w http.ResponseWriter, r *http.Request) {
 			} else if collection, ok := node.GetOptionalChildByTag("sync", "collection"); ok {
 				reply.Content = []waBinary.Node{{Tag: "sync", Content: []waBinary.Node{{Tag: "collection", Attrs: waBinary.Attrs{"name": collection.Attrs["name"], "has_more_patches": "false"}}}}}
 			}
+			_, active := node.GetOptionalChildByTag("active")
+			active = active && node.Attrs["xmlns"] == "passive"
+			if active && p.deliverFirst > 0 {
+				delivered = p.deliver(connID, noise)
+				time.Sleep(p.deliverFirst)
+			}
 			if err := noise.write(p.ctx, reply); err != nil {
 				return
 			}
-			if _, active := node.GetOptionalChildByTag("active"); active && node.Attrs["xmlns"] == "passive" {
+			if active && p.deliverFirst == 0 {
 				delivered = p.deliver(connID, noise)
 			}
 		case "receipt":
@@ -750,7 +762,12 @@ func (p *backlogPeer) serve(w http.ResponseWriter, r *http.Request) {
 func (p *backlogPeer) deliver(connID int, noise *backlogNoise) []*backlogItem {
 	p.mu.Lock()
 	items := append([]*backlogItem(nil), p.queue...)
+	hook := p.beforeDeliver
+	p.beforeDeliver = nil
 	p.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	messages, receipts := 0, 0
 	for _, item := range items {
 		if item.class == "message" {
