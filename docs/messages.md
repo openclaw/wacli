@@ -157,6 +157,12 @@ Only reports that arrive while `sync` is connected are kept: WhatsApp announces 
 
 Plain audio messages have an empty `MediaCaption`. Their `Text` keeps the `[Audio]` display fallback, so they can still match searches for `Audio`. Text supplied alongside an audio payload remains its caption, including a literal `[Audio]` supplied by the sender. Existing rows are not migrated; an ordinary live or history re-ingestion can replace a legacy synthetic caption, subject to the existing edit and deletion rules.
 
+## Replies and media captions
+
+Human output shows a media message's caption after its placeholder (`Sent image: dinner receipt`); a document without a caption shows its file name. A reply shows who wrote the quoted message and what it says, then its own words: `> Ana: «Sent image: dinner receipt» paid`. `messages show` prints `Quoted sender: Ana (JID)` and the quote on its own line.
+
+JSON adds `quoted_sender_name` and `quoted_text` to replies. Both are looked up at read time from the quoted message in the local store (`me` for your own messages), so existing history reads the same way without a re-sync; nothing new is stored. When the quoted message is not in the store, `quoted_text` falls back to the quote text sync recorded and `quoted_sender_name` to the quoted sender's contact name or number.
+
 ## Starred
 
 - `messages starred` lists starred messages ordered by star time when app-state events provide it; history-imported rows fall back to message time.
