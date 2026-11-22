@@ -130,6 +130,9 @@ func TestSemanticKindContextNeighbors(t *testing.T) {
 	}
 }
 
+// Purge is the payload-erasure path (#309): the kind says what the message
+// was, so it goes with the payload, and neither a replay of the original event
+// nor the phone/LID merge, whichever copy was purged, brings it back.
 func TestSemanticKindPurgeReplayAndIdentityMerge(t *testing.T) {
 	for _, kind := range []string{"contact", "poll"} {
 		for _, purgedChat := range []string{"123@lid", "456@s.whatsapp.net"} {
@@ -341,54 +344,6 @@ func TestSemanticKindThroughReadView(t *testing.T) {
 	}
 }
 
-// Purge is the payload-erasure path (#309): the kind says what the message
-// was, so it goes with the payload, and neither a replay of the original event
-// nor the phone/LID merge brings it back.
-func TestPurgeClearsSemanticKind(t *testing.T) {
-	db := mustOpen(t, filepath.Join(t.TempDir(), "wacli.db"))
-	chat := "123@s.whatsapp.net"
-	base := time.Now().Add(-time.Hour)
-	seedKinds(t, db, chat, base)
-	if err := db.MarkMessageDeletedForMe(chat, "card", "", false, base.Add(time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.PurgeMessage(chat, "card"); err != nil {
-		t.Fatal(err)
-	}
-	if kind := storedKind(t, db, chat, "card"); kind != nil {
-		t.Fatalf("stored kind after purge = %v", kind)
-	}
-	if err := db.UpsertMessage(UpsertMessageParams{ChatJID: chat, MsgID: "card", Timestamp: base, Kind: "contact", DisplayText: "Contact: Alice"}); err != nil {
-		t.Fatal(err)
-	}
-	m, err := db.GetMessage(chat, "card")
-	if err != nil || m.Kind != "" {
-		t.Fatalf("after replay %+v: %v", m.Kind, err)
-	}
-
-	pn, lid := "15551234567@s.whatsapp.net", "999123456789@lid"
-	for _, c := range []string{pn, lid} {
-		if err := db.UpsertChat(c, "dm", "Bob", base); err != nil {
-			t.Fatal(err)
-		}
-		if err := db.UpsertMessage(UpsertMessageParams{ChatJID: c, MsgID: "vcard", Timestamp: base, Kind: "contact", DisplayText: "Contact: Bob"}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := db.MarkMessageDeletedForMe(lid, "vcard", "", false, base.Add(time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.PurgeMessage(lid, "vcard"); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.MigrateLIDToPN(lid, pn); err != nil {
-		t.Fatal(err)
-	}
-	if kind := storedKind(t, db, pn, "vcard"); kind != nil {
-		t.Fatalf("stored kind after LID merge of a purged message = %v", kind)
-	}
-}
-
 // A store without the change journal (retrieval tables only) keeps working:
 // the kind migration must not install triggers that write to a missing table.
 func TestSemanticKindMigrationOnStoreWithoutChangeJournal(t *testing.T) {
@@ -453,33 +408,5 @@ func TestSemanticKindColumnRepairedWhenVersionRowIsTaken(t *testing.T) {
 	db = mustOpen(t, path)
 	if !db.kindEnabled {
 		t.Fatal("kind column not repaired on open")
-	}
-}
-
-// The opposite merge direction: the phone-number copy was purged and the LID
-// copy still carries the kind.
-func TestPurgedPhoneCopyKeepsKindClearedThroughLIDMerge(t *testing.T) {
-	db := mustOpen(t, filepath.Join(t.TempDir(), "wacli.db"))
-	base := time.Now().Add(-time.Hour)
-	pn, lid := "15551234567@s.whatsapp.net", "999123456789@lid"
-	for _, c := range []string{pn, lid} {
-		if err := db.UpsertChat(c, "dm", "Bob", base); err != nil {
-			t.Fatal(err)
-		}
-		if err := db.UpsertMessage(UpsertMessageParams{ChatJID: c, MsgID: "vcard", Timestamp: base, Kind: "contact", DisplayText: "Contact: Bob"}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := db.MarkMessageDeletedForMe(pn, "vcard", "", false, base.Add(time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.PurgeMessage(pn, "vcard"); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.MigrateLIDToPN(lid, pn); err != nil {
-		t.Fatal(err)
-	}
-	if kind := storedKind(t, db, pn, "vcard"); kind != nil {
-		t.Fatalf("stored kind = %v", kind)
 	}
 }
