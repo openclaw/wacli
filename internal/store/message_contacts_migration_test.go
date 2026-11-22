@@ -38,8 +38,8 @@ func TestMessageContactsMigrationIsVersionedAndIdempotent(t *testing.T) {
 		t.Fatalf("fresh store lacks message_contacts shape:\n%s", want)
 	}
 	var recorded int
-	if err := fresh.sql.QueryRow(`SELECT count(*) FROM schema_migrations WHERE version = 40 AND name = 'message contact cards'`).Scan(&recorded); err != nil || recorded != 1 {
-		t.Fatalf("fresh store did not record migration 40: %d, %v", recorded, err)
+	if err := fresh.sql.QueryRow(`SELECT count(*) FROM schema_migrations WHERE version = 41 AND name = 'message contact cards'`).Scan(&recorded); err != nil || recorded != 1 {
+		t.Fatalf("fresh store did not record migration 41: %d, %v", recorded, err)
 	}
 	if err := fresh.Close(); err != nil {
 		t.Fatal(err)
@@ -54,7 +54,7 @@ func TestMessageContactsMigrationIsVersionedAndIdempotent(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			statements := []string{`DELETE FROM schema_migrations WHERE version = 40`}
+			statements := []string{`DELETE FROM schema_migrations WHERE version = 41`}
 			for v := 34; v <= 38; v++ {
 				statements = append(statements, fmt.Sprintf(`INSERT OR IGNORE INTO schema_migrations(version, name, applied_at) VALUES(%d, 'fork %d', 1)`, v, v))
 			}
