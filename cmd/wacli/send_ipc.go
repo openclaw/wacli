@@ -39,6 +39,8 @@ type sendDelegateRequest struct {
 	To                   string   `json:"to,omitempty"`
 	Pick                 int      `json:"pick,omitempty"`
 	Message              string   `json:"message,omitempty"`
+	StatusBackground     string   `json:"status_background_color,omitempty"`
+	StatusFont           *int32   `json:"status_font,omitempty"`
 	Mentions             []string `json:"mentions,omitempty"`
 	ReplyTo              string   `json:"reply_to,omitempty"`
 	ReplyToSender        string   `json:"reply_to_sender,omitempty"`
@@ -129,12 +131,11 @@ func delegateSend(ctx context.Context, flags *rootFlags, req sendDelegateRequest
 	defer conn.Close()
 
 	deadline := time.Now().Add(commandTimeout(flags))
+	// Lock waits and validation have already consumed part of the caller's budget.
+	if parentDeadline, ok := ctx.Deadline(); ok && parentDeadline.Before(deadline) {
+		deadline = parentDeadline
+	}
 	if req.Kind == mediaDownloadKind {
-		// Cache inspection and lock waits already consumed this command's
-		// budget. Never grant recovery a new full timeout after those stages.
-		if parentDeadline, ok := ctx.Deadline(); ok && parentDeadline.Before(deadline) {
-			deadline = parentDeadline
-		}
 		// DialContext alone does not cancel an established socket. Closing it
 		// wakes a blocked read and tells the owner to cancel this media request.
 		stopCancel := context.AfterFunc(ctx, func() { _ = conn.Close() })
@@ -385,6 +386,8 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 	switch req.Kind {
 	case profilePictureInfoKind:
 		return executeProfilePictureInfo(ctx, a.WA(), req), nil
+	case sendStatusKind:
+		return executeDelegatedStatus(ctx, a, req)
 	case mediaDownloadKind:
 		if req.To == "" || req.ID == "" {
 			return sendDelegateResponse{}, fmt.Errorf("exact media chat and message ID are required")
