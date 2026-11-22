@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Sync: settle the upgrade replay for Keep chats archived after one complete `regular_low` snapshot, so stores whose snapshot has no preference mutation or omits a locally archived chat no longer request a full replay (and, on known-broken collections, a phone snapshot) on every start. A snapshot whose mutation failed to persist does not settle; the kept replay applies the original action first. Thanks @nicolasbiondic (#502).
+- Sync: recover the upgrade's missing **Keep chats archived** metadata from a background phone snapshot instead of a full `regular_low` replay, which with the SDK's full sync discards local collection state when the server's snapshot fails verification. No replay intent is recorded for it; until the phone answers with a newer snapshot, archived chats stay archived and incremental sync continues; the request is repeated at most once every six hours.
 - Dependencies: refresh eligible WhatsApp, networking and SQL tooling modules, pnpm, GoReleaser and pinned CI actions after the 48-hour cooldown; retain Go 1.27.0 and Node 24 minimums.
 - Send: delegate text and media status broadcasts to a running sync process, preserving styling and captions while keeping the original command timeout (#584).
 - Sync: keep outgoing messages from naming chats after this account’s own push name, and preserve stored chat names when metadata is unavailable. Thanks @nicolasbiondic (#574).

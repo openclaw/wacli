@@ -346,3 +346,106 @@ func TestChatArchiveIdentityMergePreservesUnrecoveredArchive(t *testing.T) {
 		t.Fatalf("missing upgrade recovery=%v, %v", required, err)
 	}
 }
+
+func TestSettleChatArchiveRecoveryKeepsArchivesAndConverges(t *testing.T) {
+	db := openTestDB(t)
+	base := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	legacy := "15550000001@s.whatsapp.net"
+	pending := "15550000002@s.whatsapp.net"
+	known := "15550000003@s.whatsapp.net"
+	for _, jid := range []string{legacy, pending, known} {
+		if err := db.UpsertChat(jid, "dm", "Synthetic", base); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, jid := range []string{legacy, pending} {
+		if err := db.SetChatArchived(jid, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.ApplyChatArchive(known, true, base.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if required, err := db.ChatArchiveRecoveryRequired(); err != nil || !required {
+		t.Fatalf("upgraded store recovery=%v, %v; want required", required, err)
+	}
+	settled := base.Add(time.Hour)
+	if err := db.SettleChatArchiveRecovery(settled); err != nil {
+		t.Fatal(err)
+	}
+	if required, err := db.ChatArchiveRecoveryRequired(); err != nil || required {
+		t.Fatalf("settled store recovery=%v, %v; want not required", required, err)
+	}
+	archived := func(jid string) bool {
+		t.Helper()
+		chat, err := db.GetChat(jid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return chat.Archived
+	}
+	if !archived(legacy) || !archived(pending) || !archived(known) {
+		t.Fatal("settlement changed the archived state")
+	}
+	incoming := func(jid, id string, ts time.Time) {
+		t.Helper()
+		if err := db.UpsertMessage(UpsertMessageParams{ChatJID: jid, MsgID: id, Timestamp: ts, Text: "synthetic", ArchiveIncoming: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The settled preference is unknown, not "unarchive": an arrival newer
+	// than the snapshot waits for the real preference, which replaces the
+	// settled one however old its timestamp is.
+	incoming(pending, "newer", settled.Add(time.Second))
+	if !archived(pending) {
+		t.Fatal("settled preference unarchived a chat")
+	}
+	if err := db.SetChatArchiveSetting(true, base); err != nil {
+		t.Fatal(err)
+	}
+	if archived(pending) {
+		t.Fatal("real preference did not replace the settled one")
+	}
+	if enabled, ts, err := chatArchiveSettingRow(db); err != nil || !enabled || ts != base.UnixMilli() {
+		t.Fatalf("preference row: enabled=%v ts=%d err=%v", enabled, ts, err)
+	}
+	// The legacy chat's boundary is the snapshot time: older messages keep it
+	// archived, newer ones unarchive it. A known boundary is left alone.
+	incoming(legacy, "older", settled.Add(-time.Second))
+	if !archived(legacy) {
+		t.Fatal("message older than the settlement unarchived the legacy chat")
+	}
+	incoming(legacy, "newer", settled.Add(2*time.Second))
+	if archived(legacy) {
+		t.Fatal("message newer than the settlement kept the legacy chat archived")
+	}
+	incoming(known, "after-action", base.Add(2*time.Second))
+	if archived(known) {
+		t.Fatal("settlement moved a known archive boundary")
+	}
+	// Settling again does not touch known state; a legacy archive written by
+	// another build re-arms recovery until the next complete snapshot.
+	if err := db.SettleChatArchiveRecovery(settled.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if enabled, ts, err := chatArchiveSettingRow(db); err != nil || !enabled || ts != base.UnixMilli() {
+		t.Fatalf("settle overwrote the known preference: enabled=%v ts=%d err=%v", enabled, ts, err)
+	}
+	other := "15550000004@s.whatsapp.net"
+	if err := db.UpsertChat(other, "dm", "Synthetic", base); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetChatArchived(other, true); err != nil {
+		t.Fatal(err)
+	}
+	if required, err := db.ChatArchiveRecoveryRequired(); err != nil || !required {
+		t.Fatalf("legacy archive without a boundary recovery=%v, %v; want required", required, err)
+	}
+}
+
+func chatArchiveSettingRow(db *DB) (bool, int64, error) {
+	var enabled int
+	var ts int64
+	err := db.sql.QueryRow(`SELECT enabled, timestamp_ms FROM chat_archive_setting WHERE id=1`).Scan(&enabled, &ts)
+	return enabled != 0, ts, err
+}

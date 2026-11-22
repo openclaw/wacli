@@ -103,7 +103,7 @@ func TestExplicitReadBoundaryMarkerSurvivesAppStateEchoAndReplay(t *testing.T) {
 					evt.FromFullSync = true
 					return evt
 				}
-				if err := a.db.MarkAppStateRecoveryRequired(string(appstate.WAPatchRegularLow)); err != nil {
+				if _, err := a.db.MarkAppStateRecoveryGeneration(string(appstate.WAPatchRegularLow)); err != nil {
 					t.Fatal(err)
 				}
 				if err := a.MarkChatReadThrough(t.Context(), chat, "handled"); err != nil {
@@ -269,7 +269,7 @@ func TestReceiptCompletionMarkerOnlyRace(t *testing.T) {
 					echo.FromFullSync = true
 					return echo
 				}
-				if err := a.db.MarkAppStateRecoveryRequired(string(appstate.WAPatchRegularLow)); err != nil {
+				if _, err := a.db.MarkAppStateRecoveryGeneration(string(appstate.WAPatchRegularLow)); err != nil {
 					t.Fatal(err)
 				}
 				if err := a.PinChat(t.Context(), chat, true); err != nil {

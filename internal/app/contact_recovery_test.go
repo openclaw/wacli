@@ -240,7 +240,15 @@ func TestFlaggedContactRecoveryUsesMainPolicy(t *testing.T) {
 			if degraded {
 				wantFull, wantPhone = 0, 1
 			}
-			if fullSyncFetches(f, contactCollection) != wantFull || len(recoveredCollections(f)) != wantPhone || recoveryIntentExists(t, a, string(contactCollection), older) != degraded {
+			// Count the contact collection's own phone requests: a store without
+			// the Keep chats archived preference also asks for regular_low.
+			contactRequests := 0
+			for _, name := range recoveredCollections(f) {
+				if name == string(contactCollection) {
+					contactRequests++
+				}
+			}
+			if fullSyncFetches(f, contactCollection) != wantFull || contactRequests != wantPhone || recoveryIntentExists(t, a, string(contactCollection), older) != degraded {
 				t.Fatalf("flagged %s did not follow main: fetches=%+v recoveries=%v debt=%v", path, f.appStateFetches, recoveredCollections(f), contactRecoveryRequired(t, a))
 			}
 		})
