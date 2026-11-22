@@ -8,7 +8,7 @@ When `sync --follow` is already running for the same store, send commands delega
 
 By default, a fresh own reply acknowledges the chat locally (v0.26.0 behavior). Automation can pass `--keep-unread` to preserve the existing unread count and manual unread marker for humans. It does not make a read chat unread, send a mark-unread patch, or change read-receipt settings. The accepted message is still saved in history; its later echo or history replay is not a fresh reply and does not acknowledge the chat. Independent reads on another device still apply.
 
-`--keep-unread` works for text, file (including `--ptt`), voice, sticker, location, poll, select (buttons and lists), and react, both directly and through `sync --follow`. Reactions already preserve unread state. Status broadcasts also accept the flag, but use separate status storage and never acknowledge chats; status delegation remains unsupported.
+`--keep-unread` works for text, file (including `--ptt`), voice, sticker, location, poll, select (buttons and lists), and react, both directly and through `sync --follow`. Reactions already preserve unread state. Status broadcasts also accept the flag, but use separate status storage and never acknowledge chats; a delegated status send does not carry it and keeps IPC version 1.
 
 Delegated opt-in sends carry `keep_unread: true` and require IPC version 2. Older running owners reject the request before sending; the CLI tells you to upgrade wacli and restart `sync --follow`. There is no fallback that could mark the chat read. Sends without the flag omit the field and continue using version 1. A local history save failure still returns `store_warning`; without that saved row, a later own echo may be treated as fresh.
 
