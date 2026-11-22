@@ -68,6 +68,9 @@ func (a *App) startOneShotStore(ctx context.Context) {
 	if deadline, ok := ctx.Deadline(); ok {
 		s.deadline = deadline
 	}
+	// From here to the end of Close, removing an app handler must not wait for
+	// the event this store is handling (see handlers.go).
+	a.deferHandlerRemovals()
 	// Download history chunks inside the handler, before whatsmeow sends the
 	// message receipt, as sync does; otherwise whatsmeow downloads them in the
 	// background and deletes the server copy whether or not they were stored.

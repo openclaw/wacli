@@ -169,7 +169,7 @@ func (a *App) retryMedia(ctx context.Context, opts RetryMediaOptions, exact *med
 	infos := make(map[mediaRetryKey]store.MediaDownloadInfo, len(pending))
 	notifs := make(map[mediaRetryKey]retryNotif, len(pending))
 
-	handlerID := a.wa.AddEventHandler(func(evt any) {
+	handlerID := a.addEventHandler(func(evt any) {
 		mr, ok := evt.(*events.MediaRetry)
 		if !ok {
 			return
@@ -187,7 +187,7 @@ func (a *App) retryMedia(ctx context.Context, opts RetryMediaOptions, exact *med
 		dp, code, derr := wa.DecryptMediaRetry(mr, info.MediaKey)
 		notifs[key] = retryNotif{directPath: dp, code: code, err: derr}
 	})
-	defer a.wa.RemoveEventHandler(handlerID)
+	defer a.removeEventHandler(a.wa, handlerID)
 
 	// Load message info + build retry receipts, dropping rows we cannot address.
 	type ready struct {

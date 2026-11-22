@@ -41,7 +41,7 @@ func (a *App) AddChatStatePersistenceHandler(ctx context.Context) (func(), error
 		return nil, err
 	}
 	waClient := a.WA()
-	handlerID := waClient.AddEventHandler(func(evt any) {
+	handlerID := a.addEventHandler(func(evt any) {
 		switch v := evt.(type) {
 		case *events.AppState, *events.Star, *events.DeleteForMe,
 			*events.Archive, *events.UnarchiveChatsSetting, *events.Pin, *events.Mute, *events.MarkChatAsRead,
@@ -55,7 +55,7 @@ func (a *App) AddChatStatePersistenceHandler(ctx context.Context) (func(), error
 	var once sync.Once
 	return func() {
 		once.Do(func() {
-			waClient.RemoveEventHandler(handlerID)
+			a.removeEventHandler(waClient, handlerID)
 			a.chatStatePersisters.Add(-1)
 		})
 	}, nil
@@ -491,7 +491,7 @@ func (a *App) newAppStateRecoveryCapture(collection appstate.WAPatchName) *appSt
 	c := &appStateRecoveryCapture{app: a, collection: collection, completed: make(chan appStateRecoveryCompletion, 1)}
 	// whatsmeow dispatches recovery mutations synchronously and emits this
 	// collection's AppStateSyncComplete last, so the sentinel closes the drain.
-	c.handlerID = a.wa.AddEventHandler(c.handle)
+	c.handlerID = a.addEventHandler(c.handle)
 	return c
 }
 
@@ -526,7 +526,7 @@ func (c *appStateRecoveryCapture) stop() {
 	c.mu.Lock()
 	c.finished = true
 	c.mu.Unlock()
-	c.app.wa.RemoveEventHandler(c.handlerID)
+	c.app.removeEventHandler(c.app.wa, c.handlerID)
 	select {
 	case completion := <-c.completed:
 		c.app.appStatePersist.complete(completion.ticket, func() {})
