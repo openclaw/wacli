@@ -3,11 +3,16 @@ package app
 import (
 	"bytes"
 	"context"
+	"database/sql"
+	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/openclaw/wacli/internal/out"
+	"github.com/openclaw/wacli/internal/sqliteutil"
 	"github.com/openclaw/wacli/internal/store"
 	"github.com/openclaw/wacli/internal/wa"
 	waBinary "go.mau.fi/whatsmeow/binary"
@@ -200,5 +205,196 @@ func TestOneShotStoreLeavesAppStateToChatStatePersister(t *testing.T) {
 	f.emit(&wa.AppStateKeyUnavailable{KeyID: []byte{0xAB}})
 	if n := strings.Count(evbuf.String(), `"code":"app_state_key_unavailable"`); n != 1 {
 		t.Fatalf("app-state warnings = %d, want 1 (handled once):\n%s", n, evbuf.String())
+	}
+}
+
+// A history chunk still being imported when the command closes: the wait at
+// exit ends at the command's own deadline, and the warning says what was lost.
+func TestOneShotExitWaitEndsAtTheCommandDeadline(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+	var evbuf bytes.Buffer
+	a.opts.Events = out.NewEventWriter(&evbuf, true)
+	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer cancel()
+	if err := a.Connect(ctx, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	release := make(chan struct{})
+	entered := make(chan struct{})
+	at := time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
+	f.downloadHistory = func(*waE2E.HistorySyncNotification) (*waHistorySync.HistorySync, error) {
+		close(entered)
+		<-release
+		return historySyncWithTextMessages(oneShotChat(), at, "h1").Data, nil
+	}
+	own := types.NewJID("15550000000", types.DefaultUserServer)
+	syncType := waE2E.HistorySyncType_RECENT
+	notif := &events.Message{
+		Info: types.MessageInfo{MessageSource: types.MessageSource{Chat: own, Sender: own, IsFromMe: true}, ID: "hist-slow", Timestamp: at},
+		Message: &waE2E.Message{ProtocolMessage: &waE2E.ProtocolMessage{
+			HistorySyncNotification: &waE2E.HistorySyncNotification{SyncType: &syncType}}},
+	}
+	dispatched := make(chan struct{})
+	go func() { f.emit(notif); close(dispatched) }()
+	<-entered
+	start := time.Now()
+	s := a.fenceOneShotStore()
+	waited := time.Since(start)
+	close(release)
+	<-dispatched
+	if waited > time.Second {
+		t.Fatalf("the wait at exit took %s; it must end at the command's deadline (300ms after connecting)", waited)
+	}
+	s.finish(a)
+	if !strings.Contains(evbuf.String(), `"code":"oneshot_store_incomplete"`) || !strings.Contains(evbuf.String(), "will not deliver it again") {
+		t.Fatalf("no oneshot_store_incomplete warning saying the cut-short event is lost:\n%s", evbuf.String())
+	}
+}
+
+// dispatchLockingWA models whatsmeow's handler lock: dispatching an event holds
+// it for reading while the handlers run, and RemoveEventHandler takes it for
+// writing, so removing a handler waits for the event being dispatched.
+type dispatchLockingWA struct {
+	*fakeWA
+	dispatch sync.RWMutex
+}
+
+func (w *dispatchLockingWA) emit(evt any) {
+	w.dispatch.RLock()
+	defer w.dispatch.RUnlock()
+	w.fakeWA.emit(evt)
+}
+
+func (w *dispatchLockingWA) RemoveEventHandler(id uint32) {
+	w.dispatch.Lock()
+	defer w.dispatch.Unlock()
+	w.fakeWA.RemoveEventHandler(id)
+}
+
+// closeWithin runs a.Close and fails if it has not returned within limit; it
+// then releases whatever blocks it, so the test ends.
+func closeWithin(t *testing.T, a *App, limit time.Duration, unblock func()) time.Duration {
+	t.Helper()
+	start := time.Now()
+	done := make(chan time.Duration, 1)
+	go func() { a.Close(); done <- time.Since(start) }()
+	select {
+	case took := <-done:
+		return took
+	case <-time.After(limit):
+		stacks := make([]byte, 1<<20)
+		t.Logf("Close still running after %s; goroutines:\n%s", limit, stacks[:runtime.Stack(stacks, true)])
+		unblock()
+		took := <-done
+		t.Fatalf("Close returned only after the blocked store was released (%s): it waited for the event being stored, whatever the command's deadline", took)
+		return took
+	}
+}
+
+// Through App.Close: an item still being stored at exit by a store that does
+// not return in time (here a history download that ignores its context).
+// Close must return at the command's deadline and report the loss.
+func TestOneShotCloseReturnsAtTheCommandDeadlineWhileAStoreHangs(t *testing.T) {
+	a := newTestApp(t)
+	w := &dispatchLockingWA{fakeWA: newFakeWA()}
+	a.wa = w
+	var evbuf bytes.Buffer
+	a.opts.Events = out.NewEventWriter(&evbuf, true)
+	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer cancel()
+	if err := a.Connect(ctx, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	release := make(chan struct{})
+	entered := make(chan struct{})
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	t.Cleanup(unblock)
+	at := time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
+	w.downloadHistory = func(*waE2E.HistorySyncNotification) (*waHistorySync.HistorySync, error) {
+		close(entered)
+		<-release
+		return historySyncWithTextMessages(oneShotChat(), at, "h1").Data, nil
+	}
+	own := types.NewJID("15550000000", types.DefaultUserServer)
+	syncType := waE2E.HistorySyncType_RECENT
+	go w.emit(&events.Message{
+		Info: types.MessageInfo{MessageSource: types.MessageSource{Chat: own, Sender: own, IsFromMe: true}, ID: "hist-hangs", Timestamp: at},
+		Message: &waE2E.Message{ProtocolMessage: &waE2E.ProtocolMessage{
+			HistorySyncNotification: &waE2E.HistorySyncNotification{SyncType: &syncType}}},
+	})
+	<-entered
+	// A Close that waits for the store never returns by itself; the timing
+	// bound gets slack for a loaded machine (-race, parallel packages).
+	took := closeWithin(t, a, 10*time.Second, unblock)
+	if took > 3*time.Second {
+		t.Fatalf("Close took %s; the command's deadline was 300ms after connecting", took)
+	}
+	if !strings.Contains(evbuf.String(), `"code":"oneshot_store_incomplete"`) {
+		t.Fatalf("no oneshot_store_incomplete warning for the item cut short:\n%s", evbuf.String())
+	}
+	t.Logf("Close returned %s after it was called, with the store still blocked", took.Round(time.Millisecond))
+}
+
+// Through App.Close, with a real SQLite statement in flight: another connection
+// holds the write lock on wacli.db, so the handler's write waits in SQLite's
+// busy handler (wacli.db: 5 s busy timeout). Close must return at the
+// command's deadline: closing wacli.db does not wait for a statement in use.
+func TestOneShotCloseDoesNotWaitForAStatementInBusyWait(t *testing.T) {
+	a := newTestApp(t)
+	w := &dispatchLockingWA{fakeWA: newFakeWA()}
+	a.wa = w
+	var evbuf bytes.Buffer
+	a.opts.Events = out.NewEventWriter(&evbuf, true)
+	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer cancel()
+	if err := a.Connect(ctx, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	locker, err := sql.Open("sqlite3", sqliteutil.FileURI(filepath.Join(a.StoreDir(), "wacli.db"), "_busy_timeout=5000"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = locker.Close() })
+	tx, err := locker.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(`INSERT INTO chats(jid, kind, name, last_message_ts) VALUES ('locker@s.whatsapp.net', 'dm', 'locker', 0)`); err != nil {
+		t.Fatal(err)
+	}
+	var lockOnce sync.Once
+	unlock := func() { lockOnce.Do(func() { _ = tx.Rollback() }) }
+	t.Cleanup(unlock)
+	handled := make(chan time.Time, 1)
+	go func() {
+		w.emit(oneShotIncoming("m-busy", time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)))
+		handled <- time.Now()
+	}()
+	time.Sleep(100 * time.Millisecond) // the handler's write is now in the busy wait
+	start := time.Now()
+	// The busy wait would end by itself after 5 s; within that, a Close that
+	// waited for the statement would still be running at the limit.
+	took := closeWithin(t, a, 4*time.Second, unlock)
+	if took > 3*time.Second {
+		t.Fatalf("Close took %s with a statement in busy wait; the command's deadline was 300ms after connecting", took)
+	}
+	if !strings.Contains(evbuf.String(), `"code":"oneshot_store_incomplete"`) {
+		t.Fatalf("no oneshot_store_incomplete warning for the message cut short:\n%s", evbuf.String())
+	}
+	select {
+	case at := <-handled:
+		t.Logf("the handler returned %s after Close began, before Close returned", at.Sub(start).Round(time.Millisecond))
+	default:
+		t.Logf("Close returned %s after it began while the handler's write was still in the busy wait; wacli.db was closed under it", took.Round(time.Millisecond))
+	}
+	unlock()
+	select {
+	case at := <-handled:
+		t.Logf("the handler returned %s after Close began, once the lock was released", at.Sub(start).Round(time.Millisecond))
+	case <-time.After(6 * time.Second):
+		t.Fatal("the handler did not return within the busy timeout after the lock was released")
 	}
 }

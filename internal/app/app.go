@@ -239,15 +239,24 @@ func (a *App) Close() {
 	a.waMu.Unlock()
 	if waClient != nil {
 		waClient.Disconnect()
-		if sessionState != nil {
-			waClient.RemoveEventHandler(sessionHandler)
-		}
 	}
+	// Before removing any handler: removing one waits for the event being
+	// dispatched, and the one-shot store's wait is what bounds that (see
+	// fenceOneShotStore). When the wait was cut short a handler is still
+	// running, so the handlers stay registered: the process is about to exit.
 	oneShot := a.fenceOneShotStore()
+	if waClient != nil && sessionState != nil && oneShot.handlersIdle() {
+		waClient.RemoveEventHandler(sessionHandler)
+	}
 	// A completed command frontier may hand later ready tasks to a background
-	// drainer. Keep SQLite open until that drainer has finished every write.
+	// drainer. Keep SQLite open until that drainer has finished every write,
+	// unless a handler cut short at exit holds a place in that queue.
 	a.appStateRecoveryWorkers.Wait()
-	_ = a.appStatePersist.waitIdle(context.Background())
+	if oneShot.handlersIdle() {
+		_ = a.appStatePersist.waitIdle(context.Background())
+	} else {
+		oneShot.abandonQueuedAppState(a)
+	}
 	oneShot.finish(a)
 	if sessionResolver != nil {
 		_ = sessionResolver.Close()

@@ -10,22 +10,40 @@ import (
 	"go.mau.fi/whatsmeow/types/events"
 )
 
-// oneShotStoreDrainTimeout bounds how long Close waits for an event that was
-// already being stored when the connection closed.
-const oneShotStoreDrainTimeout = 10 * time.Second
+const (
+	// oneShotStoreDrainMax bounds how long Close waits for events still being
+	// stored when the connection closed, within the command's own deadline.
+	oneShotStoreDrainMax = 10 * time.Second
+	// oneShotStoreDrainNoDeadline is the bound for a command run without a
+	// deadline (--timeout 0).
+	oneShotStoreDrainNoDeadline = 2 * time.Second
+)
 
 // A command that connects by itself (no `sync` holds the store) receives what
-// WhatsApp queued for this device while it was offline, like any connection,
-// and whatsmeow acknowledges each message once the event handlers return.
+// WhatsApp queued for this device while it was offline, like any connection.
 // oneShotStore keeps sync's storage handler registered for the life of such a
-// connection, so whatever the command acknowledges is in wacli.db when it
-// exits; anything it never received stays queued for the next connection.
+// connection:
+//
+//   - Messages and history chunks: whatsmeow sends the receipt only after the
+//     handlers return, so what the command acknowledges is stored first.
+//   - Receipts, calls, app-state changes and channel messages: whatsmeow
+//     acknowledges them on arrival, before any handler runs; they are stored
+//     as they are handled.
+//
+// What is not covered: when the connection closes, whatsmeow keeps decrypting
+// the message it was handling and hands it over after the store has closed.
+// That one message (1:1 or group) is lost without a warning: its decryption
+// was committed, so the copy WhatsApp delivers again no longer decrypts.
 type oneShotStore struct {
 	handlerID uint32
 	gate      *mediaQueue
 	limits    *syncStorageLimits
 	cancel    context.CancelFunc
+	deadline  time.Time // the command's own deadline; zero when it has none
 	drained   bool
+	waitedFor time.Duration
+	// appStateQueued: app-state writes were still queued when Close gave up.
+	appStateQueued bool
 }
 
 // startOneShotStore registers the store handler before the first connect of a
@@ -46,6 +64,9 @@ func (a *App) startOneShotStore(ctx context.Context) {
 		gate:   newMediaQueue(1),
 		limits: &syncStorageLimits{app: a},
 		cancel: cancel,
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		s.deadline = deadline
 	}
 	// Download history chunks inside the handler, before whatsmeow sends the
 	// message receipt, as sync does; otherwise whatsmeow downloads them in the
@@ -78,9 +99,15 @@ func (a *App) oneShotStores(evt any) bool {
 	}
 }
 
-// fenceOneShotStore runs once the socket is closed, so no receipt can follow:
-// it waits for an event still being stored, refuses later ones and removes
-// the handler.
+// fenceOneShotStore runs once the socket is closed, so no receipt can follow.
+// It waits for the events still being stored, up to oneShotStoreDrainMax and
+// never past the command's own deadline (oneShotStoreDrainNoDeadline without
+// one), then closes the store. Removing a handler waits for the event being
+// dispatched (whatsmeow holds its handler lock while handlers run), so when
+// the wait was cut short the handler is left registered: the process is about
+// to exit, and Close does not wait for it. Closing the databases does not wait
+// for a statement still in flight either (database/sql closes a connection in
+// use only when it is returned).
 func (a *App) fenceOneShotStore() *oneShotStore {
 	a.waMu.Lock()
 	s, waClient := a.oneShot, a.wa
@@ -89,15 +116,43 @@ func (a *App) fenceOneShotStore() *oneShotStore {
 	if s == nil {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), oneShotStoreDrainTimeout)
+	wait := oneShotStoreDrainNoDeadline
+	if !s.deadline.IsZero() {
+		wait = min(oneShotStoreDrainMax, max(time.Until(s.deadline), 0))
+	}
+	s.waitedFor = wait
+	ctx, cancel := context.WithTimeout(context.Background(), wait)
 	s.drained = s.gate.waitIdle(ctx)
 	cancel()
 	if !s.drained {
-		// Removing the handler waits for its dispatch: stop a slow download.
+		s.gate.stopAccepting()
+		// Stop a slow download; what it did not store is lost.
 		s.cancel()
+		return s
 	}
 	waClient.RemoveEventHandler(s.handlerID)
 	return s
+}
+
+// stopAccepting closes the gate without waiting for producers to finish.
+func (q *mediaQueue) stopAccepting() {
+	q.mu.Lock()
+	q.accepting = false
+	q.mu.Unlock()
+	q.notify()
+}
+
+// handlersIdle reports whether no handler is still running an event, so that
+// removing a handler cannot block.
+func (s *oneShotStore) handlersIdle() bool { return s == nil || s.drained }
+
+// abandonQueuedAppState does not wait for app-state writes still queued when
+// the wait at exit was cut short: the handler that was cut short may hold a
+// place in that queue. What is still queued is reported.
+func (s *oneShotStore) abandonQueuedAppState(a *App) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	s.appStateQueued = a.appStatePersist.waitIdle(ctx) != nil
 }
 
 // finish reports what the connection could not store. It runs after pending
@@ -108,9 +163,13 @@ func (s *oneShotStore) finish(a *App) {
 	}
 	s.cancel()
 	if !s.drained {
+		queued := ""
+		if s.appStateQueued {
+			queued = ", and app-state writes were still queued"
+		}
 		a.emitWarning("oneshot_store_incomplete",
-			fmt.Sprintf("warning: the connection closed while an incoming event was still being stored (waited %s); it may be missing from wacli.db", oneShotStoreDrainTimeout),
-			nil)
+			fmt.Sprintf("warning: the connection closed while an incoming event was still being stored (waited %s)%s; what was not stored is not in wacli.db and WhatsApp will not deliver it again", s.waitedFor.Round(time.Millisecond), queued),
+			map[string]any{"waited_ms": s.waitedFor.Milliseconds(), "app_state_queued": s.appStateQueued})
 	}
 	if s.limits.persistenceFailed.Load() {
 		a.emitWarning("oneshot_store_failed",
