@@ -6,6 +6,8 @@ Read when: sending text, files, stickers, locations, polls, status broadcasts, q
 
 When `sync --follow` is already running for the same store, send commands delegate the send to that running process instead of opening a second WhatsApp session. This keeps scripts usable while continuous sync owns the store lock.
 
+When no sync is running, a send (like any command that connects) opens its own session, and WhatsApp delivers to it what arrived for this device while it was offline. The command stores those messages, receipts, calls, history chunks and app-state changes the way sync does before they are acknowledged, without posting webhooks or downloading media; whatever it does not receive before it exits stays queued for the next connection. If something it received cannot be stored, it prints a `oneshot_store_failed` warning on exit.
+
 Generic connection errors do not automatically start a fresh send: a disconnect can happen after a message frame was submitted but before its acknowledgement arrived. The outcome can therefore be uncertain. Inspect history before deciding whether to send again. Known preparation/lookup failures can still retry once; an ordinary message-acknowledgement timeout also does not trigger a fresh outer send. This policy does not establish recipient delivery or guarantee server-side deduplication.
 
 ## Commands
