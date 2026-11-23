@@ -295,13 +295,11 @@ func fetchHTML(ctx context.Context, client *http.Client, rawURL string) (*html.N
 		return nil, nil, fmt.Errorf("preview request failed: %s", resp.Status)
 	}
 
-	limited := io.LimitReader(resp.Body, maxHTMLBytes+1)
-	body, err := io.ReadAll(limited)
+	// Preview metadata lives in <head>, so parse the first maxHTMLBytes and
+	// ignore the rest instead of failing on large pages such as YouTube's.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxHTMLBytes))
 	if err != nil {
 		return nil, nil, err
-	}
-	if len(body) > maxHTMLBytes {
-		return nil, nil, fmt.Errorf("preview HTML too large")
 	}
 	doc, err := html.Parse(strings.NewReader(string(body)))
 	if err != nil {
