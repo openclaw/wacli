@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -288,5 +289,22 @@ func TestThumbnailFetchRestoresSmallCap(t *testing.T) {
 	t.Setenv("WACLI_LINKPREVIEW_SMALL", "true")
 	if got := fetchThumbnail(context.Background(), srv.Client(), srv.URL); len(got) != 0 {
 		t.Fatal("small mode accepted image above legacy cap")
+	}
+}
+
+func TestFetchReadsMetadataFromHeadOfLargePage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(`<html><head><meta property="og:title" content="Big Page"></head><body>`))
+		_, _ = w.Write([]byte(strings.Repeat("x", 2*maxHTMLBytes)))
+	}))
+	t.Cleanup(srv.Close)
+
+	got, err := Fetch(context.Background(), srv.Client(), srv.URL)
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if got.Title != "Big Page" {
+		t.Fatalf("Title = %q", got.Title)
 	}
 }
