@@ -5,6 +5,8 @@ import (
 	"time"
 
 	waProto "go.mau.fi/whatsmeow/binary/proto"
+	"go.mau.fi/whatsmeow/proto/waAICommon"
+	"go.mau.fi/whatsmeow/proto/waAICommonDeprecated"
 	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
@@ -246,5 +248,37 @@ func TestMarkUnhandledPayloadNamesProtocolType(t *testing.T) {
 				t.Fatalf("UnhandledPayload = %q, want %q", pm.UnhandledPayload, tc.want)
 			}
 		})
+	}
+}
+
+func TestRichResponseTextFromLiveAndHistory(t *testing.T) {
+	const unified = `{"sections":[{"view_model":{"__typename":"GenAIVStackLayoutViewModel","primitives":[{"__typename":"GenAIMarkdownTextUXPrimitive","text":"First"},{"__typename":"GenAIBotThinkingStatusPrimitive","title":"Working"},{"__typename":"FOATextPrimitive","text":"Second"}]}}]}`
+	msg := &waProto.Message{RichResponseMessage: &waE2E.AIRichResponseMessage{
+		UnifiedResponse: &waAICommon.AIRichResponseUnifiedResponse{Data: []byte(unified)},
+		Submessages:     []*waAICommonDeprecated.AIRichResponseSubMessage{{MessageText: proto.String("Fallback")}},
+	}}
+	if got := ParseLiveMessage(liveEvent(msg)).Text; got != "First\n\nSecond" {
+		t.Fatalf("live rich text = %q", got)
+	}
+	msg.RichResponseMessage.UnifiedResponse = nil
+	if got := ParseHistoryMessage("123@bot", &waProto.WebMessageInfo{Message: msg}).Text; got != "Fallback" {
+		t.Fatalf("history rich text = %q", got)
+	}
+}
+
+func TestDirectBotReplyEditKeepsIncomingIdentity(t *testing.T) {
+	bot, _ := types.ParseJID("123@bot")
+	change := &waProto.Message{ProtocolMessage: &waE2E.ProtocolMessage{
+		Type:          waE2E.ProtocolMessage_MESSAGE_EDIT.Enum(),
+		Key:           &waCommon.MessageKey{RemoteJID: proto.String("456@s.whatsapp.net"), FromMe: proto.Bool(true), ID: proto.String("original")},
+		EditedMessage: &waProto.Message{Conversation: proto.String("The complete reply.")},
+	}}
+	event := liveEvent(change)
+	event.Info.Chat, event.Info.Sender = bot, bot
+	historical := &waProto.WebMessageInfo{Key: &waCommon.MessageKey{RemoteJID: proto.String(bot.String()), ID: proto.String("update")}, Message: change}
+	for _, got := range []ParsedMessage{ParseLiveMessage(event), ParseHistoryMessage(bot.String(), historical)} {
+		if got.Chat != bot || got.FromMe || !got.Edited || got.ID != "original" || got.Text != "The complete reply." {
+			t.Fatalf("bot reply edit = %+v", got)
+		}
 	}
 }
