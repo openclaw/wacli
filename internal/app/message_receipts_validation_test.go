@@ -81,8 +81,9 @@ func TestOutgoingReceiptValidation(t *testing.T) {
 			}
 			receipt := &events.Receipt{MessageSource: types.MessageSource{Chat: chat, Sender: tc.sender, IsGroup: chat.Server == types.GroupServer}, MessageIDs: tc.ids, Type: types.ReceiptTypeRead, Timestamp: at}
 			wantFailure := tc.invalid || tc.closeDB
-			if err := a.handleOutgoingReceiptEvent(t.Context(), receipt); (err != nil) != wantFailure {
-				t.Errorf("returned error=%v; want failure=%v", err, wantFailure)
+			unattributed, err := a.handleOutgoingReceiptEvent(t.Context(), receipt)
+			if (err != nil) != wantFailure || unattributed != tc.unattributed {
+				t.Errorf("returned unattributed=%v error=%v; want unattributed=%v failure=%v", unattributed, err, tc.unattributed, wantFailure)
 			}
 			f.emit(receipt)
 			if limits.persistenceFailed.Load() != wantFailure || limits.canRecordFreshness() == wantFailure {
@@ -91,8 +92,12 @@ func TestOutgoingReceiptValidation(t *testing.T) {
 			if strings.Contains(log.String(), "message_receipt_invalid") != tc.invalid {
 				t.Errorf("input warning mismatch: %s", &log)
 			}
-			if strings.Count(log.String(), "message_receipt_unattributed") != map[bool]int{false: 0, true: 1}[tc.unattributed] {
-				t.Errorf("unattributed warning mismatch: %s", &log)
+			wantUnattributedWarnings := 0
+			if tc.unattributed {
+				wantUnattributedWarnings = 1
+			}
+			if strings.Count(log.String(), "message_receipt_unattributed") != wantUnattributedWarnings {
+				t.Errorf("unattributed warnings: want %d: %s", wantUnattributedWarnings, &log)
 			}
 			if strings.Contains(log.String(), "message_receipt_store_failed") != tc.closeDB {
 				t.Errorf("store warning mismatch: %s", &log)

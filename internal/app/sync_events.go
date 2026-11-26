@@ -55,6 +55,7 @@ type syncPresence struct {
 func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, messagesStored, lastEvent *atomic.Int64, disconnected chan<- struct{}, loggedOut chan<- struct{}, staleReconnect chan<- staleReconnectRequest, enqueueMedia func(string, string), enqueueWebhook func(syncWebhookEvent), limits *syncStorageLimits, ps *syncPresence, mediaQ *mediaQueue) (uint32, *sync.Map) {
 	var panicCount atomic.Int64
 	var appStateRecoveries sync.Map
+	var unattributedReceiptsReported atomic.Bool
 	if enqueueWebhook == nil {
 		enqueueWebhook = func(syncWebhookEvent) {}
 	}
@@ -134,8 +135,12 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 		case *events.Receipt:
 			lastEvent.Store(nowUTC().UnixNano())
 			a.handleReceiptPersistenceEvent(ctx, v)
-			if err := a.handleOutgoingReceiptEvent(ctx, v); err != nil && limits != nil {
+			unattributed, err := a.handleOutgoingReceiptEvent(ctx, v)
+			if err != nil && limits != nil {
 				limits.persistenceFailed.Store(true)
+			}
+			if unattributed {
+				a.reportUnattributedReceipts(&unattributedReceiptsReported)
 			}
 			if opts.WebhookEvents.Enabled(SyncWebhookEventReceipt) {
 				if job, ok := newSyncWebhookReceiptEvent(v); ok {

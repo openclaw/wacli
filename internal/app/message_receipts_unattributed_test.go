@@ -41,29 +41,33 @@ func TestFollowSyncRecordsFreshnessDespiteUnattributedGroupReceipts(t *testing.T
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	_, _ = a.Sync(ctx, SyncOptions{Mode: SyncModeFollow, AfterConnect: func(context.Context) error {
-		for _, participant := range []string{"111", "222", "333"} {
-			f.emit(groupReceipt(participant, ""))
-		}
-		f.emit(groupReceipt("444", "valid"))
-		f.emit(&events.OfflineSyncCompleted{Count: 4})
+	followSync := func() {
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		_, _ = a.Sync(ctx, SyncOptions{Mode: SyncModeFollow, AfterConnect: func(context.Context) error {
+			for _, participant := range []string{"111", "222", "333"} {
+				f.emit(groupReceipt(participant, ""))
+			}
+			f.emit(groupReceipt("444", "valid"))
+			f.emit(&events.OfflineSyncCompleted{Count: 4})
 
-		marker, err := a.db.LastSuccessfulSync()
-		if err != nil || marker == nil {
-			t.Errorf("freshness marker=%v err=%v; want it recorded", marker, err)
-		}
-		counts, err := a.db.MessageReceipts(group.String(), "valid")
-		if err != nil || counts.Read != 1 {
-			t.Errorf("valid receipt counts=%+v err=%v; want read=1", counts, err)
-		}
-		cancel()
-		return nil
-	}})
+			marker, err := a.db.LastSuccessfulSync()
+			if err != nil || marker == nil {
+				t.Errorf("freshness marker=%v err=%v; want it recorded", marker, err)
+			}
+			counts, err := a.db.MessageReceipts(group.String(), "valid")
+			if err != nil || counts.Read != 1 {
+				t.Errorf("valid receipt counts=%+v err=%v; want read=1", counts, err)
+			}
+			cancel()
+			return nil
+		}})
+	}
+	followSync()
+	followSync()
 
-	if n := strings.Count(log.String(), "message_receipt_unattributed"); n != 1 {
-		t.Errorf("unattributed warnings=%d; want one per sync: %s", n, &log)
+	if n := strings.Count(log.String(), "message_receipt_unattributed"); n != 2 {
+		t.Errorf("unattributed warnings=%d across two syncs; want one per sync: %s", n, &log)
 	}
 	if strings.Contains(log.String(), "message_receipt_invalid") {
 		t.Errorf("unattributed receipts reported as invalid input: %s", &log)
