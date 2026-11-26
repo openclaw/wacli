@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"unicode"
@@ -96,10 +95,9 @@ func (a *App) handleOutgoingReceiptEvent(ctx context.Context, evt *events.Receip
 	if when.IsZero() {
 		when = nowUTC()
 	}
-	var inputErr error
 	for _, id := range evt.MessageIDs {
 		if strings.TrimSpace(string(id)) == "" {
-			inputErr = invalid("blank message ID")
+			a.warnUnattributedReceipts()
 			continue
 		}
 		if err := a.db.UpsertMessageReceipt(chat, string(id), recipientJID, status, when); err != nil {
@@ -108,10 +106,26 @@ func (a *App) handleOutgoingReceiptEvent(ctx context.Context, evt *events.Receip
 				fmt.Sprintf("warning: failed to store a %s receipt for chat %s: %v", status, chat, err),
 				map[string]any{"chat_jid": chat, "status": status, "error": err.Error()},
 			)
-			return errors.Join(inputErr, err)
+			return err
 		}
 	}
-	return inputErr
+	return nil
+}
+
+// warnUnattributedReceipts reports, once per process, receipt entries that
+// name no message. whatsmeow leaves the ID blank when a grouped group receipt
+// arrives without a message key. Nothing can be stored for them and WhatsApp
+// does not resend them, so retrying cannot help and they leave sync freshness
+// alone; an active group can send thousands in one session.
+func (a *App) warnUnattributedReceipts() {
+	if !a.unattributedReceiptWarned.CompareAndSwap(false, true) {
+		return
+	}
+	a.emitWarning(
+		"message_receipt_unattributed",
+		"warning: skipped delivery/read receipts that name no message; WhatsApp does not resend them, so those counts stay unchanged. Further occurrences in this sync are not reported.",
+		nil,
+	)
 }
 
 // Require both JID components before and after canonicalization. IsEmpty only

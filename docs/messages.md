@@ -147,7 +147,9 @@ wacli --read-only --json messages list --sender "Ada" --limit 100
 
 Messages you sent carry `DeliveredTo` and `ReadBy`: how many recipients reported the message delivered, and how many of those went on to read it. A direct chat counts one recipient; a group counts one per participant who reported, so a chat where everybody has read is distinguishable from one where a single member has. Playing a voice note counts as reading it, and a state never moves backwards.
 
-Malformed receipt entries are skipped while valid entries in the same batch are retained. A `message_receipt_invalid` warning keeps that sync incomplete: retry sync and report repeated warnings. This does not recover skipped receipts or certify freshness; genuine storage failures also keep freshness unchanged.
+Malformed receipt entries are skipped while valid entries in the same batch are retained. A `message_receipt_invalid` warning, for a receipt whose chat or recipient cannot be read, keeps that sync incomplete: retry sync and report repeated warnings. This does not recover skipped receipts or certify freshness; genuine storage failures also keep freshness unchanged.
+
+Some group receipts arrive without naming the message they report on. They are skipped with a single `message_receipt_unattributed` warning per sync and do not hold back freshness: nothing could be stored for them, and WhatsApp does not send them again, so a retry would not help.
 
 `messages show` reports the same two counts, and an identity migration from a `@lid` chat to its phone number carries the reports with their messages, counting a recipient that reported under both identities once.
 

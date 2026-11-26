@@ -27,13 +27,14 @@ func TestOutgoingReceiptValidation(t *testing.T) {
 		ids                   []types.MessageID
 		sender, chat          types.JID
 		invalid, closeDB      bool
+		unattributed          bool
 		wantValid, wantBefore int
 	}{
-		{name: "blank", ids: []types.MessageID{""}, invalid: true},
-		{name: "whitespace", ids: []types.MessageID{" \t\n"}, invalid: true},
-		{name: "invalid_before_valid", ids: []types.MessageID{"", "valid"}, invalid: true, wantValid: 1},
-		{name: "valid_before_invalid", ids: []types.MessageID{"valid", " "}, invalid: true, wantValid: 1},
-		{name: "valid_both_sides", ids: []types.MessageID{"before", "", "valid"}, invalid: true, wantValid: 1, wantBefore: 1},
+		{name: "blank", ids: []types.MessageID{""}, unattributed: true},
+		{name: "whitespace", ids: []types.MessageID{" \t\n"}, unattributed: true},
+		{name: "blank_before_valid", ids: []types.MessageID{"", "valid"}, unattributed: true, wantValid: 1},
+		{name: "valid_before_blank", ids: []types.MessageID{"valid", " "}, unattributed: true, wantValid: 1},
+		{name: "valid_both_sides", ids: []types.MessageID{"before", "", "valid"}, unattributed: true, wantValid: 1, wantBefore: 1},
 		{name: "valid_persistence", ids: []types.MessageID{"valid"}, sender: pn, wantValid: 1},
 		{name: "empty_sender_fallback", ids: []types.MessageID{"valid"}, wantValid: 1},
 		{name: "malformed_empty_user", ids: []types.MessageID{"valid"}, sender: types.JID{Server: types.DefaultUserServer}, invalid: true},
@@ -90,6 +91,9 @@ func TestOutgoingReceiptValidation(t *testing.T) {
 			if strings.Contains(log.String(), "message_receipt_invalid") != tc.invalid {
 				t.Errorf("input warning mismatch: %s", &log)
 			}
+			if strings.Count(log.String(), "message_receipt_unattributed") != map[bool]int{false: 0, true: 1}[tc.unattributed] {
+				t.Errorf("unattributed warning mismatch: %s", &log)
+			}
 			if strings.Contains(log.String(), "message_receipt_store_failed") != tc.closeDB {
 				t.Errorf("store warning mismatch: %s", &log)
 			}
@@ -132,12 +136,13 @@ func TestOutgoingReceiptSyncMarkers(t *testing.T) {
 		ids               []types.MessageID
 		sender            types.JID
 		sqlFault, invalid bool
+		unattributed      bool
 	}{
-		{name: "blank", ids: []types.MessageID{""}, invalid: true},
-		{name: "mixed", ids: []types.MessageID{"before", "", "valid"}, invalid: true},
+		{name: "blank", ids: []types.MessageID{""}, unattributed: true},
+		{name: "mixed", ids: []types.MessageID{"before", "", "valid"}, unattributed: true},
 		{name: "malformed_recipient", ids: []types.MessageID{"valid"}, sender: types.JID{Server: types.DefaultUserServer}, invalid: true},
 		{name: "sql_failure", ids: []types.MessageID{"valid"}, sqlFault: true},
-		{name: "invalid_and_sql_failure", ids: []types.MessageID{"", "valid"}, invalid: true, sqlFault: true},
+		{name: "blank_and_sql_failure", ids: []types.MessageID{"", "valid"}, unattributed: true, sqlFault: true},
 		{name: "valid_control", ids: []types.MessageID{"valid"}},
 	} {
 		for _, offline := range []bool{false, true} {
@@ -191,7 +196,7 @@ func TestOutgoingReceiptSyncMarkers(t *testing.T) {
 				if err != nil || (marker == nil) != (tc.invalid || tc.sqlFault) {
 					t.Errorf("final marker=%v err=%v", marker, err)
 				}
-				if strings.Contains(log.String(), "message_receipt_invalid") != tc.invalid || strings.Contains(log.String(), "message_receipt_store_failed") != tc.sqlFault {
+				if strings.Contains(log.String(), "message_receipt_invalid") != tc.invalid || strings.Contains(log.String(), "message_receipt_store_failed") != tc.sqlFault || strings.Contains(log.String(), "message_receipt_unattributed") != tc.unattributed {
 					t.Errorf("warning classification: %s", &log)
 				}
 				if tc.sqlFault && !strings.Contains(log.String(), "synthetic receipt write failure") {
@@ -248,16 +253,11 @@ func TestOutgoingReceiptMixedBatchCLI(t *testing.T) {
 			t.Fatalf("valid receipt lost: %v", message)
 		}
 	}
-	if messages["source"].(map[string]any)["last_sync_at"] != nil {
-		t.Fatal("mixed batch advanced successful-sync freshness")
+	if messages["source"].(map[string]any)["last_sync_at"] == nil {
+		t.Fatal("a blank entry beside valid ones held back successful-sync freshness")
 	}
-	if !strings.Contains(warnings.String(), "message_receipt_invalid") {
-		t.Fatalf("missing input warning: %s", &warnings)
+	if !strings.Contains(warnings.String(), "message_receipt_unattributed") || strings.Contains(warnings.String(), "message_receipt_invalid") {
+		t.Fatalf("blank entry not reported as unattributed: %s", &warnings)
 	}
 	fmt.Fprintf(&h.log, "mixed batch warnings: %s\n", &warnings)
-	receipt.MessageIDs = []types.MessageID{"before", "after"}
-	retrievalSyncEvents(t, a, receipt, &events.OfflineSyncCompleted{Count: 1})
-	if messages = h.run(dir, "", "messages", "list"); messages["source"].(map[string]any)["last_sync_at"] == nil {
-		t.Fatal("valid follow-up did not restore successful-sync freshness")
-	}
 }

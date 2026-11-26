@@ -160,6 +160,7 @@ type App struct {
 	appStateFullSyncBroken    map[string]bool
 	appStateRecoveryRequested map[string]time.Time
 	heartbeatLast             atomic.Int64
+	unattributedReceiptWarned atomic.Bool
 	groupInfo                 groupInfoCache
 	presenceWatch             presenceWatch
 }
