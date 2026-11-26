@@ -108,8 +108,11 @@ func CopyVerifiedMediaCache(ctx context.Context, info store.MediaDownloadInfo, t
 	return n, true, nil
 }
 
+// The stored SHA-256 decides, as in wa.downloadAndDecryptDirect: a sender's wrong declared FileLength must
+// not turn a verified copy into a permanent miss.
+// A declaration over the size cap still misses, as wa.mediaDownloadLength refuses it before downloading.
 func mediaCacheMatches(info store.MediaDownloadInfo, n int64, digest []byte) bool {
-	return n <= wa.MaxMediaDownloadSize && (info.FileLength == 0 || uint64(n) == info.FileLength) && bytes.Equal(digest, info.FileSHA256)
+	return n <= wa.MaxMediaDownloadSize && info.FileLength <= wa.MaxMediaDownloadSize && bytes.Equal(digest, info.FileSHA256)
 }
 
 // Preserve the distinction between an unreadable cache and unwritable output.

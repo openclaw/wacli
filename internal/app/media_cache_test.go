@@ -29,7 +29,8 @@ func TestCopyVerifiedMediaCache(t *testing.T) {
 				t.Fatal(err)
 			}
 			info := store.MediaDownloadInfo{LocalPath: source, FileSHA256: hash[:], FileLength: uint64(len(content))}
-			wantHit := name == "valid" || name == "unknown length" || name == "empty content"
+			// "length mismatch" hits: the digest decides over a sender's wrong FileLength.
+			wantHit := name == "valid" || name == "unknown length" || name == "empty content" || name == "length mismatch"
 			switch name {
 			case "unknown length":
 				info.FileLength = 0

@@ -252,6 +252,46 @@ func TestLimitedDownloadFileAllowsEncryptedOverheadBeforeTruncate(t *testing.T) 
 	}
 }
 
+// A wrong declared FileLength must not veto bytes whose plaintext SHA-256 matches. With no
+// digest the length is the only plaintext check, so it stays strict; a wrong digest still rejects.
+func TestDownloadMediaDirectToFileDeclaredLength(t *testing.T) {
+	plaintext := []byte("synthetic image whose sender misstated its length")
+	key := bytes.Repeat([]byte{7}, 32)
+	encrypted, encHash, hash := encryptedMediaFixture(t, plaintext, key, whatsmeow.MediaImage)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(encrypted) }))
+	defer server.Close()
+	oldBase := directMediaBaseURL
+	directMediaBaseURL = server.URL
+	defer func() { directMediaBaseURL = oldBase }()
+	dir := t.TempDir()
+	ctx := context.Background()
+
+	for _, declared := range []uint64{3, uint64(len(plaintext)) + 1000} {
+		target := filepath.Join(t.TempDir(), "hashed.jpg") // fresh per pass: no bytes left from the last one
+		n, err := DownloadMediaDirectToFile(ctx, "/misstated", encHash, hash, key, declared, "image", target)
+		if err != nil || n != int64(len(plaintext)) {
+			t.Fatalf("declared %d with matching digest = %d, %v; want %d, nil", declared, n, err, len(plaintext))
+		}
+		if got, err := os.ReadFile(target); err != nil || !bytes.Equal(got, plaintext) {
+			t.Fatalf("declared %d: plaintext = %q, %v", declared, got, err)
+		}
+	}
+
+	unhashed := filepath.Join(dir, "unhashed.jpg")
+	if _, err := DownloadMediaDirectToFile(ctx, "/misstated", encHash, nil, key, 3, "image", unhashed); !errors.Is(err, whatsmeow.ErrFileLengthMismatch) {
+		t.Fatalf("no digest, wrong length = %v, want ErrFileLengthMismatch", err)
+	}
+	if _, err := os.Stat(unhashed); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("rejected download left a file: %v", err)
+	}
+	if _, err := DownloadMediaDirectToFile(ctx, "/misstated", encHash, bytes.Repeat([]byte{1}, 32), key, 3, "image", filepath.Join(dir, "bad.jpg")); !errors.Is(err, whatsmeow.ErrInvalidMediaSHA256) {
+		t.Fatalf("wrong digest, wrong length = %v, want ErrInvalidMediaSHA256", err)
+	}
+	if _, err := DownloadMediaDirectToFile(ctx, "/misstated", encHash, nil, key, uint64(len(plaintext)), "image", filepath.Join(dir, "exact.jpg")); err != nil {
+		t.Fatalf("no digest, exact length = %v, want nil", err)
+	}
+}
+
 func TestDownloadRetriedMediaAuthenticatesReupload(t *testing.T) {
 	plaintext := []byte("synthetic re-uploaded image")
 	key := bytes.Repeat([]byte{7}, 32)
@@ -285,8 +325,8 @@ func TestDownloadRetriedMediaAuthenticatesReupload(t *testing.T) {
 		{name: "ciphertext tampered", mutate: func() { served = bytes.Clone(encrypted); served[0] ^= 1 }, fileHash: hash, mediaKey: key, want: whatsmeow.ErrInvalidMediaHMAC},
 		{name: "MAC tampered", mutate: func() { served = bytes.Clone(encrypted); served[len(served)-1] ^= 1 }, fileHash: hash, mediaKey: key, want: whatsmeow.ErrInvalidMediaHMAC},
 		{name: "plaintext changed", fileHash: bytes.Repeat([]byte{1}, 32), mediaKey: key, want: whatsmeow.ErrInvalidMediaSHA256},
-		{name: "length changed", fileHash: hash, mediaKey: key, length: 1, want: whatsmeow.ErrFileLengthMismatch},
 		{name: "missing digest", mediaKey: key},
+		{name: "wrong digest, wrong length", fileHash: bytes.Repeat([]byte{1}, 32), mediaKey: key, length: 1, want: whatsmeow.ErrInvalidMediaSHA256},
 		{name: "short digest", fileHash: []byte{1}, mediaKey: key},
 		{name: "missing key", fileHash: hash},
 		{name: "short key", fileHash: hash, mediaKey: []byte{1}},
@@ -309,5 +349,14 @@ func TestDownloadRetriedMediaAuthenticatesReupload(t *testing.T) {
 				t.Fatalf("partial downloads=%v error=%v", partials, err)
 			}
 		})
+	}
+	// The retry path always carries a digest, so a wrong declared length alone no longer rejects.
+	served = encrypted
+	misstated := filepath.Join(filepath.Dir(target), "misstated.jpg")
+	if n, err := client.DownloadRetriedMediaToFile(context.Background(), "/reuploaded", hash, key, 1, "image", misstated); err != nil || n != int64(len(plaintext)) {
+		t.Fatalf("retry with matching digest, wrong length = %d, %v; want %d, nil", n, err, len(plaintext))
+	}
+	if got, err := os.ReadFile(misstated); err != nil || !bytes.Equal(got, plaintext) {
+		t.Fatalf("misstated plaintext = %q, %v", got, err)
 	}
 }

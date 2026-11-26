@@ -265,14 +265,20 @@ func downloadAndDecryptDirect(ctx context.Context, mediaURL string, encFileHash,
 	if err != nil {
 		return nil, fmt.Errorf("failed to decrypt file: %w", err)
 	}
-	if fileLength > 0 && uint64(len(plaintext)) != fileLength {
-		return nil, fmt.Errorf("%w: expected %d, got %d", whatsmeow.ErrFileLengthMismatch, fileLength, len(plaintext))
-	}
-	if len(fileHash) == sha256.Size {
+	hashed := len(fileHash) == sha256.Size
+	if hashed {
 		sum := sha256.Sum256(plaintext)
 		if !bytes.Equal(sum[:], fileHash) {
 			return nil, whatsmeow.ErrInvalidMediaSHA256
 		}
+	}
+	// A matching 32-byte plaintext digest binds these to the sender's exact bytes. The declared FileLength
+	// binds nothing, and some senders state it wrongly (seen: 94208 declared, 243605 actual, with every
+	// hash matching), so after a digest match it cannot veto the file. whatsmeow's own Download path does
+	// not compare FileLength either. A declaration over the size cap is still refused up front by
+	// mediaDownloadLength, and without a digest the length is the only plaintext check, so it stays strict.
+	if !hashed && fileLength > 0 && uint64(len(plaintext)) != fileLength {
+		return nil, fmt.Errorf("%w: expected %d, got %d", whatsmeow.ErrFileLengthMismatch, fileLength, len(plaintext))
 	}
 	return plaintext, nil
 }
